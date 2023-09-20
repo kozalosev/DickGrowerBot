@@ -1,0 +1,43 @@
+version: "3.7"
+services:
+  DickGrowerBot:
+    build: .
+    image: kozalosev/dickgrowerbot
+    container_name: dickgrowerbot
+    restart: unless-stopped
+    environment:
+      - TELOXIDE_TOKEN
+      - RUST_LOG
+      - WEBHOOK_URL
+      - DATABASE_URL=postgres://${POSTGRES_USER:?error}:${POSTGRES_PASSWORD:?error}@${POSTGRES_HOST:?error}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:?error}
+      - DATABASE_MAX_CONNECTIONS
+    expose:
+      - 8080
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    logging:
+      driver: local
+  postgres:
+    image: postgres:14.5-alpine
+    container_name: dickgrowerbot-postgresql
+    environment:
+      - POSTGRES_PORT
+      - POSTGRES_DB
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    expose:
+      - ${POSTGRES_PORT}
+    volumes:
+      - ./data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+#    networks:
+#      - postgres-network
+    logging:
+      driver: local

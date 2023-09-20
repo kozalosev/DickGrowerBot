@@ -1,0 +1,44 @@
+name: CI Build
+on:
+  push:
+    branches:
+      - '**'
+jobs:
+  Run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "🔎 The name of your branch is ${{github.repository }}."
+
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+
+      - name: Set up Rust
+        uses: hecrj/setup-rust-action@v1
+      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Test
+        run: cargo test --verbose
+
+      - run: echo "🍏 This job's status is ${{ job.status }}."
+
+  Build-Docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "🔎 The name of your branch is ${{github.repository }}."
+
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+
+      - name: Build the Docker image
+        run: docker build . --file Dockerfile --tag kozalosev/locplacebot:$(date +%s)
+
+      - run: echo "🍏 This job's status is ${{ job.status }}."
