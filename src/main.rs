@@ -1,4 +1,5 @@
 mod handlers;
+mod repo;
 mod help;
 mod metrics;
 
@@ -12,7 +13,7 @@ use dotenvy::dotenv;
 use refinery::config::Config;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
-use crate::handlers::Command;
+use crate::handlers::{DickCommands, HelpCommands};
 
 
 const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
@@ -30,7 +31,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv()?;
 
     let handler = dptree::entry()
-        .branch(Update::filter_message().filter_command::<Command>().endpoint(handlers::command_handler));
+        .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
+        .branch(Update::filter_message().filter_command::<DickCommands>().endpoint(handlers::dick_cmd_handler));
         // TODO: inline mode
         //.branch(Update::filter_inline_query().endpoint(handlers::inline_handler))
         //.branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
@@ -49,8 +51,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metrics_router = metrics::init();
 
     run_migrations().await?;
+    let db_conn = establish_database_connection().await?;
     let deps = deps![
-        establish_database_connection().await?
+        repo::Users::new(db_conn.clone()),
+        repo::Dicks::new(db_conn)
     ];
 
     match webhook_url {
