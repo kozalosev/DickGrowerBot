@@ -2,6 +2,7 @@ mod handlers;
 mod repo;
 mod help;
 mod metrics;
+mod config;
 
 use std::env::VarError;
 use std::net::SocketAddr;
@@ -30,6 +31,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pretty_env_logger::init();
     dotenv()?;
 
+    let app_config = config::AppConfig::from_env();
+    let database_config = config::DatabaseConfig::from_env()?;
+
     let handler = dptree::entry()
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<DickCommands>().endpoint(handlers::dick_cmd_handler));
@@ -50,11 +54,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let metrics_router = metrics::init();
 
-    run_migrations().await?;
-    let db_conn = establish_database_connection().await?;
+    run_migrations(&database_config).await?;
+    let db_conn = establish_database_connection(&database_config).await?;
     let deps = deps![
         repo::Users::new(db_conn.clone()),
-        repo::Dicks::new(db_conn)
+        repo::Dicks::new(db_conn),
+        app_config
     ];
 
     match webhook_url {
@@ -113,18 +118,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn establish_database_connection() -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
-    let url = std::env::var("DATABASE_URL")?;
-    let mc: u32 = std::env::var("DATABASE_MAX_CONNECTIONS")?.parse()?;
+async fn establish_database_connection(config: &config::DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
     sqlx::postgres::PgPoolOptions::new()
-        .max_connections(mc)
-        .connect(url.as_str()).await
+        .max_connections(config.max_connections)
+        .connect(config.url.as_str()).await
         .map_err(|e| e.into())
 }
 
-async fn run_migrations() -> anyhow::Result<()> {
-    let url: Url = std::env::var("DATABASE_URL")?.parse()?;
-    let mut conn = Config::try_from(url)?;
+async fn run_migrations(config: &config::DatabaseConfig) -> anyhow::Result<()> {
+    let mut conn = Config::try_from(config.url.clone())?;
     embedded::migrations::runner().run_async(&mut conn).await?;
     Ok(())
 }

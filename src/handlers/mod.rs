@@ -4,7 +4,7 @@ use teloxide::prelude::*;
 use teloxide::types::{Me, User};
 use teloxide::types::ParseMode::Html;
 use rust_i18n::t;
-use crate::{help, repo};
+use crate::{config, help, repo};
 use crate::metrics;
 
 #[derive(BotCommands, Clone)]
@@ -43,13 +43,15 @@ pub async fn help_cmd_handler(bot: Bot, msg: Message, cmd: HelpCommands, me: Me)
     Ok(())
 }
 
-pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands, users: repo::Users, dicks: repo::Dicks) -> HandlerResult {
+pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
+                              users: repo::Users, dicks: repo::Dicks,
+                              config: config::AppConfig) -> HandlerResult {
     let help = match cmd {
         DickCommands::Grow if msg.from().is_some() => {
             metrics::CMD_GROW_COUNTER.inc();
 
             let from = msg.from().unwrap();
-            let increment = OsRng::default().gen_range(-5..=10);
+            let increment = OsRng::default().gen_range(config.growth_range);
 
             users.create_or_update(from.id, from.first_name.clone()).await?;
             let new_length = dicks.create_or_grow(from.id, msg.chat.id, increment).await?;
