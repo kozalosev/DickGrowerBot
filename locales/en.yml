@@ -1,6 +1,7 @@
 commands:
   grow:
-    result: "Your dick has grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long"
+    result: "Your dick has been grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long"
+    tomorrow: "Your dick has been already grown today. Come back tomorrow!"
   top:
     title: "Top of the biggest dicks:"
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"

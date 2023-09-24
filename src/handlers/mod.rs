@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use rand::{Rng, rngs::OsRng};
 use teloxide::utils::command::BotCommands;
 use teloxide::prelude::*;
@@ -6,6 +7,8 @@ use teloxide::types::ParseMode::Html;
 use rust_i18n::t;
 use crate::{config, help, repo};
 use crate::metrics;
+
+const TOMORROW_SQL_CODE: &str = "GD0E1";
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -54,10 +57,25 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
             let increment = OsRng::default().gen_range(config.growth_range);
 
             users.create_or_update(from.id, from.first_name.clone()).await?;
-            let new_length = dicks.create_or_grow(from.id, msg.chat.id, increment).await?;
+            let grow_result = dicks.create_or_grow(from.id, msg.chat.id, increment).await;
 
-            let lang_code = ensure_lang_code(Some(from));
-            t!("commands.grow.result", locale = lang_code.as_str(), incr = increment, length = new_length)
+            match grow_result {
+                Ok(new_length) => {
+                    let lang_code = ensure_lang_code(Some(from));
+                    t!("commands.grow.result", locale = lang_code.as_str(), incr = increment, length = new_length)
+                },
+                Err(e) => {
+                    let db_err = e.downcast::<sqlx::Error>()?;
+                    if let sqlx::Error::Database(e) = db_err {
+                        e.code()
+                            .filter(|c| c == TOMORROW_SQL_CODE)
+                            .map(|_| t!("commands.grow.tomorrow"))
+                            .ok_or(anyhow!(e))?
+                    } else {
+                        Err(db_err)?
+                    }
+                }
+            }
         },
         DickCommands::Grow => Err("unexpected absence of a FROM field for the /grow command")?,
         DickCommands::Top => {
