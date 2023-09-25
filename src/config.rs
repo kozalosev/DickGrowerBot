@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::fmt::Display;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 use anyhow::anyhow;
@@ -6,7 +7,8 @@ use reqwest::Url;
 
 #[derive(Clone)]
 pub struct AppConfig {
-    pub growth_range: RangeInclusive<i32>
+    pub growth_range: RangeInclusive<i32>,
+    pub dod_bonus_range: RangeInclusive<u32>,
 }
 
 #[derive(Clone)]
@@ -19,8 +21,10 @@ impl AppConfig {
     pub fn from_env() -> Self {
         let min = get_value_or_default("GROWTH_MIN", -5);
         let max = get_value_or_default("GROWTH_MAX", 10);
+        let max_dod_bonus = get_value_or_default("GROWTH_DOD_BONUS_MAX", 5);
         Self {
-            growth_range: min..=max
+            growth_range: min..=max,
+            dod_bonus_range: 1..=max_dod_bonus
         }
     }
 }

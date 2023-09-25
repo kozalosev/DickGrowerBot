@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use anyhow::anyhow;
 use rand::{Rng, rngs::OsRng};
 use teloxide::utils::command::BotCommands;
@@ -9,6 +10,7 @@ use crate::{config, help, repo};
 use crate::metrics;
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
+const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -22,6 +24,12 @@ pub enum HelpCommands {
 pub enum DickCommands {
     Grow,
     Top,
+}
+
+#[derive(BotCommands, Clone)]
+#[command(rename_rule = "snake_case")]
+pub enum DickOfDayCommands {
+    DickOfDay
 }
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -49,7 +57,7 @@ pub async fn help_cmd_handler(bot: Bot, msg: Message, cmd: HelpCommands, me: Me)
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                               users: repo::Users, dicks: repo::Dicks,
                               config: config::AppConfig) -> HandlerResult {
-    let help = match cmd {
+    let answer = match cmd {
         DickCommands::Grow if msg.from().is_some() => {
             metrics::CMD_GROW_COUNTER.inc();
 
@@ -99,11 +107,32 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
             }
         }
     };
+    reply_html(bot, msg, answer).await
+}
 
-    let mut answer = bot.send_message(msg.chat.id, help);
-    answer.parse_mode = Some(Html);
-    answer.await?;
-    Ok(())
+pub async fn dod_cmd_handler(bot: Bot, msg: Message,
+                             users: repo::Users, dicks: repo::Dicks,
+                             config: config::AppConfig) -> HandlerResult {
+    let chat_id = msg.chat.id;
+    let winner = users.get_random_active_member(chat_id).await?;
+    let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);
+    let dod_result = dicks.set_dod_winner(chat_id, repo::UID(winner.uid), bonus).await;
+    let lang_code = ensure_lang_code(msg.from());
+
+    let answer = match dod_result {
+        Ok(new_length) => t!("commands.dod.result", locale = lang_code.as_str(),
+            name = winner.name, growth = bonus, length = new_length),
+        Err(e) => {
+            match e.downcast::<sqlx::Error>()? {
+                sqlx::Error::Database(e)
+                if e.code() == Some(Cow::Borrowed(DOD_ALREADY_CHOSEN_SQL_CODE)) => {
+                    t!("commands.dod.already_chosen", locale = lang_code.as_str(), name = e.message())
+                }
+                e => Err(e)?
+            }
+        }
+    };
+    reply_html(bot, msg, answer).await
 }
 
 pub fn ensure_lang_code(user: Option<&User>) -> String {
@@ -117,4 +146,11 @@ pub fn ensure_lang_code(user: Option<&User>) -> String {
         })
         .flatten()
         .unwrap_or("en".to_owned())
+}
+
+async fn reply_html(bot: Bot, msg: Message, answer: String) -> HandlerResult {
+    let mut answer = bot.send_message(msg.chat.id, answer);
+    answer.parse_mode = Some(Html);
+    answer.await?;
+    Ok(())
 }
