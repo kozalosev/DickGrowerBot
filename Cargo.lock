@@ -475,6 +475,7 @@ dependencies = [
  "prometheus",
  "rand",
  "refinery",
+ "regex",
  "reqwest",
  "rust-i18n",
  "serde_json",

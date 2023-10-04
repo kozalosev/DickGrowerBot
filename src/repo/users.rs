@@ -19,6 +19,14 @@ repository!(Users,
         Ok(())
     }
 ,
+    pub async fn get_chat_members(&self, chat_id: ChatId) -> anyhow::Result<Vec<User>> {
+        sqlx::query_as::<_, User>("SELECT u.uid, name FROM Users u JOIN Dicks d ON u.uid = d.uid WHERE chat_id = $1")
+            .bind(chat_id.0)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| e.into())
+    }
+,
     pub async fn get_random_active_member(&self, chat_id: ChatId) -> anyhow::Result<User> {
         let sql = "SELECT u.uid, name FROM Users u
             JOIN Dicks d ON u.uid = d.uid

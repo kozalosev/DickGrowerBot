@@ -26,3 +26,4 @@ sqlx = { version = "0.7", features = [ "runtime-tokio", "postgres" ] }
 rand = "0.8.5"
 refinery = { version = "0.8.11", features = [ "postgres", "tokio-postgres" ] }
 dotenvy = "0.15.7"
+regex = "1.9.5"
