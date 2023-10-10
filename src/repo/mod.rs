@@ -1,8 +1,10 @@
 mod users;
 mod dicks;
+mod imports;
 
 pub use users::*;
 pub use dicks::*;
+pub use imports::*;
 
 #[macro_export]
 macro_rules! repository {

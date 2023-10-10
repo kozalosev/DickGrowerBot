@@ -9,5 +9,9 @@ commands:
   dod:
     result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has became longer for <b>%{growth} cm</b> and is <b>%{length} cm</b> long now"
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>"
+  import:
+    errors:
+      not_reply: "You must reply to a message sent by %{origin_bot}"
+      
 title:
   greeting: "Hello"

@@ -59,7 +59,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_conn = establish_database_connection(&database_config).await?;
     let deps = deps![
         repo::Users::new(db_conn.clone()),
-        repo::Dicks::new(db_conn),
+        repo::Dicks::new(db_conn.clone()),
+        repo::Imports::new(db_conn.clone()),
         app_config
     ];
 

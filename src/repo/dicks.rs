@@ -72,8 +72,4 @@ repository!(Dicks,
             .await?;
         Ok(())
     }
-,
-    pub async fn import_dicks(&self, chat_id: ChatId, users: Vec<ExternalUser>) -> anyhow::Result<()> {
-
-    }
 );
