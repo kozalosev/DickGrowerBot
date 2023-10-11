@@ -10,7 +10,14 @@ commands:
     result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has became longer for <b>%{growth} cm</b> and is <b>%{length} cm</b> long now"
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>"
   import:
+    result:
+      template: "The following users were imported:\n\n%{imported}\n\nThe following users are not in the game yet:\n\n%{not_found}"
+      line:
+        imported: "➖ <b>%{name}</b> (<i>%{length}</i> cm)"
+        already_present: "➖ <b>%{name}</b> (<i>%{length}</i> cm)"
+        not_found: "➖ <b>%{name}</b>"
     errors:
+      not_admin: "This command is supposed to be used by admins only!"
       not_reply: "You must reply to a message sent by %{origin_bot}"
       
 title:

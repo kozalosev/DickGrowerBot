@@ -26,13 +26,20 @@ pub enum ImportCommands {
 
 type Username = String;
 
-pub struct OriginalUser {
+struct OriginalUser {
+    name: String,
+    length: u32
+}
+
+struct UserInfo {
+    uid: UserId,
     name: String,
     length: u32
 }
 
 struct ImportResult {
-    found: Vec<OriginalUser>,
+    imported: Vec<UserInfo>,
+    already_present: Vec<UserInfo>,
     not_found: Vec<Username>,
 }
 
@@ -44,7 +51,6 @@ struct InvalidLines;
 enum BeforeImportCheckErrors {
     NotAdmin,
     NotReply,
-    AlreadyImported,
     Other(anyhow::Error)
 }
 
@@ -62,27 +68,33 @@ struct Repositories<'a> {
 pub async fn import_cmd_handler(bot: Bot, msg: Message,
                                 users: repo::Users, imports: repo::Imports) -> HandlerResult {
     let lang_code = ensure_lang_code(msg.from());
-    let repos = Repositories {
-        users: &users,
-        imports: &imports,
-    };
-
-    let answer = match check_params_and_parse_message(&bot, &msg, &repos).await {
+    let answer = match check_and_parse_message(&bot, &msg).await {
         Ok(txt) => {
+            let repos = Repositories {
+                users: &users,
+                imports: &imports,
+            };
             let result = import_impl(repos, msg.chat.id, txt).await?;
-            let imported = result.found.into_iter()
-                .map(|u| t!("commands.import.result.imported",
+            let imported = result.imported.into_iter()
+                .map(|u| t!("commands.import.result.line.imported",
+                    name = u.name, length = u.length,
+                    locale = lang_code.as_str()))
+                .collect::<Vec<String>>()
+                .join("\n");
+            let already_present = result.already_present.into_iter()
+                .map(|u| t!("commands.import.result.line.already_present",
                     name = u.name, length = u.length,
                     locale = lang_code.as_str()))
                 .collect::<Vec<String>>()
                 .join("\n");
             let not_found = result.not_found.into_iter()
-                .map(|name| t!("commands.import.result.not_found",
+                .map(|name| t!("commands.import.result.line.not_found",
                     name = name,
                     locale = lang_code.as_str()))
                 .collect::<Vec<String>>()
                 .join("\n");
-            t!("commands.import.result.template", imported = imported, not_found = not_found,
+            t!("commands.import.result.template", imported = imported,
+                already_present = already_present, not_found = not_found,
                 locale = lang_code.as_str())
         },
         Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
@@ -92,7 +104,7 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message,
     reply_html(bot, msg, answer).await
 }
 
-async fn check_params_and_parse_message<'a>(bot: &Bot, msg: &Message, repos: &Repositories<'a>) -> Result<String, BeforeImportCheckErrors> {
+async fn check_and_parse_message<'a>(bot: &Bot, msg: &Message) -> Result<String, BeforeImportCheckErrors> {
     let admin_ids = bot.get_chat_administrators(msg.chat.id)
         .await
         .map_err(|e| BeforeImportCheckErrors::Other(anyhow!(e)))?
@@ -113,11 +125,6 @@ async fn check_params_and_parse_message<'a>(bot: &Bot, msg: &Message, repos: &Re
         None => return Err(BeforeImportCheckErrors::NotReply),
         Some(text) => text.to_owned()
     };
-
-    let already_imported = repos.imports.were_dicks_already_imported(msg.chat.id).await?;
-    if already_imported {
-        return Err(BeforeImportCheckErrors::AlreadyImported)
-    }
 
     Ok(text)
 }
@@ -150,30 +157,46 @@ async fn import_impl<'a>(repos: Repositories<'a>, chat_id: ChatId, text: String)
     }
 
     let top: Vec<OriginalUser> = top.into_iter()
-        .filter_map(map_users)
+        .filter_map(map_user)
         .collect();
     let (existing, not_existing): (Vec<OriginalUser>, Vec<OriginalUser>) = top.into_iter()
         .partition(|u| member_names.contains(&u.name));
-
-    let users: Vec<repo::ExternalUser> = existing.iter()
-        .filter_map(|u| repo::ExternalUser::new(members[&u.name], u.length).ok())
+    let existing: Vec<UserInfo> = existing.into_iter()
+        .map(|u| UserInfo {
+            uid: members[&u.name],
+            name: u.name,
+            length: u.length
+        })
         .collect();
-    if users.len() != existing.len() {
-        return Err(anyhow!("couldn't convert integers for external users"))
-    }
-
-    repos.imports.import(chat_id, &users).await?;
-
     let not_found = not_existing.into_iter()
         .map(|u| u.name)
         .collect();
+
+    let imported_uids: HashSet<UserId> = repos.imports.get_imported_users(chat_id)
+        .await?.into_iter()
+        .filter_map(|u| u.uid.try_into().ok())
+        .map(|uid| UserId(uid))
+        .collect();
+
+    let (to_import, already_present): (Vec<UserInfo>, Vec<UserInfo>) = existing.into_iter()
+        .partition(|u| imported_uids.contains(&u.uid));
+
+    let users: Vec<repo::ExternalUser> = to_import.iter()
+        .filter_map(|u| repo::ExternalUser::new(u.uid, u.length).ok())
+        .collect();
+    if users.len() != to_import.len() {
+        return Err(anyhow!("couldn't convert integers for external users"))
+    }
+    repos.imports.import(chat_id, &users).await?;
+
     Ok(ImportResult {
-        found: existing,
+        imported: to_import,
+        already_present,
         not_found
     })
 }
 
-fn map_users(capture: Option<Captures>) -> Option<OriginalUser> {
+fn map_user(capture: Option<Captures>) -> Option<OriginalUser> {
     let pos = capture?;
     if let (Some(name), Some(length)) = (pos.name("name"), pos.name("length")) {
         let name = name.as_str().to_owned();

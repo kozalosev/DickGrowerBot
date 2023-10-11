@@ -3,9 +3,10 @@ use sqlx::{Postgres, Transaction};
 use teloxide::types::{ChatId, UserId};
 use crate::repository;
 
+#[derive(sqlx::FromRow)]
 pub struct ExternalUser {
-    uid: i64,
-    length: i32
+    pub uid: i64,
+    pub length: i32
 }
 
 impl ExternalUser {
@@ -18,12 +19,13 @@ impl ExternalUser {
 }
 
 repository!(Imports,
-    pub async fn were_dicks_already_imported(&self, chat_id: ChatId) -> anyhow::Result<bool> {
-        sqlx::query_scalar("SELECT count(*) > 0 AS exists FROM Imports WHERE chat_id = $1")
-            .bind(chat_id.0)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| e.into())
+    pub async fn get_imported_users(&self, chat_id: ChatId) -> anyhow::Result<Vec<ExternalUser>> {
+        let chat_id: i64 = chat_id.0.try_into()?;
+        let res = sqlx::query_as::<_, ExternalUser>("SELECT uid, original_length AS length FROM Imports WHERE chat_id = $1")
+            .bind(chat_id)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(res)
     }
 ,
     pub async fn import(&self, chat_id: ChatId, users: &Vec<ExternalUser>) -> anyhow::Result<()> {
