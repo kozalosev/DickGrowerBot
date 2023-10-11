@@ -11,20 +11,6 @@ pub struct Dick {
 #[derive(Copy, Clone)]
 pub struct UID(pub i64);
 
-pub struct ExternalUser {
-    uid: i64,
-    length: i32
-}
-
-impl ExternalUser {
-    pub fn new(uid: UserId, length: u32) -> Self {
-        Self {
-            uid: uid.0.into(),
-            length: length.into()
-        }
-    }
-}
-
 repository!(Dicks,
     pub async fn create_or_grow(&self, uid: UserId, chat_id: ChatId, increment: i32) -> anyhow::Result<i32> {
         let uid: i64 = uid.0.try_into()?;

@@ -29,6 +29,7 @@ pub fn ensure_lang_code(user: Option<&User>) -> String {
 }
 
 pub async fn reply_html(bot: Bot, msg: Message, answer: String) -> HandlerResult {
+    // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer);
     answer.parse_mode = Some(Html);
     answer.await?;

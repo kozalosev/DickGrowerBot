@@ -1,4 +1,3 @@
-use sqlx::Postgres;
 use teloxide::types::{ChatId, UserId};
 use crate::repository;
 
