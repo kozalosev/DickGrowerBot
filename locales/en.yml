@@ -9,5 +9,20 @@ commands:
   dod:
     result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has became longer for <b>%{growth} cm</b> and is <b>%{length} cm</b> long now"
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>"
+  import:
+    result:
+      titles:
+        imported: "The following users were imported:"
+        already_present: "The following users were already imported earlier:"
+        not_found: "The following users are not in the game yet:"
+      line:
+        imported: "➖ <b>%{name}</b> (<i>%{length}</i> cm)"
+        already_present: "➖ <b>%{name}</b> (<i>%{length}</i> cm)"
+        not_found: "➖ <b>%{name}</b>"
+    errors:
+      not_group_chat: "This command is supposed to be used only in groups or supergroups!"
+      not_admin: "This command is supposed to be used by admins only!"
+      not_reply: "You must reply to a non-forwarded message sent by %{origin_bot}"
+      invalid_lines: "Couldn't parse this message 🤔"
 title:
   greeting: "Hello"

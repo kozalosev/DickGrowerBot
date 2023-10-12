@@ -17,6 +17,7 @@ RUN adduser \
 
 COPY src/ src/
 COPY locales/ locales/
+COPY migrations/ migrations/
 COPY Cargo.* ./
 
 ENV RUSTFLAGS='-C target-feature=-crt-static'
@@ -24,7 +25,6 @@ RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 
 FROM alpine
 RUN apk update && apk add --no-cache libgcc libressl
-COPY migrations/ migrations/
 COPY --from=builder /dickGrowerBot /usr/local/bin/
 # Import the user and group files from the builder
 COPY --from=builder /etc/passwd /etc/passwd
