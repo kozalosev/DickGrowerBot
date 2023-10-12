@@ -32,14 +32,14 @@ repository!(Imports,
         let chat_id: i64 = chat_id.0.try_into()?;
         let mut tx = self.pool.begin().await?;
 
-        let uids = Self::insert_to_imports_table(&mut tx, chat_id, &users).await?;
+        let uids = Self::insert_into_imports_table(&mut tx, chat_id, &users).await?;
         Self::update_dicks(&mut tx, chat_id, uids).await?;
 
         tx.commit().await?;
         Ok(())
     }
 ,
-    async fn insert_to_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &Vec<ExternalUser>) -> anyhow::Result<Vec<i64>> {
+    async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &Vec<ExternalUser>) -> anyhow::Result<Vec<i64>> {
         let (uids, lengths): (Vec<i64>, Vec<i32>) = users.iter()
             .map(|user| (user.uid, user.length))
             .unzip();
@@ -53,9 +53,9 @@ repository!(Imports,
     }
 ,
     async fn update_dicks(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uids: Vec<i64>) -> anyhow::Result<()> {
-        sqlx::query("WITH orig AS (SELECT * FROM Imports WHERE chat_id = $1 AND uid = ANY($2))
-                        UPDATE Dicks SET length = (length + orig.original_length)
-                                     WHERE chat_id = orig.chat_id AND uid = orig.uid")
+        sqlx::query("WITH original AS (SELECT * FROM Imports WHERE chat_id = $1 AND uid = ANY($2))
+                        UPDATE Dicks d SET length = (length + original_length), bonus_attempts = (bonus_attempts + 1)
+                                     FROM original o WHERE d.chat_id = o.chat_id AND d.uid = o.uid")
             .bind(chat_id)
             .bind(uids)
             .execute(&mut **tx)

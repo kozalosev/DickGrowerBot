@@ -14,7 +14,7 @@ const ORIGINAL_BOT_USERNAME: &str = "@pipisabot";   // TODO: support @kraft28_bo
 
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
     // TODO: load from env var
-    Regex::new(r"\d{1,2}\|(?<name>.+) — (?<length>\d+) см.")
+    Regex::new(r"\d{1,2}\|(?<name>.{1,13})(\.{3})? — (?<length>\d+) см.")
         .expect("TOP_LINE_REGEXP is invalid")
 });
 
@@ -29,6 +29,11 @@ type Username = String;
 struct OriginalUser {
     name: String,
     length: u32
+}
+
+struct ChatMember {
+    uid: UserId,
+    full_name: String,
 }
 
 struct UserInfo {
@@ -49,6 +54,7 @@ struct InvalidLines;
 #[derive(strum_macros::Display)]
 #[strum(serialize_all="snake_case")]
 enum BeforeImportCheckErrors {
+    NotGroupChat,
     NotAdmin,
     NotReply,
     Other(anyhow::Error)
@@ -74,30 +80,54 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message,
                 users: &users,
                 imports: &imports,
             };
-            let result = import_impl(repos, msg.chat.id, txt).await?;
-            let imported = result.imported.into_iter()
-                .map(|u| t!("commands.import.result.line.imported",
-                    name = u.name, length = u.length,
-                    locale = lang_code.as_str()))
-                .collect::<Vec<String>>()
-                .join("\n");
-            let already_present = result.already_present.into_iter()
-                .map(|u| t!("commands.import.result.line.already_present",
-                    name = u.name, length = u.length,
-                    locale = lang_code.as_str()))
-                .collect::<Vec<String>>()
-                .join("\n");
-            let not_found = result.not_found.into_iter()
-                .map(|name| t!("commands.import.result.line.not_found",
-                    name = name,
-                    locale = lang_code.as_str()))
-                .collect::<Vec<String>>()
-                .join("\n");
-            t!("commands.import.result.template", imported = imported,
-                already_present = already_present, not_found = not_found,
-                locale = lang_code.as_str())
+            match import_impl(repos, msg.chat.id, txt).await {
+                Ok(r) => {
+                    let imported = r.imported.into_iter()
+                        .map(|u| t!("commands.import.result.line.imported",
+                            name = u.name, length = u.length,
+                            locale = lang_code.as_str()))
+                        .collect::<Vec<String>>()
+                        .join("\n");
+                    let already_present = r.already_present.into_iter()
+                        .map(|u| t!("commands.import.result.line.already_present",
+                            name = u.name, length = u.length,
+                            locale = lang_code.as_str()))
+                        .collect::<Vec<String>>()
+                        .join("\n");
+                    let not_found = r.not_found.into_iter()
+                        .map(|name| t!("commands.import.result.line.not_found",
+                            name = name,
+                            locale = lang_code.as_str()))
+                        .collect::<Vec<String>>()
+                        .join("\n");
+
+                    [
+                        ("imported", imported),
+                        ("already_present", already_present),
+                        ("not_found", not_found),
+                    ].into_iter()
+                        .filter(|t| !t.1.is_empty())
+                        .map(|t| {
+                            let title_key = format!("commands.import.result.titles.{}", t.0);
+                            let title = t!(&title_key, locale = &lang_code);
+                            format!("{}\n{}", title, t.1)
+                        })
+                        .collect::<Vec<String>>()
+                        .join("\n\n")
+                }
+                Err(e) => if let Some(InvalidLines) = e.downcast_ref() {
+                    log::error!("Invalid lines: {msg:?}");
+                    t!("commands.import.errors.invalid_lines", locale = lang_code.as_str())
+                } else {
+                    Err(e)?
+                }
+            }
+
         },
         Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
+        Err(BeforeImportCheckErrors::NotReply) => t!(format!("commands.import.errors.not_reply").as_str(),
+            origin_bot = ORIGINAL_BOT_USERNAME,
+            locale = lang_code.as_str()),
         Err(e) => t!(format!("commands.import.errors.{e}").as_str(),
             locale = lang_code.as_str()),
     };
@@ -105,6 +135,10 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message,
 }
 
 async fn check_and_parse_message<'a>(bot: &Bot, msg: &Message) -> Result<String, BeforeImportCheckErrors> {
+    if msg.chat.is_private() || msg.chat.is_channel() {
+        return Err(BeforeImportCheckErrors::NotGroupChat)
+    }
+
     let admin_ids = bot.get_chat_administrators(msg.chat.id)
         .await
         .map_err(|e| BeforeImportCheckErrors::Other(anyhow!(e)))?
@@ -137,14 +171,23 @@ fn check_reply_source(reply: &&Message) -> bool {
 }
 
 async fn import_impl<'a>(repos: Repositories<'a>, chat_id: ChatId, text: String) -> anyhow::Result<ImportResult> {
-    let members: HashMap<String, UserId> = repos.users.get_chat_members(chat_id)
+    let members: HashMap<String, ChatMember> = repos.users.get_chat_members(chat_id)
         .await?.into_iter()
         .map(|m| {
             let uid = m.uid.try_into().expect("couldn't convert uid to u64");
-            (m.name, UserId(uid))
+            let short_name = if m.name.len() > 13 {
+                m.name[0..13].to_owned()
+            } else {
+                m.name.to_owned()
+            };
+            let member = ChatMember {
+                uid: UserId(uid),
+                full_name: m.name
+            };
+            (short_name, member)
         })
         .collect();
-    let member_names: HashSet<_> = HashSet::from_iter(members.keys());  // TODO: cloned()?
+    let member_names: HashSet<_> = HashSet::from_iter(members.keys());
 
     let top: Vec<Option<Captures>> = text.lines()
         .skip(2)    // TODO: parametrize by env var
@@ -162,14 +205,17 @@ async fn import_impl<'a>(repos: Repositories<'a>, chat_id: ChatId, text: String)
     let (existing, not_existing): (Vec<OriginalUser>, Vec<OriginalUser>) = top.into_iter()
         .partition(|u| member_names.contains(&u.name));
     let existing: Vec<UserInfo> = existing.into_iter()
-        .map(|u| UserInfo {
-            uid: members[&u.name],
-            name: u.name,
-            length: u.length
+        .map(|u| {
+            let member = &members[&u.name];
+            UserInfo {
+                uid: member.uid,
+                name: member.full_name.clone(),
+                length: u.length
+            }
         })
         .collect();
     let not_found = not_existing.into_iter()
-        .map(|u| u.name)
+        .map(|u| teloxide::utils::html::escape(&u.name))
         .collect();
 
     let imported_uids: HashSet<UserId> = repos.imports.get_imported_users(chat_id)
@@ -178,7 +224,7 @@ async fn import_impl<'a>(repos: Repositories<'a>, chat_id: ChatId, text: String)
         .map(|uid| UserId(uid))
         .collect();
 
-    let (to_import, already_present): (Vec<UserInfo>, Vec<UserInfo>) = existing.into_iter()
+    let (already_present, to_import): (Vec<UserInfo>, Vec<UserInfo>) = existing.into_iter()
         .partition(|u| imported_uids.contains(&u.uid));
 
     let users: Vec<repo::ExternalUser> = to_import.iter()
