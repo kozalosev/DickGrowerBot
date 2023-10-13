@@ -17,12 +17,11 @@ pub enum DickOfDayCommands {
 }
 
 pub async fn dod_cmd_handler(bot: Bot, msg: Message,
-                             users: repo::Users, dicks: repo::Dicks,
-                             config: config::AppConfig) -> HandlerResult {
+                             repos: repo::Repositories, config: config::AppConfig) -> HandlerResult {
     let chat_id = msg.chat.id;
-    let winner = users.get_random_active_member(chat_id).await?;
+    let winner = repos.users.get_random_active_member(chat_id).await?;
     let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);
-    let dod_result = dicks.set_dod_winner(chat_id, repo::UID(winner.uid), bonus).await;
+    let dod_result = repos.dicks.set_dod_winner(chat_id, repo::UID(winner.uid), bonus).await;
     let lang_code = ensure_lang_code(msg.from());
 
     let answer = match dod_result {

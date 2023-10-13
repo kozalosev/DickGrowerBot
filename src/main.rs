@@ -59,9 +59,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_migrations(&database_config).await?;
     let db_conn = establish_database_connection(&database_config).await?;
     let deps = deps![
-        repo::Users::new(db_conn.clone()),
-        repo::Dicks::new(db_conn.clone()),
-        repo::Imports::new(db_conn.clone()),
+        repo::Repositories {
+            users: repo::Users::new(db_conn.clone()),
+            dicks: repo::Dicks::new(db_conn.clone()),
+            imports: repo::Imports::new(db_conn.clone()),
+        },
         app_config
     ];
 

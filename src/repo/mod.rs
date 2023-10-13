@@ -6,6 +6,13 @@ pub use users::*;
 pub use dicks::*;
 pub use imports::*;
 
+#[derive(Clone)]
+pub struct Repositories {
+    pub users: Users,
+    pub dicks: Dicks,
+    pub imports: Imports,
+}
+
 #[macro_export]
 macro_rules! repository {
     ($name:ident, $($methods:item),*) => {

@@ -18,8 +18,7 @@ pub enum DickCommands {
 }
 
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
-                              users: repo::Users, dicks: repo::Dicks,
-                              config: config::AppConfig) -> HandlerResult {
+                              repos: repo::Repositories, config: config::AppConfig) -> HandlerResult {
     let answer = match cmd {
         DickCommands::Grow if msg.from().is_some() => {
             metrics::CMD_GROW_COUNTER.inc();
@@ -30,8 +29,8 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                 .unwrap_or(from.first_name.clone());
             let increment = OsRng::default().gen_range(config.growth_range);
 
-            users.create_or_update(from.id, name).await?;
-            let grow_result = dicks.create_or_grow(from.id, msg.chat.id, increment).await;
+            repos.users.create_or_update(from.id, name).await?;
+            let grow_result = repos.dicks.create_or_grow(from.id, msg.chat.id, increment).await;
 
             match grow_result {
                 Ok(new_length) => {
@@ -57,7 +56,7 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
 
             let lang_code = ensure_lang_code(msg.from());
             let title = t!("commands.top.title", locale = lang_code.as_str());
-            let lines = dicks.get_top(msg.chat.id)
+            let lines = repos.dicks.get_top(msg.chat.id)
                 .await?
                 .iter().enumerate()
                 .map(|(i, d)| {

@@ -60,27 +60,17 @@ enum BeforeImportCheckErrors {
     Other(anyhow::Error)
 }
 
-impl From<anyhow::Error> for BeforeImportCheckErrors {
-    fn from(value: anyhow::Error) -> Self {
-        Self::Other(value)
+impl <T: Into<anyhow::Error>> From<T> for BeforeImportCheckErrors {
+    fn from(value: T) -> Self {
+        Self::Other(anyhow!(value))
     }
 }
 
-struct Repositories<'a> {
-    users: &'a repo::Users,
-    imports: &'a repo::Imports,
-}
-
-pub async fn import_cmd_handler(bot: Bot, msg: Message,
-                                users: repo::Users, imports: repo::Imports) -> HandlerResult {
+pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories) -> HandlerResult {
     let lang_code = ensure_lang_code(msg.from());
     let answer = match check_and_parse_message(&bot, &msg).await {
         Ok(txt) => {
-            let repos = Repositories {
-                users: &users,
-                imports: &imports,
-            };
-            match import_impl(repos, msg.chat.id, txt).await {
+            match import_impl(&repos, msg.chat.id, txt).await {
                 Ok(r) => {
                     let imported = r.imported.into_iter()
                         .map(|u| t!("commands.import.result.line.imported",
@@ -140,8 +130,7 @@ async fn check_and_parse_message<'a>(bot: &Bot, msg: &Message) -> Result<String,
     }
 
     let admin_ids = bot.get_chat_administrators(msg.chat.id)
-        .await
-        .map_err(|e| BeforeImportCheckErrors::Other(anyhow!(e)))?
+        .await?
         .into_iter()
         .map(|m| m.user.id);
     let from_id = msg.from()
@@ -170,7 +159,7 @@ fn check_reply_source(reply: &&Message) -> bool {
         .is_some()
 }
 
-async fn import_impl<'a>(repos: Repositories<'a>, chat_id: ChatId, text: String) -> anyhow::Result<ImportResult> {
+async fn import_impl<'a>(repos: &repo::Repositories, chat_id: ChatId, text: String) -> anyhow::Result<ImportResult> {
     let members: HashMap<String, ChatMember> = repos.users.get_chat_members(chat_id)
         .await?.into_iter()
         .map(|m| {
