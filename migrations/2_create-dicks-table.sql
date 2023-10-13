@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS Dicks (
-    uid bigint,
+    uid bigint REFERENCES Users(uid) ON DELETE CASCADE,
     chat_id bigint,
     length integer NOT NULL DEFAULT 0,
     updated_at timestamptz NOT NULL DEFAULT current_timestamp,

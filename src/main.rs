@@ -11,18 +11,11 @@ use reqwest::Url;
 use rust_i18n::i18n;
 use teloxide::prelude::*;
 use dotenvy::dotenv;
-use refinery::config::Config;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands};
 
-
 const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
-
-mod embedded {
-    use refinery::embed_migrations;
-    embed_migrations!();
-}
 
 i18n!();    // load localizations with default parameters
 
@@ -56,7 +49,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let metrics_router = metrics::init();
 
-    run_migrations(&database_config).await?;
     let db_conn = establish_database_connection(&database_config).await?;
     let deps = deps![
         repo::Repositories {
@@ -124,14 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn establish_database_connection(config: &config::DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
-    sqlx::postgres::PgPoolOptions::new()
+    let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.max_connections)
-        .connect(config.url.as_str()).await
-        .map_err(|e| e.into())
-}
-
-async fn run_migrations(config: &config::DatabaseConfig) -> anyhow::Result<()> {
-    let mut conn = Config::try_from(config.url.clone())?;
-    embedded::migrations::runner().run_async(&mut conn).await?;
-    Ok(())
+        .connect(config.url.as_str()).await?;
+    sqlx::migrate!().run(&pool).await?;
+    Ok(pool)
 }
