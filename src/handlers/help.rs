@@ -1,8 +1,7 @@
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::requests::Requester;
 use teloxide::types::{Me, Message};
-use crate::handlers::HandlerResult;
+use crate::handlers::{HandlerResult, reply_html};
 use crate::{help, metrics};
 
 #[derive(BotCommands, Clone)]
@@ -27,7 +26,5 @@ pub async fn help_cmd_handler(bot: Bot, msg: Message, cmd: HelpCommands, me: Me)
             help::get_help_message(msg.from(), me)
         },
     };
-
-    bot.send_message(msg.chat.id, help).await?;
-    Ok(())
+    reply_html(bot, msg, help).await
 }

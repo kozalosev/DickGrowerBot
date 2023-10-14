@@ -8,7 +8,7 @@ static RU_HELP: &str = include_str!("ru.md");
 pub fn get_start_message(from: &User, me: Me) -> String {
     let lang_code = &ensure_lang_code(Some(from));
     let greeting = t!("title.greeting", locale = lang_code);
-    format!("{}, <b>{}</b>\\!\n\n{}", greeting, from.first_name, get_help_message(Some(from), me))
+    format!("{}, <b>{}</b>!\n\n{}", greeting, from.first_name, get_help_message(Some(from), me))
 }
 
 pub fn get_help_message(from: Option<&User>, me: Me) -> String {

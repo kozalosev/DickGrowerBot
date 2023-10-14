@@ -22,7 +22,9 @@ commands:
     errors:
       not_group_chat: "This command is supposed to be used only in groups or supergroups!"
       not_admin: "This command is supposed to be used by admins only!"
-      not_reply: "You must reply to a non-forwarded message sent by %{origin_bot}"
-      invalid_lines: "Couldn't parse this message 🤔"
+      not_reply: "You must reply to a non-forwarded message sent by any of %{origin_bots}"
+      invalid_lines:
+        template: "Couldn't parse this message 🤔\nThe following lines are invalid:\n%{invalid_lines}"
+        line: "➖ <b>%{line}</b>"
 title:
   greeting: "Hello"

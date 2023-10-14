@@ -460,7 +460,6 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-prometheus",
- "derive_more",
  "dotenvy",
  "futures",
  "hyper 1.0.0-rc.4",
