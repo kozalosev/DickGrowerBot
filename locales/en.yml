@@ -29,4 +29,4 @@ commands:
 titles:
   greeting: "Hello"
 errors:
-  not_group_chat: "This bot is supposed to do its mission in group chats only!"
+  not_group_chat: "This bot is supposed to do its mission in group chats only! <i>(for the testing period: in a specific list of chats)</i>"
