@@ -13,6 +13,7 @@ use teloxide::prelude::*;
 use dotenvy::dotenv;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
+use crate::handlers::checks;
 use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands};
 
 const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
@@ -29,9 +30,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let handler = dptree::entry()
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
-        .branch(Update::filter_message().filter_command::<DickCommands>().endpoint(handlers::dick_cmd_handler))
-        .branch(Update::filter_message().filter_command::<DickOfDayCommands>().endpoint(handlers::dod_cmd_handler))
-        .branch(Update::filter_message().filter_command::<ImportCommands>().endpoint(handlers::import_cmd_handler));
+        .branch(Update::filter_message().filter_command::<DickCommands>().filter(checks::is_group_chat).endpoint(handlers::dick_cmd_handler))
+        .branch(Update::filter_message().filter_command::<DickOfDayCommands>().filter(checks::is_group_chat).endpoint(handlers::dod_cmd_handler))
+        .branch(Update::filter_message().filter_command::<ImportCommands>().filter(checks::is_group_chat).endpoint(handlers::import_cmd_handler))
+        .branch(Update::filter_message().filter(checks::is_not_group_chat).endpoint(checks::handle_not_group_chat));
         // TODO: inline mode
         //.branch(Update::filter_inline_query().endpoint(handlers::inline_handler))
         //.branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))

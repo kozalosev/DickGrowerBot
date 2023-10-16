@@ -35,3 +35,27 @@ pub async fn reply_html(bot: Bot, msg: Message, answer: String) -> HandlerResult
     answer.await?;
     Ok(())
 }
+
+pub mod checks {
+    use rust_i18n::t;
+    use teloxide::Bot;
+    use teloxide::types::Message;
+    use super::{ensure_lang_code, HandlerResult, reply_html};
+
+    pub fn is_group_chat(msg: Message) -> bool {
+        if msg.chat.is_private() || msg.chat.is_channel() {
+            return false
+        }
+        true
+    }
+
+    pub fn is_not_group_chat(msg: Message) -> bool {
+        !is_group_chat(msg)
+    }
+
+    pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
+        let lang_code = ensure_lang_code(msg.from());
+        let answer = t!("errors.not_group_chat", locale = &lang_code);
+        reply_html(bot, msg, answer).await
+    }
+}

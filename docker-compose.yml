@@ -11,8 +11,13 @@ services:
       - WEBHOOK_URL
       - DATABASE_URL=postgres://${POSTGRES_USER:?error}:${POSTGRES_PASSWORD:?error}@${POSTGRES_HOST:?error}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:?error}
       - DATABASE_MAX_CONNECTIONS
+      - GROWTH_MIN
+      - GROWTH_MAX
+      - GROWTH_DOD_BONUS_MAX
     expose:
       - 8080
+    networks:
+      - postgres-network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     logging:
@@ -37,7 +42,10 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
-#    networks:
-#      - postgres-network
+    networks:
+      - postgres-network
     logging:
       driver: local
+networks:
+  postgres-network:
+    driver: bridge

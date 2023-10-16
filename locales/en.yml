@@ -26,5 +26,7 @@ commands:
       invalid_lines:
         template: "Couldn't parse this message 🤔\nThe following lines are invalid:\n%{invalid_lines}"
         line: "➖ <b>%{line}</b>"
-title:
+titles:
   greeting: "Hello"
+errors:
+  not_group_chat: "This bot is supposed to do its mission in group chats only!"
