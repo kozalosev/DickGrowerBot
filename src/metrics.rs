@@ -28,6 +28,17 @@ pub static CMD_GROW_COUNTER: Lazy<Counter> = Lazy::new(|| {
 pub static CMD_TOP_COUNTER: Lazy<Counter> = Lazy::new(|| {
     Counter::new("command_top", Opts::new("command_top_usage_total", "count of /top invocations"))
 });
+pub static CMD_DOD_COUNTER: Lazy<Counter> = Lazy::new(|| {
+    Counter::new("command_dick_of_day", Opts::new("command_dick_of_day_usage_total", "count of /dick_of_day invocations"))
+});
+pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(|| {
+    let opts = Opts::new("command_import_usage_total", "count of /import invocations and successes");
+    ComplexCommandCounters {
+        invoked: Counter::new("command_import (invoked)", opts.clone().const_label("state", "invoked")),
+        finished: Counter::new("command_import (finished)", opts.const_label("state", "finished")),
+    }
+});
+
 
 pub fn init() -> axum::Router {
     let prometheus = REGISTRY
@@ -38,6 +49,9 @@ pub fn init() -> axum::Router {
         .register(&*CMD_HELP_COUNTER)
         .register(&*CMD_GROW_COUNTER)
         .register(&*CMD_TOP_COUNTER)
+        .register(&*CMD_DOD_COUNTER)
+        .register(&CMD_IMPORT.invoked)
+        .register(&CMD_IMPORT.finished)
         .unwrap();
 
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
@@ -57,6 +71,10 @@ pub struct Counter {
     inner: prometheus::Counter,
     name: String
 }
+pub struct ComplexCommandCounters {
+    invoked: Counter,
+    finished: Counter,
+}
 struct Registry(prometheus::Registry);
 
 impl Counter {
@@ -68,6 +86,16 @@ impl Counter {
 
     pub fn inc(&self) {
         self.inner.inc()
+    }
+}
+
+impl ComplexCommandCounters {
+    pub fn invoked(&self) {
+        self.invoked.inc()
+    }
+
+    pub fn finished(&self) {
+        self.finished.inc()
     }
 }
 

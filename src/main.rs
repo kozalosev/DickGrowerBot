@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             let (res, _) = futures::join!(srv, bot_fut);
-            res?.map_err(|e| e.into()).into()
+            res
         }
         None => {
             log::info!("The polling dispatcher is activating...");
@@ -114,9 +114,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             let (res, _) = futures::join!(srv, bot_fut);
-            res?.map_err(|e| e.into()).into()
+            res
         }
-    }
+    }?.map_err(|e| e.into())
 }
 
 async fn establish_database_connection(config: &config::DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
