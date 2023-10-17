@@ -38,6 +38,13 @@ pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(|| {
         finished: Counter::new("command_import (finished)", opts.const_label("state", "finished")),
     }
 });
+pub static CMD_PROMO: Lazy<ComplexCommandCounters> = Lazy::new(|| {
+    let opts = Opts::new("command_promo_usage_total", "count of /promo invocations and successes");
+    ComplexCommandCounters {
+        invoked: Counter::new("command_promo (invoked)", opts.clone().const_label("state", "invoked")),
+        finished: Counter::new("command_promo (finished)", opts.const_label("state", "finished")),
+    }
+});
 
 
 pub fn init() -> axum::Router {
@@ -52,6 +59,8 @@ pub fn init() -> axum::Router {
         .register(&*CMD_DOD_COUNTER)
         .register(&CMD_IMPORT.invoked)
         .register(&CMD_IMPORT.finished)
+        .register(&CMD_PROMO.invoked)
+        .register(&CMD_PROMO.finished)
         .unwrap();
 
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();

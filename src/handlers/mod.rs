@@ -2,6 +2,7 @@ mod dick;
 mod help;
 mod dod;
 mod import;
+mod promo;
 
 use teloxide::Bot;
 use teloxide::requests::Requester;
@@ -12,6 +13,7 @@ pub use dick::*;
 pub use help::*;
 pub use dod::*;
 pub use import::*;
+pub use promo::*;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
