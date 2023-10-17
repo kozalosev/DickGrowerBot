@@ -60,4 +60,4 @@ jobs:
       - uses: ncipollo/release-action@v1
         with:
           generateReleaseNotes: true
-          token: ${{ secrets.GH_KEY_2_RELEASE }}
+          token: ${{ secrets.GITHUB_TOKEN }}
