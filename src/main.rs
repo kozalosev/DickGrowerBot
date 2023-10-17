@@ -14,7 +14,7 @@ use dotenvy::dotenv;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use crate::handlers::checks;
-use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands};
+use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, PromoCommands};
 
 const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
 
@@ -35,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter_command::<DickCommands>().filter(checks::is_group_chat).endpoint(handlers::dick_cmd_handler))
         .branch(Update::filter_message().filter_command::<DickOfDayCommands>().filter(checks::is_group_chat).endpoint(handlers::dod_cmd_handler))
         .branch(Update::filter_message().filter_command::<ImportCommands>().filter(checks::is_group_chat).endpoint(handlers::import_cmd_handler))
+        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_group_chat).endpoint(handlers::promo_cmd_handler))
         .branch(Update::filter_message().filter(checks::is_not_group_chat).endpoint(checks::handle_not_group_chat));
         // TODO: inline mode
         //.branch(Update::filter_inline_query().endpoint(handlers::inline_handler))
@@ -59,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             users: repo::Users::new(db_conn.clone()),
             dicks: repo::Dicks::new(db_conn.clone()),
             imports: repo::Imports::new(db_conn.clone()),
+            promo: repo::Promo::new(db_conn.clone()),
         },
         app_config
     ];
@@ -87,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             let (res, _) = futures::join!(srv, bot_fut);
-            res?.map_err(|e| e.into()).into()
+            res
         }
         None => {
             log::info!("The polling dispatcher is activating...");
@@ -114,9 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             let (res, _) = futures::join!(srv, bot_fut);
-            res?.map_err(|e| e.into()).into()
+            res
         }
-    }
+    }?.map_err(|e| e.into())
 }
 
 async fn establish_database_connection(config: &config::DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {

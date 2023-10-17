@@ -1,15 +1,13 @@
 use sqlx::{Postgres, Row, Transaction};
 use teloxide::types::{ChatId, UserId};
 use crate::repository;
+use super::UID;
 
 #[derive(sqlx::FromRow, Debug)]
 pub struct Dick {
     pub length: i32,
     pub owner_name: String,
 }
-
-#[derive(Copy, Clone)]
-pub struct UID(pub i64);
 
 repository!(Dicks,
     pub async fn create_or_grow(&self, uid: UserId, chat_id: ChatId, increment: i32) -> anyhow::Result<i32> {
