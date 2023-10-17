@@ -9,6 +9,7 @@ commands:
   dod:
     result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has became longer for <b>%{growth} cm</b> and is <b>%{length} cm</b> long now"
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>"
+    no_candidates: "There is no candidates for election. In this chat nobody is in the game yet 😢"
   import:
     result:
       titles:
@@ -20,7 +21,6 @@ commands:
         already_present: "➖ <b>%{name}</b> (<i>%{length}</i> cm)"
         not_found: "➖ <b>%{name}</b>"
     errors:
-      not_group_chat: "This command is supposed to be used only in groups or supergroups!"
       not_admin: "This command is supposed to be used by admins only!"
       not_reply: "You must reply to a non-forwarded message sent by any of %{origin_bots}"
       invalid_lines:

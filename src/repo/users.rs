@@ -26,14 +26,14 @@ repository!(Users,
             .map_err(|e| e.into())
     }
 ,
-    pub async fn get_random_active_member(&self, chat_id: ChatId) -> anyhow::Result<User> {
+    pub async fn get_random_active_member(&self, chat_id: ChatId) -> anyhow::Result<Option<User>> {
         let sql = "SELECT u.uid, name FROM Users u
             JOIN Dicks d ON u.uid = d.uid
             WHERE chat_id = $1 AND updated_at > current_timestamp - interval '1 week'
             ORDER BY random() LIMIT 1";
         sqlx::query_as::<_, User>(sql)
             .bind(chat_id.0)
-            .fetch_one(&self.pool)
+            .fetch_optional(&self.pool)
             .await
             .map_err(|e| e.into())
     }

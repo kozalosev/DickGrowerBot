@@ -11,7 +11,7 @@ use teloxide::types::{ChatId, Message, UserId};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
 use crate::{metrics, repo};
 
-const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["@pipisabot", "@kraft28_bot"];
+const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+)(\.{3})? — (?<length>\d+) см.")
@@ -48,9 +48,9 @@ impl TryFrom<&String> for OriginalBotKind {
     type Error = String;
 
     fn try_from(value: &String) -> Result<Self, Self::Error> {
-        match value.as_str() {
-            "@pipisa" => Ok(OriginalBotKind::PIPISA),
-            "@kraft28_bot" => Ok(OriginalBotKind::KRAFT28),
+        match value.as_str().trim_start_matches('@') {
+            "pipisabot" => Ok(OriginalBotKind::PIPISA),
+            "kraft28_bot" => Ok(OriginalBotKind::KRAFT28),
             _ => Err("Unknown OriginalBotKind".to_owned())
         }
     }
@@ -61,7 +61,6 @@ struct ParseResult(OriginalBotKind, String);
 #[derive(strum_macros::Display)]
 #[strum(serialize_all="snake_case")]
 enum BeforeImportCheckErrors {
-    NotGroupChat,
     NotAdmin,
     NotReply,
     Other(anyhow::Error)
@@ -168,7 +167,7 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
         },
         Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
         Err(BeforeImportCheckErrors::NotReply) => t!(format!("commands.import.errors.not_reply").as_str(),
-            origin_bots = ORIGINAL_BOT_USERNAMES.join(", "),
+            origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", "),
             locale = lang_code.as_str()),
         Err(e) => t!(format!("commands.import.errors.{e}").as_str(),
             locale = lang_code.as_str()),
@@ -177,10 +176,6 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
 }
 
 async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult, BeforeImportCheckErrors> {
-    if msg.chat.is_private() || msg.chat.is_channel() {
-        return Err(BeforeImportCheckErrors::NotGroupChat)
-    }
-
     let admin_ids = bot.get_chat_administrators(msg.chat.id)
         .await?
         .into_iter()
@@ -210,7 +205,10 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
         .and_then(|u| u.username.as_ref())
         .filter(|name| ORIGINAL_BOT_USERNAMES.contains(&name.as_ref()))
         .and_then(|name| {
-            if let (Some(name), Some(text)) = (name.try_into().ok(), reply.text()) {
+            let name = name.try_into()
+                .map_err(|name| log::error!("couldn't convert name: {name}"))
+                .ok();
+            if let (Some(name), Some(text)) = (name, reply.text()) {
                 Some(ParseResult(name, text.to_owned()))
             } else {
                 None

@@ -34,6 +34,9 @@ pub async fn reply_html(bot: Bot, msg: Message, answer: String) -> HandlerResult
     // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer);
     answer.parse_mode = Some(Html);
+    if msg.chat.is_group() || msg.chat.is_supergroup() {
+        answer.reply_to_message_id.replace(msg.id);
+    }
     answer.await?;
     Ok(())
 }

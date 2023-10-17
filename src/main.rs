@@ -55,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metrics_router = metrics::init();
 
     let db_conn = establish_database_connection(&database_config).await?;
+    let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
         repo::Repositories {
             users: repo::Users::new(db_conn.clone()),
@@ -73,6 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let error_handler = LoggingErrorHandler::with_custom_text("An error from the update listener");
             let mut dispatcher = Dispatcher::builder(bot, handler)
+                .default_handler(ignore_unknown_updates)
                 .dependencies(deps)
                 .build();
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
@@ -96,6 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let bot_fut = tokio::spawn(async move {
                 Dispatcher::builder(bot, handler)
+                    .default_handler(ignore_unknown_updates)
                     .dependencies(deps)
                     .enable_ctrlc_handler()
                     .build()
