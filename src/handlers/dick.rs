@@ -1,5 +1,6 @@
 use std::ops::RangeInclusive;
 use anyhow::anyhow;
+use chrono::Utc;
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
@@ -28,9 +29,14 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
             let name = from.last_name.as_ref()
                 .map(|last_name| format!("{} {}", from.first_name, last_name))
                 .unwrap_or(from.first_name.clone());
-            let increment = gen_increment(config.growth_range, config.grow_shrink_ratio);
-
-            repos.users.create_or_update(from.id, name).await?;
+            let user = repos.users.create_or_update(from.id, name).await?;
+            let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
+            let grow_shrink_ratio = if days_since_registration > config.newcomers_grace_days {
+                config.grow_shrink_ratio
+            } else {
+                1.0
+            };
+            let increment = gen_increment(config.growth_range, grow_shrink_ratio);
             let grow_result = repos.dicks.create_or_grow(from.id, msg.chat.id, increment).await;
 
             match grow_result {

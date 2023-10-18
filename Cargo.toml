@@ -22,8 +22,9 @@ prometheus = "0.13.3"
 rust-i18n = "2.1.0"
 async-trait = "0.1.68"
 anyhow = "1.0.71"
-sqlx = { version = "0.7", features = [ "runtime-tokio", "postgres" ] }
+sqlx = { version = "0.7", features = [ "runtime-tokio", "postgres", "chrono" ] }
 rand = "0.8.5"
 dotenvy = "0.15.7"
 regex = "1.9.5"
 strum_macros = "0.25.2"
+chrono = { version = "0.4.31", features = [ "serde" ] }

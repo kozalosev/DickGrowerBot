@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub growth_range: RangeInclusive<i32>,
     pub grow_shrink_ratio: f32,
     pub dod_bonus_range: RangeInclusive<u32>,
+    pub newcomers_grace_days: u32,
 }
 
 #[derive(Clone)]
@@ -24,10 +25,12 @@ impl AppConfig {
         let max = get_value_or_default("GROWTH_MAX", 10);
         let grow_shrink_ratio = get_value_or_default("GROW_SHRINK_RATIO", 0.5);
         let max_dod_bonus = get_value_or_default("GROWTH_DOD_BONUS_MAX", 5);
+        let newcomers_grace_days = get_value_or_default("NEWCOMERS_GRACE_DAYS", 7);
         Self {
             growth_range: min..=max,
             grow_shrink_ratio,
-            dod_bonus_range: 1..=max_dod_bonus
+            dod_bonus_range: 1..=max_dod_bonus,
+            newcomers_grace_days,
         }
     }
 }
