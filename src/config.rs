@@ -22,7 +22,7 @@ impl AppConfig {
     pub fn from_env() -> Self {
         let min = get_value_or_default("GROWTH_MIN", -5);
         let max = get_value_or_default("GROWTH_MAX", 10);
-        let grow_shrink_ratio = get_value_or_default("GROW_SHRINK_RATIO", 1.0);
+        let grow_shrink_ratio = get_value_or_default("GROW_SHRINK_RATIO", 0.5);
         let max_dod_bonus = get_value_or_default("GROWTH_DOD_BONUS_MAX", 5);
         Self {
             growth_range: min..=max,

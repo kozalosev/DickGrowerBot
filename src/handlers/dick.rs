@@ -76,14 +76,14 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
     reply_html(bot, msg, answer).await
 }
 
-fn gen_increment(range: RangeInclusive<i32>, positive_distribution_coef: f32) -> i32 {
-    let min_max_ratio = {
-        let start_abs = range.start().abs() as f32;
-        let end = *range.end() as f32;
-        start_abs / (start_abs + end)
+fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {
+    let sign_ratio_percent = match (sign_ratio * 100.0).round() as u32 {
+        ..=0 => 0,
+        100.. => 100,
+        x => x
     };
     let mut rng = OsRng::default();
-    let positive = rng.gen_range(0.0..=positive_distribution_coef) > min_max_ratio;
+    let positive = rng.gen_ratio(sign_ratio_percent, 100);
     let end = if positive {
         *range.end()
     } else {
