@@ -1,3 +1,4 @@
+use std::ops::RangeInclusive;
 use anyhow::anyhow;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -27,7 +28,7 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
             let name = from.last_name.as_ref()
                 .map(|last_name| format!("{} {}", from.first_name, last_name))
                 .unwrap_or(from.first_name.clone());
-            let increment = OsRng::default().gen_range(config.growth_range);
+            let increment = gen_increment(config.growth_range, config.grow_shrink_ratio);
 
             repos.users.create_or_update(from.id, name).await?;
             let grow_result = repos.dicks.create_or_grow(from.id, msg.chat.id, increment).await;
@@ -73,4 +74,20 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
         }
     };
     reply_html(bot, msg, answer).await
+}
+
+fn gen_increment(range: RangeInclusive<i32>, positive_distribution_coef: f32) -> i32 {
+    let min_max_ratio = {
+        let start_abs = range.start().abs() as f32;
+        let end = *range.end() as f32;
+        start_abs / (start_abs + end)
+    };
+    let mut rng = OsRng::default();
+    let positive = rng.gen_range(0.0..=positive_distribution_coef) > min_max_ratio;
+    let end = if positive {
+        *range.end()
+    } else {
+        range.start().abs()
+    };
+    rng.gen_range(1..=end)
 }
