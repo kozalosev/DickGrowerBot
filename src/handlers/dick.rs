@@ -1,4 +1,6 @@
+use std::ops::RangeInclusive;
 use anyhow::anyhow;
+use chrono::Utc;
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
@@ -27,9 +29,14 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
             let name = from.last_name.as_ref()
                 .map(|last_name| format!("{} {}", from.first_name, last_name))
                 .unwrap_or(from.first_name.clone());
-            let increment = OsRng::default().gen_range(config.growth_range);
-
-            repos.users.create_or_update(from.id, name).await?;
+            let user = repos.users.create_or_update(from.id, name).await?;
+            let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
+            let grow_shrink_ratio = if days_since_registration > config.newcomers_grace_days {
+                config.grow_shrink_ratio
+            } else {
+                1.0
+            };
+            let increment = gen_increment(config.growth_range, grow_shrink_ratio);
             let grow_result = repos.dicks.create_or_grow(from.id, msg.chat.id, increment).await;
 
             match grow_result {
@@ -73,4 +80,20 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
         }
     };
     reply_html(bot, msg, answer).await
+}
+
+fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {
+    let sign_ratio_percent = match (sign_ratio * 100.0).round() as u32 {
+        ..=0 => 0,
+        100.. => 100,
+        x => x
+    };
+    let mut rng = OsRng::default();
+    let positive = rng.gen_ratio(sign_ratio_percent, 100);
+    let end = if positive {
+        *range.end()
+    } else {
+        range.start().abs()
+    };
+    rng.gen_range(1..=end)
 }

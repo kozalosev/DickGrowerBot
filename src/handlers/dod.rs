@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::ops::RangeInclusive;
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
@@ -26,7 +25,7 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
     let winner = repos.users.get_random_active_member(chat_id).await?;
     let answer = match winner {
         Some(winner) => {
-            let bonus: u32 = gen_bonus(config.dod_bonus_range)?;
+            let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);
             let dod_result = repos.dicks.set_dod_winner(chat_id, repo::UID(winner.uid), bonus).await;
             match dod_result {
                 Ok(new_length) => t!("commands.dod.result", locale = &lang_code,
@@ -45,14 +44,4 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
         None => t!("commands.dod.no_candidates", locale = &lang_code)
     };
     reply_html(bot, msg, answer).await
-}
-
-fn gen_bonus(range: RangeInclusive<u32>) -> Result<u32, String> {
-    for _ in 1..=10 {   // fused
-        let bonus: u32 = OsRng::default().gen_range(range.clone());
-        if bonus != 0 {
-            return Ok(bonus);
-        }
-    }
-    Err("couldn't generate bonus: fused loop was exhausted".to_owned())
 }
