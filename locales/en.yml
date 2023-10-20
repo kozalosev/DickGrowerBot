@@ -1,14 +1,14 @@
 commands:
   grow:
-    result: "Your dick has been grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long"
-    tomorrow: "Your dick has been already grown today. Come back tomorrow!"
+    result: "Your dick has been grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long.\nYour position in the top is <b>%{pos}</b>."
+    tomorrow: "Your dick has been already grown today."
   top:
     title: "Top of the biggest dicks:"
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"
     empty: "No one is in the game yet :("
   dod:
-    result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length} cm</b> long now"
-    already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>"
+    result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now.\nHis position in the top is <b>%{pos}</b>."
+    already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>."
     no_candidates: "There is no candidates for election. In this chat nobody is in the game yet 😢"
   import:
     result:
@@ -37,5 +37,8 @@ commands:
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
 titles:
   greeting: "Hello"
+  time_till_next_day:
+    none: " Come back tomorrow!"
+    some: "\n\nThe next attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only! <i>(for the testing period: in a specific list of chats)</i>"

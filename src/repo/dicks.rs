@@ -9,17 +9,25 @@ pub struct Dick {
     pub owner_name: String,
 }
 
+pub struct GrowthResult {
+    pub new_length: i32,
+    pub pos_in_top: u64,
+}
+
 repository!(Dicks,
-    pub async fn create_or_grow(&self, uid: UserId, chat_id: ChatId, increment: i32) -> anyhow::Result<i32> {
+    pub async fn create_or_grow(&self, uid: UserId, chat_id: ChatId, increment: i32) -> anyhow::Result<GrowthResult> {
         let uid: i64 = uid.0.try_into()?;
-        sqlx::query("INSERT INTO dicks(uid, chat_id, length) VALUES ($1, $2, $3) ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3) RETURNING length")
+        let new_length = sqlx::query("INSERT INTO dicks(uid, chat_id, length) VALUES ($1, $2, $3)
+                ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3)
+                RETURNING length")
             .bind(uid)
             .bind(chat_id.0)
             .bind(increment)
             .fetch_one(&self.pool)
             .await?
-            .try_get("length")
-            .map_err(|e| e.into())
+            .try_get("length")?;
+        let pos_in_top = self.get_position_in_top(chat_id, uid).await? as u64;
+        Ok(GrowthResult { new_length, pos_in_top })
     }
 ,
     pub async fn get_top(&self, chat_id: ChatId) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
@@ -29,12 +37,29 @@ repository!(Dicks,
             .await
     }
 ,
-    pub async fn set_dod_winner(&self, chat_id: ChatId, user_id: UID, bonus: u32) -> anyhow::Result<i32> {
+    pub async fn set_dod_winner(&self, chat_id: ChatId, user_id: UID, bonus: u32) -> anyhow::Result<GrowthResult> {
         let mut tx = self.pool.begin().await?;
         let new_length = Self::grow_dods_dick(&mut tx, chat_id, user_id, bonus.try_into()?).await?;
         Self::insert_to_dod_table(&mut tx, chat_id, user_id).await?;
+        let pos_in_top = self.get_position_in_top(chat_id, user_id.0).await? as u64;
         tx.commit().await?;
-        Ok(new_length)
+        Ok(GrowthResult { new_length, pos_in_top })
+    }
+,
+    async fn get_position_in_top(&self, chat_id: ChatId, uid: i64) -> anyhow::Result<i64> {
+        sqlx::query("
+                WITH top AS (
+                    SELECT chat_id, uid, length FROM dicks WHERE chat_id = $1
+                ) SELECT
+                    ROW_NUMBER() OVER(ORDER BY top.length DESC) as position
+                FROM top
+                WHERE uid = $2")
+            .bind(chat_id.0)
+            .bind(uid)
+            .fetch_one(&self.pool)
+            .await?
+            .try_get::<i64, _>("position")
+            .map_err(|e| e.into())
     }
 ,
     async fn grow_dods_dick(tx: &mut Transaction<'_, Postgres>, chat_id: ChatId, user_id: UID, bonus: i32) -> anyhow::Result<i32> {

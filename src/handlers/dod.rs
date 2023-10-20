@@ -6,7 +6,7 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::Message;
 use crate::{config, metrics, repo};
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
+use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
 
 const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
 
@@ -27,9 +27,11 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
         Some(winner) => {
             let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);
             let dod_result = repos.dicks.set_dod_winner(chat_id, repo::UID(winner.uid), bonus).await;
-            match dod_result {
-                Ok(new_length) => t!("commands.dod.result", locale = &lang_code,
-                    name = winner.name, growth = bonus, length = new_length),
+            let main_part = match dod_result {
+                Ok(repo::GrowthResult{ new_length, pos_in_top }) => {
+                    t!("commands.dod.result", locale = &lang_code,
+                        name = winner.name, growth = bonus, length = new_length, pos = pos_in_top)
+                },
                 Err(e) => {
                     match e.downcast::<sqlx::Error>()? {
                         sqlx::Error::Database(e)
@@ -39,7 +41,9 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
                         e => Err(e)?
                     }
                 }
-            }
+            };
+            let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
+            format!("{main_part}{time_left_part}")
         },
         None => t!("commands.dod.no_candidates", locale = &lang_code)
     };

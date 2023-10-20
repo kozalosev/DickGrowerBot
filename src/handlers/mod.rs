@@ -3,6 +3,7 @@ mod help;
 mod dod;
 mod import;
 mod promo;
+mod utils;
 
 use std::borrow::ToOwned;
 use teloxide::Bot;

@@ -7,7 +7,7 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::Message;
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
+use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{config, metrics, repo};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
@@ -38,42 +38,45 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
             };
             let increment = gen_increment(config.growth_range, grow_shrink_ratio);
             let grow_result = repos.dicks.create_or_grow(from.id, msg.chat.id, increment).await;
+            let lang_code = ensure_lang_code(Some(from));
 
-            match grow_result {
-                Ok(new_length) => {
-                    let lang_code = ensure_lang_code(Some(from));
-                    t!("commands.grow.result", locale = lang_code.as_str(), incr = increment, length = new_length)
+            let main_part = match grow_result {
+                Ok(repo::GrowthResult { new_length, pos_in_top }) => {
+                    t!("commands.grow.result", locale = &lang_code,
+                        incr = increment, length = new_length, pos = pos_in_top)
                 },
                 Err(e) => {
                     let db_err = e.downcast::<sqlx::Error>()?;
                     if let sqlx::Error::Database(e) = db_err {
                         e.code()
                             .filter(|c| c == TOMORROW_SQL_CODE)
-                            .map(|_| t!("commands.grow.tomorrow"))
+                            .map(|_| t!("commands.grow.tomorrow", locale = &lang_code))
                             .ok_or(anyhow!(e))?
                     } else {
                         Err(db_err)?
                     }
                 }
-            }
+            };
+            let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
+            format!("{main_part}{time_left_part}")
         },
         DickCommands::Grow => Err("unexpected absence of a FROM field for the /grow command")?,
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.inc();
 
             let lang_code = ensure_lang_code(msg.from());
-            let title = t!("commands.top.title", locale = lang_code.as_str());
+            let title = t!("commands.top.title", locale = &lang_code);
             let lines = repos.dicks.get_top(msg.chat.id)
                 .await?
                 .iter().enumerate()
                 .map(|(i, d)| {
-                    let name = teloxide::utils::html::escape(d.owner_name.as_str());
-                    t!("commands.top.line", locale = lang_code.as_str(), n = i+1, name = name, length = d.length)
+                    let name = teloxide::utils::html::escape(&d.owner_name);
+                    t!("commands.top.line", locale = &lang_code, n = i+1, name = name, length = d.length)
                 })
                 .collect::<Vec<String>>();
 
             if lines.is_empty() {
-                t!("commands.top.empty", locale = lang_code.as_str())
+                t!("commands.top.empty", locale = &lang_code)
             } else {
                 format!("{}\n\n{}", title, lines.join("\n"))
             }
