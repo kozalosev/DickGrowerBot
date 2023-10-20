@@ -24,6 +24,7 @@ pub enum ImportCommands {
     Import
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 enum OriginalBotKind {
     PIPISA,
     KRAFT28,
@@ -33,22 +34,20 @@ impl OriginalBotKind {
     fn convert_name(&self, name: &str) -> String {
         match self {
             OriginalBotKind::PIPISA => {
-                if name.len() > 13 {
-                    &name[0..13]
-                } else {
-                    name
-                }
+                name.chars()
+                    .take(13)
+                    .collect()
             },
-            OriginalBotKind::KRAFT28 => name
-        }.to_owned()
+            OriginalBotKind::KRAFT28 => name.to_owned()
+        }
     }
 }
 
-impl TryFrom<&String> for OriginalBotKind {
+impl TryFrom<&str> for OriginalBotKind {
     type Error = String;
 
-    fn try_from(value: &String) -> Result<Self, Self::Error> {
-        match value.as_str().trim_start_matches('@') {
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.trim_start_matches('@') {
             "pipisabot" => Ok(OriginalBotKind::PIPISA),
             "kraft28_bot" => Ok(OriginalBotKind::KRAFT28),
             _ => Err("Unknown OriginalBotKind".to_owned())
@@ -205,7 +204,7 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
         .and_then(|u| u.username.as_ref())
         .filter(|name| ORIGINAL_BOT_USERNAMES.contains(&name.as_ref()))
         .and_then(|name| {
-            let name = name.try_into()
+            let name = name.as_str().try_into()
                 .map_err(|name| log::error!("couldn't convert name: {name}"))
                 .ok();
             if let (Some(name), Some(text)) = (name, reply.text()) {
@@ -295,4 +294,40 @@ fn map_user(pos: Captures) -> Option<OriginalUser> {
         return Some(OriginalUser { name, length })
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn original_bot_kind_convert_name_pipisa() {
+        let (p, short) = (OriginalBotKind::PIPISA, "SadBot #incel".to_owned());
+        assert_eq!(p.convert_name("SadBot #incel..."), short);
+        assert_eq!(p.convert_name("SadBot #incel>suicide"), short);
+    }
+
+    #[test]
+    fn original_bot_kind_try_from() {
+        let check = |variant: &str, kind| {
+            let second_variant = variant.strip_prefix("@").expect("no '@' prefix");
+            let valid_variants = [variant, &second_variant];
+            assert!(valid_variants.into_iter()
+                .all(|v| OriginalBotKind::try_from(v)
+                    .is_ok_and(|k| k == kind)));
+
+            let invalid_variants = valid_variants.into_iter()
+                .map(|v| {
+                    v.strip_suffix("_bot")
+                        .or_else (|| v.strip_suffix("bot"))
+                        .expect("no 'bot' suffix")
+                });
+            assert!(invalid_variants.into_iter()
+                .all(|v| OriginalBotKind::try_from(v)
+                    .is_err()));
+        } ;
+
+        check("@pipisabot", OriginalBotKind::PIPISA);
+        check("@kraft28_bot", OriginalBotKind::KRAFT28);
+    }
 }
