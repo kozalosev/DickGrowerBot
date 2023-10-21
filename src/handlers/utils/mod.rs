@@ -33,7 +33,7 @@ mod tests {
     fn get_time_till_next_day_string() {
         let expected = "<b>1</b>h <b>49</b>m.";
         let actual = date::get_time_till_next_day_string("en");
-        let actual = &actual[expected.len()+1..];
+        let actual = &actual[actual.len()-expected.len()..];
         assert_eq!(expected, actual)
     }
 }
