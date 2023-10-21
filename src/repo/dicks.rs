@@ -48,13 +48,10 @@ repository!(Dicks,
     }
 ,
     async fn get_position_in_top(&self, chat_id: ChatId, uid: i64) -> anyhow::Result<i64> {
-        sqlx::query("
-                WITH top AS (
-                    SELECT chat_id, uid, length FROM dicks WHERE chat_id = $1
-                ) SELECT
-                    ROW_NUMBER() OVER(ORDER BY top.length DESC) as position
-                FROM top
-                WHERE uid = $2")
+        sqlx::query("SELECT position FROM (
+                        SELECT uid, ROW_NUMBER() OVER (ORDER BY length DESC) AS position
+                        FROM dicks WHERE chat_id = $1) AS _
+                    WHERE uid = $2")
             .bind(chat_id.0)
             .bind(uid)
             .fetch_one(&self.pool)
