@@ -3,7 +3,9 @@ mod help;
 mod dod;
 mod import;
 mod promo;
+mod utils;
 
+use std::borrow::ToOwned;
 use teloxide::Bot;
 use teloxide::requests::Requester;
 use teloxide::types::{Message, User};
@@ -19,15 +21,19 @@ pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 pub fn ensure_lang_code(user: Option<&User>) -> String {
     user
-        .map(|u| {
-            u.language_code.clone()
+        .and_then(|u| {
+            u.language_code.as_ref()
                 .or_else(|| {
                     log::warn!("no language_code for {}, using the default", u.id);
                     None
                 })
         })
-        .flatten()
-        .unwrap_or("en".to_owned())
+        .map(|code| match &code[..2] {
+            "uk" | "be" => "ru",
+            _ => code
+        })
+        .unwrap_or("en")
+        .to_owned()
 }
 
 pub async fn reply_html(bot: Bot, msg: Message, answer: String) -> HandlerResult {
