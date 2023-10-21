@@ -30,9 +30,10 @@ repository!(Dicks,
         Ok(GrowthResult { new_length, pos_in_top })
     }
 ,
-    pub async fn get_top(&self, chat_id: ChatId) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
-        sqlx::query_as::<_, Dick>("SELECT length, name as owner_name FROM dicks d JOIN users u ON u.uid = d.uid WHERE chat_id = $1 ORDER BY length DESC LIMIT 10")
+    pub async fn get_top(&self, chat_id: ChatId, limit: u32) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
+        sqlx::query_as::<_, Dick>("SELECT length, name as owner_name FROM dicks d JOIN users u ON u.uid = d.uid WHERE chat_id = $1 ORDER BY length DESC LIMIT $2")
             .bind(chat_id.0)
+            .bind(limit as i32)
             .fetch_all(&self.pool)
             .await
     }
