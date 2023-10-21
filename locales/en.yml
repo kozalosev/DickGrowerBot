@@ -42,4 +42,4 @@ titles:
     none: " Come back tomorrow!"
     some: "\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
 errors:
-  not_group_chat: "This bot is supposed to do its mission in group chats only! <i>(for the testing period: in a specific list of chats)</i>"
+  not_group_chat: "This bot is supposed to do its mission in group chats only!"

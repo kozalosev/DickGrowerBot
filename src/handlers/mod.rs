@@ -57,13 +57,6 @@ pub mod checks {
         if msg.chat.is_private() || msg.chat.is_channel() {
             return false
         }
-
-        // TODO: delete before release (alongside with the ending of the error message)
-        let allowed_chats = [-1001486665073, -1001631811756, -1001100294568, -1001947584857, -1001347968299];
-        if !allowed_chats.contains(&msg.chat.id.0) {
-            return false
-        }
-
         true
     }
 
