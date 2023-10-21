@@ -66,7 +66,7 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
 
             let lang_code = ensure_lang_code(msg.from());
             let title = t!("commands.top.title", locale = &lang_code);
-            let lines = repos.dicks.get_top(msg.chat.id)
+            let lines = repos.dicks.get_top(msg.chat.id, config.top_limit)
                 .await?
                 .iter().enumerate()
                 .map(|(i, d)| {

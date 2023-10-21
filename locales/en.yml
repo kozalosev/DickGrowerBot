@@ -1,7 +1,7 @@
 commands:
   grow:
-    result: "Your dick has been grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long.\nYour position in the top is <b>%{pos}</b>."
-    tomorrow: "Your dick has been already grown today."
+    result: "Your dick has grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long.\nYour position in the top is <b>%{pos}</b>."
+    tomorrow: "You have already played with your dick today."
   top:
     title: "Top of the biggest dicks:"
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"
@@ -13,7 +13,7 @@ commands:
   import:
     result:
       titles:
-        imported: "The following users were imported:"
+        imported: "The following users have been imported:"
         already_present: "The following users were already imported earlier:"
         not_found: "The following users are not in the game yet:"
       line:
@@ -29,16 +29,16 @@ commands:
   promo:
     success:
       template: "You has activated this promo code successfully! %{ending}"
-      singular: "Your dick in one chat was grown by %{growth} cm"
-      plural: "Your dicks in %{affected_chats} chats were grown by %{growth} cm"
+      singular: "Your dick has grown by %{growth} cm in one chat."
+      plural: "Your dick has grown by %{growth} cm in %{affected_chats} chats!"
     errors:
       no_promo: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
-      already_activated: "It seems you had already used this promocode earlier 🤨"
+      already_activated: "It seems you already used this promocode earlier 🤨"
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
 titles:
   greeting: "Hello"
   time_till_next_day:
     none: " Come back tomorrow!"
-    some: "\n\nThe next attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
+    some: "\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only! <i>(for the testing period: in a specific list of chats)</i>"

@@ -14,7 +14,7 @@ use crate::{metrics, repo};
 const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+)(\.{3})? — (?<length>\d+) см.")
+    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?)(\.{3})? — (?<length>\d+) см.")
         .expect("TOP_LINE_REGEXP is invalid")
 });
 
@@ -116,19 +116,21 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                     metrics::CMD_IMPORT.finished();
                     let imported = r.imported.into_iter()
                         .map(|u| t!("commands.import.result.line.imported",
-                            name = u.name, length = u.length,
+                            name = teloxide::utils::html::escape(&u.name),
+                            length = u.length,
                             locale = &lang_code))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let already_present = r.already_present.into_iter()
                         .map(|u| t!("commands.import.result.line.already_present",
-                            name = u.name, length = u.length,
+                            name = teloxide::utils::html::escape(&u.name),
+                            length = u.length,
                             locale = &lang_code))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let not_found = r.not_found.into_iter()
                         .map(|name| t!("commands.import.result.line.not_found",
-                            name = name,
+                            name = teloxide::utils::html::escape(&name),
                             locale = &lang_code))
                         .collect::<Vec<String>>()
                         .join("\n");
@@ -199,7 +201,7 @@ async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult
 }
 
 fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
-    reply.from().clone()
+    reply.from().as_ref()
         .filter(|u| u.is_bot)
         .and_then(|u| u.username.as_ref())
         .filter(|name| ORIGINAL_BOT_USERNAMES.contains(&name.as_ref()))
