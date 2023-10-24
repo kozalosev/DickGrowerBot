@@ -17,8 +17,8 @@ pub struct GrowthResult {
 repository!(Dicks,
     pub async fn create_or_grow(&self, uid: UserId, chat_id: ChatId, increment: i32) -> anyhow::Result<GrowthResult> {
         let uid: i64 = uid.0.try_into()?;
-        let new_length = sqlx::query("INSERT INTO dicks(uid, chat_id, length) VALUES ($1, $2, $3)
-                ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3)
+        let new_length = sqlx::query("INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
+                ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
                 RETURNING length")
             .bind(uid)
             .bind(chat_id.0)
