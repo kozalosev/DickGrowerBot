@@ -5,6 +5,7 @@ commands:
   top:
     title: "Top of the biggest dicks:"
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"
+    ending: "<i>[+] means a grower hasn't grown his dick today yet.</i>"
     empty: "No one is in the game yet :("
   dod:
     result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now.\nHis position in the top is <b>%{pos}</b>."
