@@ -65,20 +65,28 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
             metrics::CMD_TOP_COUNTER.inc();
 
             let lang_code = ensure_lang_code(msg.from());
-            let title = t!("commands.top.title", locale = &lang_code);
             let lines = repos.dicks.get_top(msg.chat.id, config.top_limit)
                 .await?
                 .iter().enumerate()
                 .map(|(i, d)| {
                     let name = teloxide::utils::html::escape(&d.owner_name);
-                    t!("commands.top.line", locale = &lang_code, n = i+1, name = name, length = d.length)
+                    let can_grow = (chrono::Utc::now() - d.grown_at).num_days() > 0;
+                    let line = t!("commands.top.line", locale = &lang_code,
+                        n = i+1, name = name, length = d.length);
+                    if can_grow {
+                        format!("{line} [+]")
+                    } else {
+                        line
+                    }
                 })
                 .collect::<Vec<String>>();
 
             if lines.is_empty() {
                 t!("commands.top.empty", locale = &lang_code)
             } else {
-                format!("{}\n\n{}", title, lines.join("\n"))
+                let title = t!("commands.top.title", locale = &lang_code);
+                let ending = t!("commands.top.ending", locale = &lang_code);
+                format!("{}\n\n{}\n\n{}", title, lines.join("\n"), ending)
             }
         }
     };

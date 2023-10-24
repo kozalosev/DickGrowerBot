@@ -7,6 +7,7 @@ use super::UID;
 pub struct Dick {
     pub length: i32,
     pub owner_name: String,
+    pub grown_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub struct GrowthResult {
@@ -17,8 +18,8 @@ pub struct GrowthResult {
 repository!(Dicks,
     pub async fn create_or_grow(&self, uid: UserId, chat_id: ChatId, increment: i32) -> anyhow::Result<GrowthResult> {
         let uid: i64 = uid.0.try_into()?;
-        let new_length = sqlx::query("INSERT INTO dicks(uid, chat_id, length) VALUES ($1, $2, $3)
-                ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3)
+        let new_length = sqlx::query("INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
+                ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
                 RETURNING length")
             .bind(uid)
             .bind(chat_id.0)
@@ -31,7 +32,12 @@ repository!(Dicks,
     }
 ,
     pub async fn get_top(&self, chat_id: ChatId, limit: u32) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
-        sqlx::query_as::<_, Dick>("SELECT length, name as owner_name FROM dicks d JOIN users u ON u.uid = d.uid WHERE chat_id = $1 ORDER BY length DESC LIMIT $2")
+        sqlx::query_as::<_, Dick>(
+            "SELECT length, name as owner_name, updated_at as grown_at FROM dicks d
+                JOIN users u ON u.uid = d.uid
+                WHERE chat_id = $1
+                ORDER BY length DESC, updated_at DESC, name
+                LIMIT $2")
             .bind(chat_id.0)
             .bind(limit as i32)
             .fetch_all(&self.pool)
