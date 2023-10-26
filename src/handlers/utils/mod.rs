@@ -1,3 +1,11 @@
+use teloxide::types::User;
+
+pub fn get_full_name(user: &User) -> String {
+    user.last_name.as_ref()
+        .map(|last_name| format!("{} {}", user.first_name, last_name))
+        .unwrap_or(user.first_name.clone())
+}
+
 pub mod date {
     use chrono::{DateTime, Duration, Timelike, Utc};
     use rust_i18n::t;

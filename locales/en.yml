@@ -36,6 +36,18 @@ commands:
       no_promo: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
       already_activated: "It seems you already used this promocode earlier 🤨"
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
+inline:
+  results:
+    text: "Since I cannot determine the chat by an inline query, you should click on the button bellow to get the result."
+    button: "Click me!"
+    titles:
+      grow: "Grow your dick!"
+      top: "Get the biggest dicks of the chat"
+      dick_of_day: "Elect the Dick of a Day"
+  callback:
+    errors:
+      unknown_data: "Unknown command"
+      no_data: "Something went wrong…"
 titles:
   greeting: "Hello"
   time_till_next_day:

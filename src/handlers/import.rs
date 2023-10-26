@@ -218,7 +218,8 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
 }
 
 async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseResult) -> anyhow::Result<ImportResult> {
-    let members: HashMap<String, ChatMember> = repos.users.get_chat_members(chat_id)
+    let chat_id_kind = chat_id.into();
+    let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)
         .await?.into_iter()
         .map(|m| {
             let uid = m.uid.try_into().expect("couldn't convert uid to u64");

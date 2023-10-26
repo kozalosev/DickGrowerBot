@@ -4,6 +4,7 @@ mod imports;
 mod promo;
 
 use std::num::TryFromIntError;
+use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
 pub use imports::*;
@@ -28,6 +29,40 @@ impl TryFrom<u64> for UID {
             .map(UID)
     }
 }
+
+pub enum ChatIdKind {
+    ID(ChatId),
+    Instance(String)
+}
+
+impl From<ChatId> for ChatIdKind {
+    fn from(value: ChatId) -> Self {
+        ChatIdKind::ID(value)
+    }
+}
+
+impl From<String> for ChatIdKind {
+    fn from(value: String) -> Self {
+        ChatIdKind::Instance(value)
+    }
+}
+
+impl ChatIdKind {
+    pub fn kind(&self) -> String {
+        match self {
+            ChatIdKind::ID(_) => "id",
+            ChatIdKind::Instance(_) => "inst"
+        }.to_owned()
+    }
+
+    pub fn value(&self) -> String {
+        match self {
+            ChatIdKind::ID(id) => id.0.to_string(),
+            ChatIdKind::Instance(instance) => instance.to_owned()
+        }
+    }
+}
+
 
 #[macro_export]
 macro_rules! repository {

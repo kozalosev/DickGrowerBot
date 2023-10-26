@@ -6,9 +6,10 @@ use rand::rngs::OsRng;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::types::Message;
+use teloxide::types::{Message, User};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{config, metrics, repo};
+use crate::repo::ChatIdKind;
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 
@@ -21,76 +22,86 @@ pub enum DickCommands {
 
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                               repos: repo::Repositories, config: config::AppConfig) -> HandlerResult {
+    let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+    let chat_id = msg.chat.id.into();
+    let from_refs = FromRefs(from, &chat_id);
     let answer = match cmd {
-        DickCommands::Grow if msg.from().is_some() => {
+        DickCommands::Grow => {
             metrics::CMD_GROW_COUNTER.inc();
-
-            let from = msg.from().unwrap();
-            let name = from.last_name.as_ref()
-                .map(|last_name| format!("{} {}", from.first_name, last_name))
-                .unwrap_or(from.first_name.clone());
-            let user = repos.users.create_or_update(from.id, name).await?;
-            let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
-            let grow_shrink_ratio = if days_since_registration > config.newcomers_grace_days {
-                config.grow_shrink_ratio
-            } else {
-                1.0
-            };
-            let increment = gen_increment(config.growth_range, grow_shrink_ratio);
-            let grow_result = repos.dicks.create_or_grow(from.id, msg.chat.id, increment).await;
-            let lang_code = ensure_lang_code(Some(from));
-
-            let main_part = match grow_result {
-                Ok(repo::GrowthResult { new_length, pos_in_top }) => {
-                    t!("commands.grow.result", locale = &lang_code,
-                        incr = increment, length = new_length, pos = pos_in_top)
-                },
-                Err(e) => {
-                    let db_err = e.downcast::<sqlx::Error>()?;
-                    if let sqlx::Error::Database(e) = db_err {
-                        e.code()
-                            .filter(|c| c == TOMORROW_SQL_CODE)
-                            .map(|_| t!("commands.grow.tomorrow", locale = &lang_code))
-                            .ok_or(anyhow!(e))?
-                    } else {
-                        Err(db_err)?
-                    }
-                }
-            };
-            let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-            format!("{main_part}{time_left_part}")
+            grow_impl(&repos, config, from_refs).await?
         },
-        DickCommands::Grow => Err("unexpected absence of a FROM field for the /grow command")?,
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.inc();
-
-            let lang_code = ensure_lang_code(msg.from());
-            let lines = repos.dicks.get_top(msg.chat.id, config.top_limit)
-                .await?
-                .iter().enumerate()
-                .map(|(i, d)| {
-                    let name = teloxide::utils::html::escape(&d.owner_name);
-                    let can_grow = (chrono::Utc::now() - d.grown_at).num_days() > 0;
-                    let line = t!("commands.top.line", locale = &lang_code,
-                        n = i+1, name = name, length = d.length);
-                    if can_grow {
-                        format!("{line} [+]")
-                    } else {
-                        line
-                    }
-                })
-                .collect::<Vec<String>>();
-
-            if lines.is_empty() {
-                t!("commands.top.empty", locale = &lang_code)
-            } else {
-                let title = t!("commands.top.title", locale = &lang_code);
-                let ending = t!("commands.top.ending", locale = &lang_code);
-                format!("{}\n\n{}\n\n{}", title, lines.join("\n"), ending)
-            }
+            top_impl(&repos, config, from_refs).await?
         }
     };
     reply_html(bot, msg, answer).await
+}
+
+pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdKind);
+
+pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+    let (from, chat_id) = (from_refs.0, from_refs.1.into());
+    let name = utils::get_full_name(from);
+    let user = repos.users.create_or_update(from.id, name).await?;
+    let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
+    let grow_shrink_ratio = if days_since_registration > config.newcomers_grace_days {
+        config.grow_shrink_ratio
+    } else {
+        1.0
+    };
+    let increment = gen_increment(config.growth_range, grow_shrink_ratio);
+    let grow_result = repos.dicks.create_or_grow(from.id, chat_id, increment).await;
+    let lang_code = ensure_lang_code(Some(from));
+
+    let main_part = match grow_result {
+        Ok(repo::GrowthResult { new_length, pos_in_top }) => {
+            t!("commands.grow.result", locale = &lang_code,
+                incr = increment, length = new_length, pos = pos_in_top)
+        },
+        Err(e) => {
+            let db_err = e.downcast::<sqlx::Error>()?;
+            if let sqlx::Error::Database(e) = db_err {
+                e.code()
+                    .filter(|c| c == TOMORROW_SQL_CODE)
+                    .map(|_| t!("commands.grow.tomorrow", locale = &lang_code))
+                    .ok_or(anyhow!(e))?
+            } else {
+                Err(db_err)?
+            }
+        }
+    };
+    let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
+    Ok(format!("{main_part}{time_left_part}"))
+}
+
+pub(crate) async fn top_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+    let (from, chat_id) = (from_refs.0, from_refs.1.into());
+    let lang_code = ensure_lang_code(Some(from));
+    let lines = repos.dicks.get_top(chat_id, config.top_limit)
+        .await?
+        .iter().enumerate()
+        .map(|(i, d)| {
+            let name = teloxide::utils::html::escape(&d.owner_name);
+            let can_grow = (chrono::Utc::now() - d.grown_at).num_days() > 0;
+            let line = t!("commands.top.line", locale = &lang_code,
+                n = i+1, name = name, length = d.length);
+            if can_grow {
+                format!("{line} [+]")
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<String>>();
+
+    let res = if lines.is_empty() {
+        t!("commands.top.empty", locale = &lang_code)
+    } else {
+        let title = t!("commands.top.title", locale = &lang_code);
+        let ending = t!("commands.top.ending", locale = &lang_code);
+        format!("{}\n\n{}\n\n{}", title, lines.join("\n"), ending)
+    };
+    Ok(res)
 }
 
 fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {

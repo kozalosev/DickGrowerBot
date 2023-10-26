@@ -3,6 +3,7 @@ mod help;
 mod dod;
 mod import;
 mod promo;
+mod inline;
 mod utils;
 
 use std::borrow::ToOwned;
@@ -15,6 +16,7 @@ pub use dick::*;
 pub use help::*;
 pub use dod::*;
 pub use import::*;
+pub use inline::*;
 pub use promo::*;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
