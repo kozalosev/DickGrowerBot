@@ -3,6 +3,7 @@ mod help;
 mod dod;
 mod import;
 mod promo;
+mod inline;
 mod utils;
 
 use std::borrow::ToOwned;
@@ -15,6 +16,7 @@ pub use dick::*;
 pub use help::*;
 pub use dod::*;
 pub use import::*;
+pub use inline::*;
 pub use promo::*;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -57,13 +59,6 @@ pub mod checks {
         if msg.chat.is_private() || msg.chat.is_channel() {
             return false
         }
-
-        // TODO: delete before release (alongside with the ending of the error message)
-        let allowed_chats = [-1001486665073, -1001631811756, -1001100294568, -1001947584857, -1001347968299];
-        if !allowed_chats.contains(&msg.chat.id.0) {
-            return false
-        }
-
         true
     }
 
