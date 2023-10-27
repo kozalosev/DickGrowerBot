@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 use anyhow::anyhow;
-use chrono::Utc;
+use chrono::{Datelike, Utc};
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
@@ -12,6 +12,7 @@ use crate::{config, metrics, repo};
 use crate::repo::ChatIdKind;
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
+const LTR_MARK: char = '\u{200E}';
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -83,13 +84,13 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: config::AppConf
         .iter().enumerate()
         .map(|(i, d)| {
             let name = teloxide::utils::html::escape(&d.owner_name);
-            let can_grow = (chrono::Utc::now() - d.grown_at).num_days() > 0;
+            let can_grow = chrono::Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
             let line = t!("commands.top.line", locale = &lang_code,
                 n = i+1, name = name, length = d.length);
             if can_grow {
-                format!("{line} [+]")
+                format!("{LTR_MARK}{line} [+]")
             } else {
-                line
+                format!("{LTR_MARK}{line}")
             }
         })
         .collect::<Vec<String>>();
