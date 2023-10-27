@@ -29,7 +29,7 @@ repository!(Dicks,
             .bind(chat_id.kind())
             .bind(chat_id.value())
             .bind(increment)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await?
             .try_get("length")?;
         tx.commit().await?;
@@ -87,8 +87,9 @@ repository!(Dicks,
 ,
     async fn get_position_in_top(&self, chat_id_internal: i64, uid: i64) -> anyhow::Result<i64> {
         sqlx::query("SELECT position FROM (
-                        SELECT uid, ROW_NUMBER() OVER (ORDER BY length DESC) AS position
+                        SELECT uid, ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
                         FROM dicks
+                        JOIN users using (uid)
                         WHERE chat_id = $1
                     ) AS _
                     WHERE uid = $2")
