@@ -8,6 +8,7 @@ use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::handlers::{dick, dod, ensure_lang_code, FromRefs, HandlerResult, utils};
+use crate::metrics;
 use crate::repo::Repositories;
 
 #[derive(Debug, strum_macros::Display, EnumIter, EnumString)]
@@ -21,14 +22,25 @@ enum InlineCommand {
 impl InlineCommand {
     async fn execute(&self, repos: &Repositories, config: AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
         match self {
-            InlineCommand::Grow => dick::grow_impl(repos, config, from_refs).await,
-            InlineCommand::Top => dick::top_impl(repos, config, from_refs).await,
-            InlineCommand::DickOfDay => dod::dick_of_day_impl(repos, config, from_refs).await,
+            InlineCommand::Grow => {
+                metrics::CMD_GROW_COUNTER.inline.inc();
+                dick::grow_impl(repos, config, from_refs).await
+            },
+            InlineCommand::Top => {
+                metrics::CMD_TOP_COUNTER.inline.inc();
+                dick::top_impl(repos, config, from_refs).await
+            },
+            InlineCommand::DickOfDay => {
+                metrics::CMD_DOD_COUNTER.inline.inc();
+                dod::dick_of_day_impl(repos, config, from_refs).await
+            },
         }
     }
 }
 
 pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -> HandlerResult {
+    metrics::INLINE_COUNTER.invoked();
+
     let name = utils::get_full_name(&query.from);
     repos.users.create_or_update(query.from.id, name).await?;
 
@@ -54,6 +66,11 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
     let mut answer = bot.answer_inline_query(query.id, results);
     answer.cache_time = Some(1);
     answer.await?;
+    Ok(())
+}
+
+pub async fn inline_chosen_handler() -> HandlerResult {
+    metrics::INLINE_COUNTER.finished();
     Ok(())
 }
 

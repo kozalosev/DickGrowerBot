@@ -7,14 +7,12 @@ use prometheus::{Encoder, Opts, TextEncoder};
 static REGISTRY: Lazy<Registry> = Lazy::new(|| Registry(prometheus::Registry::new()));
 
 // Export special preconstructed counters for Teloxide's handlers.
-pub static INLINE_COUNTER: Lazy<Counter> = Lazy::new(|| {
-    Counter::new("inline", Opts::new("inline_usage_total", "count of inline queries processed by the bot"))
-});
-pub static INLINE_CHOSEN_COUNTER: Lazy<Counter> = Lazy::new(|| {
-    Counter::new("inline_chosen", Opts::new("inline_chosen_total", "count of inline results chosen by the users"))
-});
-pub static MESSAGE_COUNTER: Lazy<Counter> = Lazy::new(|| {
-    Counter::new("message", Opts::new("message_usage_total", "count of messages processed by the bot"))
+pub static INLINE_COUNTER: Lazy<ComplexCommandCounters> = Lazy::new(|| {
+    let opts = Opts::new("inline_usage_total", "count of inline queries processed by the bot");
+    ComplexCommandCounters {
+        invoked: Counter::new("inline (query)", opts.clone().const_label("state", "query")),
+        finished: Counter::new("inline (chosen)", opts.const_label("state", "chosen")),
+    }
 });
 pub static CMD_START_COUNTER: Lazy<Counter> = Lazy::new(|| {
     Counter::new("command_start", Opts::new("command_start_usage_total", "count of /start invocations"))
@@ -22,14 +20,26 @@ pub static CMD_START_COUNTER: Lazy<Counter> = Lazy::new(|| {
 pub static CMD_HELP_COUNTER: Lazy<Counter> = Lazy::new(|| {
     Counter::new("command_help", Opts::new("command_help_usage_total", "count of /help invocations"))
 });
-pub static CMD_GROW_COUNTER: Lazy<Counter> = Lazy::new(|| {
-    Counter::new("command_grow", Opts::new("command_grow_usage_total", "count of /grow invocations"))
+pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
+    let opts = Opts::new("command_grow_usage_total", "count of /grow invocations");
+    BothModesCounters {
+        chat: Counter::new("command_grow (chat)", opts.clone().const_label("mode", "chat")),
+        inline: Counter::new("command_grow (inline)", opts.const_label("mode", "inline")),
+    }
 });
-pub static CMD_TOP_COUNTER: Lazy<Counter> = Lazy::new(|| {
-    Counter::new("command_top", Opts::new("command_top_usage_total", "count of /top invocations"))
+pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
+    let opts = Opts::new("command_top_usage_total", "count of /top invocations");
+    BothModesCounters {
+        chat: Counter::new("command_top (chat)", opts.clone().const_label("mode", "chat")),
+        inline: Counter::new("command_top (inline)", opts.const_label("mode", "inline")),
+    }
 });
-pub static CMD_DOD_COUNTER: Lazy<Counter> = Lazy::new(|| {
-    Counter::new("command_dick_of_day", Opts::new("command_dick_of_day_usage_total", "count of /dick_of_day invocations"))
+pub static CMD_DOD_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
+    let opts = Opts::new("command_dick_of_day_usage_total", "count of /dick_of_day invocations");
+    BothModesCounters {
+        chat: Counter::new("command_dick_of_day (chat)", opts.clone().const_label("mode", "chat")),
+        inline: Counter::new("command_dick_of_day (inline)", opts.const_label("mode", "inline")),
+    }
 });
 pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(|| {
     let opts = Opts::new("command_import_usage_total", "count of /import invocations and successes");
@@ -49,14 +59,16 @@ pub static CMD_PROMO: Lazy<ComplexCommandCounters> = Lazy::new(|| {
 
 pub fn init() -> axum::Router {
     let prometheus = REGISTRY
-        .register(&*INLINE_COUNTER)
-        .register(&*INLINE_CHOSEN_COUNTER)
-        .register(&*MESSAGE_COUNTER)
+        .register(&INLINE_COUNTER.invoked)
+        .register(&INLINE_COUNTER.finished)
         .register(&*CMD_START_COUNTER)
         .register(&*CMD_HELP_COUNTER)
-        .register(&*CMD_GROW_COUNTER)
-        .register(&*CMD_TOP_COUNTER)
-        .register(&*CMD_DOD_COUNTER)
+        .register(&CMD_GROW_COUNTER.chat)
+        .register(&CMD_GROW_COUNTER.inline)
+        .register(&CMD_TOP_COUNTER.chat)
+        .register(&CMD_TOP_COUNTER.inline)
+        .register(&CMD_DOD_COUNTER.chat)
+        .register(&CMD_DOD_COUNTER.inline)
         .register(&CMD_IMPORT.invoked)
         .register(&CMD_IMPORT.finished)
         .register(&CMD_PROMO.invoked)
@@ -83,6 +95,10 @@ pub struct Counter {
 pub struct ComplexCommandCounters {
     invoked: Counter,
     finished: Counter,
+}
+pub struct BothModesCounters {
+    pub chat: Counter,
+    pub inline: Counter
 }
 struct Registry(prometheus::Registry);
 

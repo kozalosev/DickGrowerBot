@@ -28,11 +28,11 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
     let from_refs = FromRefs(from, &chat_id);
     let answer = match cmd {
         DickCommands::Grow => {
-            metrics::CMD_GROW_COUNTER.inc();
+            metrics::CMD_GROW_COUNTER.chat.inc();
             grow_impl(&repos, config, from_refs).await?
         },
         DickCommands::Top => {
-            metrics::CMD_TOP_COUNTER.inc();
+            metrics::CMD_TOP_COUNTER.chat.inc();
             top_impl(&repos, config, from_refs).await?
         }
     };

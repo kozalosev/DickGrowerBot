@@ -20,7 +20,7 @@ pub enum DickOfDayCommands {
 
 pub async fn dod_cmd_handler(bot: Bot, msg: Message,
                              repos: repo::Repositories, config: config::AppConfig) -> HandlerResult {
-    metrics::CMD_DOD_COUNTER.inc();
+    metrics::CMD_DOD_COUNTER.chat.inc();
     let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
