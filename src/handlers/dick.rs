@@ -83,7 +83,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: config::AppConf
         .await?
         .iter().enumerate()
         .map(|(i, d)| {
-            let ltr_name = format!("{LTR_MARK}{}", d.owner_name);
+            let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
             let name = teloxide::utils::html::escape(&ltr_name);
             let can_grow = chrono::Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
             let line = t!("commands.top.line", locale = &lang_code,

@@ -75,12 +75,6 @@ pub async fn inline_chosen_handler() -> HandlerResult {
     Ok(())
 }
 
-enum CallbackDataParseResult {
-    Ok(InlineCommand),
-    AnotherUser,
-    Invalid,
-}
-
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig) -> HandlerResult {
     let lang_code = ensure_lang_code(Some(&query.from));
@@ -89,17 +83,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     let mut answer = bot.answer_callback_query(&query.id);
 
     if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {
-        let parse_res = data.split_once(":")
-            .map(|(uid, data)| {
-                if uid == query.from.id.0.to_string() {
-                    InlineCommand::from_str(&data)
-                        .map(|cmd| CallbackDataParseResult::Ok(cmd))
-                } else {
-                    Ok(CallbackDataParseResult::AnotherUser)
-                }
-            })
-            .unwrap_or(Ok(CallbackDataParseResult::Invalid));
-
+        let parse_res = parse_callback_data(&data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let text = cmd.execute(&repos, config, from_refs).await?;
             let mut edit = bot.edit_message_text_inline(inline_msg_id, text);
@@ -128,4 +112,23 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
 
     answer.await?;
     Ok(())
+}
+
+enum CallbackDataParseResult {
+    Ok(InlineCommand),
+    AnotherUser,
+    Invalid,
+}
+
+fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseResult, strum::ParseError> {
+    data.split_once(":")
+        .map(|(uid, data)| {
+            if uid == user_id.0.to_string() {
+                InlineCommand::from_str(&data)
+                    .map(|cmd| CallbackDataParseResult::Ok(cmd))
+            } else {
+                Ok(CallbackDataParseResult::AnotherUser)
+            }
+        })
+        .unwrap_or(Ok(CallbackDataParseResult::Invalid))
 }

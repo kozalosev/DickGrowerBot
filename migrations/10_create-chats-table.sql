@@ -28,7 +28,7 @@ DECLARE
     c_count integer := 0;
 BEGIN
     SELECT count(*) INTO c_count FROM Chats;
-    IF NOT c_count = 0 THEN
+    IF c_count = 0 THEN
         INSERT INTO Chats (type, chat_id) SELECT DISTINCT 'id'::chat_id_type, chat_id FROM Dicks;
         UPDATE Dicks d SET bonus_attempts = (bonus_attempts + 1), chat_id = id FROM Chats c WHERE c.chat_id = d.chat_id;
         UPDATE Dick_of_Day dod SET chat_id = id FROM Chats c WHERE c.chat_id = dod.chat_id;
