@@ -18,7 +18,7 @@ use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportComma
 
 const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
 
-i18n!();    // load localizations with default parameters
+i18n!(fallback = "en");    // load localizations with default parameters
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
