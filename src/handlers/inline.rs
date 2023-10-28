@@ -44,6 +44,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
     let name = utils::get_full_name(&query.from);
     repos.users.create_or_update(query.from.id, name).await?;
 
+    let uid = query.from.id.0;
     let lang_code = ensure_lang_code(Some(&query.from));
     let btn_label = t!("inline.results.button", locale = &lang_code);
     let results: Vec<InlineQueryResult> = InlineCommand::iter()
@@ -56,7 +57,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
                 key.clone(), title, content
             );
             let buttons = vec![vec![
-                InlineKeyboardButton::callback(&btn_label, key)
+                InlineKeyboardButton::callback(&btn_label, format!("{uid}:{key}"))
             ]];
             article.reply_markup.replace(InlineKeyboardMarkup::new(buttons));
             InlineQueryResult::Article(article)
@@ -74,6 +75,12 @@ pub async fn inline_chosen_handler() -> HandlerResult {
     Ok(())
 }
 
+enum CallbackDataParseResult {
+    Ok(InlineCommand),
+    AnotherUser,
+    Invalid,
+}
+
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig) -> HandlerResult {
     let lang_code = ensure_lang_code(Some(&query.from));
@@ -82,20 +89,36 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     let mut answer = bot.answer_callback_query(&query.id);
 
     if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {
-        match InlineCommand::from_str(&data) {
-            Ok(cmd) => {
-                let text = cmd.execute(&repos, config, from_refs).await?;
-                let mut edit = bot.edit_message_text_inline(inline_msg_id, text);
-                edit.reply_markup = None;
-                edit.parse_mode.replace(Html);
-                edit.await?;
-            }
-            Err(e) => {
-                log::error!("unknown callback data: {e}");
-                let text = t!("inline.callback.errors.unknown_data", locale = &lang_code);
-                answer.text.replace(text);
-                answer.show_alert.replace(true);
-            }
+        let parse_res = data.split_once(":")
+            .map(|(uid, data)| {
+                if uid == query.from.id.0.to_string() {
+                    InlineCommand::from_str(&data)
+                        .map(|cmd| CallbackDataParseResult::Ok(cmd))
+                } else {
+                    Ok(CallbackDataParseResult::AnotherUser)
+                }
+            })
+            .unwrap_or(Ok(CallbackDataParseResult::Invalid));
+
+        if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
+            let text = cmd.execute(&repos, config, from_refs).await?;
+            let mut edit = bot.edit_message_text_inline(inline_msg_id, text);
+            edit.reply_markup = None;
+            edit.parse_mode.replace(Html);
+            edit.await?;
+        } else {
+            let key = match parse_res {
+                Ok(CallbackDataParseResult::AnotherUser) => "another_user",
+                Ok(CallbackDataParseResult::Invalid) => "invalid_data",
+                Err(e) => {
+                    log::error!("unknown callback data: {e}");
+                    "unknown_data"
+                }
+                Ok(CallbackDataParseResult::Ok(_)) => panic!("unexpected CallbackDataParseResult::Ok(_)")
+            };
+            let text = t!(&format!("inline.callback.errors.{key}"), locale = &lang_code);
+            answer.text.replace(text);
+            answer.show_alert.replace(true);
         }
     } else {
         let text = t!("inline.callback.errors.no_data", locale = &lang_code);

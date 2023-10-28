@@ -46,6 +46,8 @@ inline:
       dick_of_day: "Elect the Dick of a Day"
   callback:
     errors:
+      another_user: "This message was sent by another person."
+      invalid_data: "Possibly this message was sent via an older version of the bot. Try to resend it again."
       unknown_data: "Unknown command"
       no_data: "Something went wrong…"
 titles:
