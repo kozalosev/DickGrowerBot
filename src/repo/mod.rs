@@ -3,7 +3,6 @@ mod dicks;
 mod imports;
 mod promo;
 
-use std::num::TryFromIntError;
 use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
@@ -16,18 +15,6 @@ pub struct Repositories {
     pub dicks: Dicks,
     pub imports: Imports,
     pub promo: Promo,
-}
-
-#[derive(Copy, Clone)]
-pub struct UID(pub i64);
-
-impl TryFrom<u64> for UID {
-    type Error = TryFromIntError;
-
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        value.try_into()
-            .map(UID)
-    }
 }
 
 pub enum ChatIdKind {
@@ -48,17 +35,27 @@ impl From<String> for ChatIdKind {
 }
 
 impl ChatIdKind {
-    pub fn kind(&self) -> String {
-        match self {
-            ChatIdKind::ID(_) => "id",
-            ChatIdKind::Instance(_) => "inst"
-        }.to_owned()
-    }
-
     pub fn value(&self) -> String {
         match self {
             ChatIdKind::ID(id) => id.0.to_string(),
             ChatIdKind::Instance(instance) => instance.to_owned()
+        }
+    }
+}
+
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "chat_id_type")]
+#[sqlx(rename_all = "lowercase")]
+enum ChatIdType {
+    ID,
+    Inst,
+}
+
+impl From<&ChatIdKind> for ChatIdType {
+    fn from(value: &ChatIdKind) -> Self {
+        match value {
+            ChatIdKind::ID(_) => ChatIdType::ID,
+            ChatIdKind::Instance(_) => ChatIdType::Inst,
         }
     }
 }
