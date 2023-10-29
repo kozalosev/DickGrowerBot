@@ -52,8 +52,8 @@ repository!(Dicks,
         let internal_chat_id = Self::upsert_chat(&mut tx, &chat_id).await?;
         let new_length = Self::grow_dods_dick(&mut tx, internal_chat_id, uid, bonus as i32).await?;
         Self::insert_to_dod_table(&mut tx, internal_chat_id, uid).await?;
-        let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await? as u64;
         tx.commit().await?;
+        let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await? as u64;
         Ok(GrowthResult { new_length, pos_in_top })
     }
 ,
