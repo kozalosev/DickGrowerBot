@@ -27,7 +27,23 @@ impl <T: Into<anyhow::Error>> From<T> for ActivationError {
     }
 }
 
+#[cfg(test)]
+pub struct PromoCodeParams {
+    pub code: String,
+    pub bonus_length: u32,
+    pub capacity: u32,
+}
+
 repository!(Promo,
+    #[cfg(test)]
+    pub async fn create(&self, p: PromoCodeParams) -> anyhow::Result<()> {
+        sqlx::query!("INSERT INTO Promo_Codes (code, bonus_length, capacity) VALUES ($1, $2, $3)",
+                p.code, p.bonus_length as i32, p.capacity as i32)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+,
     pub async fn activate(&self, user_id: UserId, code: &str) -> Result<ActivationResult, ActivationError> {
         let mut tx = self.pool.begin().await?;
 

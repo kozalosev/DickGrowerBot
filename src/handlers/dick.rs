@@ -44,7 +44,7 @@ pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdKind);
 pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1.into());
     let name = utils::get_full_name(from);
-    let user = repos.users.create_or_update(from.id, name).await?;
+    let user = repos.users.create_or_update(from.id, &name).await?;
     let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
     let grow_shrink_ratio = if days_since_registration > config.newcomers_grace_days {
         config.grow_shrink_ratio

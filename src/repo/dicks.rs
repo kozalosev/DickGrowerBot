@@ -46,15 +46,18 @@ repository!(Dicks,
             .await
     }
 ,
-    pub async fn set_dod_winner(&self, chat_id: &ChatIdKind, user_id: UserId, bonus: u32) -> anyhow::Result<GrowthResult> {
+    pub async fn set_dod_winner(&self, chat_id: &ChatIdKind, user_id: UserId, bonus: u32) -> anyhow::Result<Option<GrowthResult>> {
         let uid = user_id.0 as i64;
         let mut tx = self.pool.begin().await?;
         let internal_chat_id = Self::upsert_chat(&mut tx, &chat_id).await?;
-        let new_length = Self::grow_dods_dick(&mut tx, internal_chat_id, uid, bonus as i32).await?;
+        let new_length = match Self::grow_dods_dick(&mut tx, internal_chat_id, uid, bonus as i32).await? {
+            Some(length) => length,
+            None => return Ok(None)
+        };
         Self::insert_to_dod_table(&mut tx, internal_chat_id, uid).await?;
         tx.commit().await?;
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await? as u64;
-        Ok(GrowthResult { new_length, pos_in_top })
+        Ok(Some(GrowthResult { new_length, pos_in_top }))
     }
 ,
     async fn upsert_chat(tx: &mut Transaction<'_, Postgres>, chat_id: &ChatIdKind) -> anyhow::Result<i64> {
@@ -94,13 +97,13 @@ repository!(Dicks,
             .map_err(|e| e.into())
     }
 ,
-    async fn grow_dods_dick(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: i64, bonus: i32) -> anyhow::Result<i32> {
+    async fn grow_dods_dick(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: i64, bonus: i32) -> anyhow::Result<Option<i32>> {
         sqlx::query_scalar!(
             "UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $3)
                 WHERE chat_id = $1 AND uid = $2
                 RETURNING length",
                 chat_id_internal, user_id, bonus)
-            .fetch_one(&mut **tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|e| e.into())
     }

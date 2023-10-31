@@ -1,22 +1,28 @@
 mod users;
 mod dicks;
-mod imports;
+mod import;
 mod promo;
 
+#[cfg(test)]
+pub(crate) mod test;
+
+use strum_macros::Display;
 use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
-pub use imports::*;
+pub use import::*;
 pub use promo::*;
+use crate::config::DatabaseConfig;
 
 #[derive(Clone)]
 pub struct Repositories {
     pub users: Users,
     pub dicks: Dicks,
-    pub imports: Imports,
+    pub import: Import,
     pub promo: Promo,
 }
 
+#[derive(Display)]
 pub enum ChatIdKind {
     ID(ChatId),
     Instance(String)
@@ -58,6 +64,15 @@ impl From<&ChatIdKind> for ChatIdType {
             ChatIdKind::Instance(_) => ChatIdType::Inst,
         }
     }
+}
+
+
+pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(config.max_connections)
+        .connect(config.url.as_str()).await?;
+    sqlx::migrate!().run(&pool).await?;
+    Ok(pool)
 }
 
 

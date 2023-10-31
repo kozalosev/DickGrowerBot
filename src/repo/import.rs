@@ -1,24 +1,23 @@
-use std::num::TryFromIntError;
 use sqlx::{Postgres, Transaction};
 use teloxide::types::{ChatId, UserId};
 use crate::repository;
 
-#[derive(sqlx::FromRow)]
+#[derive(Eq, PartialEq, Debug, sqlx::FromRow)]
 pub struct ExternalUser {
     pub uid: i64,
     pub length: i32
 }
 
 impl ExternalUser {
-    pub fn new(uid: UserId, length: u32) -> Result<Self, TryFromIntError> {
-        Ok(Self {
-            uid: uid.0.try_into()?,
-            length: length.try_into()?
-        })
+    pub fn new(uid: UserId, length: u32) -> Self {
+        Self {
+            uid: uid.0 as i64,
+            length: length as i32
+        }
     }
 }
 
-repository!(Imports,
+repository!(Import,
     pub async fn get_imported_users(&self, chat_id: ChatId) -> anyhow::Result<Vec<ExternalUser>> {
         sqlx::query_as!(ExternalUser,
                 "SELECT uid, original_length AS length FROM Imports WHERE chat_id = $1",
@@ -49,9 +48,11 @@ repository!(Imports,
     }
 ,
     async fn update_dicks(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uids: Vec<i64>) -> anyhow::Result<()> {
-        sqlx::query!("WITH original AS (SELECT * FROM Imports WHERE chat_id = $1 AND uid = ANY($2))
-                        UPDATE Dicks d SET length = (length + original_length), bonus_attempts = (bonus_attempts + 1)
-                        FROM original o WHERE d.chat_id = o.chat_id AND d.uid = o.uid",
+        sqlx::query!("WITH original AS (SELECT c.id as chat_id, uid, original_length
+                        FROM Imports JOIN Chats c USING (chat_id)
+                        WHERE chat_id = $1 AND uid = ANY($2))
+                            UPDATE Dicks d SET length = (length + original_length), bonus_attempts = (bonus_attempts + 1)
+                            FROM original o WHERE d.chat_id = o.chat_id AND d.uid = o.uid",
                 chat_id, &uids)
             .execute(&mut **tx)
             .await?;

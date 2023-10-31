@@ -53,13 +53,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let metrics_router = metrics::init();
 
-    let db_conn = establish_database_connection(&database_config).await?;
+    let db_conn = repo::establish_database_connection(&database_config).await?;
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
         repo::Repositories {
             users: repo::Users::new(db_conn.clone()),
             dicks: repo::Dicks::new(db_conn.clone()),
-            imports: repo::Imports::new(db_conn.clone()),
+            import: repo::Import::new(db_conn.clone()),
             promo: repo::Promo::new(db_conn.clone()),
         },
         app_config
@@ -121,12 +121,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             res
         }
     }?.map_err(|e| e.into())
-}
-
-async fn establish_database_connection(config: &config::DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(config.max_connections)
-        .connect(config.url.as_str()).await?;
-    sqlx::migrate!().run(&pool).await?;
-    Ok(pool)
 }

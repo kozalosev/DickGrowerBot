@@ -11,7 +11,7 @@ pub struct User {
 }
 
 repository!(Users,
-    pub async fn create_or_update(&self, user_id: UserId, name: String) -> anyhow::Result<User> {
+    pub async fn create_or_update(&self, user_id: UserId, name: &str) -> anyhow::Result<User> {
         let uid = user_id.0 as i64;
         sqlx::query_as!(User,
             "INSERT INTO Users(uid, name) VALUES ($1, $2)
@@ -47,6 +47,14 @@ repository!(Users,
                 ORDER BY random() LIMIT 1",
                 chat_id_type as ChatIdType, chat_id.value() as String)
             .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| e.into())
+    }
+,
+    #[cfg(test)]
+    pub async fn get_all(&self) -> anyhow::Result<Vec<User>> {
+        sqlx::query_as!(User, "SELECT * FROM Users")
+            .fetch_all(&self.pool)
             .await
             .map_err(|e| e.into())
     }
