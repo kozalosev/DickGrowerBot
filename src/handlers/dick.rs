@@ -113,11 +113,42 @@ fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {
         x => x
     };
     let mut rng = OsRng::default();
+    if range.start() > &0 {
+        return rng.gen_range(range)
+    }
     let positive = rng.gen_ratio(sign_ratio_percent, 100);
-    let end = if positive {
-        *range.end()
+    if positive {
+        let end = *range.end();
+        rng.gen_range(1..=end)
     } else {
-        range.start().abs()
-    };
-    rng.gen_range(1..=end)
+        let start = *range.start();
+        rng.gen_range(start..=-1)
+    }
+
+}
+
+#[cfg(test)]
+mod test {
+    use super::gen_increment;
+
+    #[test]
+    fn test_gen_increment() {
+        let increments: Vec<i32> = (0..100)
+            .map(|_| gen_increment(-5..=10, 0.5))
+            .collect();
+        assert!(increments.iter().any(|n| n > &0));
+        assert!(increments.iter().any(|n| n < &0));
+        assert!(increments.iter().all(|n| n != &0));
+        assert!(increments.iter().all(|n| n <= &10));
+        assert!(increments.iter().all(|n| n >= &-5));
+    }
+
+    #[test]
+    fn test_gen_increment_with_positive_range() {
+        let increments: Vec<i32> = (0..100)
+            .map(|_| gen_increment(5..=10, 0.5))
+            .collect();
+        assert!(increments.iter().all(|n| n <= &10));
+        assert!(increments.iter().all(|n| n >= &5));
+    }
 }
