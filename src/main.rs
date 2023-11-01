@@ -10,7 +10,6 @@ use axum::Router;
 use reqwest::Url;
 use rust_i18n::i18n;
 use teloxide::prelude::*;
-use dotenvy::dotenv;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use crate::handlers::checks;
@@ -23,7 +22,7 @@ i18n!(fallback = "en");    // load localizations with default parameters
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
-    dotenv()?;
+    dotenvy::dotenv()?;
 
     pretty_env_logger::init();
 
