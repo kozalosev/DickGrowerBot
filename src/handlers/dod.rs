@@ -5,7 +5,7 @@ use rand::rngs::OsRng;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::types::Message;
+use teloxide::types::{Message, UserId};
 use crate::{config, metrics, repo};
 use crate::handlers::{ensure_lang_code, FromRefs, HandlerResult, reply_html, utils};
 
@@ -35,12 +35,17 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, config: config:
     let answer = match winner {
         Some(winner) => {
             let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);
-            let dod_result = repos.dicks.set_dod_winner(&chat_id, repo::UID(winner.uid), bonus).await;
+            let dod_result = repos.dicks.set_dod_winner(&chat_id, UserId(winner.uid as u64), bonus).await;
             let main_part = match dod_result {
-                Ok(repo::GrowthResult{ new_length, pos_in_top }) => {
+                Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
                     t!("commands.dod.result", locale = &lang_code,
                         name = winner.name, growth = bonus, length = new_length, pos = pos_in_top)
                 },
+                Ok(None) => {
+                    log::error!("there was an attempt to set a non-existent dick as a winner (UserID={}, ChatId={})",
+                        winner.uid, chat_id);
+                    t!("commands.dod.no_candidates", locale = &lang_code)
+                }
                 Err(e) => {
                     match e.downcast::<sqlx::Error>()? {
                         sqlx::Error::Database(e)

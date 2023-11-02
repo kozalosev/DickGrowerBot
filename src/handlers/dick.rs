@@ -44,7 +44,7 @@ pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdKind);
 pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1.into());
     let name = utils::get_full_name(from);
-    let user = repos.users.create_or_update(from.id, name).await?;
+    let user = repos.users.create_or_update(from.id, &name).await?;
     let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
     let grow_shrink_ratio = if days_since_registration > config.newcomers_grace_days {
         config.grow_shrink_ratio
@@ -113,11 +113,42 @@ fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {
         x => x
     };
     let mut rng = OsRng::default();
+    if range.start() > &0 {
+        return rng.gen_range(range)
+    }
     let positive = rng.gen_ratio(sign_ratio_percent, 100);
-    let end = if positive {
-        *range.end()
+    if positive {
+        let end = *range.end();
+        rng.gen_range(1..=end)
     } else {
-        range.start().abs()
-    };
-    rng.gen_range(1..=end)
+        let start = *range.start();
+        rng.gen_range(start..=-1)
+    }
+
+}
+
+#[cfg(test)]
+mod test {
+    use super::gen_increment;
+
+    #[test]
+    fn test_gen_increment() {
+        let increments: Vec<i32> = (0..100)
+            .map(|_| gen_increment(-5..=10, 0.5))
+            .collect();
+        assert!(increments.iter().any(|n| n > &0));
+        assert!(increments.iter().any(|n| n < &0));
+        assert!(increments.iter().all(|n| n != &0));
+        assert!(increments.iter().all(|n| n <= &10));
+        assert!(increments.iter().all(|n| n >= &-5));
+    }
+
+    #[test]
+    fn test_gen_increment_with_positive_range() {
+        let increments: Vec<i32> = (0..100)
+            .map(|_| gen_increment(5..=10, 0.5))
+            .collect();
+        assert!(increments.iter().all(|n| n <= &10));
+        assert!(increments.iter().all(|n| n >= &5));
+    }
 }

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "35ea8e589ab66d28179266fc264d462ef6df6b6050426cd5c15efd6f6909daa1"
+}

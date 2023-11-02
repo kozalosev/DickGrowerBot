@@ -10,7 +10,6 @@ use axum::Router;
 use reqwest::Url;
 use rust_i18n::i18n;
 use teloxide::prelude::*;
-use dotenvy::dotenv;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use crate::handlers::checks;
@@ -23,7 +22,7 @@ i18n!(fallback = "en");    // load localizations with default parameters
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
-    dotenv()?;
+    dotenvy::dotenv()?;
 
     pretty_env_logger::init();
 
@@ -53,13 +52,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let metrics_router = metrics::init();
 
-    let db_conn = establish_database_connection(&database_config).await?;
+    let db_conn = repo::establish_database_connection(&database_config).await?;
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
         repo::Repositories {
             users: repo::Users::new(db_conn.clone()),
             dicks: repo::Dicks::new(db_conn.clone()),
-            imports: repo::Imports::new(db_conn.clone()),
+            import: repo::Import::new(db_conn.clone()),
             promo: repo::Promo::new(db_conn.clone()),
         },
         app_config
@@ -121,12 +120,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             res
         }
     }?.map_err(|e| e.into())
-}
-
-async fn establish_database_connection(config: &config::DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(config.max_connections)
-        .connect(config.url.as_str()).await?;
-    sqlx::migrate!().run(&pool).await?;
-    Ok(pool)
 }

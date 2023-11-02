@@ -29,3 +29,6 @@ regex = "1.9.5"
 strum = "0.25.0"
 strum_macros = "0.25.2"
 chrono = { version = "0.4.31", features = [ "serde" ] }
+
+[dev-dependencies]
+testcontainers = "0.15.0"

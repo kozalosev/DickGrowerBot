@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT position AS \"position!\" FROM (\n                    SELECT uid, ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position\n                    FROM dicks\n                    JOIN users using (uid)\n                    WHERE chat_id = $1\n                ) AS _\n                WHERE uid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "position!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1db500aad844ae08ba070f955ba0cf14fa152089c2ec1de8c162f51a1dae2fc9"
+}

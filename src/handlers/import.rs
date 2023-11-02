@@ -266,7 +266,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .map(|u| teloxide::utils::html::escape(&u.name))
         .collect();
 
-    let imported_uids: HashSet<UserId> = repos.imports.get_imported_users(chat_id)
+    let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
         .await?.into_iter()
         .filter_map(|u| u.uid.try_into().ok())
         .map(|uid| UserId(uid))
@@ -276,12 +276,12 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .partition(|u| imported_uids.contains(&u.uid));
 
     let users: Vec<repo::ExternalUser> = to_import.iter()
-        .filter_map(|u| repo::ExternalUser::new(u.uid, u.length).ok())
+        .map(|u| repo::ExternalUser::new(u.uid, u.length))
         .collect();
     if users.len() != to_import.len() {
         return Err(anyhow!("couldn't convert integers for external users"))
     }
-    repos.imports.import(chat_id, &users).await?;
+    repos.import.import(chat_id, &users).await?;
 
     Ok(ImportResult {
         imported: to_import,

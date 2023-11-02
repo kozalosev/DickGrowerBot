@@ -18,6 +18,7 @@ RUN adduser \
 COPY src/ src/
 COPY locales/ locales/
 COPY migrations/ migrations/
+COPY .sqlx/ .sqlx/
 COPY Cargo.* ./
 
 ENV RUSTFLAGS='-C target-feature=-crt-static'

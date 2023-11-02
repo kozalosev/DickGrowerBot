@@ -42,7 +42,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
-    repos.users.create_or_update(query.from.id, name).await?;
+    repos.users.create_or_update(query.from.id, &name).await?;
 
     let uid = query.from.id.0;
     let lang_code = ensure_lang_code(Some(&query.from));
