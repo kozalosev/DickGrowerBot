@@ -1,4 +1,5 @@
 [@DickGrowerBot](https://t.me/DickGrowerBot)
+============================================
 
 [![CI Build](https://github.com/kozalosev/DickGrowerBot/actions/workflows/ci-build.yaml/badge.svg?branch=main&event=push)](https://github.com/kozalosev/DickGrowerBot/actions/workflows/ci-build.yaml)
 
