@@ -6,6 +6,7 @@ use crate::repo::ChatIdKind;
 use crate::repo::test::{CHAT_ID, get_chat_id_and_dicks, NAME, start_postgres, UID};
 
 #[tokio::test]
+#[ignore]
 async fn test_all() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;

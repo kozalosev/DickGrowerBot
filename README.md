@@ -36,3 +36,10 @@ _(to build the application without a running RDBMS)_
 ```shell
 cargo sqlx prepare
 ```
+
+### Run tests
+_(integration tests are marked as ignored since they don't always run successfully on CI)_
+
+```shell
+cargo test -- --include-ignored
+```

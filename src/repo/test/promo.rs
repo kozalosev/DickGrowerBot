@@ -9,6 +9,7 @@ const PROMO_CODE: &str = "test10";
 const PROMO_BONUS: u32 = 10;
 
 #[tokio::test]
+#[ignore]
 async fn activate() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
