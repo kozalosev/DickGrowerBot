@@ -37,10 +37,10 @@ commands:
     description: "Activate a promo code"
     success:
       template: "You has activated this promo code successfully! %{ending}"
-      singular: "Your dick has grown by %{growth} cm in one chat."
-      plural: "Your dick has grown by %{growth} cm in %{affected_chats} chats!"
+      singular: "Your dick has grown by <b>%{growth}</b> cm in one chat."
+      plural: "Your dick has grown by <b>%{growth}</b> cm in <b>%{affected_chats}</b> chats!"
     errors:
-      no_promo: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
+      no_activations_left: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
       already_activated: "It seems you already used this promocode earlier 🤨"
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
 inline:

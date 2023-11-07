@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter_command::<DickCommands>().filter(checks::is_group_chat).endpoint(handlers::dick_cmd_handler))
         .branch(Update::filter_message().filter_command::<DickOfDayCommands>().filter(checks::is_group_chat).endpoint(handlers::dod_cmd_handler))
         .branch(Update::filter_message().filter_command::<ImportCommands>().filter(checks::is_group_chat).endpoint(handlers::import_cmd_handler))
-        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_group_chat).endpoint(handlers::promo_cmd_handler))
+        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).endpoint(handlers::promo_cmd_handler))
         .branch(Update::filter_message().filter(checks::is_not_group_chat).endpoint(checks::handle_not_group_chat))
         .branch(Update::filter_inline_query().endpoint(handlers::inline_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
