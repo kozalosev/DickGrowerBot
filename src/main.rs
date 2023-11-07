@@ -3,10 +3,12 @@ mod repo;
 mod help;
 mod metrics;
 mod config;
+mod commands;
 
 use std::env::VarError;
 use std::net::SocketAddr;
 use axum::Router;
+use futures::future::join_all;
 use reqwest::Url;
 use rust_i18n::i18n;
 use teloxide::prelude::*;
@@ -43,6 +45,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = Bot::from_env();
     bot.delete_webhook().await?;
 
+    let set_my_commands_requests = _rust_i18n_available_locales()
+        .into_iter()
+        .map(|locale| commands::set_my_commands(&bot, locale));
+    let set_my_commands_failed = join_all(set_my_commands_requests)
+        .await
+        .into_iter()
+        .any(|res| res.is_err());
+    if set_my_commands_failed {
+        Err("couldn't set the bot's commands")?
+    }
+
+    let me = bot.get_me().await?;
+    let help_context = config::build_context_for_help_messages(me, &app_config, &handlers::ORIGINAL_BOT_USERNAMES)?;
+    let help_container = help::render_help_messages(help_context)?;
+
     let webhook_url: Option<Url> = match std::env::var(ENV_WEBHOOK_URL) {
         Ok(env_url) if env_url.len() > 0 => Some(env_url.parse()?),
         Ok(env_url) if env_url.len() == 0 => None,
@@ -61,7 +78,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             import: repo::Import::new(db_conn.clone()),
             promo: repo::Promo::new(db_conn.clone()),
         },
-        app_config
+        app_config,
+        help_container
     ];
 
     match webhook_url {

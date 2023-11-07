@@ -11,7 +11,7 @@ use teloxide::types::{ChatId, Message, UserId};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
 use crate::{metrics, repo};
 
-const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
+pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?)(\.{3})? — (?<length>\d+) см.")
@@ -26,19 +26,19 @@ pub enum ImportCommands {
 
 #[cfg_attr(test, derive(PartialEq, Eq))]
 enum OriginalBotKind {
-    PIPISA,
-    KRAFT28,
+    Pipisa,
+    Kraft28,
 }
 
 impl OriginalBotKind {
     fn convert_name(&self, name: &str) -> String {
         match self {
-            OriginalBotKind::PIPISA => {
+            OriginalBotKind::Pipisa => {
                 name.chars()
                     .take(13)
                     .collect()
             },
-            OriginalBotKind::KRAFT28 => name.to_owned()
+            OriginalBotKind::Kraft28 => name.to_owned()
         }
     }
 }
@@ -48,8 +48,8 @@ impl TryFrom<&str> for OriginalBotKind {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value.trim_start_matches('@') {
-            "pipisabot" => Ok(OriginalBotKind::PIPISA),
-            "kraft28_bot" => Ok(OriginalBotKind::KRAFT28),
+            "pipisabot" => Ok(OriginalBotKind::Pipisa),
+            "kraft28_bot" => Ok(OriginalBotKind::Kraft28),
             _ => Err("Unknown OriginalBotKind".to_owned())
         }
     }
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn original_bot_kind_convert_name_pipisa() {
-        let (p, short) = (OriginalBotKind::PIPISA, "SadBot #incel".to_owned());
+        let (p, short) = (OriginalBotKind::Pipisa, "SadBot #incel".to_owned());
         assert_eq!(p.convert_name("SadBot #incel..."), short);
         assert_eq!(p.convert_name("SadBot #incel>suicide"), short);
     }
@@ -330,7 +330,7 @@ mod tests {
                     .is_err()));
         } ;
 
-        check("@pipisabot", OriginalBotKind::PIPISA);
-        check("@kraft28_bot", OriginalBotKind::KRAFT28);
+        check("@pipisabot", OriginalBotKind::Pipisa);
+        check("@kraft28_bot", OriginalBotKind::Kraft28);
     }
 }

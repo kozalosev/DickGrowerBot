@@ -4,6 +4,8 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 use anyhow::anyhow;
 use reqwest::Url;
+use teloxide::types::Me;
+use crate::help;
 
 #[derive(Clone)]
 pub struct AppConfig {
@@ -47,6 +49,24 @@ impl DatabaseConfig {
     }
 }
 
+pub fn build_context_for_help_messages(me: Me, app_config: &AppConfig, competitor_bots: &[&str]) -> anyhow::Result<help::Context> {
+    let other_bots = competitor_bots
+        .into_iter()
+        .map(|username| ensure_starts_with_at_sign(username.to_string()))
+        .collect::<Vec<String>>()
+        .join(", ");
+
+    Ok(help::Context {
+        bot_name: me.username().to_owned(),
+        grow_min: app_config.growth_range.clone().min().ok_or(anyhow!("growth_range must have min"))?.to_string(),
+        grow_max: app_config.growth_range.clone().max().ok_or(anyhow!("growth_range must have max"))?.to_string(),
+        other_bots,
+        admin_username: ensure_starts_with_at_sign(get_mandatory_value("HELP_ADMIN_USERNAME")?),
+        admin_channel: ensure_starts_with_at_sign(get_mandatory_value("HELP_ADMIN_CHANNEL")?),
+        git_repo: get_mandatory_value("HELP_GIT_REPO")?,
+    })
+}
+
 fn get_mandatory_value<T, E>(key: &str) -> anyhow::Result<T>
 where
     T: FromStr<Err = E>,
@@ -73,4 +93,24 @@ where
                 anyhow!(e)
             }))
         .unwrap_or(default)
+}
+
+fn ensure_starts_with_at_sign(s: String) -> String {
+    if s.starts_with("@") {
+        s
+    } else {
+        format!("@{s}")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::ensure_starts_with_at_sign;
+
+    #[test]
+    fn test_ensure_starts_with_at_sign() {
+        let result = "@test";
+        assert_eq!(ensure_starts_with_at_sign("test".to_owned()), result);
+        assert_eq!(ensure_starts_with_at_sign("@test".to_owned()), result);
+    }
 }

@@ -1,20 +1,47 @@
 use rust_i18n::t;
-use teloxide::types::{Me, User};
-use crate::handlers::ensure_lang_code;
+use serde::Serialize;
+use tinytemplate::TinyTemplate;
 
 static EN_HELP: &str = include_str!("en.md");
 static RU_HELP: &str = include_str!("ru.md");
 
-pub fn get_start_message(from: &User, me: Me) -> String {
-    let lang_code = &ensure_lang_code(Some(from));
-    let greeting = t!("titles.greeting", locale = lang_code);
-    format!("{}, <b>{}</b>!\n\n{}", greeting, from.first_name, get_help_message(Some(from), me))
+#[derive(Clone)]
+pub struct HelpContainer {
+    en: String,
+    ru: String,
 }
 
-pub fn get_help_message(from: Option<&User>, me: Me) -> String {
-    let help_template = from.and_then(|u| u.language_code.clone())
-        .filter(|lang_code| lang_code == "ru")
-        .map(|_| RU_HELP)
-        .unwrap_or(EN_HELP);
-    help_template.replace("{{bot_name}}", me.username())
+impl HelpContainer {
+    pub fn get_start_message(&self, username: String, lang_code: String) -> String {
+        let greeting = t!("titles.greeting", locale = &lang_code);
+        format!("{}, <b>{}</b>!\n\n{}", greeting, username, self.get_help_message(lang_code))
+    }
+
+    pub fn get_help_message(&self, lang_code: String) -> String {
+        match lang_code.as_str() {
+            "ru" => self.ru.clone(),
+            _ => self.en.clone()
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
+pub struct Context {
+    pub bot_name: String,
+    pub grow_min: String,
+    pub grow_max: String,
+    pub other_bots: String,
+    pub admin_username: String,
+    pub admin_channel: String,
+    pub git_repo: String,
+}
+
+pub fn render_help_messages(context: Context) -> Result<HelpContainer, tinytemplate::error::Error> {
+    let mut tt = TinyTemplate::new();
+    tt.add_template("en", EN_HELP)?;
+    tt.add_template("ru", RU_HELP)?;
+    Ok(HelpContainer {
+        en: tt.render("en", &context)?,
+        ru: tt.render("ru", &context)?,
+    })
 }

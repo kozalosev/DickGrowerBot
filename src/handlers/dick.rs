@@ -17,7 +17,9 @@ const LTR_MARK: char = '\u{200E}';
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
 pub enum DickCommands {
+    #[command(description = "grow")]
     Grow,
+    #[command(description = "top")]
     Top,
 }
 

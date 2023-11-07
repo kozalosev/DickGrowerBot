@@ -1,29 +1,33 @@
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::types::{Me, Message};
-use crate::handlers::{HandlerResult, reply_html};
-use crate::{help, metrics};
+use teloxide::types::Message;
+use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
+use crate::metrics;
+use crate::help::HelpContainer;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
 pub enum HelpCommands {
     Start,
+    #[command(description = "help")]
     Help,
 }
 
-pub async fn help_cmd_handler(bot: Bot, msg: Message, cmd: HelpCommands, me: Me) -> HandlerResult {
+pub async fn help_cmd_handler(bot: Bot, msg: Message, cmd: HelpCommands, container: HelpContainer) -> HandlerResult {
+    let lang_code = ensure_lang_code(msg.from());
     let help = match cmd {
         HelpCommands::Start if msg.from().is_some() => {
             metrics::CMD_START_COUNTER.inc();
-            help::get_start_message(msg.from().unwrap(), me)
+            let username = teloxide::utils::html::escape(&msg.from().unwrap().first_name);
+            container.get_start_message(username, lang_code)
         },
         HelpCommands::Help => {
             metrics::CMD_HELP_COUNTER.inc();
-            help::get_help_message(msg.from(), me)
+            container.get_help_message(lang_code).to_owned()
         }
         HelpCommands::Start => {
             log::warn!("The /start or /help command was invoked without a FROM field for message: {:?}", msg);
-            help::get_help_message(msg.from(), me)
+            container.get_help_message(lang_code).to_owned()
         },
     };
     reply_html(bot, msg, help).await

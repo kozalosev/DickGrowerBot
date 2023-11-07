@@ -1,17 +1,23 @@
 commands:
+  help:
+    description: "I'll help you, my friend"
   grow:
+    description: "Grow your dick!"
     result: "Your dick has grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long.\nYour position in the top is <b>%{pos}</b>."
     tomorrow: "You have already played with your dick today."
   top:
+    description: "Get the biggest dicks of the chat"
     title: "Top of the biggest dicks:"
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"
     ending: "<i>[+] means a grower hasn't grown his dick today yet.</i>"
     empty: "No one is in the game yet :("
   dod:
+    description: "Elect the Dick of a Day"
     result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now.\nHis position in the top is <b>%{pos}</b>."
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>."
     no_candidates: "There is no candidates for election. In this chat nobody is in the game yet 😢"
   import:
+    description: "Import dicks from other bots"
     result:
       titles:
         imported: "The following users have been imported:"
@@ -28,6 +34,7 @@ commands:
         template: "Couldn't parse this message 🤔\nThe following lines are invalid:\n%{invalid_lines}"
         line: "➖ <b>%{line}</b>"
   promo:
+    description: "Activate a promo code"
     success:
       template: "You has activated this promo code successfully! %{ending}"
       singular: "Your dick has grown by %{growth} cm in one chat."
