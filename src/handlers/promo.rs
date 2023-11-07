@@ -9,6 +9,7 @@ use crate::repo::ActivationError;
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
 pub enum PromoCommands {
+    #[command(description = "promo")]
     Promo(String)
 }
 
