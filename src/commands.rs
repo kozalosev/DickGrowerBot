@@ -16,9 +16,9 @@ pub async fn set_my_commands(bot: &Bot, lang_code: &str) -> Result<(), RequestEr
         DickCommands::bot_commands(),
         DickOfDayCommands::bot_commands(),
     ];
-    let admin_commands = vec![
+    let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),
-    ];
+    ]].concat();
 
     let requests = vec![
         set_commands(bot, personal_commands, BotCommandScope::AllPrivateChats, lang_code),
@@ -45,6 +45,7 @@ async fn set_commands(bot: &Bot, commands: Vec<Vec<BotCommand>>, scope: BotComma
             cmd
         })
         .collect();
+    log::info!("Registering commands for scope {scope:?}: {commands:?}");
     let mut request = bot.set_my_commands(commands);
     request.language_code.replace(lang_code.to_owned());
     request.scope.replace(scope);

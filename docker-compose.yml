@@ -11,6 +11,9 @@ services:
       - WEBHOOK_URL
       - DATABASE_URL=postgres://${POSTGRES_USER:?error}:${POSTGRES_PASSWORD:?error}@${POSTGRES_HOST:?error}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:?error}
       - DATABASE_MAX_CONNECTIONS
+      - HELP_ADMIN_USERNAME
+      - HELP_ADMIN_CHANNEL
+      - HELP_GIT_REPO
       - GROWTH_MIN
       - GROWTH_MAX
       - GROW_SHRINK_RATIO

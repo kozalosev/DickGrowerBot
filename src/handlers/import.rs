@@ -21,6 +21,7 @@ static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
 pub enum ImportCommands {
+    #[command(description = "import")]
     Import
 }
 
