@@ -18,6 +18,8 @@ Unfortunately, I had to disable the privacy mode to make the import feature work
 
 Nevertheless, there is a way to play without the bot being in a chat at all! Just use inline queries! Type the username of the bot after the <code>@</code> sign and a trailing space to get the same commands!
 
+<i>NB!</i> The rating used via inline mode is different from the rating used by the bot added to the chat. The process of their <a href="https://github.com/kozalosev/DickGrowerBot/issues/17">synchronization</a> may be implemented later.
+
 <b>Contacts and links</b>
 
 In case of any problems, write to {admin_username} or create an issue in the source code repository.
