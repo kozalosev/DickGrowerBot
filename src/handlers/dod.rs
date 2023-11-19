@@ -26,7 +26,8 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     let answer = dick_of_day_impl(&repos, config, from_refs).await?;
-    reply_html(bot, msg, answer).await
+    reply_html(bot, msg, answer).await?;
+    Ok(())
 }
 
 pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {

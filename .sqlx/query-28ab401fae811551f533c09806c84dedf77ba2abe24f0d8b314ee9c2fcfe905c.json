@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT length, name as owner_name, updated_at as grown_at FROM dicks d\n                JOIN users USING (uid)\n                JOIN chats c ON c.id = d.chat_id\n                WHERE c.type = $1 AND (c.chat_id = $2::bigint OR c.chat_instance = $2::text)\n                ORDER BY length DESC, updated_at DESC, name\n                LIMIT $3",
+  "query": "SELECT length, name as owner_name, updated_at as grown_at, null::bigint AS position FROM dicks d\n                JOIN users USING (uid)\n                JOIN chats c ON c.id = d.chat_id\n                WHERE c.type = $1 AND (c.chat_id = $2::bigint OR c.chat_instance = $2::text)\n                ORDER BY length DESC, updated_at DESC, name\n                LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "grown_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "position",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -39,8 +44,9 @@
     "nullable": [
       false,
       false,
-      false
+      false,
+      null
     ]
   },
-  "hash": "026f23959b843e9717188c236c796aff43cec07d58ddfb5d2cc273079a32a22e"
+  "hash": "28ab401fae811551f533c09806c84dedf77ba2abe24f0d8b314ee9c2fcfe905c"
 }

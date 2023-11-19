@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use anyhow::anyhow;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
@@ -7,7 +8,8 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::handlers::{dick, dod, ensure_lang_code, FromRefs, HandlerResult, utils};
+use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerResult, utils};
+use crate::handlers::utils::page::Page;
 use crate::metrics;
 use crate::repo::Repositories;
 
@@ -19,20 +21,45 @@ enum InlineCommand {
     DickOfDay,
 }
 
+struct InlineResult {
+    text: String,
+    keyboard: Option<InlineKeyboardMarkup>,
+}
+
+impl InlineResult {
+    fn text(value: String) -> Self {
+        Self {
+            text: value,
+            keyboard: None,
+        }
+    }
+}
+
 impl InlineCommand {
-    async fn execute(&self, repos: &Repositories, config: AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+    async fn execute(&self, repos: &Repositories, config: AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<InlineResult> {
         match self {
             InlineCommand::Grow => {
                 metrics::CMD_GROW_COUNTER.inline.inc();
-                dick::grow_impl(repos, config, from_refs).await
+                dick::grow_impl(repos, config, from_refs)
+                    .await
+                    .map(|res| InlineResult::text(res))
             },
             InlineCommand::Top => {
                 metrics::CMD_TOP_COUNTER.inline.inc();
-                dick::top_impl(repos, config, from_refs).await
+                dick::top_impl(repos, config, from_refs, Page::first())
+                    .await
+                    .and_then(|top| top.ok_or(anyhow!("top must not be None via inline mode")))
+                    .map(|top| {
+                        let mut res = InlineResult::text(top.lines);
+                        res.keyboard = Some(build_pagination_keyboard(Page::first(), top.has_more_pages));
+                        res
+                    })
             },
             InlineCommand::DickOfDay => {
                 metrics::CMD_DOD_COUNTER.inline.inc();
-                dod::dick_of_day_impl(repos, config, from_refs).await
+                dod::dick_of_day_impl(repos, config, from_refs)
+                    .await
+                    .map(|res| InlineResult::text(res))
             },
         }
     }
@@ -85,9 +112,9 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {
         let parse_res = parse_callback_data(&data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
-            let text = cmd.execute(&repos, config, from_refs).await?;
-            let mut edit = bot.edit_message_text_inline(inline_msg_id, text);
-            edit.reply_markup = None;
+            let inline_result = cmd.execute(&repos, config, from_refs).await?;
+            let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
+            edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
             edit.await?;
         } else {

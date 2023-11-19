@@ -42,7 +42,8 @@ pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands,
             t!(&format!("commands.promo.errors.{suffix}"), locale = &lang_code)
         }
     };
-    reply_html(bot, msg, answer).await
+    reply_html(bot, msg, answer).await?;
+    Ok(())
 }
 
 fn get_chats_in_russian(count: u64) -> String {

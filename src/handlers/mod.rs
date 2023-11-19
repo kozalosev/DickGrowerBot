@@ -8,7 +8,8 @@ mod utils;
 
 use std::borrow::ToOwned;
 use teloxide::Bot;
-use teloxide::requests::Requester;
+use teloxide::payloads::SendMessage;
+use teloxide::requests::{JsonRequest, Requester};
 use teloxide::types::{Message, User};
 use teloxide::types::ParseMode::Html;
 
@@ -38,15 +39,14 @@ pub fn ensure_lang_code(user: Option<&User>) -> String {
         .to_owned()
 }
 
-pub async fn reply_html(bot: Bot, msg: Message, answer: String) -> HandlerResult {
+pub fn reply_html(bot: Bot, msg: Message, answer: String) -> JsonRequest<SendMessage> {
     // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer);
     answer.parse_mode = Some(Html);
     if msg.chat.is_group() || msg.chat.is_supergroup() {
         answer.reply_to_message_id.replace(msg.id);
     }
-    answer.await?;
-    Ok(())
+    answer
 }
 
 pub mod checks {
@@ -69,6 +69,7 @@ pub mod checks {
     pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
         let lang_code = ensure_lang_code(msg.from());
         let answer = t!("errors.not_group_chat", locale = &lang_code);
-        reply_html(bot, msg, answer).await
+        reply_html(bot, msg, answer).await?;
+        Ok(())
     }
 }

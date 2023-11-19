@@ -1,3 +1,5 @@
+pub mod page;
+
 use teloxide::types::User;
 
 pub fn get_full_name(user: &User) -> String {

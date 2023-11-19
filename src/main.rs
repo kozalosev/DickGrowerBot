@@ -40,6 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter(checks::is_not_group_chat).endpoint(checks::handle_not_group_chat))
         .branch(Update::filter_inline_query().endpoint(handlers::inline_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
+        .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
 
     let bot = Bot::from_env();
@@ -103,8 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .into_make_service())
                     .with_graceful_shutdown(stop_flag)
                     .await
-            }
-            );
+            });
 
             let (res, _) = futures::join!(srv, bot_fut);
             res
