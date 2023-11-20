@@ -15,7 +15,7 @@ async fn test_all() {
 
     let user_id = UserId(UID as u64);
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let d = dicks.get_top(&chat_id, 1)
+    let d = dicks.get_top(&chat_id, 0, 1)
         .await.expect("couldn't fetch the empty top");
     assert_eq!(d.len(), 0);
 
@@ -58,13 +58,13 @@ async fn test_top_page() {
             .await.expect("couldn't create a dick");
     }
 
-    let top_with_user2_only = dicks.get_top_page(&chat_id, 0, 1)
+    let top_with_user2_only = dicks.get_top(&chat_id, 0, 1)
         .await.expect("couldn't fetch the top");
     assert_eq!(top_with_user2_only.len(), 1);
     assert_eq!(top_with_user2_only[0].owner_name, user2_name);
     assert_eq!(top_with_user2_only[0].length, 1);
 
-    let top_with_user1_only = dicks.get_top_page(&chat_id, 1, 1)
+    let top_with_user1_only = dicks.get_top(&chat_id, 1, 1)
         .await.expect("couldn't fetch the top");
     assert_eq!(top_with_user1_only.len(), 1);
     assert_eq!(top_with_user1_only[0].owner_name, NAME);
@@ -86,7 +86,7 @@ pub async fn create_dick(db: &Pool<Postgres>) {
 
 pub async fn check_dick(db: &Pool<Postgres>, length: u32) {
     let (chat_id, dicks) = get_chat_id_and_dicks(db);
-    let top = dicks.get_top(&chat_id, 2)
+    let top = dicks.get_top(&chat_id, 0, 2)
         .await.expect("couldn't fetch the top");
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].length, length as i32);
@@ -94,7 +94,7 @@ pub async fn check_dick(db: &Pool<Postgres>, length: u32) {
 }
 
 async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i32) {
-    let d = dicks.get_top(&chat_id, 1)
+    let d = dicks.get_top(&chat_id, 0, 1)
         .await.expect("couldn't fetch the top again");
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].length, length);

@@ -33,21 +33,7 @@ repository!(Dicks,
         Ok(GrowthResult { new_length, pos_in_top })
     }
 ,
-    pub async fn get_top(&self, chat_id: &ChatIdKind, limit: u32) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
-        let chat_id_type: ChatIdType = chat_id.into();
-        sqlx::query_as!(Dick,
-            r#"SELECT length, name as owner_name, updated_at as grown_at, null::bigint AS position FROM dicks d
-                JOIN users USING (uid)
-                JOIN chats c ON c.id = d.chat_id
-                WHERE c.type = $1 AND (c.chat_id = $2::bigint OR c.chat_instance = $2::text)
-                ORDER BY length DESC, updated_at DESC, name
-                LIMIT $3"#,
-                chat_id_type as ChatIdType, chat_id.value() as String, limit as i32)
-            .fetch_all(&self.pool)
-            .await
-    }
-,
-    pub async fn get_top_page(&self, chat_id: &ChatIdKind, offset: u32, limit: u32) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
+    pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u32) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
         let chat_id_type: ChatIdType = chat_id.into();
         sqlx::query_as!(Dick,
             r#"SELECT length, name as owner_name, updated_at as grown_at,

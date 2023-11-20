@@ -43,9 +43,7 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
-            let top = top_impl(&repos, config, from_refs, Page::first())
-                .await?
-                .ok_or("top must not be None in dick_cmd_handler")?;
+            let top = top_impl(&repos, config, from_refs, Page::first()).await?;
             let mut request = reply_html(bot, msg, top.lines);
             if top.has_more_pages {
                 let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
@@ -116,15 +114,15 @@ impl Top {
 }
 
 pub(crate) async fn top_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>,
-                             page: Page) -> anyhow::Result<Option<Top>> {
+                             page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.into());
     let lang_code = ensure_lang_code(Some(from));
-    let lines = if page.is_first() {
-        repos.dicks.get_top(chat_id, config.top_limit).await
-    } else {
-        let offset = page * config.top_limit;
-        repos.dicks.get_top_page(chat_id, offset, config.top_limit).await
-    }?.into_iter()
+    let offset = page * config.top_limit;
+    let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
+    let dicks = repos.dicks.get_top(chat_id, offset, query_limit).await?;
+    let has_more_pages = dicks.len() as u32 > config.top_limit;
+    let lines = dicks.into_iter()
+        .take(config.top_limit as usize)
         .enumerate()
         .map(|(i, d)| {
             let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
@@ -142,21 +140,16 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: config::AppConf
         .collect::<Vec<String>>();
 
     let res = if lines.is_empty() {
-        if page.is_first() {
-            Some(Top::from(t!("commands.top.empty", locale = &lang_code)))
-        } else {
-            None
-        }
+        Top::from(t!("commands.top.empty", locale = &lang_code))
     } else {
         let title = t!("commands.top.title", locale = &lang_code);
         let ending = t!("commands.top.ending", locale = &lang_code);
         let text = format!("{}\n\n{}\n\n{}", title, lines.join("\n"), ending);
-        let top = if (lines.len() as u32) < config.top_limit {
-            Top::from(text)
-        } else {
+        if has_more_pages {
             Top::with_more_pages(text)
-        };
-        Some(top)
+        } else {
+            Top::from(text)
+        }
     };
     Ok(res)
 }
@@ -204,50 +197,25 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
     let from_refs = FromRefs(&q.from, &chat_id_kind);
     let top = top_impl(&repos, config, from_refs, page).await?;
 
-    let (answer_callback_query_result, edit_message_result) = match top {
-        Some(top) => {
-            let keyboard = build_pagination_keyboard(page, top.has_more_pages);
-            match edit_msg_req_params {
-                EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-                    let mut edit_message_text_request = bot.edit_message_text(chat_id, message_id, top.lines);
-                    edit_message_text_request.parse_mode.replace(ParseMode::Html);
-                    edit_message_text_request.reply_markup.replace(keyboard);
-                    join(
-                        bot.answer_callback_query(q.id).into_future(),
-                        edit_message_text_request.into_future().map_ok(|_| ())
-                    ).await
-                },
-                EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-                    let mut edit_message_text_request = bot.edit_message_text_inline(inline_message_id, top.lines);
-                    edit_message_text_request.parse_mode.replace(ParseMode::Html);
-                    edit_message_text_request.reply_markup.replace(keyboard);
-                    join(
-                        bot.answer_callback_query(q.id).into_future(),
-                        edit_message_text_request.into_future().map_ok(|_| ())
-                    ).await
-                }
-            }
-        }
-        None => {
-            let keyboard = build_pagination_keyboard(page - 1, false);
-            match edit_msg_req_params {
-                EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-                    let mut edit_message_reply_markup_request = bot.edit_message_reply_markup(chat_id, message_id);
-                    edit_message_reply_markup_request.reply_markup.replace(keyboard);
-                    join(
-                        bot.answer_callback_query(q.id).into_future(),
-                        edit_message_reply_markup_request.into_future().map_ok(|_| ())
-                    ).await
-                },
-                EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-                    let mut edit_message_reply_markup_inline_request = bot.edit_message_reply_markup_inline(inline_message_id);
-                    edit_message_reply_markup_inline_request.reply_markup.replace(keyboard);
-                    join(
-                        bot.answer_callback_query(q.id).into_future(),
-                        edit_message_reply_markup_inline_request.into_future().map_ok(|_| ())
-                    ).await
-                }
-            }
+    let keyboard = build_pagination_keyboard(page, top.has_more_pages);
+    let (answer_callback_query_result, edit_message_result) = match edit_msg_req_params {
+        EditMessageReqParamsKind::Chat(chat_id, message_id) => {
+            let mut edit_message_text_req = bot.edit_message_text(chat_id, message_id, top.lines);
+            edit_message_text_req.parse_mode.replace(ParseMode::Html);
+            edit_message_text_req.reply_markup.replace(keyboard);
+            join(
+                bot.answer_callback_query(q.id).into_future(),
+                edit_message_text_req.into_future().map_ok(|_| ())
+            ).await
+        },
+        EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
+            let mut edit_message_text_inline_req = bot.edit_message_text_inline(inline_message_id, top.lines);
+            edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
+            edit_message_text_inline_req.reply_markup.replace(keyboard);
+            join(
+                bot.answer_callback_query(q.id).into_future(),
+                edit_message_text_inline_req.into_future().map_ok(|_| ())
+            ).await
         }
     };
     answer_callback_query_result?;

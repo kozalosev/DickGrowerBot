@@ -1,5 +1,4 @@
 use std::str::FromStr;
-use anyhow::anyhow;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
@@ -48,7 +47,6 @@ impl InlineCommand {
                 metrics::CMD_TOP_COUNTER.inline.inc();
                 dick::top_impl(repos, config, from_refs, Page::first())
                     .await
-                    .and_then(|top| top.ok_or(anyhow!("top must not be None via inline mode")))
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
                         res.keyboard = Some(build_pagination_keyboard(Page::first(), top.has_more_pages));
