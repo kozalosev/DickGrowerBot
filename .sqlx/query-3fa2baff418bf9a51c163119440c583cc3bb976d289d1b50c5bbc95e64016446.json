@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH sum_dicks AS (SELECT uid, sum(length) as length FROM Dicks WHERE chat_id IN ($1, $2) GROUP BY uid)\n                    UPDATE Dicks d SET length = sum_dicks.length, bonus_attempts = (bonus_attempts + 1)\n                    FROM sum_dicks WHERE chat_id = $1 AND d.uid = sum_dicks.uid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3fa2baff418bf9a51c163119440c583cc3bb976d289d1b50c5bbc95e64016446"
+}

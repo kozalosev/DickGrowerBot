@@ -15,7 +15,7 @@ use page::{InvalidPage, Page};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{config, metrics, repo};
 use crate::handlers::utils::page;
-use crate::repo::ChatIdKind;
+use crate::repo::{ChatIdKind, ChatIdPartiality};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const LTR_MARK: char = '\u{200E}';
@@ -55,10 +55,10 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
     Ok(())
 }
 
-pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdKind);
+pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdPartiality);
 
 pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
-    let (from, chat_id) = (from_refs.0, from_refs.1.into());
+    let (from, chat_id) = (from_refs.0, from_refs.1);
     let name = utils::get_full_name(from);
     let user = repos.users.create_or_update(from.id, &name).await?;
     let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
@@ -115,11 +115,11 @@ impl Top {
 
 pub(crate) async fn top_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>,
                              page: Page) -> anyhow::Result<Top> {
-    let (from, chat_id) = (from_refs.0, from_refs.1.into());
+    let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let lang_code = ensure_lang_code(Some(from));
     let offset = page * config.top_limit;
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
-    let dicks = repos.dicks.get_top(chat_id, offset, query_limit).await?;
+    let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
     let has_more_pages = dicks.len() as u32 > config.top_limit;
     let lines = dicks.into_iter()
         .take(config.top_limit as usize)
@@ -194,7 +194,8 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             }))
         .ok_or("no message")?;
     let chat_id_kind = edit_msg_req_params.clone().into();
-    let from_refs = FromRefs(&q.from, &chat_id_kind);
+    let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
+    let from_refs = FromRefs(&q.from, &chat_id_partiality);
     let top = top_impl(&repos, config, from_refs, page).await?;
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);

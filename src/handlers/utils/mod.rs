@@ -1,4 +1,7 @@
 pub mod page;
+mod tghack;
+
+pub use tghack::*;
 
 use teloxide::types::User;
 

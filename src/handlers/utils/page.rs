@@ -1,26 +1,15 @@
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter};
 use std::ops::{Add, Mul, Sub};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, derive_more::Display)]
 pub struct Page(pub u32);
 
-#[derive(Debug)]
-pub struct InvalidPage(String);
+#[derive(Debug, derive_more::Error, derive_more::Display)]
+pub struct InvalidPage(#[error(not(source))] String);
 
 impl Page {
     pub fn first() -> Self {
         Self(0)
-    }
-
-    pub fn is_first(&self) -> bool {
-        self.0 == 0
-    }
-}
-
-impl Display for Page {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.to_string().as_str())
     }
 }
 
@@ -60,12 +49,6 @@ impl PartialOrd<u32> for Page {
     }
 }
 
-impl Display for InvalidPage {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("InvalidPage: {}", self.0))
-    }
-}
-
 impl InvalidPage {
     pub fn message(msg: impl ToString) -> Self {
         Self(msg.to_string())
@@ -91,8 +74,5 @@ mod test {
         assert_eq!(p1, 1);
         assert_eq!(p00, 0);
         assert_eq!(p5, 5);
-
-        assert!(p0.is_first());
-        assert!(!p1.is_first());
     }
 }

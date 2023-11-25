@@ -96,6 +96,6 @@ async fn create_member(db: &Pool<Postgres>) {
 
     users.create_or_update(uid, NAME)
         .await.expect("couldn't create a user");
-    dicks.create_or_grow(uid, &chat_id, 0)
+    dicks.create_or_grow(uid, &chat_id.into(), 0)
         .await.expect("couldn't create a dick");
 }

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.uid, name, u.created_at FROM Users u\n                JOIN Dicks d ON u.uid = d.uid\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text\n                    AND updated_at > current_timestamp - interval '1 week'\n                ORDER BY random() LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "592e4ff3dd3a6463e1b57005fb476eab7000dabb1675138b2af8148081f541b5"
+}

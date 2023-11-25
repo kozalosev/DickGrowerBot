@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c65be916421be9a70eb769b5b1b8a5461478608ca5d0fb4e85d4fd4723773982"
+}

@@ -31,9 +31,9 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
 }
 
 pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
-    let (from, chat_id) = (from_refs.0, from_refs.1.into());
+    let (from, chat_id) = (from_refs.0, from_refs.1);
     let lang_code = ensure_lang_code(Some(from));
-    let winner = repos.users.get_random_active_member(chat_id).await?;
+    let winner = repos.users.get_random_active_member(&chat_id.kind()).await?;
     let answer = match winner {
         Some(winner) => {
             let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Chats SET chat_instance = $3 WHERE id = $1 AND chat_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "05d57df30a23a17f4c7b1e3c130db22564ccaf90ec60ee610c01a4a6054f1773"
+}

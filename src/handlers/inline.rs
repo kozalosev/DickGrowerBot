@@ -1,4 +1,6 @@
+use std::fmt::Debug;
 use std::str::FromStr;
+use anyhow::anyhow;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
@@ -10,7 +12,7 @@ use crate::config::AppConfig;
 use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerResult, utils};
 use crate::handlers::utils::page::Page;
 use crate::metrics;
-use crate::repo::Repositories;
+use crate::repo::{ChatIdFull, NoChatIdError, Repositories};
 
 #[derive(Debug, strum_macros::Display, EnumIter, EnumString)]
 #[strum(serialize_all = "snake_case")]
@@ -95,21 +97,59 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
     Ok(())
 }
 
-pub async fn inline_chosen_handler() -> HandlerResult {
+pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
+                                   repos: Repositories, config: AppConfig) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
+
+    let maybe_chat_in_sync = result.inline_message_id.clone()
+        .and_then(|msg_id| utils::resolve_inline_message_id(&msg_id)
+            .or_else(|e| {
+                log::error!("couldn't resolve inline_message_id: {e}");
+                Err(e)
+            })
+            .ok())
+        .map(|info| ChatId(info.chat_id))
+        .map(|chat_id| repos.dicks.get_chat(chat_id.into()));
+    if let Some(chat_in_sync_future) = maybe_chat_in_sync {
+        if let Some(chat) = chat_in_sync_future.await? {
+            let cmd = InlineCommand::from_str(&format!("{}:{}", result.from.id.0, result.result_id))?;
+            let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
+            let from_refs = FromRefs(&result.from, &chat_id);
+            let inline_result = cmd.execute(&repos, config, from_refs).await?;
+
+            let inline_message_id = result.inline_message_id
+                .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
+            let mut request = bot.edit_message_text_inline(inline_message_id, inline_result.text);
+            request.reply_markup = inline_result.keyboard;
+            request.parse_mode.replace(Html);
+            request.await?;
+        }
+    }
+
     Ok(())
 }
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig) -> HandlerResult {
     let lang_code = ensure_lang_code(Some(&query.from));
-    let chat_id = query.chat_instance.into();
-    let from_refs = FromRefs(&query.from, &chat_id);
     let mut answer = bot.answer_callback_query(&query.id);
 
     if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {
+        let chat_id = match utils::resolve_inline_message_id(&inline_msg_id) {
+            Ok(info) => ChatIdFull {
+                id: ChatId(info.chat_id),
+                instance: query.chat_instance,
+            }.into(),
+            Err(err) => {
+                log::error!("callback_handler couldn't resolve an inline_message_id: {err}");
+                query.chat_instance.into()
+            }
+        };
+        log::info!("[callback_handler] chat_id: {chat_id:?}");
+
         let parse_res = parse_callback_data(&data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
+            let from_refs = FromRefs(&query.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, from_refs).await?;
             let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
             edit.reply_markup = inline_result.keyboard;
