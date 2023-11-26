@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::str::FromStr;
 use anyhow::anyhow;
+use futures::TryFutureExt;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
@@ -47,11 +48,12 @@ impl InlineCommand {
             },
             InlineCommand::Top => {
                 metrics::CMD_TOP_COUNTER.inline.inc();
-                dick::top_impl(repos, config, from_refs, Page::first())
+                dick::top_impl(repos, &config, from_refs, Page::first())
                     .await
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
-                        res.keyboard = Some(build_pagination_keyboard(Page::first(), top.has_more_pages));
+                        res.keyboard = config.features.chats_merging
+                            .then_some(build_pagination_keyboard(Page::first(), top.has_more_pages));
                         res
                     })
             },
@@ -111,8 +113,13 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
         .map(|info| ChatId(info.chat_id))
         .map(|chat_id| repos.chats.get_chat(chat_id.into()));
     if let Some(chat_in_sync_future) = maybe_chat_in_sync {
-        if let Some(chat) = chat_in_sync_future.await? {
-            let cmd = InlineCommand::from_str(&format!("{}:{}", result.from.id.0, result.result_id))?;
+        let maybe_chat = chat_in_sync_future
+            .map_ok(|res| res.filter(|c| c.chat_id.is_some() && c.chat_instance.is_some()))
+            .await?;
+        if let Some(chat) = maybe_chat {
+            log::debug!("[inline_chosen_handler] chat: {chat:?}, user_id: {}", result.from.id);
+
+            let cmd = InlineCommand::from_str(&result.result_id)?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, from_refs).await?;
@@ -135,17 +142,20 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     let mut answer = bot.answer_callback_query(&query.id);
 
     if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {
-        let chat_id = match utils::resolve_inline_message_id(&inline_msg_id) {
-            Ok(info) => ChatIdFull {
-                id: ChatId(info.chat_id),
-                instance: query.chat_instance,
-            }.into(),
-            Err(err) => {
-                log::error!("callback_handler couldn't resolve an inline_message_id: {err}");
-                query.chat_instance.into()
-            }
-        };
-        log::info!("[callback_handler] chat_id: {chat_id:?}");
+        let chat_id = config.features.chats_merging
+            .then(|| utils::resolve_inline_message_id(&inline_msg_id))
+            .map(|res| match res {
+                Ok(info) => ChatIdFull {
+                    id: ChatId(info.chat_id),
+                    instance: query.chat_instance.clone(),
+                }.into(),
+                Err(err) => {
+                    log::error!("callback_handler couldn't resolve an inline_message_id: {err}");
+                    query.chat_instance.clone().into()
+                }
+            })
+            .unwrap_or(query.chat_instance.clone().into());
+        log::debug!("[callback_handler] chat_id: {chat_id:?}, user_id: {}", query.from.id);
 
         let parse_res = parse_callback_data(&data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {

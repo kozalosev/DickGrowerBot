@@ -1,6 +1,7 @@
 use sqlx::{Pool, Postgres};
 use teloxide::types::{ChatId, UserId};
 use testcontainers::clients;
+use crate::config::FeatureToggles;
 use crate::repo;
 use crate::repo::ChatIdKind;
 use crate::repo::test::{CHAT_ID, get_chat_id_and_dicks, NAME, start_postgres, UID};
@@ -10,7 +11,7 @@ use crate::repo::test::{CHAT_ID, get_chat_id_and_dicks, NAME, start_postgres, UI
 async fn test_all() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let dicks = repo::Dicks::new(db.clone());
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
     create_user(&db).await;
 
     let user_id = UserId(UID as u64);
@@ -23,7 +24,7 @@ async fn test_all() {
     let increment = 5;
     let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment)
         .await.expect("couldn't grow a dick");
-    assert_eq!(growth.pos_in_top, 1);
+    assert_eq!(growth.pos_in_top, Some(1));
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
@@ -31,7 +32,43 @@ async fn test_all() {
         .await
         .expect("couldn't elect a winner")
         .expect("the winner hasn't a dick");
-    assert_eq!(growth.pos_in_top, 1);
+    assert_eq!(growth.pos_in_top, Some(1));
+    let new_length = 2 * increment;
+    assert_eq!(growth.new_length, new_length);
+    check_top(&dicks, &chat_id, new_length).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_all_with_top_pagination_disabled() {
+    let docker = clients::Cli::default();
+    let (_container, db) = start_postgres(&docker).await;
+    let dicks = {
+        let mut features = FeatureToggles::default();
+        features.top_unlimited = false;
+        repo::Dicks::new(db.clone(), features)
+    };
+    create_user(&db).await;
+
+    let user_id = UserId(UID as u64);
+    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+    let chat_id_partiality = chat_id.clone().into();
+    let d = dicks.get_top(&chat_id, 0, 1)
+        .await.expect("couldn't fetch the empty top");
+    assert_eq!(d.len(), 0);
+
+    let increment = 5;
+    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment)
+        .await.expect("couldn't grow a dick");
+    assert_eq!(growth.pos_in_top, None);
+    assert_eq!(growth.new_length, increment);
+    check_top(&dicks, &chat_id, increment).await;
+
+    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment as u32)
+        .await
+        .expect("couldn't elect a winner")
+        .expect("the winner hasn't a dick");
+    assert_eq!(growth.pos_in_top, None);
     let new_length = 2 * increment;
     assert_eq!(growth.new_length, new_length);
     check_top(&dicks, &chat_id, new_length).await;
@@ -42,7 +79,7 @@ async fn test_all() {
 async fn test_top_page() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let dicks = repo::Dicks::new(db.clone());
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
     let chat_id_partiality = chat_id.clone().into();
     let user2_name = format!("{NAME} 2");
@@ -52,7 +89,7 @@ async fn test_top_page() {
     create_dick(&db).await;
     // create user and dick #2
     {
-        let users = repo::Users::new(db.clone());
+        let users = repo::Users::new(db.clone(), Default::default());
         let uid2 = UserId((UID + 1) as u64);
         users.create_or_update(uid2, &user2_name)
             .await.expect("couldn't create a user");
@@ -74,7 +111,7 @@ async fn test_top_page() {
 }
 
 pub async fn create_user(db: &Pool<Postgres>) {
-    let users = repo::Users::new(db.clone());
+    let users = repo::Users::new(db.clone(), Default::default());
     users.create_or_update(UserId(UID as u64), NAME)
         .await.expect("couldn't create a user");
 }

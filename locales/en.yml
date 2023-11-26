@@ -3,7 +3,8 @@ commands:
     description: "I'll help you, my friend"
   grow:
     description: "Grow your dick!"
-    result: "Your dick has grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long.\nYour position in the top is <b>%{pos}</b>."
+    result: "Your dick has grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."
+    position: "Your position in the top is <b>%{pos}</b>."
     tomorrow: "You have already played with your dick today."
   top:
     description: "Get the biggest dicks of the chat"
@@ -13,7 +14,8 @@ commands:
     empty: "No one is in the game yet :("
   dod:
     description: "Elect the Dick of a Day"
-    result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now.\nHis position in the top is <b>%{pos}</b>."
+    result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."
+    position: "His position in the top is <b>%{pos}</b>."
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>."
     no_candidates: "There is no candidates for election. In this chat nobody is in the game yet 😢"
   import:
@@ -64,3 +66,4 @@ titles:
     some: "\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
+  feature_disabled: "This feature is currently temporarily disabled."

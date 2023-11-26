@@ -17,8 +17,7 @@ async fn upsert_chat() {
         .execute(&db)
         .await.expect("couldn't drop the trigger");
 
-    let dicks = repo::Dicks::new(db.clone());
-    let chats = repo::Chats::new(db.clone());
+    let chats = repo::Chats::new(db.clone(), Default::default());
     let chat_id_full = ChatIdFull {
         id: ChatId(CHAT_ID),
         instance: "instance".to_owned(),
@@ -30,7 +29,7 @@ async fn upsert_chat() {
     old_instance_new_chat_id(&db, &chats, chat_id_full.clone()).await;
     clear_dicks_and_chats(&db).await;
 
-    two_separate_chats(&db, &dicks, &chats, chat_id_full).await;
+    two_separate_chats(&db, &chats, chat_id_full).await;
 }
 
 async fn clear_dicks_and_chats(db: &Pool<Postgres>) {
@@ -72,7 +71,9 @@ async fn old_instance_new_chat_id(db: &Pool<Postgres>, chats: &repo::Chats, full
     check_chat(chats, id, inst).await;
 }
 
-async fn two_separate_chats(db: &Pool<Postgres>, dicks: &repo::Dicks, chats: &repo::Chats, full: ChatIdFull) {
+async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: ChatIdFull) {
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+
     let (id, inst) = (full.id, full.instance.clone());
     let ids = sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, NULL), (NULL, $2) RETURNING id",
             id.0, &inst)

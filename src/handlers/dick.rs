@@ -43,9 +43,9 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
-            let top = top_impl(&repos, config, from_refs, Page::first()).await?;
+            let top = top_impl(&repos, &config, from_refs, Page::first()).await?;
             let mut request = reply_html(bot, msg, top.lines);
-            if top.has_more_pages {
+            if top.has_more_pages && config.features.top_unlimited {
                 let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
                 request.reply_markup.replace(keyboard);
             }
@@ -73,8 +73,14 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppCon
 
     let main_part = match grow_result {
         Ok(repo::GrowthResult { new_length, pos_in_top }) => {
-            t!("commands.grow.result", locale = &lang_code,
-                incr = increment, length = new_length, pos = pos_in_top)
+            let answer = t!("commands.grow.result", locale = &lang_code,
+                incr = increment, length = new_length);
+            if let Some(pos) = pos_in_top {
+                let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
+                format!("{answer}\n{position}")
+            } else {
+                answer
+            }
         },
         Err(e) => {
             let db_err = e.downcast::<sqlx::Error>()?;
@@ -113,7 +119,7 @@ impl Top {
     }
 }
 
-pub(crate) async fn top_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>,
+pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppConfig, from_refs: FromRefs<'_>,
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let lang_code = ensure_lang_code(Some(from));
@@ -177,6 +183,18 @@ impl Into<ChatIdKind> for EditMessageReqParamsKind {
 
 pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                               config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
+    let edit_msg_req_params = q.message.as_ref()
+        .map(|m| EditMessageReqParamsKind::Chat(m.chat.id, m.id))
+        .or(q.inline_message_id.as_ref().map(|inline_message_id| EditMessageReqParamsKind::Inline {
+            chat_instance: q.chat_instance.clone(),
+            inline_message_id: inline_message_id.clone()
+        }))
+        .ok_or("no message")?;
+
+    if !config.features.top_unlimited {
+        return answer_callback_feature_disabled(bot, q, edit_msg_req_params).await
+    }
+
     let page = q.data
         .ok_or(InvalidPage::message("no data"))
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
@@ -186,17 +204,10 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             .map_err(|e| InvalidPage::for_value(&r, e)))
         .map(|p| Page(p))
         .map_err(|e| anyhow!(e))?;
-    let edit_msg_req_params = q.message
-        .map(|m| EditMessageReqParamsKind::Chat(m.chat.id, m.id))
-        .or(q.inline_message_id.map(|inline_message_id| EditMessageReqParamsKind::Inline {
-                chat_instance: q.chat_instance,
-                inline_message_id
-            }))
-        .ok_or("no message")?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
     let from_refs = FromRefs(&q.from, &chat_id_partiality);
-    let top = top_impl(&repos, config, from_refs, page).await?;
+    let top = top_impl(&repos, &config, from_refs, page).await?;
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
     let (answer_callback_query_result, edit_message_result) = match edit_msg_req_params {
@@ -254,6 +265,24 @@ fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {
         rng.gen_range(start..=-1)
     }
 
+}
+
+async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: EditMessageReqParamsKind) -> HandlerResult {
+    let lang_code = ensure_lang_code(Some(&q.from));
+
+    let mut answer = bot.answer_callback_query(q.id);
+    answer.show_alert.replace(true);
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code));
+    answer.await?;
+
+    return Ok(match edit_msg_req_params {
+        EditMessageReqParamsKind::Chat(chat_id, message_id) =>
+            bot.edit_message_reply_markup(chat_id, message_id)
+                .await.map(|_| ())?,
+        EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
+            bot.edit_message_reply_markup_inline(inline_message_id)
+                .await.map(|_| ())?
+    })
 }
 
 #[cfg(test)]

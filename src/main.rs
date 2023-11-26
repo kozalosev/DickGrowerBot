@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_conn = repo::establish_database_connection(&database_config).await?;
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
-        repo::Repositories::new(&db_conn),
+        repo::Repositories::new(&db_conn, app_config.features),
         app_config,
         help_container
     ];

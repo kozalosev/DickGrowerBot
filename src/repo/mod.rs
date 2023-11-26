@@ -15,7 +15,7 @@ pub use dicks::*;
 pub use chats::*;
 pub use import::*;
 pub use promo::*;
-use crate::config::DatabaseConfig;
+use crate::config::{DatabaseConfig, FeatureToggles};
 
 #[derive(Clone)]
 pub struct Repositories {
@@ -27,13 +27,13 @@ pub struct Repositories {
 }
 
 impl Repositories {
-    pub fn new(db_conn: &Pool<Postgres>) -> Self {
+    pub fn new(db_conn: &Pool<Postgres>, feature_toggles: FeatureToggles) -> Self {
         Self {
-            users: Users::new(db_conn.clone()),
-            dicks: Dicks::new(db_conn.clone()),
-            chats: Chats::new(db_conn.clone()),
-            import: Import::new(db_conn.clone()),
-            promo: Promo::new(db_conn.clone()),
+            users: Users::new(db_conn.clone(), feature_toggles),
+            dicks: Dicks::new(db_conn.clone(), feature_toggles),
+            chats: Chats::new(db_conn.clone(), feature_toggles),
+            import: Import::new(db_conn.clone(), feature_toggles),
+            promo: Promo::new(db_conn.clone(), feature_toggles),
         }
     }
 }
@@ -142,12 +142,13 @@ macro_rules! repository {
     ($name:ident, $($methods:item),*) => {
         #[derive(Clone)]
         pub struct $name {
-            pool: sqlx::Pool<sqlx::Postgres>
+            pool: sqlx::Pool<sqlx::Postgres>,
+            #[allow(dead_code)] features: crate::config::FeatureToggles,
         }
 
         impl $name {
-            pub fn new(pool: sqlx::Pool<sqlx::Postgres>) -> Self {
-                Self { pool }
+            pub fn new(pool: sqlx::Pool<sqlx::Postgres>, features: crate::config::FeatureToggles) -> Self {
+                Self { pool, features }
             }
 
             $($methods)*

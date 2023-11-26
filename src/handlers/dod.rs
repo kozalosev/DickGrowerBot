@@ -40,8 +40,14 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, config: config:
             let dod_result = repos.dicks.set_dod_winner(&chat_id, UserId(winner.uid as u64), bonus).await;
             let main_part = match dod_result {
                 Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
-                    t!("commands.dod.result", locale = &lang_code,
-                        name = winner.name, growth = bonus, length = new_length, pos = pos_in_top)
+                    let answer = t!("commands.dod.result", locale = &lang_code,
+                        name = winner.name, growth = bonus, length = new_length);
+                    if let Some(pos) = pos_in_top {
+                        let position = t!("commands.dod.result", locale = &lang_code, pos = pos);
+                        format!("{answer}\n{position}")
+                    } else {
+                        answer
+                    }
                 },
                 Ok(None) => {
                     log::error!("there was an attempt to set a non-existent dick as a winner (UserID={}, ChatId={})",

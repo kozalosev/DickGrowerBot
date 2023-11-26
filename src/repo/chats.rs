@@ -39,9 +39,10 @@ repository!(Chats,
             .map_err(|e| e.into())
     }
 ,
-    pub async fn upsert_chat(tx: &mut Transaction<'_, Postgres>, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
+    pub async fn upsert_chat(&self, tx: &mut Transaction<'_, Postgres>, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
         let (id, instance) = match chat_id {
-            ChatIdPartiality::Both(full) => (Some(full.id.0), Some(full.instance.to_owned())),
+            ChatIdPartiality::Both(full) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
+            ChatIdPartiality::Both(full) => (Some(full.id.0), None),
             ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.0), None),
             ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_owned())),
         };
@@ -81,9 +82,7 @@ repository!(Chats,
     }
 ,
     async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<i64> {
-        log::info!("merging chats: {chats:?}");
         let state = merge_chat_objects(&chats)?;
-
         let updated_dicks = sqlx::query!(
             "WITH sum_dicks AS (SELECT uid, sum(length) as length FROM Dicks WHERE chat_id IN ($1, $2) GROUP BY uid)
                     UPDATE Dicks d SET length = sum_dicks.length, bonus_attempts = (bonus_attempts + 1)
@@ -96,9 +95,7 @@ repository!(Chats,
             .execute(&mut **tx)
             .await?
             .rows_affected();
-        if updated_dicks != deleted_dicks {
-            return Err(anyhow!("counts of updated {updated_dicks} and deleted {deleted_dicks} dicks are not equal"))
-        }
+        log::info!("merging chats: {chats:?}, updated dicks: {updated_dicks}, deleted: {deleted_dicks}");
 
         sqlx::query!("DELETE FROM Chats WHERE id = $1 AND chat_instance = $2",
                 state.deleted.0, state.deleted.1)
