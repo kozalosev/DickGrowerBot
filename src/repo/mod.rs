@@ -1,15 +1,18 @@
 mod users;
 mod dicks;
+mod chats;
 mod import;
 mod promo;
 
 #[cfg(test)]
 pub(crate) mod test;
 
+use sqlx::{Pool, Postgres};
 use strum_macros::Display;
 use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
+pub use chats::*;
 pub use import::*;
 pub use promo::*;
 use crate::config::DatabaseConfig;
@@ -18,8 +21,21 @@ use crate::config::DatabaseConfig;
 pub struct Repositories {
     pub users: Users,
     pub dicks: Dicks,
+    pub chats: Chats,
     pub import: Import,
     pub promo: Promo,
+}
+
+impl Repositories {
+    pub fn new(db_conn: &Pool<Postgres>) -> Self {
+        Self {
+            users: Users::new(db_conn.clone()),
+            dicks: Dicks::new(db_conn.clone()),
+            chats: Chats::new(db_conn.clone()),
+            import: Import::new(db_conn.clone()),
+            promo: Promo::new(db_conn.clone()),
+        }
+    }
 }
 
 #[derive(Display, Debug)]

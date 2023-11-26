@@ -109,7 +109,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
             })
             .ok())
         .map(|info| ChatId(info.chat_id))
-        .map(|chat_id| repos.dicks.get_chat(chat_id.into()));
+        .map(|chat_id| repos.chats.get_chat(chat_id.into()));
     if let Some(chat_in_sync_future) = maybe_chat_in_sync {
         if let Some(chat) = chat_in_sync_future.await? {
             let cmd = InlineCommand::from_str(&format!("{}:{}", result.from.id.0, result.result_id))?;
