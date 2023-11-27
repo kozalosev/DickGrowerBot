@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "d67f9f36504b381c81af399ea3735477a26beee4fc76b943e545c891429e69b6"
+}

@@ -35,7 +35,7 @@ Technical stuff
 _(to build the application without a running RDBMS)_
 
 ```shell
-cargo sqlx prepare
+cargo sqlx prepare -- --tests
 ```
 
 ### Run tests
