@@ -6,6 +6,7 @@ use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
 use teloxide::Bot;
+use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
@@ -93,8 +94,11 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
         })
         .collect();
 
-    let mut answer = bot.answer_inline_query(query.id, results);
-    answer.cache_time = Some(1);
+    let mut answer = bot.answer_inline_query(query.id, results)
+        .is_personal(true);
+    if cfg!(debug_assertions) {
+        answer.cache_time.replace(1);
+    }
     answer.await?;
     Ok(())
 }
@@ -103,14 +107,8 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                                    repos: Repositories, config: AppConfig) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
 
-    let maybe_chat_in_sync = result.inline_message_id.clone()
-        .and_then(|msg_id| utils::resolve_inline_message_id(&msg_id)
-            .or_else(|e| {
-                log::error!("couldn't resolve inline_message_id: {e}");
-                Err(e)
-            })
-            .ok())
-        .map(|info| ChatId(info.chat_id))
+    let maybe_chat_in_sync = result.inline_message_id.as_ref()
+        .and_then(try_resolve_chat_id)
         .map(|chat_id| repos.chats.get_chat(chat_id.into()));
     if let Some(chat_in_sync_future) = maybe_chat_in_sync {
         let maybe_chat = chat_in_sync_future
@@ -206,4 +204,14 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             }
         })
         .unwrap_or(Ok(CallbackDataParseResult::Invalid))
+}
+
+pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<ChatId> {
+    utils::resolve_inline_message_id(msg_id)
+        .or_else(|e| {
+            log::error!("couldn't resolve inline_message_id: {e}");
+            Err(e)
+        })
+        .ok()
+        .map(|info| ChatId(info.chat_id))
 }

@@ -49,6 +49,13 @@ repository!(Users,
             .map_err(|e| e.into())
     }
 ,
+    pub async fn get(&self, user_id: UserId) -> Result<Option<User>, sqlx::Error> {
+        sqlx::query_as!(User, "SELECT uid, name, created_at FROM Users WHERE uid = $1",
+                user_id.0 as i64)
+            .fetch_optional(&self.pool)
+            .await
+    }
+,
     #[cfg(test)]
     pub async fn get_all(&self) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User, "SELECT * FROM Users")

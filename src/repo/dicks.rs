@@ -1,3 +1,4 @@
+use futures::TryFutureExt;
 use sqlx::{Pool, Postgres, Transaction};
 use teloxide::types::UserId;
 use crate::config::FeatureToggles;
@@ -74,6 +75,36 @@ impl Dicks {
         tx.commit().await?;
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
         Ok(Some(GrowthResult { new_length, pos_in_top }))
+    }
+
+    pub async fn check_dick(&self, chat_id: &ChatIdKind, user_id: UserId, length: u32) -> anyhow::Result<bool> {
+        sqlx::query_scalar!(r#"SELECT length >= $3 AS "enough!" FROM Dicks d
+                JOIN Chats c ON d.chat_id = c.id
+                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
+                    AND uid = $2"#,
+                chat_id.value() as String, user_id.0 as i64, length as i32)
+            .fetch_optional(&self.pool)
+            .map_ok(|opt| opt.unwrap_or(false))
+            .map_err(|e| e.into())
+            .await
+    }
+
+    pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u32) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let internal_chat_id = self.chats.upsert_chat(&mut tx, chat_id).await?;
+
+        for params in vec![
+            (from.0, -(length as i32)),
+            (to.0, length as i32)
+        ] {
+            sqlx::query!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2",
+                    internal_chat_id, params.0 as i64, params.1)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 
     async fn get_position_in_top(&self, chat_id_internal: i64, uid: i64) -> anyhow::Result<Option<u64>> {

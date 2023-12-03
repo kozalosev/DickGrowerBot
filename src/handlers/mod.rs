@@ -5,6 +5,7 @@ mod import;
 mod promo;
 mod inline;
 mod utils;
+pub mod pvp;
 
 use std::borrow::ToOwned;
 use teloxide::Bot;

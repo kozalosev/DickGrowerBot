@@ -3,7 +3,7 @@ use teloxide::types::{ChatId, UserId};
 use testcontainers::clients;
 use crate::config::FeatureToggles;
 use crate::repo;
-use crate::repo::ChatIdKind;
+use crate::repo::{ChatIdKind, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID, get_chat_id_and_dicks, NAME, start_postgres, UID};
 
 #[tokio::test]
@@ -88,14 +88,7 @@ async fn test_top_page() {
     create_user(&db).await;
     create_dick(&db).await;
     // create user and dick #2
-    {
-        let users = repo::Users::new(db.clone(), Default::default());
-        let uid2 = UserId((UID + 1) as u64);
-        users.create_or_update(uid2, &user2_name)
-            .await.expect("couldn't create a user");
-        dicks.create_or_grow(uid2, &chat_id_partiality, 1)
-            .await.expect("couldn't create a dick");
-    }
+    create_user_and_dick_2(&db, &chat_id_partiality, &user2_name).await;
 
     let top_with_user2_only = dicks.get_top(&chat_id, 0, 1)
         .await.expect("couldn't fetch the top");
@@ -110,10 +103,64 @@ async fn test_top_page() {
     assert_eq!(top_with_user1_only[0].length, 0);
 }
 
+#[tokio::test]
+#[ignore]
+async fn test_pvp() {
+    let docker = clients::Cli::default();
+    let (_container, db) = start_postgres(&docker).await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+    let chat_id_part: &ChatIdPartiality = &chat_id.clone().into();
+    let uid = UserId(UID as u64);
+    {
+        let enough = dicks.check_dick(&chat_id_part.kind(), uid, 1)
+            .await.expect("couldn't check the dick #1");
+        assert!(!enough);
+    }
+    {
+        create_user(&db).await;
+        dicks.create_or_grow(uid, chat_id_part, 1)
+            .await
+            .expect("couldn't create a dick");
+
+        let enough = dicks.check_dick(&chat_id_part.kind(), uid, 1)
+            .await.expect("couldn't check the dick #2");
+        assert!(enough);
+    }
+    {
+        let enough = dicks.check_dick(&chat_id_part.kind(), uid, 2)
+            .await.expect("couldn't check the dick #3");
+        assert!(!enough);
+    }
+    {
+        create_user_and_dick_2(&db, chat_id_part, Default::default()).await;
+        let uid2 = UserId((UID + 1) as u64);
+        dicks.move_length(chat_id_part, uid, uid2, 1)
+            .await.expect("couldn't move the length");
+
+        let enough1 = dicks.check_dick(&chat_id_part.kind(), uid, 1)
+            .await.expect("couldn't check the dick #4");
+        let enough2 = dicks.check_dick(&chat_id_part.kind(), uid2, 1)
+            .await.expect("couldn't check the dick #5");
+        assert!(!enough1);
+        assert!(enough2);
+    }
+}
+
 pub async fn create_user(db: &Pool<Postgres>) {
     let users = repo::Users::new(db.clone(), Default::default());
     users.create_or_update(UserId(UID as u64), NAME)
         .await.expect("couldn't create a user");
+}
+
+async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartiality, name: &str) {
+        let users = repo::Users::new(db.clone(), Default::default());
+        let dicks = repo::Dicks::new(db.clone(), Default::default());
+        let uid2 = UserId((UID + 1) as u64);
+        users.create_or_update(uid2, name)
+            .await.expect("couldn't create a user #2");
+        dicks.create_or_grow(uid2, chat_id, 1)
+            .await.expect("couldn't create a dick #2");
 }
 
 pub async fn create_dick(db: &Pool<Postgres>) {

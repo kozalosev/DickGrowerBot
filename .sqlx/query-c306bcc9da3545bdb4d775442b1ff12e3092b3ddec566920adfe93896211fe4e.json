@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT length >= $3 AS \"enough!\" FROM Dicks d\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                    AND uid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "enough!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c306bcc9da3545bdb4d775442b1ff12e3092b3ddec566920adfe93896211fe4e"
+}
