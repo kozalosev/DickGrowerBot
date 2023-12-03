@@ -73,8 +73,10 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppCon
 
     let main_part = match grow_result {
         Ok(repo::GrowthResult { new_length, pos_in_top }) => {
+            let event_key = if increment.is_negative() { "shrunk" } else { "grown" };
+            let event = t!(&format!("commands.grow.direction.{event_key}"), locale = &lang_code);
             let answer = t!("commands.grow.result", locale = &lang_code,
-                incr = increment, length = new_length);
+                event = event, incr = increment.abs(), length = new_length);
             if let Some(pos) = pos_in_top {
                 let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
                 format!("{answer}\n{position}")

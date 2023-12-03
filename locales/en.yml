@@ -3,7 +3,10 @@ commands:
     description: "I'll help you, my friend"
   grow:
     description: "Grow your dick!"
-    result: "Your dick has grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."
+    result: "Your dick has %{event} by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."
+    direction:
+      grown: "grown"
+      shrunk: "shrunk"
     position: "Your position in the top is <b>%{pos}</b>."
     tomorrow: "You have already played with your dick today."
   top:

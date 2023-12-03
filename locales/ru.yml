@@ -3,7 +3,10 @@ commands:
     description: "Я обязательно помогу тебе, друг"
   grow:
     description: "Вырасти пиписю!"
-    result: "Твоя пися выросла на <b>%{incr}</b> см и теперь её длина составляет <b>%{length} см</b>."
+    result: "Твоя пися %{event} на <b>%{incr}</b> см и теперь её длина составляет <b>%{length} см</b>."
+    direction:
+      grown: "выросла"
+      shrunk: "скукожилась"
     position: "Ты занимаешь <b>%{pos}</b> место в топе."
     tomorrow: "Ты уже играл с пиписей сегодня."
   top:
