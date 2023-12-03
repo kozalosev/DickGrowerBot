@@ -135,15 +135,13 @@ async fn test_pvp() {
     {
         create_user_and_dick_2(&db, chat_id_part, Default::default()).await;
         let uid2 = UserId((UID + 1) as u64);
-        dicks.move_length(chat_id_part, uid, uid2, 1)
+        let (gr1, gr2) = dicks.move_length(chat_id_part, uid, uid2, 1)
             .await.expect("couldn't move the length");
 
-        let enough1 = dicks.check_dick(&chat_id_part.kind(), uid, 1)
-            .await.expect("couldn't check the dick #4");
-        let enough2 = dicks.check_dick(&chat_id_part.kind(), uid2, 1)
-            .await.expect("couldn't check the dick #5");
-        assert!(!enough1);
-        assert!(enough2);
+        assert_eq!(gr1.new_length, 0);
+        assert_eq!(gr2.new_length, 2);
+        assert_eq!(gr2.pos_in_top, Some(1));
+        assert_eq!(gr1.pos_in_top, Some(2));
     }
 }
 

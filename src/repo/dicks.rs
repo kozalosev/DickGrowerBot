@@ -89,22 +89,32 @@ impl Dicks {
             .await
     }
 
-    pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u32) -> anyhow::Result<()> {
+    pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u32) -> anyhow::Result<(GrowthResult, GrowthResult)> {
         let mut tx = self.pool.begin().await?;
         let internal_chat_id = self.chats.upsert_chat(&mut tx, chat_id).await?;
 
-        for params in vec![
-            (from.0, -(length as i32)),
-            (to.0, length as i32)
-        ] {
-            sqlx::query!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2",
-                    internal_chat_id, params.0 as i64, params.1)
-                .execute(&mut *tx)
-                .await?;
-        }
-
+        let length_from = Self::move_length_for_one_user(&mut tx, internal_chat_id, from.0, -(length as i32)).await?;
+        let length_to = Self::move_length_for_one_user(&mut tx, internal_chat_id, to.0, length as i32).await?;
         tx.commit().await?;
-        Ok(())
+
+        let pos_from = self.get_position_in_top(internal_chat_id, from.0 as i64).await?;
+        let pos_to = self.get_position_in_top(internal_chat_id, to.0 as i64).await?;
+        let gr_from = GrowthResult {
+            new_length: length_from,
+            pos_in_top: pos_from,
+        };
+        let gr_to = GrowthResult {
+            new_length: length_to,
+            pos_in_top: pos_to,
+        };
+        Ok((gr_from, gr_to))
+    }
+
+    async fn move_length_for_one_user(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: u64, change: i32) -> Result<i32, sqlx::Error> {
+        sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
+                    chat_id_internal, user_id as i64, change)
+            .fetch_one(&mut **tx)
+            .await
     }
 
     async fn get_position_in_top(&self, chat_id_internal: i64, uid: i64) -> anyhow::Result<Option<u64>> {

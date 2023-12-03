@@ -253,8 +253,8 @@ async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: U
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator, bet).await?;
     let text = if enough {
         let acceptor_uid = acceptor.clone().into();
-        let (winner, looser) = choose_winner(initiator, acceptor_uid);
-        p.repos.dicks.move_length(p.chat_id, looser, winner, bet).await?;
+        let (winner, loser) = choose_winner(initiator, acceptor_uid);
+        let (loser_res, winner_res) = p.repos.dicks.move_length(p.chat_id, loser, winner, bet).await?;
 
         let winner_info = if winner == acceptor.uid {
             repo::User {
@@ -266,7 +266,15 @@ async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: U
             p.repos.users.get(winner).await?
                 .ok_or(anyhow!("winner must present in the database!"))?
         };
-        t!("commands.pvp.results.finish", name = winner_info.name, locale = &p.lang_code)
+        let main_part = t!("commands.pvp.results.finish", locale = &p.lang_code,
+            winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length);
+        if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
+            let winner_pos = t!("commands.pvp.results.position.winner", pos = winner_pos, locale = &p.lang_code);
+            let loser_pos = t!("commands.pvp.results.position.loser", pos = loser_pos, locale = &p.lang_code);
+            format!("{main_part}\n\n{winner_pos}\n{loser_pos}")
+        } else {
+            main_part
+        }
     } else {
         t!("commands.pvp.errors.not_enough", locale = &p.lang_code)
     };
