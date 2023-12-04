@@ -43,7 +43,7 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, config: config:
                     let answer = t!("commands.dod.result", locale = &lang_code,
                         name = winner.name, growth = bonus, length = new_length);
                     if let Some(pos) = pos_in_top {
-                        let position = t!("commands.dod.result", locale = &lang_code, pos = pos);
+                        let position = t!("commands.dod.position", locale = &lang_code, pos = pos);
                         format!("{answer}\n{position}")
                     } else {
                         answer
