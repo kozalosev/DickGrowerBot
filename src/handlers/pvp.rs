@@ -25,6 +25,7 @@ pub enum BattleCommands {
     PVP(u32),
     Battle(u32),
     Attack(u32),
+    Fight(u32),
 }
 
 #[derive(BotCommands, Clone)]
@@ -33,6 +34,7 @@ pub enum BattleCommandsNoArgs {
     PVP,
     Battle,
     Attack,
+    Fight,
 }
 
 impl BattleCommands {
@@ -41,6 +43,7 @@ impl BattleCommands {
             Self::Battle(bet) => bet,
             Self::PVP(bet) => bet,
             Self::Attack(bet) => bet,
+            Self::Fight(bet) => bet,
         }
     }
 }
