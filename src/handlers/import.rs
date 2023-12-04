@@ -174,7 +174,8 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
         Err(e) => t!(format!("commands.import.errors.{e}").as_str(),
             locale = lang_code.as_str()),
     };
-    reply_html(bot, msg, answer).await
+    reply_html(bot, msg, answer).await?;
+    Ok(())
 }
 
 async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult, BeforeImportCheckErrors> {

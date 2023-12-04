@@ -1,5 +1,6 @@
 mod users;
 mod dicks;
+mod chats;
 mod import;
 mod promo;
 
@@ -45,7 +46,7 @@ pub async fn start_postgres(docker: &clients::Cli) -> (Container<GenericImage>, 
 
 #[inline]
 pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
-    let dicks = repo::Dicks::new(db.clone());
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
     (chat_id, dicks)
 }

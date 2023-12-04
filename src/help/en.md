@@ -2,7 +2,7 @@ Do you want to have the biggest dick in the world? I'm sure you do. Just /grow i
 
 The growth range for the command is between <b>{grow_min}</b> and <b>{grow_max}</b> cm. Use the /top command to show the top of the biggest weapons in a chat.
 
-Also, there is a daily election of <i>the Dick of the Day</i> in every chat. This title brings its owner some bonus centimeters additionally.
+Also, there is a daily election of <i>the Dick of the Day</i> in every chat. This title brings its owner some bonus centimeters additionally. Only active players who have grown their cucumber at least once in the last week participate in the election.
 
 <b>Wait, I already know similar bots in Telegram and have a very big thing there…</b>
 

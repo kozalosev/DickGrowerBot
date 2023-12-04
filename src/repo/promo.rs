@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use anyhow::anyhow;
 use sqlx::Postgres;
-use strum_macros::Display;
 use teloxide::types::UserId;
 use crate::repository;
 
@@ -12,7 +11,7 @@ pub struct ActivationResult {
     pub bonus_length: i32,
 }
 
-#[derive(Debug, Display)]
+#[derive(Debug, strum_macros::Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum ActivationError {
     NoActivationsLeft,

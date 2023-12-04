@@ -3,7 +3,11 @@ commands:
     description: "I'll help you, my friend"
   grow:
     description: "Grow your dick!"
-    result: "Your dick has grown by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long.\nYour position in the top is <b>%{pos}</b>."
+    result: "Your dick has %{event} by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."
+    direction:
+      grown: "grown"
+      shrunk: "shrunk"
+    position: "Your position in the top is <b>%{pos}</b>."
     tomorrow: "You have already played with your dick today."
   top:
     description: "Get the biggest dicks of the chat"
@@ -13,9 +17,23 @@ commands:
     empty: "No one is in the game yet :("
   dod:
     description: "Elect the Dick of a Day"
-    result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now.\nHis position in the top is <b>%{pos}</b>."
+    result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."
+    position: "His position in the top is <b>%{pos}</b>."
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>."
     no_candidates: "There is no candidates for election. In this chat nobody is in the game yet 😢"
+  pvp:
+    description: "Fight with your friend's dick!"
+    results:
+      start: "<b>%{name}</b> challenged the chat with a bet of <b>%{bet} cm</b>!"
+      finish: "The winner is <b>%{winner_name}</b>! His dick is now <b>%{winner_length} cm</b> long. The loser's one is <b>%{loser_length}</b>."
+      position:
+        winner: "The <b>winner</b>'s position in the top is <b>%{pos}</b>."
+        loser: "The <b>loser</b>'s position in the top is <b>%{pos}</b>."
+    button: "Attack!"
+    errors:
+      no_args: "Call the command with a number of centimeters you're willing to bet."
+      not_enough: "Meh. The initiator's dick is not long enough for such a big bet!"
+      same_person: "You cannot fight with yourself!"
   import:
     description: "Import dicks from other bots"
     result:
@@ -51,6 +69,7 @@ inline:
       grow: "Grow your dick!"
       top: "Get the biggest dicks of the chat"
       dick_of_day: "Elect the Dick of a Day"
+      pvp: "Challenge others with a bet of %{bet} cm!"
   callback:
     errors:
       another_user: "This message was sent by another person."
@@ -64,3 +83,4 @@ titles:
     some: "\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
+  feature_disabled: "This feature is currently temporarily disabled."

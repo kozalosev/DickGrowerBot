@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Dicks WHERE chat_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "72c116bcfeb0e09309565ef0d1ecf6113c0684503b2be41b5db9b29f4370eaf8"
+}

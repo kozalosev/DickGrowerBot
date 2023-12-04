@@ -9,6 +9,7 @@ use crate::help;
 
 #[derive(Clone)]
 pub struct AppConfig {
+    pub features: FeatureToggles,
     pub growth_range: RangeInclusive<i32>,
     pub grow_shrink_ratio: f32,
     pub dod_bonus_range: RangeInclusive<u32>,
@@ -22,6 +23,22 @@ pub struct DatabaseConfig {
     pub max_connections: u32
 }
 
+#[derive(Clone, Copy)]
+pub struct FeatureToggles {
+    pub chats_merging: bool,
+    pub top_unlimited: bool,
+}
+
+#[cfg(test)]
+impl Default for FeatureToggles {
+    fn default() -> Self {
+        Self {
+            chats_merging: true,
+            top_unlimited: true,
+        }
+    }
+}
+
 impl AppConfig {
     pub fn from_env() -> Self {
         let min = get_value_or_default("GROWTH_MIN", -5);
@@ -30,7 +47,13 @@ impl AppConfig {
         let max_dod_bonus = get_value_or_default("GROWTH_DOD_BONUS_MAX", 5);
         let newcomers_grace_days = get_value_or_default("NEWCOMERS_GRACE_DAYS", 7);
         let top_limit = get_value_or_default("TOP_LIMIT", 10);
+        let chats_merging = get_value_or_default("CHATS_MERGING_ENABLED", false);
+        let top_unlimited = get_value_or_default("TOP_UNLIMITED_ENABLED", false);
         Self {
+            features: FeatureToggles {
+                chats_merging,
+                top_unlimited,
+            },
             growth_range: min..=max,
             grow_shrink_ratio,
             dod_bonus_range: 1..=max_dod_bonus,

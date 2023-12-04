@@ -1,28 +1,89 @@
 mod users;
 mod dicks;
+mod chats;
 mod import;
 mod promo;
 
 #[cfg(test)]
 pub(crate) mod test;
 
+use sqlx::{Pool, Postgres};
 use strum_macros::Display;
 use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
+pub use chats::*;
 pub use import::*;
 pub use promo::*;
-use crate::config::DatabaseConfig;
+use crate::config::{DatabaseConfig, FeatureToggles};
 
 #[derive(Clone)]
 pub struct Repositories {
     pub users: Users,
     pub dicks: Dicks,
+    pub chats: Chats,
     pub import: Import,
     pub promo: Promo,
 }
 
-#[derive(Display)]
+impl Repositories {
+    pub fn new(db_conn: &Pool<Postgres>, feature_toggles: FeatureToggles) -> Self {
+        Self {
+            users: Users::new(db_conn.clone(), feature_toggles),
+            dicks: Dicks::new(db_conn.clone(), feature_toggles),
+            chats: Chats::new(db_conn.clone(), feature_toggles),
+            import: Import::new(db_conn.clone(), feature_toggles),
+            promo: Promo::new(db_conn.clone(), feature_toggles),
+        }
+    }
+}
+
+#[derive(Display, Debug)]
+pub enum ChatIdPartiality {
+    Both(ChatIdFull),
+    Specific(ChatIdKind)
+}
+
+impl From<ChatId> for ChatIdPartiality {
+    fn from(value: ChatId) -> Self {
+        Self::Specific(ChatIdKind::ID(value))
+    }
+}
+
+impl From<String> for ChatIdPartiality {
+    fn from(value: String) -> Self {
+        Self::Specific(ChatIdKind::Instance(value))
+    }
+}
+
+impl From<ChatIdKind> for ChatIdPartiality {
+    fn from(value: ChatIdKind) -> Self {
+        Self::Specific(value)
+    }
+}
+
+impl ChatIdPartiality {
+    pub fn kind(&self) -> ChatIdKind {
+        match self {
+            ChatIdPartiality::Both(ChatIdFull { id, .. }) => ChatIdKind::ID(*id),
+            ChatIdPartiality::Specific(kind) => kind.clone()
+        }
+    }
+}
+
+impl From<ChatIdFull> for ChatIdPartiality {
+    fn from(value: ChatIdFull) -> Self {
+        Self::Both(value)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatIdFull {
+    pub id: ChatId,
+    pub instance: String,
+}
+
+#[derive(Debug, Display, Clone)]
 pub enum ChatIdKind {
     ID(ChatId),
     Instance(String)
@@ -44,7 +105,7 @@ impl ChatIdKind {
     pub fn value(&self) -> String {
         match self {
             ChatIdKind::ID(id) => id.0.to_string(),
-            ChatIdKind::Instance(instance) => instance.to_owned()
+            ChatIdKind::Instance(instance) => instance.to_owned(),
         }
     }
 }
@@ -81,12 +142,13 @@ macro_rules! repository {
     ($name:ident, $($methods:item),*) => {
         #[derive(Clone)]
         pub struct $name {
-            pool: sqlx::Pool<sqlx::Postgres>
+            pool: sqlx::Pool<sqlx::Postgres>,
+            #[allow(dead_code)] features: crate::config::FeatureToggles,
         }
 
         impl $name {
-            pub fn new(pool: sqlx::Pool<sqlx::Postgres>) -> Self {
-                Self { pool }
+            pub fn new(pool: sqlx::Pool<sqlx::Postgres>, features: crate::config::FeatureToggles) -> Self {
+                Self { pool, features }
             }
 
             $($methods)*

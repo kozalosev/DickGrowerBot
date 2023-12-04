@@ -30,5 +30,6 @@ pub async fn help_cmd_handler(bot: Bot, msg: Message, cmd: HelpCommands, contain
             container.get_help_message(lang_code).to_owned()
         },
     };
-    reply_html(bot, msg, help).await
+    reply_html(bot, msg, help).await?;
+    Ok(())
 }

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.uid, name, created_at FROM Users u\n                JOIN Dicks d ON u.uid = d.uid\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7da5f924eab2fc23d5fabd7c27d3cbbfb2336a6fd13f658ebdbc6c82d1bb200a"
+}

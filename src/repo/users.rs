@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use teloxide::types::UserId;
-use crate::repo::{ChatIdKind, ChatIdType};
+use crate::repo::ChatIdKind;
 use crate::repository;
 
 #[derive(sqlx::FromRow, Debug)]
@@ -24,31 +24,36 @@ repository!(Users,
     }
 ,
     pub async fn get_chat_members(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<User>> {
-        let chat_id_type: ChatIdType = chat_id.into();
         sqlx::query_as!(User,
             "SELECT u.uid, name, created_at FROM Users u
                 JOIN Dicks d ON u.uid = d.uid
                 JOIN Chats c ON d.chat_id = c.id
-                WHERE c.type = $1 AND (c.chat_id = $2::bigint OR c.chat_instance = $2::text)",
-                chat_id_type as ChatIdType, chat_id.value() as String)
+                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text",
+                chat_id.value() as String)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| e.into())
     }
 ,
     pub async fn get_random_active_member(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
-        let chat_id_type: ChatIdType = chat_id.into();
         sqlx::query_as!(User,
             "SELECT u.uid, name, u.created_at FROM Users u
                 JOIN Dicks d ON u.uid = d.uid
                 JOIN Chats c ON d.chat_id = c.id
-                WHERE c.type = $1::chat_id_type AND (c.chat_id = $2::bigint OR c.chat_instance = $2::text)
+                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text
                     AND updated_at > current_timestamp - interval '1 week'
                 ORDER BY random() LIMIT 1",
-                chat_id_type as ChatIdType, chat_id.value() as String)
+                chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| e.into())
+    }
+,
+    pub async fn get(&self, user_id: UserId) -> Result<Option<User>, sqlx::Error> {
+        sqlx::query_as!(User, "SELECT uid, name, created_at FROM Users WHERE uid = $1",
+                user_id.0 as i64)
+            .fetch_optional(&self.pool)
+            .await
     }
 ,
     #[cfg(test)]

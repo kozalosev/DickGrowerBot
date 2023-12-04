@@ -26,21 +26,28 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     let answer = dick_of_day_impl(&repos, config, from_refs).await?;
-    reply_html(bot, msg, answer).await
+    reply_html(bot, msg, answer).await?;
+    Ok(())
 }
 
 pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
-    let (from, chat_id) = (from_refs.0, from_refs.1.into());
+    let (from, chat_id) = (from_refs.0, from_refs.1);
     let lang_code = ensure_lang_code(Some(from));
-    let winner = repos.users.get_random_active_member(chat_id).await?;
+    let winner = repos.users.get_random_active_member(&chat_id.kind()).await?;
     let answer = match winner {
         Some(winner) => {
             let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);
             let dod_result = repos.dicks.set_dod_winner(&chat_id, UserId(winner.uid as u64), bonus).await;
             let main_part = match dod_result {
                 Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
-                    t!("commands.dod.result", locale = &lang_code,
-                        name = winner.name, growth = bonus, length = new_length, pos = pos_in_top)
+                    let answer = t!("commands.dod.result", locale = &lang_code,
+                        name = winner.name, growth = bonus, length = new_length);
+                    if let Some(pos) = pos_in_top {
+                        let position = t!("commands.dod.result", locale = &lang_code, pos = pos);
+                        format!("{answer}\n{position}")
+                    } else {
+                        answer
+                    }
                 },
                 Ok(None) => {
                     log::error!("there was an attempt to set a non-existent dick as a winner (UserID={}, ChatId={})",

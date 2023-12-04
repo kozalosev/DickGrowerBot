@@ -12,9 +12,9 @@ _(compared with some competitors)_
 * **The Dick of the Day** daily contest to grow a randomly chosen dick for a bit more.
 * A way to play the game without the necessity to add the bot into a group (via inline queries with a callback button).
 * Import from _@pipisabot_ and _@kraft28_bot_ (not tested! help of its users is required).
+* PvP fights.
 
-### Soon
-* dick battles (PvP)
+### Soon (but not very, I guess)
 * global monthly events
 
 Features
@@ -35,7 +35,7 @@ Technical stuff
 _(to build the application without a running RDBMS)_
 
 ```shell
-cargo sqlx prepare
+cargo sqlx prepare -- --tests
 ```
 
 ### Run tests

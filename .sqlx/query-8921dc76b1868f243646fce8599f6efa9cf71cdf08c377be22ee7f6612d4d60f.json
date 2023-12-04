@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id as internal_id, chat_id, chat_instance FROM Chats\n                WHERE chat_id = $1::bigint OR chat_instance = $1::text",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "internal_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "chat_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "chat_instance",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "8921dc76b1868f243646fce8599f6efa9cf71cdf08c377be22ee7f6612d4d60f"
+}
