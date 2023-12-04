@@ -73,4 +73,30 @@ pub mod checks {
         reply_html(bot, msg, answer).await?;
         Ok(())
     }
+
+    pub mod inline {
+        use teloxide::Bot;
+        use teloxide::payloads::AnswerInlineQuerySetters;
+        use teloxide::prelude::{InlineQuery, Requester};
+        use teloxide::types::ChatType;
+        use super::HandlerResult;
+
+        pub fn is_group_chat(query: InlineQuery) -> bool {
+            query.chat_type
+                .map(|t| [ChatType::Group, ChatType::Supergroup].contains(&t))
+                .unwrap_or(false)
+        }
+
+        pub fn is_not_group_chat(query: InlineQuery) -> bool {
+            !is_group_chat(query)
+        }
+
+        pub async fn handle_not_group_chat(bot: Bot, query: InlineQuery) -> HandlerResult {
+            bot.answer_inline_query(query.id, vec![])
+                .is_personal(true)
+                .cache_time(1)
+                .await?;
+            Ok(())
+        }
+    }
 }
