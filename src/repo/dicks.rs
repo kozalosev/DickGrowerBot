@@ -35,16 +35,14 @@ impl Dicks {
 
     pub async fn create_or_grow(&self, uid: UserId, chat_id: &ChatIdPartiality, increment: i32) -> anyhow::Result<GrowthResult> {
         let uid = uid.0 as i64;
-        let mut tx = self.pool.begin().await?;
-        let internal_chat_id = self.chats.upsert_chat(&mut tx, chat_id).await?;
+        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
         let new_length = sqlx::query_scalar!(
             "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
                 ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
                 RETURNING length",
                 uid, internal_chat_id, increment)
-            .fetch_one(&mut *tx)
+            .fetch_one(&self.pool)
             .await?;
-        tx.commit().await?;
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
         Ok(GrowthResult { new_length, pos_in_top })
     }
@@ -64,15 +62,17 @@ impl Dicks {
     }
 
     pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: u32) -> anyhow::Result<Option<GrowthResult>> {
-        let uid = user_id.0 as i64;
+        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
+
         let mut tx = self.pool.begin().await?;
-        let internal_chat_id = self.chats.upsert_chat(&mut tx, chat_id).await?;
+        let uid = user_id.0 as i64;
         let new_length = match Self::grow_dods_dick(&mut tx, internal_chat_id, uid, bonus as i32).await? {
             Some(length) => length,
             None => return Ok(None)
         };
         Self::insert_to_dod_table(&mut tx, internal_chat_id, uid).await?;
         tx.commit().await?;
+
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
         Ok(Some(GrowthResult { new_length, pos_in_top }))
     }
@@ -90,9 +90,9 @@ impl Dicks {
     }
 
     pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u32) -> anyhow::Result<(GrowthResult, GrowthResult)> {
-        let mut tx = self.pool.begin().await?;
-        let internal_chat_id = self.chats.upsert_chat(&mut tx, chat_id).await?;
+        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
+        let mut tx = self.pool.begin().await?;
         let length_from = Self::move_length_for_one_user(&mut tx, internal_chat_id, from.0, -(length as i32)).await?;
         let length_to = Self::move_length_for_one_user(&mut tx, internal_chat_id, to.0, length as i32).await?;
         tx.commit().await?;

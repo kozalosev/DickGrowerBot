@@ -23,10 +23,10 @@ async fn upsert_chat() {
         instance: "instance".to_owned(),
     };
 
-    old_chat_id_new_instance(&db, &chats, chat_id_full.clone()).await;
+    old_chat_id_new_instance(&chats, chat_id_full.clone()).await;
     clear_dicks_and_chats(&db).await;
 
-    old_instance_new_chat_id(&db, &chats, chat_id_full.clone()).await;
+    old_instance_new_chat_id(&chats, chat_id_full.clone()).await;
     clear_dicks_and_chats(&db).await;
 
     two_separate_chats(&db, &chats, chat_id_full).await;
@@ -41,33 +41,25 @@ async fn clear_dicks_and_chats(db: &Pool<Postgres>) {
         .await.expect("couldn't delete chats");
 }
 
-async fn old_chat_id_new_instance(db: &Pool<Postgres>, chats: &repo::Chats, full: ChatIdFull) {
-    let mut tx = db.begin()
-        .await.expect("couldn't begin a transaction");
-
+async fn old_chat_id_new_instance(chats: &repo::Chats, full: ChatIdFull) {
     let (id, inst) = (full.id, full.instance.clone());
-    chats.upsert_chat(&mut tx, &ChatIdPartiality::Specific(id.into()))
+    chats.upsert_chat(&ChatIdPartiality::Specific(id.into()))
         .await.expect("couldn't create a chat");
 
-    chats.upsert_chat(&mut tx, &full.into())
+    chats.upsert_chat(&full.into())
         .await.expect("couldn't update the chat");
 
-    tx.commit().await.expect("couldn't commit the transaction");
     check_chat(chats, id, inst).await;
 }
 
-async fn old_instance_new_chat_id(db: &Pool<Postgres>, chats: &repo::Chats, full: ChatIdFull) {
-    let mut tx = db.begin()
-        .await.expect("couldn't begin a transaction");
-
+async fn old_instance_new_chat_id(chats: &repo::Chats, full: ChatIdFull) {
     let (id, inst) = (full.id, full.instance.clone());
-    chats.upsert_chat(&mut tx, &ChatIdPartiality::Specific(inst.clone().into()))
+    chats.upsert_chat(&ChatIdPartiality::Specific(inst.clone().into()))
         .await.expect("couldn't create a chat");
 
-    chats.upsert_chat(&mut tx, &full.into())
+    chats.upsert_chat(&full.into())
         .await.expect("couldn't update the chat");
 
-    tx.commit().await.expect("couldn't commit the transaction");
     check_chat(chats, id, inst).await;
 }
 
