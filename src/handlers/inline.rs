@@ -94,12 +94,10 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
         })
         .collect();
 
-    let mut answer = bot.answer_inline_query(query.id, results)
-        .is_personal(true);
-    if cfg!(debug_assertions) {
-        answer.cache_time.replace(1);
-    }
-    answer.await?;
+    bot.answer_inline_query(query.id, results)
+        .is_personal(true)
+        .cache_time(1)
+        .await?;
     Ok(())
 }
 
