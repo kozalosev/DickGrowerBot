@@ -8,7 +8,6 @@ mod promo;
 pub(crate) mod test;
 
 use sqlx::{Pool, Postgres};
-use strum_macros::Display;
 use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
@@ -38,15 +37,17 @@ impl Repositories {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(derive_more::Display, Debug, Default, Copy, Clone)]
 pub enum ChatIdSource {
     InlineQuery,
     #[default] Database,
 }
 
-#[derive(Display, Debug)]
+#[derive(derive_more::Display, Debug, Clone)]
 pub enum ChatIdPartiality {
+    #[display("ChatIdPartiality::Both({_0}, {_1})")]
     Both(ChatIdFull, ChatIdSource),
+    #[display("ChatIdPartiality::Specific({_0})")]
     Specific(ChatIdKind)
 }
 
@@ -80,7 +81,8 @@ impl ChatIdPartiality {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, derive_more::Display)]
+#[display("ChatIdFull({id}, {instance})")]
 pub struct ChatIdFull {
     pub id: ChatId,
     pub instance: String,
@@ -92,7 +94,7 @@ impl ChatIdFull {
     }
 }
 
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, derive_more::Display, Clone)]
 pub enum ChatIdKind {
     ID(ChatId),
     Instance(String)
