@@ -4,6 +4,8 @@ The growth range for the command is between <b>{grow_min}</b> and <b>{grow_max}<
 
 Also, there is a daily election of <i>the Dick of the Day</i> in every chat. This title brings its owner some bonus centimeters additionally. Only active players who have grown their cucumber at least once in the last week participate in the election.
 
+If you want to make your little bro even longer and is ready to get some risk for this opportunity, you may fight with your friends. Just place a bet via /pvp command! The winner will get the specified number of centimeters. The looser will lose theirs. It's simple.
+
 <b>Wait, I already know similar bots in Telegram and have a very big thing there…</b>
 
 This bot has been created as a replacement for all competitors abusing their ability to send messages in group chats by sending indecently large amount of advertising. I swear to never send you a message consisting of advertisement only!

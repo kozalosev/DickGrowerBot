@@ -27,8 +27,8 @@ commands:
       start: "<b>%{name}</b> challenged the chat with a bet of <b>%{bet} cm</b>!"
       finish: "The winner is <b>%{winner_name}</b>! His dick is now <b>%{winner_length} cm</b> long. The loser's one is <b>%{loser_length}</b>."
       position:
-        winner: "The <b>winner</b>'s position in the top is <b>%{pos}</b>."
-        loser: "The <b>loser</b>'s position in the top is <b>%{pos}</b>."
+        winner: "<b>%{name}</b>'s position in the top is <b>%{pos}</b>."
+        loser: "<b>%{name}</b>'s position in the top is <b>%{pos}</b>."
     button: "Attack!"
     errors:
       no_args: "Call the command with a number of centimeters you're willing to bet."

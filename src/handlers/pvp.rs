@@ -10,11 +10,10 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, MessageId, ParseMode, ReplyMarkup, User, UserId};
-use ChatIdKind::ID;
-use ChatIdPartiality::{Both, Specific};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{metrics, repo};
-use crate::repo::{ChatIdFull, ChatIdKind, ChatIdPartiality, Repositories};
+use crate::config::AppConfig;
+use crate::repo::{ChatIdPartiality, Repositories};
 
 const CALLBACK_PREFIX: &str = "pvp:";
 
@@ -257,21 +256,13 @@ async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: U
         let (winner, loser) = choose_winner(initiator, acceptor_uid);
         let (loser_res, winner_res) = p.repos.dicks.move_length(p.chat_id, loser, winner, bet).await?;
 
-        let winner_info = if winner == acceptor.uid {
-            repo::User {
-                uid: acceptor.uid.0 as i64,
-                name: acceptor.name,
-                created_at: Default::default(),
-            }
-        } else {
-            p.repos.users.get(winner).await?
-                .ok_or(anyhow!("winner must present in the database!"))?
-        };
+        let winner_info = get_user_info(&p.repos.users, winner, &acceptor).await?;
+        let loser_info = get_user_info(&p.repos.users, loser, &acceptor).await?;
         let main_part = t!("commands.pvp.results.finish", locale = &p.lang_code,
             winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length);
         if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
-            let winner_pos = t!("commands.pvp.results.position.winner", pos = winner_pos, locale = &p.lang_code);
-            let loser_pos = t!("commands.pvp.results.position.loser", pos = loser_pos, locale = &p.lang_code);
+            let winner_pos = t!("commands.pvp.results.position.winner", name = winner_info.name, pos = winner_pos, locale = &p.lang_code);
+            let loser_pos = t!("commands.pvp.results.position.loser", name = loser_info.name, pos = loser_pos, locale = &p.lang_code);
             format!("{main_part}\n\n{winner_pos}\n{loser_pos}")
         } else {
             main_part
@@ -302,4 +293,18 @@ fn parse_data(maybe_data: Option<String>) -> anyhow::Result<(UserId, u32)> {
     } else {
         Err(anyhow!("invalid number of arguments ({}) in the callback data: {:?}", parts.len(), parts))
     }
+}
+
+async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInfo) -> anyhow::Result<repo::User> {
+    let user = if user_uid == acceptor.uid {
+        repo::User {
+            uid: acceptor.uid.0 as i64,
+            name: acceptor.name.clone(),
+            created_at: Default::default(),
+        }
+    } else {
+        users.get(user_uid).await?
+            .ok_or(anyhow!("pvp participant must present in the database!"))?
+    };
+    Ok(user)
 }
