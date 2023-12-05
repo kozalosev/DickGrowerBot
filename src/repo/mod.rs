@@ -8,7 +8,6 @@ mod promo;
 pub(crate) mod test;
 
 use sqlx::{Pool, Postgres};
-use strum_macros::Display;
 use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
@@ -38,9 +37,17 @@ impl Repositories {
     }
 }
 
-#[derive(Display, Debug)]
+#[derive(derive_more::Display, Debug, Default, Copy, Clone)]
+pub enum ChatIdSource {
+    InlineQuery,
+    #[default] Database,
+}
+
+#[derive(derive_more::Display, Debug, Clone)]
 pub enum ChatIdPartiality {
-    Both(ChatIdFull),
+    #[display("ChatIdPartiality::Both({_0}, {_1})")]
+    Both(ChatIdFull, ChatIdSource),
+    #[display("ChatIdPartiality::Specific({_0})")]
     Specific(ChatIdKind)
 }
 
@@ -65,25 +72,29 @@ impl From<ChatIdKind> for ChatIdPartiality {
 impl ChatIdPartiality {
     pub fn kind(&self) -> ChatIdKind {
         match self {
-            ChatIdPartiality::Both(ChatIdFull { id, .. }) => ChatIdKind::ID(*id),
+            ChatIdPartiality::Both(ChatIdFull { id, instance }, qs) => match qs {
+                ChatIdSource::Database => ChatIdKind::ID(*id),
+                ChatIdSource::InlineQuery => ChatIdKind::Instance(instance.clone()),
+            }
             ChatIdPartiality::Specific(kind) => kind.clone()
         }
     }
 }
 
-impl From<ChatIdFull> for ChatIdPartiality {
-    fn from(value: ChatIdFull) -> Self {
-        Self::Both(value)
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, derive_more::Display)]
+#[display("ChatIdFull({id}, {instance})")]
 pub struct ChatIdFull {
     pub id: ChatId,
     pub instance: String,
 }
 
-#[derive(Debug, Display, Clone)]
+impl ChatIdFull {
+    pub fn to_partiality(self, query_source: ChatIdSource) -> ChatIdPartiality {
+        ChatIdPartiality::Both(self, query_source)
+    }
+}
+
+#[derive(Debug, derive_more::Display, Clone)]
 pub enum ChatIdKind {
     ID(ChatId),
     Instance(String)
@@ -128,7 +139,7 @@ impl From<&ChatIdKind> for ChatIdType {
 }
 
 
-pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
+pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Pool<Postgres>, anyhow::Error> {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.max_connections)
         .connect(config.url.as_str()).await?;

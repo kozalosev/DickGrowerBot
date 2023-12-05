@@ -14,7 +14,7 @@ use crate::config::AppConfig;
 use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerResult, utils};
 use crate::handlers::utils::page::Page;
 use crate::metrics;
-use crate::repo::{ChatIdFull, NoChatIdError, Repositories};
+use crate::repo::{ChatIdFull, NoChatIdError, ChatIdSource, Repositories};
 
 #[derive(Debug, strum_macros::Display, EnumIter, EnumString)]
 #[strum(serialize_all = "snake_case")]
@@ -146,7 +146,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                 Ok(info) => ChatIdFull {
                     id: ChatId(info.chat_id),
                     instance: query.chat_instance.clone(),
-                }.into(),
+                }.to_partiality(ChatIdSource::InlineQuery),
                 Err(err) => {
                     log::error!("callback_handler couldn't resolve an inline_message_id: {err}");
                     query.chat_instance.clone().into()

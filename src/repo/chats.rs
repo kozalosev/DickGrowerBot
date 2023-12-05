@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use sqlx::{Postgres, Transaction};
 use sqlx::postgres::PgQueryResult;
 use teloxide::types::ChatId;
-use super::{ChatIdFull, ChatIdKind, ChatIdPartiality};
+use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repository;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -21,7 +21,7 @@ impl TryInto<ChatIdPartiality> for Chat {
 
     fn try_into(self) -> Result<ChatIdPartiality, Self::Error> {
         match (self.chat_id, self.chat_instance) {
-            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(ChatIdFull { id: ChatId(id), instance })),
+            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(ChatIdFull { id: ChatId(id), instance }, ChatIdSource::Database)),
             (Some(id), None) => Ok(ChatIdPartiality::Specific(ChatIdKind::ID(ChatId(id)))),
             (None, Some(instance)) => Ok(ChatIdPartiality::Specific(ChatIdKind::Instance(instance))),
             (None, None) => Err(NoChatIdError(self.internal_id))
@@ -39,25 +39,28 @@ repository!(Chats,
             .map_err(|e| e.into())
     }
 ,
-    pub async fn upsert_chat(&self, tx: &mut Transaction<'_, Postgres>, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
+    pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
         let (id, instance) = match chat_id {
-            ChatIdPartiality::Both(full) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
-            ChatIdPartiality::Both(full) => (Some(full.id.0), None),
+            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
+            ChatIdPartiality::Both(full, _) => (Some(full.id.0), None),
             ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.0), None),
             ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_owned())),
         };
+        let mut tx = self.pool.begin().await?;
         let chats = sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
                 WHERE chat_id = $1 OR chat_instance = $2",
                 id, instance)
-            .fetch_all(&mut **tx)
+            .fetch_all(&mut *tx)
             .await?;
-        match chats.len() {
+        let internal_id = match chats.len() {
             1 if chats[0].chat_id == id && chats[0].chat_instance == instance => Ok(chats[0].internal_id),
-            1 => Self::update_chat(&mut *tx, chats[0].internal_id, id, instance).await,
-            0 => Self::create_chat(&mut *tx, id, instance).await,
-            2 => Self::merge_chats(&mut *tx, [&chats[0], &chats[1]]).await,
+            1 => Self::update_chat(&mut tx, chats[0].internal_id, id, instance).await,
+            0 => Self::create_chat(&mut tx, id, instance).await,
+            2 => Self::merge_chats(&mut tx, [&chats[0], &chats[1]]).await,
             x => Err(anyhow!("unexpected count of chats ({x}): {chats:?}")),
-        }
+        }?;
+        tx.commit().await?;
+        Ok(internal_id)
     }
 ,
     async fn create_chat(tx: &mut Transaction<'_, Postgres>, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
