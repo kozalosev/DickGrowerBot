@@ -147,7 +147,7 @@ impl From<Option<String>> for EditMessageTextId {
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories) -> HandlerResult {
     let (chat_id, msg_id): (ChatIdPartiality, EditMessageTextId) = query.message
-        .map(|msg| (msg.chat.id, msg.id.into()))
+        .map(|msg| (msg.chat.id, msg.id))
         .or_else(|| query.inline_message_id.as_ref()
             .and_then(|msg_id| utils::resolve_inline_message_id(msg_id)
                 .or_else(|e| {
@@ -155,9 +155,9 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
                     Err(e)
                 })
                 .ok())
-            .map(|info| (ChatId(info.chat_id), MessageId(info.message_id).into()))
+            .map(|info| (ChatId(info.chat_id), MessageId(info.message_id)))
         )
-        .map(|(chat_id, maybe_msg_id)| (chat_id.into(), maybe_msg_id))
+        .map(|(chat_id, msg_id)| (chat_id.into(), msg_id.into()))
         .unwrap_or((query.chat_instance.into(), query.inline_message_id.into()));
 
     let params = BattleParams {
@@ -177,7 +177,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     let (text, keyboard) = pvp_impl_attack(params, initiator, query.from.into(), bet).await?;
     let answer_req_fut = bot.answer_callback_query(query.id).into_future();
     let (answer_resp, edit_resp) = match (chat_id, msg_id) {
-        (Both(ChatIdFull { id, .. }) | Specific(ID(id)), EditMessageTextId::MessageId(msg_id)) => {
+        (Both(ChatIdFull { id, .. }, _) | Specific(ID(id)), EditMessageTextId::MessageId(msg_id)) => {
             let mut edit_req = bot.edit_message_text(id, msg_id, text);
             edit_req.parse_mode.replace(ParseMode::Html);
             edit_req.reply_markup = keyboard;

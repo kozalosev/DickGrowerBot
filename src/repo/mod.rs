@@ -38,9 +38,15 @@ impl Repositories {
     }
 }
 
+#[derive(Debug, Default)]
+pub enum ChatIdSource {
+    InlineQuery,
+    #[default] Database,
+}
+
 #[derive(Display, Debug)]
 pub enum ChatIdPartiality {
-    Both(ChatIdFull),
+    Both(ChatIdFull, ChatIdSource),
     Specific(ChatIdKind)
 }
 
@@ -65,15 +71,12 @@ impl From<ChatIdKind> for ChatIdPartiality {
 impl ChatIdPartiality {
     pub fn kind(&self) -> ChatIdKind {
         match self {
-            ChatIdPartiality::Both(ChatIdFull { id, .. }) => ChatIdKind::ID(*id),
+            ChatIdPartiality::Both(ChatIdFull { id, instance }, qs) => match qs {
+                ChatIdSource::Database => ChatIdKind::ID(*id),
+                ChatIdSource::InlineQuery => ChatIdKind::Instance(instance.clone()),
+            }
             ChatIdPartiality::Specific(kind) => kind.clone()
         }
-    }
-}
-
-impl From<ChatIdFull> for ChatIdPartiality {
-    fn from(value: ChatIdFull) -> Self {
-        Self::Both(value)
     }
 }
 
@@ -81,6 +84,12 @@ impl From<ChatIdFull> for ChatIdPartiality {
 pub struct ChatIdFull {
     pub id: ChatId,
     pub instance: String,
+}
+
+impl ChatIdFull {
+    pub fn to_partiality(self, query_source: ChatIdSource) -> ChatIdPartiality {
+        ChatIdPartiality::Both(self, query_source)
+    }
 }
 
 #[derive(Debug, Display, Clone)]
@@ -128,7 +137,7 @@ impl From<&ChatIdKind> for ChatIdType {
 }
 
 
-pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<sqlx::Pool<sqlx::Postgres>, anyhow::Error> {
+pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Pool<Postgres>, anyhow::Error> {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.max_connections)
         .connect(config.url.as_str()).await?;

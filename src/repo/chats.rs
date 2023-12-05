@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use sqlx::{Postgres, Transaction};
 use sqlx::postgres::PgQueryResult;
 use teloxide::types::ChatId;
-use super::{ChatIdFull, ChatIdKind, ChatIdPartiality};
+use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repository;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -21,7 +21,7 @@ impl TryInto<ChatIdPartiality> for Chat {
 
     fn try_into(self) -> Result<ChatIdPartiality, Self::Error> {
         match (self.chat_id, self.chat_instance) {
-            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(ChatIdFull { id: ChatId(id), instance })),
+            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(ChatIdFull { id: ChatId(id), instance }, ChatIdSource::Database)),
             (Some(id), None) => Ok(ChatIdPartiality::Specific(ChatIdKind::ID(ChatId(id)))),
             (None, Some(instance)) => Ok(ChatIdPartiality::Specific(ChatIdKind::Instance(instance))),
             (None, None) => Err(NoChatIdError(self.internal_id))
@@ -41,8 +41,8 @@ repository!(Chats,
 ,
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
         let (id, instance) = match chat_id {
-            ChatIdPartiality::Both(full) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
-            ChatIdPartiality::Both(full) => (Some(full.id.0), None),
+            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
+            ChatIdPartiality::Both(full, _) => (Some(full.id.0), None),
             ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.0), None),
             ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_owned())),
         };

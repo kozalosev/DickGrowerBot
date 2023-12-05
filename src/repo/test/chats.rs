@@ -46,7 +46,7 @@ async fn old_chat_id_new_instance(chats: &repo::Chats, full: ChatIdFull) {
     chats.upsert_chat(&ChatIdPartiality::Specific(id.into()))
         .await.expect("couldn't create a chat");
 
-    chats.upsert_chat(&full.into())
+    chats.upsert_chat(&full.to_partiality(Default::default()))
         .await.expect("couldn't update the chat");
 
     check_chat(chats, id, inst).await;
@@ -57,7 +57,7 @@ async fn old_instance_new_chat_id(chats: &repo::Chats, full: ChatIdFull) {
     chats.upsert_chat(&ChatIdPartiality::Specific(inst.clone().into()))
         .await.expect("couldn't create a chat");
 
-    chats.upsert_chat(&full.into())
+    chats.upsert_chat(&full.to_partiality(Default::default()))
         .await.expect("couldn't update the chat");
 
     check_chat(chats, id, inst).await;
@@ -77,7 +77,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
         .execute(db)
         .await.expect("couldn't create dicks");
 
-    let chat_id = full.into();
+    let chat_id = full.to_partiality(Default::default());
     dicks.create_or_grow(UserId(UID as u64), &chat_id, 0)
         .await
         .expect("couldn't create a dick");
