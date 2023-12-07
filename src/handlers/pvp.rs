@@ -102,10 +102,12 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
         ]]))
         .into();
 
-    bot.answer_inline_query(query.id, vec![res])
-        .is_personal(true)
-        .cache_time(1)
-        .await?;
+    let mut answer = bot.answer_inline_query(query.id, vec![res])
+        .is_personal(true);
+    if cfg!(debug_assertions) {
+        answer.cache_time.replace(1);
+    }
+    answer.await?;
     Ok(())
 }
 
