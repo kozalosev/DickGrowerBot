@@ -2,6 +2,7 @@ use std::fmt::Formatter;
 use anyhow::anyhow;
 use byteorder::{LittleEndian, ReadBytesExt};
 
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct InlineMessageIdInfo {
     pub dc_id: i32,
@@ -25,6 +26,7 @@ pub fn resolve_inline_message_id(inline_message_id: &str) -> anyhow::Result<Inli
     log::debug!("inline_message_id: {inline_message_id}");
     let info = inline_message_id.try_into()
         .map_err(|e: InvalidIDFormat| anyhow!(e))?;
+    log::debug!("resolved InlineMessageIdInfo: {info:?}");
     Ok(info)
 }
 

@@ -42,7 +42,8 @@ repository!(Chats,
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
         let (id, instance) = match chat_id {
             ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
-            ChatIdPartiality::Both(full, _) => (Some(full.id.0), None),
+            ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id.0), None),
+            ChatIdPartiality::Both(full, ChatIdSource::InlineQuery) => (None, Some(full.instance.clone())),
             ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.0), None),
             ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_owned())),
         };
@@ -64,6 +65,7 @@ repository!(Chats,
     }
 ,
     async fn create_chat(tx: &mut Transaction<'_, Postgres>, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
+        log::info!("creating a chat with chat_id = {chat_id:?} and chat_instance = {chat_instance:?}");
         sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
                 chat_id, chat_instance)
             .fetch_one(&mut **tx)
@@ -72,7 +74,8 @@ repository!(Chats,
     }
 ,
     async fn update_chat(tx: &mut Transaction<'_, Postgres>, internal_id: i64, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
-        sqlx::query!("UPDATE Chats SET chat_id = $2, chat_instance = $3 WHERE id = $1",
+        log::info!("updating the chat with id = {internal_id}, chat_id = {chat_id:?}, and chat_instance = {chat_instance:?}");
+        sqlx::query!("UPDATE Chats SET chat_id = coalesce($2, chat_id), chat_instance = coalesce($3, chat_instance) WHERE id = $1",
                 internal_id, chat_id, chat_instance)
             .execute(&mut **tx)
             .await
