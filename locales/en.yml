@@ -32,8 +32,11 @@ commands:
     button: "Attack!"
     errors:
       no_args: "Call the command with a number of centimeters you're willing to bet."
-      not_enough: "Meh. The initiator's dick is not long enough for such a big bet!"
+      not_enough: "Meh. The %{subject}'s dick is not long enough for such a big bet!"
       same_person: "You cannot fight with yourself!"
+    subjects:
+      initiator: "initiator"
+      acceptor: "acceptor"
   import:
     description: "Import dicks from other bots"
     result:

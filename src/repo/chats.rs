@@ -74,16 +74,12 @@ repository!(Chats,
     }
 ,
     async fn update_chat(tx: &mut Transaction<'_, Postgres>, internal_id: i64, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
-        log::info!("updating the chat with id = {internal_id}, chat_id = {chat_id:?}, and chat_instance = {chat_instance:?}");
+        log::debug!("updating the chat with id = {internal_id}, chat_id = {chat_id:?}, and chat_instance = {chat_instance:?}");
         sqlx::query!("UPDATE Chats SET chat_id = coalesce($2, chat_id), chat_instance = coalesce($3, chat_instance) WHERE id = $1",
                 internal_id, chat_id, chat_instance)
             .execute(&mut **tx)
             .await
-            .and_then(|res| if res.rows_affected() == 1 {
-                    Ok(internal_id)
-                } else {
-                    Err(sqlx::Error::RowNotFound)
-                })
+            .map(|_| internal_id)
             .map_err(|e| e.into())
     }
 ,
@@ -107,11 +103,13 @@ repository!(Chats,
                 state.deleted.0, state.deleted.1)
             .execute(&mut **tx)
             .await
+            .map_err(|e| e.into())
             .and_then(ensure_only_one_row_updated)?;
         sqlx::query!("UPDATE Chats SET chat_instance = $3 WHERE id = $1 AND chat_id = $2",
                 state.main.internal_id, state.main.chat_id, state.main.chat_instance)
             .execute(&mut **tx)
             .await
+            .map_err(|e| e.into())
             .and_then(ensure_only_one_row_updated)?;
         Ok(state.main.internal_id)
     }
@@ -167,11 +165,10 @@ fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, 
     }
 }
 
-fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<PgQueryResult, sqlx::Error> {
-    if res.rows_affected() == 1 {
-        Ok(res)
-    } else {
-        Err(sqlx::Error::RowNotFound)
+fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<PgQueryResult, anyhow::Error> {
+    match res.rows_affected() {
+        1 => Ok(res),
+        x => Err(anyhow!("not only one row was updated but {x}"))
     }
 }
 

@@ -27,6 +27,7 @@ pub struct DatabaseConfig {
 pub struct FeatureToggles {
     pub chats_merging: bool,
     pub top_unlimited: bool,
+    pub pvp: BattlesFeatureToggles,
 }
 
 #[cfg(test)]
@@ -35,8 +36,14 @@ impl Default for FeatureToggles {
         Self {
             chats_merging: true,
             top_unlimited: true,
+            pvp: Default::default(),
         }
     }
+}
+
+#[derive(Copy, Clone, Default)]
+pub struct BattlesFeatureToggles {
+    pub check_acceptor_length: bool,
 }
 
 impl AppConfig {
@@ -49,10 +56,14 @@ impl AppConfig {
         let top_limit = get_value_or_default("TOP_LIMIT", 10);
         let chats_merging = get_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_value_or_default("TOP_UNLIMITED_ENABLED", false);
+        let check_acceptor_length = get_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
         Self {
             features: FeatureToggles {
                 chats_merging,
                 top_unlimited,
+                pvp: BattlesFeatureToggles {
+                    check_acceptor_length,
+                }
             },
             growth_range: min..=max,
             grow_shrink_ratio,

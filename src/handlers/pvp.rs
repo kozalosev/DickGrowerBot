@@ -1,7 +1,7 @@
 use std::future::IntoFuture;
 use anyhow::anyhow;
 use futures::future::join;
-use futures::TryFutureExt;
+use futures::{join, TryFutureExt};
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
@@ -12,7 +12,7 @@ use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, MessageId, ParseMode, ReplyMarkup, User, UserId};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{metrics, repo};
-use crate::config::AppConfig;
+use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::repo::{ChatIdPartiality, Repositories};
 
 const CALLBACK_PREFIX: &str = "pvp:";
@@ -47,7 +47,8 @@ impl BattleCommands {
     }
 }
 
-pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands, repos: Repositories) -> HandlerResult {
+pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
+                         repos: Repositories, config: AppConfig) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let user = msg.from().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
@@ -55,6 +56,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands, repos: Rep
     let lang_code = ensure_lang_code(msg.from());
     let params = BattleParams {
         repos,
+        features: config.features.pvp,
         chat_id: &chat_id,
         lang_code,
     };
@@ -157,6 +159,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
 
     let params = BattleParams {
         repos,
+        features: config.features.pvp,
         lang_code: ensure_lang_code(Some(&query.from)),
         chat_id: &chat_id,
     };
@@ -202,6 +205,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
 
 pub(crate) struct BattleParams<'a> {
     repos: Repositories,
+    features: BattlesFeatureToggles,
     chat_id: &'a ChatIdPartiality,
     lang_code: String,
 }
@@ -250,8 +254,14 @@ pub(crate) async fn pvp_impl_start<'a>(p: BattleParams<'a>, initiator: UserInfo,
 }
 
 async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
-    let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator, bet).await?;
-    let text = if enough {
+    let chat_id_kind = p.chat_id.kind();
+    let (enough_initiator, enough_acceptor) = join!(
+       p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
+       p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { 0 }),
+    );
+    let (enough_initiator, enough_acceptor) = (enough_initiator?, enough_acceptor?);
+
+    let text = if enough_initiator && enough_acceptor {
         let acceptor_uid = acceptor.clone().into();
         let (winner, loser) = choose_winner(initiator, acceptor_uid);
         let (loser_res, winner_res) = p.repos.dicks.move_length(p.chat_id, loser, winner, bet).await?;
@@ -268,7 +278,12 @@ async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: U
             main_part
         }
     } else {
-        t!("commands.pvp.errors.not_enough", locale = &p.lang_code)
+        let subject = if enough_acceptor {
+            t!("commands.pvp.subjects.initiator", locale = &p.lang_code)
+        } else {
+            t!("commands.pvp.subjects.acceptor", locale = &p.lang_code)
+        };
+        t!("commands.pvp.errors.not_enough", subject = subject, locale = &p.lang_code)
     };
     Ok((text, None))
 }
