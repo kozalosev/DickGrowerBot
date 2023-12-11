@@ -10,7 +10,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, MessageId, ParseMode, ReplyMarkup, User, UserId};
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
+use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::repo::{ChatIdPartiality, Repositories};
@@ -171,33 +171,44 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         return Ok(())
     }
 
-    let (text, keyboard) = pvp_impl_attack(params, initiator, query.from.into(), bet).await?;
-
-    let answer_req_fut = bot.answer_callback_query(query.id).into_future();
-    let (answer_resp, edit_resp) = match &edit_params {
-        EditMessageTextParams::Chat(chat_id, message_id) => {
-            let mut edit_req = bot.edit_message_text(*chat_id, message_id.clone(), text);
-            edit_req.parse_mode.replace(ParseMode::Html);
-            edit_req.reply_markup = keyboard;
-            join(
-                answer_req_fut,
-                edit_req.into_future().map_ok(|_| ())
-            ).await
+    let attack_result = pvp_impl_attack(params, initiator, query.from.into(), bet).await?;
+    let answer_req = bot.answer_callback_query(query.id);
+    match attack_result {
+        CallbackResult::EditMessage(text, keyboard) => {
+            let answer_req_fut = answer_req.into_future();
+            let (answer_resp, edit_resp) = match &edit_params {
+                EditMessageTextParams::Chat(chat_id, message_id) => {
+                    let mut edit_req = bot.edit_message_text(*chat_id, message_id.clone(), text);
+                    edit_req.parse_mode.replace(ParseMode::Html);
+                    edit_req.reply_markup = keyboard;
+                    join(
+                        answer_req_fut,
+                        edit_req.into_future().map_ok(|_| ())
+                    ).await
+                }
+                EditMessageTextParams::Inline { inline_message_id } => {
+                    let mut edit_req = bot.edit_message_text_inline(inline_message_id, text);
+                    edit_req.parse_mode.replace(ParseMode::Html);
+                    edit_req.reply_markup = keyboard;
+                    join(
+                        answer_req_fut,
+                        edit_req.into_future().map_ok(|_| ())
+                    ).await
+                }
+            };
+            answer_resp?;
+            if edit_resp.is_err() {
+                log::error!("couldn't edit the message ({chat_id}, {edit_params:?}): {}", edit_resp.unwrap_err())
+            }
         }
-        EditMessageTextParams::Inline { inline_message_id } => {
-            let mut edit_req = bot.edit_message_text_inline(inline_message_id, text);
-            edit_req.parse_mode.replace(ParseMode::Html);
-            edit_req.reply_markup = keyboard;
-            join(
-                answer_req_fut,
-                edit_req.into_future().map_ok(|_| ())
-            ).await
+        CallbackResult::ShowError(error) => {
+            answer_req
+                .text(error)
+                .show_alert(true)
+                .await?;
         }
-    };
-    answer_resp?;
-    if edit_resp.is_err() {
-        log::error!("couldn't edit the message ({chat_id}, {edit_params:?}): {}", edit_resp.unwrap_err())
     }
+
     metrics::CMD_PVP_COUNTER.inline.inc();
     Ok(())
 }
@@ -247,12 +258,12 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u3
         ]]);
         (text, Some(keyboard))
     } else {
-        (t!("commands.pvp.errors.not_enough", locale = &p.lang_code), None)
+        (t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code), None)
     };
     Ok(data)
 }
 
-async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u32) -> anyhow::Result<CallbackResult> {
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
@@ -260,7 +271,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
     );
     let (enough_initiator, enough_acceptor) = (enough_initiator?, enough_acceptor?);
 
-    let text = if enough_initiator && enough_acceptor {
+    let result = if enough_initiator && enough_acceptor {
         let acceptor_uid = acceptor.clone().into();
         let (winner, loser) = choose_winner(initiator, acceptor_uid);
         let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
@@ -269,22 +280,22 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         let loser_info = get_user_info(&p.repos.users, loser, &acceptor).await?;
         let main_part = t!("commands.pvp.results.finish", locale = &p.lang_code,
             winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length);
-        if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
+        let text = if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
             let winner_pos = t!("commands.pvp.results.position.winner", locale = &p.lang_code, name = winner_info.name, pos = winner_pos);
             let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.name, pos = loser_pos);
             format!("{main_part}\n\n{winner_pos}\n{loser_pos}")
         } else {
             main_part
-        }
-    } else {
-        let subject = if enough_acceptor {
-            t!("commands.pvp.subjects.initiator", locale = &p.lang_code)
-        } else {
-            t!("commands.pvp.subjects.acceptor", locale = &p.lang_code)
         };
-        t!("commands.pvp.errors.not_enough", locale = &p.lang_code, subject = subject)
+        CallbackResult::EditMessage(text, None)
+    } else if enough_acceptor {
+        let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code);
+        CallbackResult::EditMessage(text, None)
+    } else {
+        let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code);
+        CallbackResult::ShowError(text)
     };
-    Ok((text, None))
+    Ok(result)
 }
 
 fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {

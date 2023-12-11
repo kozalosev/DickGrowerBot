@@ -11,7 +11,7 @@ use std::borrow::ToOwned;
 use teloxide::Bot;
 use teloxide::payloads::SendMessage;
 use teloxide::requests::{JsonRequest, Requester};
-use teloxide::types::{Message, User};
+use teloxide::types::{InlineKeyboardMarkup, Message, User};
 use teloxide::types::ParseMode::Html;
 
 pub use dick::*;
@@ -22,6 +22,11 @@ pub use inline::*;
 pub use promo::*;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+pub enum CallbackResult {
+    EditMessage(String, Option<InlineKeyboardMarkup>),
+    ShowError(String),
+}
 
 pub fn ensure_lang_code(user: Option<&User>) -> String {
     user
