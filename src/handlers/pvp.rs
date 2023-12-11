@@ -52,12 +52,11 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let user = msg.from().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
-    let chat_id = msg.chat.id.into();
     let lang_code = ensure_lang_code(msg.from());
     let params = BattleParams {
         repos,
         features: config.features.pvp,
-        chat_id: &chat_id,
+        chat_id: msg.chat.id.into(),
         lang_code,
     };
     let (text, keyboard) = pvp_impl_start(params, user, cmd.bet()).await?;
@@ -93,8 +92,8 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let lang_code = ensure_lang_code(Some(&query.from));
     let name = utils::get_full_name(&query.from);
 
-    let title = t!("inline.results.titles.pvp", bet = bet, locale = &lang_code);
-    let text = t!("commands.pvp.results.start", name = name, bet = bet, locale = &lang_code);
+    let title = t!("inline.results.titles.pvp", locale = &lang_code, bet = bet);
+    let text = t!("commands.pvp.results.start", locale = &lang_code, name = name, bet = bet);
     let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
     let btn_label = t!("commands.pvp.button", locale = &lang_code);
     let btn_data = format!("{CALLBACK_PREFIX}{}:{bet}", query.from.id);
@@ -161,7 +160,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         repos,
         features: config.features.pvp,
         lang_code: ensure_lang_code(Some(&query.from)),
-        chat_id: &chat_id,
+        chat_id: chat_id.clone(),
     };
     let (initiator, bet) = parse_data(query.data)?;
     if initiator == query.from.id {
@@ -203,10 +202,10 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     Ok(())
 }
 
-pub(crate) struct BattleParams<'a> {
+pub(crate) struct BattleParams {
     repos: Repositories,
     features: BattlesFeatureToggles,
-    chat_id: &'a ChatIdPartiality,
+    chat_id: ChatIdPartiality,
     lang_code: String,
 }
 
@@ -237,10 +236,10 @@ impl Into<UserId> for UserInfo {
     }
 }
 
-pub(crate) async fn pvp_impl_start<'a>(p: BattleParams<'a>, initiator: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     let data = if enough {
-        let text = t!("commands.pvp.results.start", name = initiator.name, bet = bet, locale = &p.lang_code);
+        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name, bet = bet);
         let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
         let btn_data = format!("{CALLBACK_PREFIX}{}:{bet}", initiator.uid);
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
@@ -253,7 +252,7 @@ pub(crate) async fn pvp_impl_start<'a>(p: BattleParams<'a>, initiator: UserInfo,
     Ok(data)
 }
 
-async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
@@ -264,15 +263,15 @@ async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: U
     let text = if enough_initiator && enough_acceptor {
         let acceptor_uid = acceptor.clone().into();
         let (winner, loser) = choose_winner(initiator, acceptor_uid);
-        let (loser_res, winner_res) = p.repos.dicks.move_length(p.chat_id, loser, winner, bet).await?;
+        let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
 
         let winner_info = get_user_info(&p.repos.users, winner, &acceptor).await?;
         let loser_info = get_user_info(&p.repos.users, loser, &acceptor).await?;
         let main_part = t!("commands.pvp.results.finish", locale = &p.lang_code,
             winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length);
         if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
-            let winner_pos = t!("commands.pvp.results.position.winner", name = winner_info.name, pos = winner_pos, locale = &p.lang_code);
-            let loser_pos = t!("commands.pvp.results.position.loser", name = loser_info.name, pos = loser_pos, locale = &p.lang_code);
+            let winner_pos = t!("commands.pvp.results.position.winner", locale = &p.lang_code, name = winner_info.name, pos = winner_pos);
+            let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.name, pos = loser_pos);
             format!("{main_part}\n\n{winner_pos}\n{loser_pos}")
         } else {
             main_part
@@ -283,7 +282,7 @@ async fn pvp_impl_attack<'a>(p: BattleParams<'a>, initiator: UserId, acceptor: U
         } else {
             t!("commands.pvp.subjects.acceptor", locale = &p.lang_code)
         };
-        t!("commands.pvp.errors.not_enough", subject = subject, locale = &p.lang_code)
+        t!("commands.pvp.errors.not_enough", locale = &p.lang_code, subject = subject)
     };
     Ok((text, None))
 }

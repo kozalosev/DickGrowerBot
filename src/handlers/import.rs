@@ -116,23 +116,20 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                 Ok(r) => {
                     metrics::CMD_IMPORT.finished();
                     let imported = r.imported.into_iter()
-                        .map(|u| t!("commands.import.result.line.imported",
+                        .map(|u| t!("commands.import.result.line.imported", locale = &lang_code,
                             name = teloxide::utils::html::escape(&u.name),
-                            length = u.length,
-                            locale = &lang_code))
+                            length = u.length))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let already_present = r.already_present.into_iter()
-                        .map(|u| t!("commands.import.result.line.already_present",
+                        .map(|u| t!("commands.import.result.line.already_present", locale = &lang_code,
                             name = teloxide::utils::html::escape(&u.name),
-                            length = u.length,
-                            locale = &lang_code))
+                            length = u.length))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let not_found = r.not_found.into_iter()
-                        .map(|name| t!("commands.import.result.line.not_found",
-                            name = teloxide::utils::html::escape(&name),
-                            locale = &lang_code))
+                        .map(|name| t!("commands.import.result.line.not_found", locale = &lang_code,
+                            name = teloxide::utils::html::escape(&name)))
                         .collect::<Vec<String>>()
                         .join("\n");
 
@@ -153,14 +150,12 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                 Err(e) => if let Some(InvalidLines(lines)) = e.downcast_ref() {
                     log::error!("Invalid lines: {lines:?}");
                     let invalid_lines = lines.iter()
-                        .map(|line| {
-                            t!("commands.import.errors.invalid_lines.line",
-                                line = line, locale = &lang_code)
-                        })
+                        .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
+                            line = line))
                         .collect::<Vec<String>>()
                         .join("\n");
-                    t!("commands.import.errors.invalid_lines.template",
-                        invalid_lines = invalid_lines, locale = &lang_code)
+                    t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
+                        invalid_lines = invalid_lines)
                 } else {
                     Err(e)?
                 }
@@ -169,8 +164,8 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
         },
         Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
         Err(BeforeImportCheckErrors::NotReply) => t!(format!("commands.import.errors.not_reply").as_str(),
-            origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", "),
-            locale = lang_code.as_str()),
+            locale = lang_code.as_str(),
+            origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ")),
         Err(e) => t!(format!("commands.import.errors.{e}").as_str(),
             locale = lang_code.as_str()),
     };
