@@ -31,6 +31,8 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
     logging:
       driver: local
+    depends_on:
+      - postgres
   postgres:
     image: postgres:14.5-alpine
     container_name: dickgrowerbot-postgresql

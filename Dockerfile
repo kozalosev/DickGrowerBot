@@ -1,4 +1,4 @@
-FROM rust:alpine as builder
+FROM rust:1.74-alpine3.18 as builder
 WORKDIR /build
 
 RUN apk update && apk add --no-cache pkgconfig musl-dev libressl-dev
@@ -24,7 +24,7 @@ COPY Cargo.* ./
 ENV RUSTFLAGS='-C target-feature=-crt-static'
 RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 
-FROM alpine
+FROM alpine:3.18
 RUN apk update && apk add --no-cache libgcc libressl
 COPY --from=builder /dickGrowerBot /usr/local/bin/
 # Import the user and group files from the builder
@@ -39,8 +39,20 @@ ARG RUST_LOG
 ARG WEBHOOK_URL
 ARG DATABASE_URL
 ARG DATABASE_MAX_CONNECTIONS
+ARG HELP_ADMIN_USERNAME
+ARG HELP_ADMIN_CHANNEL
+ARG HELP_GIT_REPO
+ARG CHATS_MERGING_ENABLED
+ARG TOP_UNLIMITED_ENABLED
+ARG PVP_CHECK_ACCEPTOR_LENGTH
+ARG GROWTH_MIN
+ARG GROWTH_MAX
+ARG GROW_SHRINK_RATIO
+ARG GROWTH_DOD_BONUS_MAX
+ARG NEWCOMERS_GRACE_DAYS
+ARG TOP_LIMIT
 ENTRYPOINT [ "/usr/local/bin/dickGrowerBot" ]
 
 LABEL org.opencontainers.image.source=https://github.com/kozalosev/DickGrowerBot
 LABEL org.opencontainers.image.description="Who has the biggest dick ever? A game bot for Telegram"
-LABEL org.opencontainers.image.licenses=MIT
+LABEL org.opencontainers.image.licenses='MIT+"Commons Clause" License Condition v1.0'

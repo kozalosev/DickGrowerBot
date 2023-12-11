@@ -39,6 +39,6 @@ jobs:
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
 
       - name: Build the Docker image
-        run: docker build . --file Dockerfile --tag kozalosev/locplacebot:$(date +%s)
+        run: docker build . --file Dockerfile --tag kozalosev/dickgrowerbot:$(date +%s)
 
       - run: echo "🍏 This job's status is ${{ job.status }}."
