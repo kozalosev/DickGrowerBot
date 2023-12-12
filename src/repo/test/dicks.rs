@@ -7,7 +7,6 @@ use crate::repo::{ChatIdKind, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID, get_chat_id_and_dicks, NAME, start_postgres, UID};
 
 #[tokio::test]
-#[ignore]
 async fn test_all() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
@@ -39,7 +38,6 @@ async fn test_all() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_all_with_top_pagination_disabled() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
@@ -75,7 +73,6 @@ async fn test_all_with_top_pagination_disabled() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_top_page() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
@@ -104,7 +101,6 @@ async fn test_top_page() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_pvp() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;

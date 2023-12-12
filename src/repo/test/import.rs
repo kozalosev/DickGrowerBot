@@ -6,7 +6,6 @@ use crate::repo::test::{CHAT_ID, start_postgres, UID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user};
 
 #[tokio::test]
-#[ignore]
 async fn test_all() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;

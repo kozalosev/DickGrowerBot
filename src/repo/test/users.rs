@@ -6,7 +6,6 @@ use crate::repo::ChatIdKind;
 use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID};
 
 #[tokio::test]
-#[ignore]
 async fn create_or_update() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
@@ -36,7 +35,6 @@ async fn create_or_update() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn get_chat_members() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
@@ -55,7 +53,6 @@ async fn get_chat_members() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn get_random_active_member() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;

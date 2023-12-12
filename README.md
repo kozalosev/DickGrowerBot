@@ -38,13 +38,6 @@ _(to build the application without a running RDBMS)_
 cargo sqlx prepare -- --tests
 ```
 
-### Run tests
-_(integration tests are marked as ignored since they don't always run successfully on CI)_
-
-```shell
-cargo test -- --include-ignored
-```
-
 ### Adjustment hints
 
 It's most probably you want to change the value of the `GROW_SHRINK_RATIO` environment variable to make the players upset and disappointed more or less often.
