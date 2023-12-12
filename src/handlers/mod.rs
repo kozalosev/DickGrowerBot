@@ -9,9 +9,9 @@ pub mod pvp;
 
 use std::borrow::ToOwned;
 use teloxide::Bot;
-use teloxide::payloads::SendMessage;
+use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessage};
 use teloxide::requests::{JsonRequest, Requester};
-use teloxide::types::{InlineKeyboardMarkup, Message, User};
+use teloxide::types::{CallbackQuery, InlineKeyboardMarkup, Message, User};
 use teloxide::types::ParseMode::Html;
 
 pub use dick::*;
@@ -26,6 +26,45 @@ pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 pub enum CallbackResult {
     EditMessage(String, Option<InlineKeyboardMarkup>),
     ShowError(String),
+}
+
+impl CallbackResult {
+    pub async fn apply(self, bot: Bot, callback_query: CallbackQuery) -> anyhow::Result<()> {
+        let answer_req = bot.answer_callback_query(callback_query.id);
+        match self {
+            CallbackResult::EditMessage(text, keyboard) => {
+                if let Some(message) = callback_query.message {
+                    let mut edit_req = bot.edit_message_text(message.chat.id, message.id, text);
+                    edit_req.parse_mode.replace(Html);
+                    edit_req.reply_markup = keyboard;
+
+                    let edit_req_resp = edit_req.await;
+                    if let Err(err) = edit_req_resp {
+                        log::error!("couldn't edit the message ({}:{}): {}", message.chat.id, message.id, err);
+                        Err(err)?;
+                    }
+                } else if let Some(inline_message_id) = callback_query.inline_message_id {
+                    let mut edit_req = bot.edit_message_text_inline(&inline_message_id, text);
+                    edit_req.parse_mode.replace(Html);
+                    edit_req.reply_markup = keyboard;
+
+                    let edit_req_resp = edit_req.await;
+                    if let Err(err) = edit_req_resp {
+                        log::error!("couldn't edit the message ({}): {}", inline_message_id, err);
+                        Err(err)?;
+                    }
+                };
+                answer_req.await?;
+            },
+            CallbackResult::ShowError(err) => {
+                answer_req
+                    .text(err)
+                    .show_alert(true)
+                    .await?;
+            }
+        };
+        Ok(())
+    }
 }
 
 pub fn ensure_lang_code(user: Option<&User>) -> String {

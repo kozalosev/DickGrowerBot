@@ -1,7 +1,5 @@
-use std::future::IntoFuture;
 use anyhow::anyhow;
-use futures::future::join;
-use futures::{join, TryFutureExt};
+use futures::join;
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
@@ -9,7 +7,7 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, MessageId, ParseMode, ReplyMarkup, User, UserId};
+use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
 use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
@@ -123,15 +121,9 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
         .is_some()
 }
 
-#[derive(Debug, Clone)]
-enum EditMessageTextParams {
-    Chat(ChatId, MessageId),
-    Inline { inline_message_id: String },
-}
-
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig) -> HandlerResult {
-    let (chat_id, edit_params): (ChatIdPartiality, EditMessageTextParams) = query.message.as_ref()
-        .map(|msg| (msg.chat.id, EditMessageTextParams::Chat(msg.chat.id, msg.id)))
+    let chat_id: ChatIdPartiality = query.message.as_ref()
+        .map(|msg| msg.chat.id)
         .or_else(|| config.features.chats_merging
             .then_some(query.inline_message_id.as_ref())
             .flatten()
@@ -141,20 +133,11 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
                     Err(e)
                 })
                 .ok()
-                .map(|info| (msg_id, info))
             )
-            .map(|(msg_id, info)| {
-                let params = EditMessageTextParams::Inline { inline_message_id: msg_id.clone() };
-                (ChatId(info.chat_id), params)
-            })
+            .map(|info| ChatId(info.chat_id))
         )
-        .map(|(chat_id, edit_params)| (chat_id.into(), edit_params))
-        .or_else(|| {
-            query.inline_message_id.as_ref()
-                .map(|msg_id| EditMessageTextParams::Inline { inline_message_id: msg_id.clone() })
-                .map(|params| (query.chat_instance.clone().into(), params))
-        })
-        .ok_or(anyhow!("unexpected state of the query: {query:?}"))?;
+        .map(|chat_id| ChatIdPartiality::from(chat_id))
+        .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));
 
     let params = BattleParams {
         repos,
@@ -162,7 +145,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         lang_code: ensure_lang_code(Some(&query.from)),
         chat_id: chat_id.clone(),
     };
-    let (initiator, bet) = parse_data(query.data)?;
+    let (initiator, bet) = parse_data(&query.data)?;
     if initiator == query.from.id {
         bot.answer_callback_query(query.id)
             .show_alert(true)
@@ -171,43 +154,8 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         return Ok(())
     }
 
-    let attack_result = pvp_impl_attack(params, initiator, query.from.into(), bet).await?;
-    let answer_req = bot.answer_callback_query(query.id);
-    match attack_result {
-        CallbackResult::EditMessage(text, keyboard) => {
-            let answer_req_fut = answer_req.into_future();
-            let (answer_resp, edit_resp) = match &edit_params {
-                EditMessageTextParams::Chat(chat_id, message_id) => {
-                    let mut edit_req = bot.edit_message_text(*chat_id, message_id.clone(), text);
-                    edit_req.parse_mode.replace(ParseMode::Html);
-                    edit_req.reply_markup = keyboard;
-                    join(
-                        answer_req_fut,
-                        edit_req.into_future().map_ok(|_| ())
-                    ).await
-                }
-                EditMessageTextParams::Inline { inline_message_id } => {
-                    let mut edit_req = bot.edit_message_text_inline(inline_message_id, text);
-                    edit_req.parse_mode.replace(ParseMode::Html);
-                    edit_req.reply_markup = keyboard;
-                    join(
-                        answer_req_fut,
-                        edit_req.into_future().map_ok(|_| ())
-                    ).await
-                }
-            };
-            answer_resp?;
-            if edit_resp.is_err() {
-                log::error!("couldn't edit the message ({chat_id}, {edit_params:?}): {}", edit_resp.unwrap_err())
-            }
-        }
-        CallbackResult::ShowError(error) => {
-            answer_req
-                .text(error)
-                .show_alert(true)
-                .await?;
-        }
-    }
+    let attack_result = pvp_impl_attack(params, initiator, query.from.clone().into(), bet).await?;
+    attack_result.apply(bot, query).await?;
 
     metrics::CMD_PVP_COUNTER.inline.inc();
     Ok(())
@@ -306,8 +254,8 @@ fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {
     }
 }
 
-fn parse_data(maybe_data: Option<String>) -> anyhow::Result<(UserId, u32)> {
-    let parts = maybe_data
+fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u32)> {
+    let parts = maybe_data.as_ref()
         .and_then(|data| data.strip_prefix(CALLBACK_PREFIX).map(|s| s.to_owned()))
         .map(|data| data.split(":").map(|s| s.to_owned()).collect::<Vec<String>>())
         .ok_or(anyhow!("callback data must be present!"))?;
