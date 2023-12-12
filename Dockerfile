@@ -1,7 +1,7 @@
 FROM rust:1.74-alpine3.18 as builder
 WORKDIR /build
 
-RUN apk update && apk add --no-cache pkgconfig musl-dev libressl-dev
+RUN apk update && apk add --no-cache musl-dev
 
 # Create an unprivileged user
 ENV USER=appuser
@@ -25,7 +25,7 @@ ENV RUSTFLAGS='-C target-feature=-crt-static'
 RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 
 FROM alpine:3.18
-RUN apk update && apk add --no-cache libgcc libressl
+RUN apk update && apk add --no-cache libgcc
 COPY --from=builder /dickGrowerBot /usr/local/bin/
 # Import the user and group files from the builder
 COPY --from=builder /etc/passwd /etc/passwd

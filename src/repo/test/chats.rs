@@ -7,7 +7,6 @@ use crate::repo::test::{CHAT_ID, start_postgres, UID};
 use crate::repo::test::dicks::create_user;
 
 #[tokio::test]
-#[ignore]
 async fn upsert_chat() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
