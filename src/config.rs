@@ -78,7 +78,7 @@ impl DatabaseConfig {
     pub fn from_env() -> anyhow::Result<Self> {
         Ok(Self {
             url: get_mandatory_value("DATABASE_URL")?,
-            max_connections: get_value_or_default("DATABASE_MAX_CONNECTIONS", 5)
+            max_connections: get_value_or_default("DATABASE_MAX_CONNECTIONS", 10)
         })
     }
 }

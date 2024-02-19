@@ -10,7 +10,7 @@ license-file = "LICENSE"
 teloxide = { version = "0.12", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler"] }
 log = "0.4"
 pretty_env_logger = "0.5.0"
-tokio = { version =  "1.32.0", default-features = false, features = ["rt-multi-thread", "macros"] }
+tokio = { version =  "1.32.0", features = ["rt-multi-thread", "macros"] }
 reqwest = { version = "0.11.17", default-features = false, features = ["rustls-tls"] }
 once_cell = "1.17.1"
 serde = { version = "1.0.188", features = ["derive"] }

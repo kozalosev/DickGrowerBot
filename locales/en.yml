@@ -82,7 +82,7 @@ titles:
   greeting: "Hello"
   time_till_next_day:
     none: " Come back tomorrow!"
-    some: "\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
+    some: "\n\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   feature_disabled: "This feature is currently temporarily disabled."
