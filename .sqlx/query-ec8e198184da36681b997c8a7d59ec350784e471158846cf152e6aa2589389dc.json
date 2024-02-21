@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT left_to_pay FROM Loans WHERE uid = $1 AND chat_id = $2 AND repaid_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "left_to_pay",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ec8e198184da36681b997c8a7d59ec350784e471158846cf152e6aa2589389dc"
+}

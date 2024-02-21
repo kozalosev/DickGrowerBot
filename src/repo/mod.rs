@@ -3,6 +3,7 @@ mod dicks;
 mod chats;
 mod import;
 mod promo;
+mod loans;
 
 #[cfg(test)]
 pub(crate) mod test;
@@ -95,7 +96,7 @@ impl ChatIdFull {
     }
 }
 
-#[derive(Debug, derive_more::Display, Clone)]
+#[derive(Debug, derive_more::Display, Clone, Eq, PartialEq, Hash)]
 pub enum ChatIdKind {
     ID(ChatId),
     Instance(String)
