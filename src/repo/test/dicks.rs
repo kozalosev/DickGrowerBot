@@ -42,8 +42,10 @@ async fn test_all_with_top_pagination_disabled() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
     let dicks = {
-        let mut features = FeatureToggles::default();
-        features.top_unlimited = false;
+        let features = FeatureToggles {
+            top_unlimited: false,
+            ..Default::default()
+        };
         repo::Dicks::new(db.clone(), features)
     };
     create_user(&db).await;
@@ -174,7 +176,7 @@ pub async fn check_dick(db: &Pool<Postgres>, length: u32) {
 }
 
 async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i32) {
-    let d = dicks.get_top(&chat_id, 0, 1)
+    let d = dicks.get_top(chat_id, 0, 1)
         .await.expect("couldn't fetch the top again");
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].length, length);

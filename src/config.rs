@@ -85,7 +85,7 @@ impl DatabaseConfig {
 
 pub fn build_context_for_help_messages(me: Me, app_config: &AppConfig, competitor_bots: &[&str]) -> anyhow::Result<help::Context> {
     let other_bots = competitor_bots
-        .into_iter()
+        .iter()
         .map(|username| ensure_starts_with_at_sign(username.to_string()))
         .collect::<Vec<String>>()
         .join(", ");
@@ -130,7 +130,7 @@ where
 }
 
 fn ensure_starts_with_at_sign(s: String) -> String {
-    if s.starts_with("@") {
+    if s.starts_with('@') {
         s
     } else {
         format!("@{s}")

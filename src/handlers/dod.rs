@@ -36,8 +36,8 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, config: config:
     let winner = repos.users.get_random_active_member(&chat_id.kind()).await?;
     let answer = match winner {
         Some(winner) => {
-            let bonus: u32 = OsRng::default().gen_range(config.dod_bonus_range);
-            let dod_result = repos.dicks.set_dod_winner(&chat_id, UserId(winner.uid as u64), bonus).await;
+            let bonus: u32 = OsRng.gen_range(config.dod_bonus_range);
+            let dod_result = repos.dicks.set_dod_winner(chat_id, UserId(winner.uid as u64), bonus).await;
             let main_part = match dod_result {
                 Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
                     let answer = t!("commands.dod.result", locale = &lang_code,

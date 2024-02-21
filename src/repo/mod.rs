@@ -89,6 +89,7 @@ pub struct ChatIdFull {
 }
 
 impl ChatIdFull {
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_partiality(self, query_source: ChatIdSource) -> ChatIdPartiality {
         ChatIdPartiality::Both(self, query_source)
     }
@@ -154,11 +155,11 @@ macro_rules! repository {
         #[derive(Clone)]
         pub struct $name {
             pool: sqlx::Pool<sqlx::Postgres>,
-            #[allow(dead_code)] features: crate::config::FeatureToggles,
+            #[allow(dead_code)] features: $crate::config::FeatureToggles,
         }
 
         impl $name {
-            pub fn new(pool: sqlx::Pool<sqlx::Postgres>, features: crate::config::FeatureToggles) -> Self {
+            pub fn new(pool: sqlx::Pool<sqlx::Postgres>, features: $crate::config::FeatureToggles) -> Self {
                 Self { pool, features }
             }
 

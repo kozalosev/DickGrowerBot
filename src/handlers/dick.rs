@@ -174,6 +174,7 @@ enum EditMessageReqParamsKind {
     Inline { chat_instance: String, inline_message_id: String },
 }
 
+#[allow(clippy::from_over_into)]
 impl Into<ChatIdKind> for EditMessageReqParamsKind {
     fn into(self) -> ChatIdKind {
         match self {
@@ -204,7 +205,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             .ok_or(InvalidPage::for_value(&d, "invalid prefix")))
         .and_then(|r| r.parse()
             .map_err(|e| InvalidPage::for_value(&r, e)))
-        .map(|p| Page(p))
+        .map(Page)
         .map_err(|e| anyhow!(e))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
@@ -254,7 +255,7 @@ fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {
         100.. => 100,
         x => x
     };
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     if range.start() > &0 {
         return rng.gen_range(range)
     }
@@ -277,14 +278,15 @@ async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_r
     answer.text.replace(t!("errors.feature_disabled", locale = &lang_code));
     answer.await?;
 
-    return Ok(match edit_msg_req_params {
+    match edit_msg_req_params {
         EditMessageReqParamsKind::Chat(chat_id, message_id) =>
             bot.edit_message_reply_markup(chat_id, message_id)
                 .await.map(|_| ())?,
         EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
             bot.edit_message_reply_markup_inline(inline_message_id)
                 .await.map(|_| ())?
-    })
+    };
+    Ok(())
 }
 
 #[cfg(test)]

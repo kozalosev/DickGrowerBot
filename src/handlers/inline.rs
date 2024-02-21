@@ -45,7 +45,7 @@ impl InlineCommand {
                 metrics::CMD_GROW_COUNTER.inline.inc();
                 dick::grow_impl(repos, config, from_refs)
                     .await
-                    .map(|res| InlineResult::text(res))
+                    .map(InlineResult::text)
             },
             InlineCommand::Top => {
                 metrics::CMD_TOP_COUNTER.inline.inc();
@@ -62,7 +62,7 @@ impl InlineCommand {
                 metrics::CMD_DOD_COUNTER.inline.inc();
                 dod::dick_of_day_impl(repos, config, from_refs)
                     .await
-                    .map(|res| InlineResult::text(res))
+                    .map(InlineResult::text)
             },
         }
     }
@@ -194,11 +194,11 @@ enum CallbackDataParseResult {
 }
 
 fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseResult, strum::ParseError> {
-    data.split_once(":")
+    data.split_once(':')
         .map(|(uid, data)| {
             if uid == user_id.0.to_string() {
-                InlineCommand::from_str(&data)
-                    .map(|cmd| CallbackDataParseResult::Ok(cmd))
+                InlineCommand::from_str(data)
+                    .map(CallbackDataParseResult::Ok)
             } else {
                 Ok(CallbackDataParseResult::AnotherUser)
             }
@@ -206,11 +206,12 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
         .unwrap_or(Ok(CallbackDataParseResult::Invalid))
 }
 
+#[allow(clippy::ptr_arg)]
 pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<ChatId> {
     utils::resolve_inline_message_id(msg_id)
-        .or_else(|e| {
+        .map_err(|e| {
             log::error!("couldn't resolve inline_message_id: {e}");
-            Err(e)
+            e
         })
         .ok()
         .map(|info| ChatId(info.chat_id))

@@ -158,7 +158,7 @@ fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, 
             main: MergedChat {
                 internal_id: chat_ids[0].0,
                 chat_id: chat_ids[0].1,
-                chat_instance: &chat_instances[0].1,
+                chat_instance: chat_instances[0].1,
             },
             deleted: (chat_instances[0].0, &chat_instances[0].1)
         })
