@@ -12,6 +12,7 @@ use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerResult, utils};
+use crate::handlers::utils::Incrementor;
 use crate::handlers::utils::page::Page;
 use crate::metrics;
 use crate::repo::{ChatIdFull, NoChatIdError, ChatIdSource, Repositories};
@@ -39,11 +40,11 @@ impl InlineResult {
 }
 
 impl InlineCommand {
-    async fn execute(&self, repos: &Repositories, config: AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<InlineResult> {
+    async fn execute(&self, repos: &Repositories, config: AppConfig, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<InlineResult> {
         match self {
             InlineCommand::Grow => {
                 metrics::CMD_GROW_COUNTER.inline.inc();
-                dick::grow_impl(repos, config, from_refs)
+                dick::grow_impl(repos, incr, from_refs)
                     .await
                     .map(InlineResult::text)
             },
@@ -60,7 +61,7 @@ impl InlineCommand {
             },
             InlineCommand::DickOfDay => {
                 metrics::CMD_DOD_COUNTER.inline.inc();
-                dod::dick_of_day_impl(repos, config, from_refs)
+                dod::dick_of_day_impl(repos, incr, from_refs)
                     .await
                     .map(InlineResult::text)
             },
@@ -104,7 +105,8 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
 }
 
 pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
-                                   repos: Repositories, config: AppConfig) -> HandlerResult {
+                                   repos: Repositories, config: AppConfig,
+                                   incr: Incrementor) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
 
     let maybe_chat_in_sync = result.inline_message_id.as_ref()
@@ -120,7 +122,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
             let cmd = InlineCommand::from_str(&result.result_id)?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, from_refs).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
@@ -135,7 +137,8 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
 }
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
-                              repos: Repositories, config: AppConfig) -> HandlerResult {
+                              repos: Repositories, config: AppConfig,
+                              incr: Incrementor) -> HandlerResult {
     let lang_code = ensure_lang_code(Some(&query.from));
     let mut answer = bot.answer_callback_query(&query.id);
 
@@ -158,7 +161,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
         let parse_res = parse_callback_data(&data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, from_refs).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
             let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
@@ -209,10 +212,7 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
 #[allow(clippy::ptr_arg)]
 pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<ChatId> {
     utils::resolve_inline_message_id(msg_id)
-        .map_err(|e| {
-            log::error!("couldn't resolve inline_message_id: {e}");
-            e
-        })
+        .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
         .ok()
         .map(|info| ChatId(info.chat_id))
 }

@@ -4,8 +4,9 @@ mod dod;
 mod import;
 mod promo;
 mod inline;
-mod utils;
+pub mod utils;
 pub mod pvp;
+pub mod perks;
 
 use std::borrow::ToOwned;
 use teloxide::Bot;
