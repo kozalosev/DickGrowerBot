@@ -31,7 +31,6 @@ pub struct Config {
 pub trait Perk: Send + Sync {
     fn name(&self) -> &'static str;
     fn enabled(&self) -> bool;
-    async fn active(&self, dick_id: &DickId, change_intent: ChangeIntent) -> bool;
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange;
 }
 
@@ -136,12 +135,10 @@ impl Incrementor {
         let mut additional_change = AdditionalChange(0);
         let mut by_perks = HashMap::new();
         for perk in self.perks.iter() {
-            if perk.active(&dick, change_intent).await {
-                let ac = perk.apply(&dick, change_intent).await;
-                let v = T::try_from(ac.0).expect("TODO: fix numeric types!");   // TODO: fix numeric types!
-                by_perks.insert(perk.name(), v);
-                additional_change += ac
-            }
+            let ac = perk.apply(&dick, change_intent).await;
+            let v = T::try_from(ac.0).expect("TODO: fix numeric types!");   // TODO: fix numeric types!
+            by_perks.insert(perk.name(), v);
+            additional_change += ac
         }
         Increment {
             base: base_increment,

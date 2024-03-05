@@ -35,7 +35,6 @@ base64 = { package = "simple-base64", version = "0.23.2" }
 byteorder = "1.5.0"
 derive_more = { version = "1.0.0-beta.6", features = ["display", "error", "add_assign"] }
 num-traits = "0.2.18"
-chashmap = "2.2.2"
 
 [dev-dependencies]
 testcontainers = "0.15.0"

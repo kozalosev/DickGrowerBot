@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use chashmap::CHashMap;
-use num_traits::ToPrimitive;
+use num_traits::{ToPrimitive, Zero};
 use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeIntent, DickId, Perk};
 use crate::{config, repo};
@@ -15,10 +14,10 @@ pub fn all(pool: &Pool<Postgres>, features: FeatureToggles) -> Vec<Box<dyn Perk>
         Box::new(HelpPussiesPerk {
             coefficient: help_pussies_coef,
         }),
-        Box::new(LoanPayoutPerk::new(
+        Box::new(LoanPayoutPerk {
             payout_coefficient,
             loans,
-        ))
+        })
     ]
 }
 
@@ -36,11 +35,11 @@ impl Perk for HelpPussiesPerk {
         self.coefficient > 0.0
     }
 
-    async fn active(&self, _: &DickId, change_intent: ChangeIntent) -> bool {
-        change_intent.current_length < 0
-    }
-
     async fn apply(&self, _: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
+        if change_intent.current_length >= 0 {
+            return AdditionalChange(0)
+        }
+        
         let current_length = change_intent.current_length.to_f64().expect("conversion is always Some");
         let change = (self.coefficient * current_length).ceil() as i32;
         let ac = if change_intent.base_increment.is_positive() {
@@ -55,16 +54,6 @@ impl Perk for HelpPussiesPerk {
 struct LoanPayoutPerk {
     payout_coefficient: f64,
     loans: repo::Loans,
-    debts: CHashMap<DickId, u16>
-}
-
-impl LoanPayoutPerk {
-    fn new(payout_coefficient: f64, loans: repo::Loans) -> Self {
-        Self {
-            payout_coefficient, loans,
-            debts: CHashMap::new()
-        }
-    }
 }
 
 #[async_trait]
@@ -77,26 +66,18 @@ impl Perk for LoanPayoutPerk {
         (0.0..=1.0).contains(&self.payout_coefficient)
     }
 
-    async fn active(&self, dick_id: &DickId, _: ChangeIntent) -> bool {
+    async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
         let debt = self.loans.get_active_loan(dick_id.0, &dick_id.1)
             .await
             .inspect_err(|e| log::error!("couldn't check if a perk is active: {e}"))
             .unwrap_or(0);
-        if debt > 0 {
-            self.debts.insert(dick_id.clone(), debt);
-            true
-        } else {
-            self.debts.remove(dick_id);
-            false
-        }            
-    }
+        if debt.is_zero() {
+            return AdditionalChange(0)
+        }
 
-    async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
         let payout = if change_intent.base_increment.is_positive() {
             let base_increment = change_intent.base_increment.to_f64().expect("conversion gives always Some");
             let payout = (base_increment * self.payout_coefficient).floor() as u16;
-            
-            let debt = self.debts.remove(dick_id).expect("debt must be in the hashmap");
             payout.min(debt)
         } else {
             0
