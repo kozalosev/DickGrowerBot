@@ -3,6 +3,7 @@ mod dicks;
 mod chats;
 mod import;
 mod promo;
+mod loans;
 
 use std::str::FromStr;
 use reqwest::Url;

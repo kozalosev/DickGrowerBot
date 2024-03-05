@@ -15,7 +15,7 @@ use crate::repo::ChatIdKind;
 #[derive(Clone)]
 pub struct Incrementor {
     config: Config,
-    perks: Vec<Arc<Box<dyn Perk>>>,
+    perks: Vec<Arc<dyn Perk>>,
     dicks: repo::Dicks,
 }
 
@@ -35,7 +35,7 @@ pub trait Perk: Send + Sync {
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange;
 }
 
-#[derive(Display)]
+#[derive(Display, Clone, Hash, PartialEq)]
 #[display("(user_id={_0}, chat_id={_1}")]
 pub struct DickId(pub(crate) UserId, pub(crate) ChatIdKind);
 
@@ -80,7 +80,7 @@ impl Incrementor {
         let perks = perks
             .into_iter()
             .filter(|perk| perk.enabled())
-            .map(Arc::new)
+            .map(Arc::from)
             .collect();
 
         Self {

@@ -1,4 +1,4 @@
-FROM rust:1.74-alpine3.18 as builder
+FROM rust:1.76-alpine3.18 as builder
 WORKDIR /build
 
 RUN apk update && apk add --no-cache musl-dev
