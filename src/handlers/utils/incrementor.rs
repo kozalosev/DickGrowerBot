@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use async_trait::async_trait;
 use derive_more::{AddAssign, Display};
-use num_traits::{Num};
+use num_traits::Num;
 use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -29,7 +29,7 @@ pub struct Config {
 
 #[async_trait]
 pub trait Perk: Send + Sync {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
     fn enabled(&self) -> bool;
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange;
 }
@@ -49,7 +49,7 @@ pub struct AdditionalChange(pub i32);
 
 pub struct Increment<T: Num + Copy + std::fmt::Display> {
     pub base: T,
-    pub by_perks: HashMap<&'static str, T>,
+    pub by_perks: HashMap<String, i32>,
     pub total: T,
 }
 
@@ -98,6 +98,13 @@ impl Incrementor {
         self.config.clone()
     }
 
+    #[cfg(test)]
+    fn set_perks(&mut self, perks: Vec<Box<dyn Perk>>) {
+        self.perks = perks.into_iter()
+            .map(Arc::from)
+            .collect();
+    }
+
     pub async fn growth_increment(&self, user_id: UserId, chat_id: ChatIdKind, days_since_registration: u32) -> SignedIncrement {
         let dick_id = DickId(user_id, chat_id);
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
@@ -136,8 +143,7 @@ impl Incrementor {
         let mut by_perks = HashMap::new();
         for perk in self.perks.iter() {
             let ac = perk.apply(&dick, change_intent).await;
-            let v = T::try_from(ac.0).expect("TODO: fix numeric types!");   // TODO: fix numeric types!
-            by_perks.insert(perk.name(), v);
+            by_perks.insert(perk.name().to_owned(), ac.0);
             additional_change += ac
         }
         Increment {
@@ -223,5 +229,123 @@ mod test {
             .collect();
         assert!(increments.iter().all(|n| n <= &10));
         assert!(increments.iter().all(|n| n >= &5));
+    }
+}
+
+#[cfg(test)]
+mod test_incrementor {
+    use std::iter::zip;
+
+    use async_trait::async_trait;
+    use futures::future::join_all;
+    use testcontainers::clients;
+
+    use crate::handlers::utils::{AdditionalChange, ChangeIntent, Config, DickId, Incrementor, Perk};
+    use crate::repo;
+    use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
+
+    #[tokio::test]
+    async fn test_incrementor() {
+        let docker = clients::Cli::default();
+        let (_container, db) = start_postgres(&docker).await;
+        let dicks = repo::Dicks::new(db.clone(), Default::default());
+        let incr = Incrementor {
+            config: Config {
+                growth_range: -1..=1,
+                grow_shrink_ratio: 0.5,
+                newcomers_grace_days: 1,
+                dod_bonus_range: 1..=2,
+            },
+            dicks,
+            perks: Vec::default()
+        };
+
+        test_growth_increment_base(&incr).await;
+        test_dod_increment_base(&incr).await;
+        test_with_perks(&incr).await;
+    }
+
+    async fn test_growth_increment_base(incr: &Incrementor) {
+        let lazy_vals = (0..100)
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, 1));
+        for fut in lazy_vals {
+            let val = fut.await;
+            assert_eq!(val.base, val.total);
+            assert_ne!(val.base, 0);
+            assert!(val.base >= -1);
+            assert!(val.base <= 1);
+        }
+
+        let lazy_positive_vals = (0..100)
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, 0));
+        for fut in lazy_positive_vals {
+            let val = fut.await;
+            assert_eq!(val.base, val.total);
+            assert!(val.base > 0);
+        }
+    }
+
+    async fn test_dod_increment_base(incr: &Incrementor) {
+        let val = (0..100)
+            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND));
+        let val = join_all(val).await;
+        assert!(val.iter().all(|n| { n.base == n.total }));
+        assert!(val.iter().all(|n| { n.base == 1 || n.base == 2 }))
+    }
+
+    #[derive(Clone)]
+    struct AddPerk {
+        value: i32,
+        name: String,
+    }
+
+    impl AddPerk {
+        fn boxed(value: i32) -> Box<Self> {
+            Box::new(Self {
+                value,
+                name: format!("add-perk-{value}")
+            })
+        }
+    }
+
+    #[async_trait]
+    impl Perk for AddPerk {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn enabled(&self) -> bool {
+            true
+        }
+
+        async fn apply(&self, _: &DickId, _: ChangeIntent) -> AdditionalChange {
+            AdditionalChange(self.value)
+        }
+    }
+
+    async fn test_with_perks(incr: &Incrementor) {
+        let mut incr = incr.clone();
+        let perk_plus2 = AddPerk::boxed(2);
+        let perk_minus1 = AddPerk::boxed(-1);
+        incr.set_perks(vec![perk_plus2.clone(), perk_minus1.clone()]);
+
+        let growth_lazy_vals = (0..100)
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, 1));
+        let dod_lazy_vals = (0..100)
+            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND));
+
+        macro_rules! assertions {
+            ($val:ident) => {
+                assert_eq!($val.total - $val.base, 1);
+                assert_eq!($val.by_perks[perk_plus2.name()], 2);
+                assert_eq!($val.by_perks[perk_minus1.name()], -1);
+            };
+        }
+
+        for (growth_fut, dod_fut) in zip(growth_lazy_vals, dod_lazy_vals) {
+            let (growth_val, dod_val) = (growth_fut.await, dod_fut.await);
+            assertions!(growth_val);
+            assertions!(dod_val);
+        }
     }
 }

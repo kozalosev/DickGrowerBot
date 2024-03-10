@@ -27,6 +27,7 @@ repository!(Loans,
             .map_err(Into::into)
     }
 ,
+    // this method is not transactional intentionally; I accept the risk to lose some borrowed centimeters
     pub async fn pay(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Loans SET left_to_pay = left_to_pay - $3 \
                         WHERE uid = $1 AND \
