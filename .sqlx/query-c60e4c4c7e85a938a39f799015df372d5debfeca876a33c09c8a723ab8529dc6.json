@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Loans SET left_to_pay = left_to_pay - $3 WHERE uid = $1 AND chat_id = (SELECT id FROM Chats WHERE chat_id = $2::bigint OR chat_instance = $2::text) AND repaid_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c60e4c4c7e85a938a39f799015df372d5debfeca876a33c09c8a723ab8529dc6"
+}

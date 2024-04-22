@@ -36,6 +36,18 @@ commands:
         initiator: "Meh. The initiator's dick is not long enough for such a big bet!"
         acceptor: "Your gun is not long enough 😣"
       same_person: "You cannot fight with yourself!"
+  loan:
+    description: "Take a loan if you have a deep cave"
+    confirmation:
+      text: "Your deep hole will be reset to zero, but each growth will be lowered by <b>%{payout_percentage}%</b> until all <b>%{debt} cm</b> is repaid."
+      buttons:
+        agree: "I'm in!"
+        disagree: "Disagree"
+    callback:
+      success: "Perk «Where is my centimeters, Lebowski?» has been assigned successfully!"
+      refused: "The patient refused gender reassignment on credit."
+    errors:
+      positive_length: "I cannot make your little bro bigger. Only change your gender."
   import:
     description: "Import dicks from other bots"
     result:

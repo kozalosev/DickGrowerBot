@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Loans (chat_id, uid, left_to_pay) VALUES ((SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text),$2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d576b35c15b31f0f9d16a9af84d59cacddb23b4d105406dea0cd56bfbfe75e1e"
+}

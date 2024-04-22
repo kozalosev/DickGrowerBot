@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use num_traits::{ToPrimitive, Zero};
 use sqlx::{Pool, Postgres};
-use crate::handlers::utils::{AdditionalChange, ChangeIntent, DickId, Perk};
+use crate::handlers::utils::{AdditionalChange, ChangeIntent, DickId, ConfigurablePerk, Perk};
 use crate::{config, repo};
 use crate::config::FeatureToggles;
 
 pub fn all(pool: &Pool<Postgres>, features: FeatureToggles) -> Vec<Box<dyn Perk>> {
     let help_pussies_coef = config::get_env_value_or_default("HELP_PUSSIES_COEF", 0.0);
-    let payout_coefficient = config::get_env_value_or_default("LOAN_WRITEOFF_COEF", 0.0);
+    let payout_coefficient = config::get_env_value_or_default("LOAN_PAYOUT_COEF", 0.0);
     let loans = repo::Loans::new(pool.clone(), features);
     
     vec![
@@ -47,7 +47,7 @@ impl Perk for HelpPussiesPerk {
     }
 }
 
-struct LoanPayoutPerk {
+pub(super) struct LoanPayoutPerk {
     payout_coefficient: f64,
     loans: repo::Loans,
 }
@@ -73,7 +73,7 @@ impl Perk for LoanPayoutPerk {
 
         let payout = if change_intent.base_increment.is_positive() {
             let base_increment = change_intent.base_increment.to_f64().expect("conversion gives always Some");
-            let payout = (base_increment * self.payout_coefficient).floor() as u16;
+            let payout = (base_increment * self.payout_coefficient).ceil() as u16;
             payout.min(debt)
         } else {
             0
@@ -85,6 +85,14 @@ impl Perk for LoanPayoutPerk {
                 AdditionalChange(0)
             }
         }
+    }
+}
+
+impl ConfigurablePerk for LoanPayoutPerk {
+    type Config = f64;
+
+    fn get_config(&self) -> Self::Config {
+        self.payout_coefficient
     }
 }
 

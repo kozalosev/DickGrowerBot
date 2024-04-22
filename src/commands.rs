@@ -4,7 +4,7 @@ use teloxide::{Bot, RequestError};
 use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
-use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, PromoCommands};
+use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LoanCommands, PromoCommands};
 use crate::handlers::pvp::BattleCommands;
 
 pub async fn set_my_commands(bot: &Bot, lang_code: &str) -> Result<(), RequestError> {
@@ -17,6 +17,7 @@ pub async fn set_my_commands(bot: &Bot, lang_code: &str) -> Result<(), RequestEr
         DickCommands::bot_commands(),
         DickOfDayCommands::bot_commands(),
         BattleCommands::bot_commands(),
+        LoanCommands::bot_commands(),
     ];
     let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),

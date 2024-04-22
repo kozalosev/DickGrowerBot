@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use sqlx::{Postgres, Transaction};
 use teloxide::types::UserId;
 use crate::repository;
 use crate::repo::{ChatIdKind, ensure_only_one_row_updated};
@@ -16,18 +17,18 @@ repository!(Loans,
             .map_err(Into::into)
     }
 ,
-    pub async fn borrow(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<()> {
+    pub async fn borrow(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<Transaction<Postgres>> {
+        let mut tx = self.pool.begin().await?;
         sqlx::query!("INSERT INTO Loans (chat_id, uid, left_to_pay) VALUES (\
                         (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text),\
                         $2, $3)",
                 chat_id.value() as String, uid.0 as i64, value as i32)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
-            .map(|_| ())
+            .map(|_| tx)
             .map_err(Into::into)
     }
 ,
-    // this method is not transactional intentionally; I accept the risk to lose some borrowed centimeters
     pub async fn pay(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Loans SET left_to_pay = left_to_pay - $3 \
                         WHERE uid = $1 AND \

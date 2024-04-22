@@ -27,6 +27,7 @@ pub struct Repositories {
     pub chats: Chats,
     pub import: Import,
     pub promo: Promo,
+    pub loans: Loans,
 }
 
 impl Repositories {
@@ -37,6 +38,7 @@ impl Repositories {
             chats: Chats::new(db_conn.clone(), feature_toggles),
             import: Import::new(db_conn.clone(), feature_toggles),
             promo: Promo::new(db_conn.clone(), feature_toggles),
+            loans: Loans::new(db_conn.clone(), feature_toggles),
         }
     }
 }

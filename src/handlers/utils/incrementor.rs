@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use async_trait::async_trait;
-use derive_more::{AddAssign, Display};
-use num_traits::Num;
+use derive_more::Display;
+use downcast_rs::{Downcast, impl_downcast};
+use num_traits::{Num, Zero};
 use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -28,10 +29,17 @@ pub struct Config {
 }
 
 #[async_trait]
-pub trait Perk: Send + Sync {
+pub trait Perk: Send + Sync + Downcast {
     fn name(&self) -> &str;
     fn enabled(&self) -> bool;
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange;
+}
+impl_downcast!(Perk);
+
+pub trait ConfigurablePerk: Perk {
+    type Config;
+
+    fn get_config(&self) -> Self::Config;
 }
 
 #[derive(Display, Clone, Hash, PartialEq)]
@@ -44,7 +52,7 @@ pub struct ChangeIntent {
     pub base_increment: i32,
 }
 
-#[derive(Copy, Clone, AddAssign)]
+#[derive(Copy, Clone)]
 pub struct AdditionalChange(pub i32);
 
 pub struct Increment<T: Num + Copy + std::fmt::Display> {
@@ -98,6 +106,13 @@ impl Incrementor {
         self.config.clone()
     }
 
+    pub fn find_perk_config<P: ConfigurablePerk>(&self) -> Option<P::Config> {
+        self.perks.iter()
+            .find(|p| p.is::<P>())
+            .and_then(|p| p.downcast_ref::<P>())
+            .map(ConfigurablePerk::get_config)
+    }
+
     #[cfg(test)]
     fn set_perks(&mut self, perks: Vec<Box<dyn Perk>>) {
         self.perks = perks.into_iter()
@@ -139,17 +154,19 @@ impl Incrementor {
             current_length
         };
 
-        let mut additional_change = AdditionalChange(0);
+        let mut additional_change = 0;
         let mut by_perks = HashMap::new();
         for perk in self.perks.iter() {
-            let ac = perk.apply(&dick, change_intent).await;
-            by_perks.insert(perk.name().to_owned(), ac.0);
+            let AdditionalChange(ac) = perk.apply(&dick, change_intent).await;
+            if !ac.is_zero() {
+                by_perks.insert(perk.name().to_owned(), ac);
+            }
             additional_change += ac
         }
         Increment {
             base: base_increment,
             by_perks,
-            total: T::try_from(change_intent.base_increment + additional_change.0).expect("TODO: fix numeric types!")
+            total: T::try_from(change_intent.base_increment + additional_change).expect("TODO: fix numeric types!")
         }
     }
 }
@@ -168,12 +185,12 @@ impl <T: Num + Copy + std::fmt::Display> Increment<T> {
             let top_line = t!("titles.perks.top_line", locale = lang_code);
             let perks = self.by_perks.iter()
                 .map(|(perk, value)| {
-                    let name = t!(perk, locale = lang_code);
+                    let name = t!(&format!("titles.perks.{perk}"), locale = lang_code);
                     format!("— {name} ({value})")
                 })
                 .collect::<Vec<String>>()
                 .join("\n");
-            format!("\n{top_line}:\n{perks}")
+            format!("\n\n{top_line}:\n{perks}")
         } else {
             String::default()
         }

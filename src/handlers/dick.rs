@@ -1,4 +1,5 @@
 use std::future::IntoFuture;
+
 use anyhow::anyhow;
 use chrono::{Datelike, Utc};
 use futures::future::join;
@@ -7,12 +8,14 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message, MessageId, ParseMode, ReplyMarkup, User};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup, User};
+
 use page::{InvalidPage, Page};
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
+
 use crate::{config, metrics, repo};
-use crate::handlers::utils::{Incrementor, page};
-use crate::repo::{ChatIdKind, ChatIdPartiality};
+use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
+use crate::handlers::utils::{callbacks, Incrementor, page};
+use crate::repo::ChatIdPartiality;
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const LTR_MARK: char = '\u{200E}';
@@ -162,32 +165,9 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
         .is_some()
 }
 
-#[derive(Clone)]
-enum EditMessageReqParamsKind {
-    Chat(ChatId, MessageId),
-    Inline { chat_instance: String, inline_message_id: String },
-}
-
-#[allow(clippy::from_over_into)]
-impl Into<ChatIdKind> for EditMessageReqParamsKind {
-    fn into(self) -> ChatIdKind {
-        match self {
-            EditMessageReqParamsKind::Chat(chat_id, _) => chat_id.into(),
-            EditMessageReqParamsKind::Inline { chat_instance, .. } => chat_instance.into(),
-        }
-    }
-}
-
 pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                               config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
-    let edit_msg_req_params = q.message.as_ref()
-        .map(|m| EditMessageReqParamsKind::Chat(m.chat.id, m.id))
-        .or(q.inline_message_id.as_ref().map(|inline_message_id| EditMessageReqParamsKind::Inline {
-            chat_instance: q.chat_instance.clone(),
-            inline_message_id: inline_message_id.clone()
-        }))
-        .ok_or("no message")?;
-
+    let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
         return answer_callback_feature_disabled(bot, q, edit_msg_req_params).await
     }
@@ -208,7 +188,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
     let (answer_callback_query_result, edit_message_result) = match edit_msg_req_params {
-        EditMessageReqParamsKind::Chat(chat_id, message_id) => {
+        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
             let mut edit_message_text_req = bot.edit_message_text(chat_id, message_id, top.lines);
             edit_message_text_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_req.reply_markup.replace(keyboard);
@@ -217,7 +197,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                 edit_message_text_req.into_future().map_ok(|_| ())
             ).await
         },
-        EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
+        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
             let mut edit_message_text_inline_req = bot.edit_message_text_inline(inline_message_id, top.lines);
             edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_inline_req.reply_markup.replace(keyboard);
@@ -243,7 +223,7 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
     InlineKeyboardMarkup::new(vec![buttons])
 }
 
-async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: EditMessageReqParamsKind) -> HandlerResult {
+async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
     let lang_code = ensure_lang_code(Some(&q.from));
 
     let mut answer = bot.answer_callback_query(q.id);
@@ -252,10 +232,10 @@ async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_r
     answer.await?;
 
     match edit_msg_req_params {
-        EditMessageReqParamsKind::Chat(chat_id, message_id) =>
+        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
             bot.edit_message_reply_markup(chat_id, message_id)
                 .await.map(|_| ())?,
-        EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
+        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
             bot.edit_message_reply_markup_inline(inline_message_id)
                 .await.map(|_| ())?
     };

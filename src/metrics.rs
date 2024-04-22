@@ -34,6 +34,13 @@ pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
         inline: Counter::new("command_top (inline)", opts.const_label("mode", "inline")),
     }
 });
+pub static CMD_LOAN_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
+    let opts = Opts::new("command_loan_usage_total", "count of /loan invocations");
+    BothModesCounters {
+        chat: Counter::new("command_loan (chat)", opts.clone().const_label("mode", "chat")),
+        inline: Counter::new("command_loan (inline)", opts.const_label("mode", "inline")),
+    }
+});
 pub static CMD_DOD_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
     let opts = Opts::new("command_dick_of_day_usage_total", "count of /dick_of_day invocations");
     BothModesCounters {
@@ -74,6 +81,8 @@ pub fn init() -> axum::Router {
         .register(&CMD_GROW_COUNTER.inline)
         .register(&CMD_TOP_COUNTER.chat)
         .register(&CMD_TOP_COUNTER.inline)
+        .register(&CMD_LOAN_COUNTER.chat)
+        .register(&CMD_LOAN_COUNTER.inline)
         .register(&CMD_DOD_COUNTER.chat)
         .register(&CMD_DOD_COUNTER.inline)
         .register(&CMD_PVP_COUNTER.chat)

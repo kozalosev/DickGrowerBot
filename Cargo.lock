@@ -506,6 +506,7 @@ dependencies = [
  "chrono",
  "derive_more 1.0.0-beta.6",
  "dotenvy",
+ "downcast-rs",
  "futures",
  "hyper 1.0.1",
  "log",
@@ -546,6 +547,12 @@ name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
+name = "downcast-rs"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
 name = "dptree"

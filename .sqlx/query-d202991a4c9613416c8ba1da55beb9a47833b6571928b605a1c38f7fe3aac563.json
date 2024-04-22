@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT left_to_pay FROM Loans WHERE uid = $1 AND chat_id = $2 AND repaid_at IS NULL",
+  "query": "SELECT left_to_pay FROM loans WHERE uid = $1 AND chat_id = (SELECT id FROM Chats WHERE chat_id = $2::bigint OR chat_instance = $2::text) AND repaid_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       false
     ]
   },
-  "hash": "ec8e198184da36681b997c8a7d59ec350784e471158846cf152e6aa2589389dc"
+  "hash": "d202991a4c9613416c8ba1da55beb9a47833b6571928b605a1c38f7fe3aac563"
 }
