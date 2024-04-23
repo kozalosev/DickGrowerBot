@@ -36,12 +36,11 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, incr: Increment
     let answer = match winner {
         Some(winner) => {
             let increment = incr.dod_increment(from.id, chat_id.kind()).await;
-            let bonus = increment.total as u32;
-            let dod_result = repos.dicks.set_dod_winner(chat_id, UserId(winner.uid as u64), bonus).await;
+            let dod_result = repos.dicks.set_dod_winner(chat_id, UserId(winner.uid as u64), increment.total).await;
             let main_part = match dod_result {
                 Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
                     let answer = t!("commands.dod.result", locale = &lang_code,
-                        name = winner.name, growth = bonus, length = new_length);
+                        name = winner.name, growth = increment.total, length = new_length);
                     if let Some(pos) = pos_in_top {
                         let position = t!("commands.dod.position", locale = &lang_code, pos = pos);
                         format!("{answer}\n{position}")

@@ -27,7 +27,7 @@ async fn test_all() {
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment as u32)
+    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment as u16)
         .await
         .expect("couldn't elect a winner")
         .expect("the winner hasn't a dick");
@@ -64,7 +64,7 @@ async fn test_all_with_top_pagination_disabled() {
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment as u32)
+    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment as u16)
         .await
         .expect("couldn't elect a winner")
         .expect("the winner hasn't a dick");

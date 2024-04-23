@@ -122,10 +122,11 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let lang_code = ensure_lang_code(Some(from));
-    let offset = page * config.top_limit;
+    let top_limit = config.top_limit as u32;
+    let offset = page * top_limit;
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
-    let has_more_pages = dicks.len() as u32 > config.top_limit;
+    let has_more_pages = dicks.len() as u32 > top_limit;
     let lines = dicks.into_iter()
         .take(config.top_limit as usize)
         .enumerate()

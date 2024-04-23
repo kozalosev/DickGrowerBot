@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use derive_more::Display;
 use downcast_rs::{Downcast, impl_downcast};
-use num_traits::{Num, Zero};
+use num_traits::{PrimInt, Zero};
 use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -22,10 +22,10 @@ pub struct Incrementor {
 
 #[derive(Clone)]
 pub struct Config {
-    growth_range: RangeInclusive<i32>,
+    growth_range: RangeInclusive<i16>,
     grow_shrink_ratio: f32,
     newcomers_grace_days: u32,
-    dod_bonus_range: RangeInclusive<u16>,
+    dod_bonus_range: RangeInclusive<u8>,
 }
 
 #[async_trait]
@@ -55,7 +55,7 @@ pub struct ChangeIntent {
 #[derive(Copy, Clone)]
 pub struct AdditionalChange(pub i32);
 
-pub struct Increment<T: Num + Copy + std::fmt::Display> {
+pub struct Increment<T: PrimInt + std::fmt::Display> {
     pub base: T,
     pub by_perks: HashMap<String, i32>,
     pub total: T,
@@ -65,13 +65,13 @@ pub type SignedIncrement = Increment<i32>;
 pub type UnsignedIncrement = Increment<u16>;
 
 impl Config {
-    pub fn growth_range_min(&self) -> i32 {
+    pub fn growth_range_min(&self) -> i16 {
         self.growth_range.clone()
             .min()
             .unwrap_or(0)
     }
 
-    pub fn growth_range_max(&self) -> i32 {
+    pub fn growth_range_max(&self) -> i16 {
         self.growth_range.clone()
             .max()
             .unwrap_or(0)
@@ -128,29 +128,30 @@ impl Incrementor {
             1.0
         };
         let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
-        self.add_additional_incr(dick_id, base_incr).await
+        self.add_additional_incr(dick_id, BaseIncrement(base_incr)).await
     }
 
     pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind) -> UnsignedIncrement {
         let dick_id = DickId(user_id, chat_id);
         let base_incr = OsRng.gen_range(self.config.dod_bonus_range.clone());
-        self.add_additional_incr(dick_id, base_incr).await
+        self.add_additional_incr(dick_id, BaseIncrement(base_incr)).await
     }
-
-    async fn add_additional_incr<T>(&self, dick: DickId, base_increment: T) -> Increment<T>
+    
+    async fn add_additional_incr<T, R>(&self, dick: DickId, base_increment: BaseIncrement<T>) -> Increment<R>
     where
-        T: Num + Copy + std::fmt::Display + Into<i32> + TryFrom<i32>,
-        <T as TryFrom<i32>>::Error: std::fmt::Debug
+        T: PrimInt + std::fmt::Display + Into<i16>,
+        R: PrimInt + std::fmt::Display + From<T> + TryFrom<i32>,
+        <R as TryFrom<i32>>::Error: std::fmt::Display
     {
         let current_length = match self.dicks.fetch_length(dick.0, &dick.1).await {
             Ok(length) => length,
             Err(e) => {
                 log::error!("couldn't fetch the length of a dick: {e}");
-                return Increment::base_only(base_increment)
+                return base_increment.only()
             }
         };
         let change_intent = ChangeIntent {
-            base_increment: base_increment.into(),
+            base_increment: base_increment.i32(),
             current_length
         };
 
@@ -163,23 +164,47 @@ impl Incrementor {
             }
             additional_change += ac
         }
-        Increment {
-            base: base_increment,
-            by_perks,
-            total: T::try_from(change_intent.base_increment + additional_change).expect("TODO: fix numeric types!")
+        
+        let base = <R as From<T>>::from(base_increment.0);
+        let total = change_intent.base_increment.checked_add(additional_change)
+            .map(R::try_from)
+            .and_then(Result::ok)
+            .unwrap_or_else(|| {
+                log::error!("overflow on increment calculation for {dick}: base={base}, additional={additional_change}");
+                base
+            });
+        
+        if base == total && !additional_change.is_zero() {
+            log::info!("The following perks affected the calculation: {by_perks:?}");
+            by_perks.clear();
         }
+        
+        Increment { base, by_perks, total }
     }
 }
 
-impl <T: Num + Copy + std::fmt::Display> Increment<T> {
-    fn base_only(base: T) -> Self {
-        Self {
-            base,
-            total: base,
+#[derive(Copy, Clone)]
+struct BaseIncrement<T: PrimInt + Copy + Into<i16>>(T);
+
+impl <T: PrimInt + Into<i16>> BaseIncrement<T> {
+    fn only<R>(self) -> Increment<R>
+        where
+            R: PrimInt + std::fmt::Display + From<T>
+    {
+        let value = <R as From<T>>::from(self.0);
+        Increment {
+            base: value,
             by_perks: HashMap::default(),
+            total: value
         }
     }
-    
+
+    fn i32(self) -> i32 {
+        self.0.into() as i32
+    }
+}
+
+impl <T: PrimInt + std::fmt::Display + Into<i32>> Increment<T> {    
     pub fn perks_part_of_answer(&self, lang_code: &str) -> String {
         if self.base != self.total {
             let top_line = t!("titles.perks.top_line", locale = lang_code);
@@ -199,7 +224,7 @@ impl <T: Num + Copy + std::fmt::Display> Increment<T> {
 
 fn get_base_increment<T>(range: RangeInclusive<T>, sign_ratio: f32) -> T
 where
-    T: Num + Copy + PartialOrd + SampleUniform + From<i32>
+    T: PrimInt + PartialOrd + SampleUniform + From<i8>
 {
     let sign_ratio_percent = match (sign_ratio * 100.0).round() as u32 {
         ..=0 => 0,
@@ -207,18 +232,18 @@ where
         x => x
     };
     let mut rng = OsRng;
-    let zero = T::from(0);
+    let zero = <T as From<i8>>::from(0);
     if range.start() > &zero {
         return rng.gen_range(range)
     }
     let positive = rng.gen_ratio(sign_ratio_percent, 100);
     if positive {
         let end = *range.end();
-        let one = T::from(1);
+        let one = <T as From<i8>>::from(1);
         rng.gen_range(one..=end)
     } else {
         let start = *range.start();
-        let minus_one = T::from(-1);
+        let minus_one = <T as From<i8>>::from(-1);
         rng.gen_range(start..=minus_one)
     }
 }
@@ -280,6 +305,7 @@ mod test_incrementor {
         test_growth_increment_base(&incr).await;
         test_dod_increment_base(&incr).await;
         test_with_perks(&incr).await;
+        test_perk_with_overflow(&incr).await;
     }
 
     async fn test_growth_increment_base(incr: &Incrementor) {
@@ -364,5 +390,15 @@ mod test_incrementor {
             assertions!(growth_val);
             assertions!(dod_val);
         }
+    }
+    
+    async fn test_perk_with_overflow(incr: &Incrementor) {
+        let mut incr = incr.clone();
+        let perk_add_max_int = AddPerk::boxed(i32::MAX);
+        incr.set_perks(vec![perk_add_max_int.clone()]);
+        
+        let increment = incr.dod_increment(USER_ID, CHAT_ID_KIND).await;
+        assert_eq!(increment.base, increment.total);
+        assert!(increment.by_perks.is_empty());
     }
 }

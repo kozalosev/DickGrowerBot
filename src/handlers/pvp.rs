@@ -19,10 +19,10 @@ const CALLBACK_PREFIX: &str = "pvp:";
 #[command(rename_rule = "lowercase")]
 pub enum BattleCommands {
     #[command(description = "pvp")]
-    Pvp(u32),
-    Battle(u32),
-    Attack(u32),
-    Fight(u32),
+    Pvp(u16),
+    Battle(u16),
+    Attack(u16),
+    Fight(u16),
 }
 
 #[derive(BotCommands, Clone)]
@@ -35,7 +35,7 @@ pub enum BattleCommandsNoArgs {
 }
 
 impl BattleCommands {
-    fn bet(&self) -> u32 {
+    fn bet(&self) -> u16 {
         match *self {
             Self::Battle(bet) => bet,
             Self::Pvp(bet) => bet,
@@ -193,7 +193,7 @@ impl Into<UserId> for UserInfo {
     }
 }
 
-pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     let data = if enough {
         let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name, bet = bet);
@@ -209,7 +209,7 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u3
     Ok(data)
 }
 
-async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u32) -> anyhow::Result<CallbackResult> {
+async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u16) -> anyhow::Result<CallbackResult> {
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
@@ -252,14 +252,14 @@ fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {
     }
 }
 
-fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u32)> {
+fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u16)> {
     let parts = maybe_data.as_ref()
         .and_then(|data| data.strip_prefix(CALLBACK_PREFIX).map(|s| s.to_owned()))
         .map(|data| data.split(':').map(|s| s.to_owned()).collect::<Vec<String>>())
         .ok_or(anyhow!("callback data must be present!"))?;
     if parts.len() == 2 {
         let uid: u64 = parts[0].parse()?;
-        let bet: u32 = parts[1].parse()?;
+        let bet: u16 = parts[1].parse()?;
         Ok((UserId(uid), bet))
     } else {
         Err(anyhow!("invalid number of arguments ({}) in the callback data: {:?}", parts.len(), parts))

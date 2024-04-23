@@ -10,7 +10,7 @@ use crate::help;
 #[derive(Clone)]
 pub struct AppConfig {
     pub features: FeatureToggles,
-    pub top_limit: u32,
+    pub top_limit: u16,
 }
 
 #[derive(Clone)]
