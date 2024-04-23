@@ -146,24 +146,26 @@ mod test {
         let perk = LoanPayoutPerk { loans: loans.clone(), payout_coefficient: 0.1 };
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
         let change_intent_positive_increment = ChangeIntent { current_length: 1, base_increment: 10 };
-        let change_intent_positive_increment_small = ChangeIntent { current_length: 1, base_increment: 1 };
+        let change_intent_positive_increment_small = ChangeIntent { current_length: 1, base_increment: 2 };
         let change_intent_negative_increment = ChangeIntent { current_length: 1, base_increment: -1 };
         
         assert!(perk.enabled());
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, 0);
         
         loans.borrow(USER_ID, &CHAT_ID_KIND, 10)
-            .await.expect("couldn't create a loan");
+            .await.expect("couldn't create a loan")
+            .commit()
+            .await.expect("couldn't commit the creation of a loan");
         
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, -1);
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
             .await.expect("couldn't fetch the active loan");
         assert_eq!(debt, 9);
 
-        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment_small).await.0, 0);
+        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment_small).await.0, -1);
         assert_eq!(perk.apply(&dick_id, change_intent_negative_increment).await.0, 0);
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
             .await.expect("couldn't fetch the active loan");
-        assert_eq!(debt, 9);
+        assert_eq!(debt, 8);
     }
 }

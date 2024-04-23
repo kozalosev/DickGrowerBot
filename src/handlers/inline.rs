@@ -65,7 +65,7 @@ impl InlineCommand {
                     .await
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
-                        res.keyboard = config.features.chats_merging
+                        res.keyboard = config.features.top_unlimited
                             .then_some(build_pagination_keyboard(Page::first(), top.has_more_pages));
                         res
                     })

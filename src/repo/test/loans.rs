@@ -22,7 +22,9 @@ async fn test_all() {
     assert_eq!(no_debt, 0);
     
     loans.borrow(user_id, &chat_id, value)
-        .await.expect("couldn't apply for a loan");
+        .await.expect("couldn't apply for a loan")
+        .commit()
+        .await.expect("couldn't commit the application for a loan");
 
     let debt = loans.get_active_loan(user_id, &chat_id)
         .await.expect("couldn't fetch active loans again");
