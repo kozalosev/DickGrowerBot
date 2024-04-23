@@ -47,6 +47,18 @@ impl Dicks {
         Ok(GrowthResult { new_length, pos_in_top })
     }
 
+    pub async fn fetch_length(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<i32> {
+        sqlx::query_scalar!("SELECT d.length FROM Dicks d \
+                JOIN Chats c ON d.chat_id = c.id \
+                WHERE uid = $1 AND \
+                    c.chat_id = $2::bigint OR c.chat_instance = $2::text",
+                uid.0 as i64, chat_id.value() as String)
+            .fetch_optional(&self.pool)
+            .await
+            .map(Option::unwrap_or_default)
+            .map_err(Into::into)
+    }
+
     pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u32) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
         sqlx::query_as!(Dick,
             r#"SELECT length, name as owner_name, updated_at as grown_at,

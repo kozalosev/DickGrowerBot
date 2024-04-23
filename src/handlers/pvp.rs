@@ -128,10 +128,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
             .then_some(query.inline_message_id.as_ref())
             .flatten()
             .and_then(|msg_id| utils::resolve_inline_message_id(msg_id)
-                .map_err(|e| {
-                    log::error!("couldn't resolve inline_message_id: {e}");
-                    e
-                })
+                .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
                 .ok()
             )
             .map(|info| ChatId(info.chat_id))

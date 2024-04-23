@@ -83,6 +83,10 @@ titles:
   time_till_next_day:
     none: " Возвращайся завтра!"
     some: "\n\nСледующая попытка через <b>%{hours}</b> ч. <b>%{minutes}</b> мин."
+  perks:
+    top_line: "На результат повлияли следующие перки"
+    help-pussies: "Глубокая нора"
+    loan-payout: "Микрозаймер"
 errors:
   not_group_chat: "Бот выполняет свою миссию только в групповых чатах!"
   feature_disabled: "Данная функция пока временно отключена."

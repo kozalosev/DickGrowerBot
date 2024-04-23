@@ -31,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app_config = config::AppConfig::from_env();
     let database_config = config::DatabaseConfig::from_env()?;
+    let db_conn = repo::establish_database_connection(&database_config).await?;
 
     let handler = dptree::entry()
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
@@ -65,7 +66,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let me = bot.get_me().await?;
-    let help_context = config::build_context_for_help_messages(me, &app_config, &handlers::ORIGINAL_BOT_USERNAMES)?;
+    let repos = repo::Repositories::new(&db_conn, app_config.features);
+    let perks = handlers::perks::all(&db_conn, app_config.features);
+    let incrementor = handlers::utils::Incrementor::from_env(&repos.dicks, perks);
+    let help_context = config::build_context_for_help_messages(me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
 
     let webhook_url: Option<Url> = match std::env::var(ENV_WEBHOOK_URL) {
@@ -77,10 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let metrics_router = metrics::init();
 
-    let db_conn = repo::establish_database_connection(&database_config).await?;
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
-        repo::Repositories::new(&db_conn, app_config.features),
+        repos,
+        incrementor,
         app_config,
         help_container
     ];

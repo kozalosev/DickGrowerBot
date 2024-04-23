@@ -3,17 +3,21 @@ mod dicks;
 mod chats;
 mod import;
 mod promo;
+mod loans;
 
 #[cfg(test)]
 pub(crate) mod test;
 
+use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
+use sqlx::postgres::PgQueryResult;
 use teloxide::types::ChatId;
 pub use users::*;
 pub use dicks::*;
 pub use chats::*;
 pub use import::*;
 pub use promo::*;
+pub use loans::*;
 use crate::config::{DatabaseConfig, FeatureToggles};
 
 #[derive(Clone)]
@@ -95,7 +99,7 @@ impl ChatIdFull {
     }
 }
 
-#[derive(Debug, derive_more::Display, Clone)]
+#[derive(Debug, derive_more::Display, Clone, Eq, PartialEq, Hash)]
 pub enum ChatIdKind {
     ID(ChatId),
     Instance(String)
@@ -166,4 +170,11 @@ macro_rules! repository {
             $($methods)*
         }
     };
+}
+
+fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<PgQueryResult, anyhow::Error> {
+    match res.rows_affected() {
+        1 => Ok(res),
+        x => Err(anyhow!("not only one row was updated but {x}"))
+    }
 }

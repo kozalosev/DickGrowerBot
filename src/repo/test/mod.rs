@@ -3,11 +3,12 @@ mod dicks;
 mod chats;
 mod import;
 mod promo;
+mod loans;
 
 use std::str::FromStr;
 use reqwest::Url;
 use sqlx::{Pool, Postgres};
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, UserId};
 use testcontainers::{clients, Container, GenericImage};
 use testcontainers::core::WaitFor;
 use crate::config::DatabaseConfig;
@@ -22,6 +23,9 @@ const POSTGRES_PORT: u16 = 5432;
 pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = 67890;
 pub const NAME: &str = "test";
+
+pub const USER_ID: UserId = UserId(UID as u64);
+pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(ChatId(CHAT_ID));
 
 pub async fn start_postgres(docker: &clients::Cli) -> (Container<GenericImage>, Pool<Postgres>) {
     let postgres_image = GenericImage::new("postgres", "latest")
