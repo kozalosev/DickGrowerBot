@@ -38,6 +38,7 @@ commands:
       same_person: "You cannot fight with yourself!"
   loan:
     description: "Take a loan if you have a deep cave"
+    debt: "Left to pay <b>%{debt} cm</b>"
     confirmation:
       text: "Your deep hole will be reset to zero, but each growth will be lowered by <b>%{payout_percentage}%</b> until all <b>%{debt} cm</b> is repaid."
       buttons:
@@ -84,6 +85,7 @@ inline:
       top: "Get the biggest dicks of the chat"
       dick_of_day: "Elect the Dick of a Day"
       pvp: "Challenge others with a bet of %{bet} cm!"
+      loan: "Take a loan to reset your tool to zero"
   callback:
     errors:
       another_user: "This message was sent by another person."

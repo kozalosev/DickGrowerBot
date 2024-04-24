@@ -211,7 +211,7 @@ impl <T: PrimInt + std::fmt::Display + Into<i32>> Increment<T> {
             let perks = self.by_perks.iter()
                 .map(|(perk, value)| {
                     let name = t!(&format!("titles.perks.{perk}"), locale = lang_code);
-                    format!("— {name} ({value})")
+                    format!("— {name} ({value:+})")
                 })
                 .collect::<Vec<String>>()
                 .join("\n");
