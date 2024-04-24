@@ -47,7 +47,19 @@ impl Dicks {
         Ok(GrowthResult { new_length, pos_in_top })
     }
 
-    pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u32) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
+    pub async fn fetch_length(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<i32> {
+        sqlx::query_scalar!("SELECT d.length FROM Dicks d \
+                JOIN Chats c ON d.chat_id = c.id \
+                WHERE uid = $1 AND \
+                    c.chat_id = $2::bigint OR c.chat_instance = $2::text",
+                uid.0 as i64, chat_id.value() as String)
+            .fetch_optional(&self.pool)
+            .await
+            .map(Option::unwrap_or_default)
+            .map_err(Into::into)
+    }
+
+    pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u16) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
         sqlx::query_as!(Dick,
             r#"SELECT length, name as owner_name, updated_at as grown_at,
                     ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
@@ -56,12 +68,12 @@ impl Dicks {
                 JOIN chats c ON c.id = d.chat_id
                 WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text
                 OFFSET $2 LIMIT $3"#,
-                chat_id.value() as String, offset as i32, limit as i32)
+                chat_id.value() as String, offset as i64, limit as i32)
             .fetch_all(&self.pool)
             .await
     }
 
-    pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: u32) -> anyhow::Result<Option<GrowthResult>> {
+    pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: u16) -> anyhow::Result<Option<GrowthResult>> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;
@@ -77,7 +89,7 @@ impl Dicks {
         Ok(Some(GrowthResult { new_length, pos_in_top }))
     }
 
-    pub async fn check_dick(&self, chat_id: &ChatIdKind, user_id: UserId, length: u32) -> anyhow::Result<bool> {
+    pub async fn check_dick(&self, chat_id: &ChatIdKind, user_id: UserId, length: u16) -> anyhow::Result<bool> {
         sqlx::query_scalar!(r#"SELECT length >= $3 AS "enough!" FROM Dicks d
                 JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
@@ -89,7 +101,7 @@ impl Dicks {
             .await
     }
 
-    pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u32) -> anyhow::Result<(GrowthResult, GrowthResult)> {
+    pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u16) -> anyhow::Result<(GrowthResult, GrowthResult)> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;

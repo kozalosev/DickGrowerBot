@@ -163,7 +163,7 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
 
         },
         Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
-        Err(BeforeImportCheckErrors::NotReply) => t!(format!("commands.import.errors.not_reply").as_str(),
+        Err(BeforeImportCheckErrors::NotReply) => t!("commands.import.errors.not_reply",
             locale = lang_code.as_str(),
             origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ")),
         Err(e) => t!(format!("commands.import.errors.{e}").as_str(),
@@ -266,7 +266,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
     let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
         .await?.into_iter()
         .filter_map(|u| u.uid.try_into().ok())
-        .map(|uid| UserId(uid))
+        .map(UserId)
         .collect();
 
     let (already_present, to_import): (Vec<UserInfo>, Vec<UserInfo>) = existing.into_iter()
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn original_bot_kind_try_from() {
         let check = |variant: &str, kind| {
-            let second_variant = variant.strip_prefix("@").expect("no '@' prefix");
+            let second_variant = variant.strip_prefix('@').expect("no '@' prefix");
             let valid_variants = [variant, &second_variant];
             assert!(valid_variants.into_iter()
                 .all(|v| OriginalBotKind::try_from(v)

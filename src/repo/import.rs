@@ -27,16 +27,16 @@ repository!(Import,
             .map_err(|e| e.into())
     }
 ,
-    pub async fn import(&self, chat_id: ChatId, users: &Vec<ExternalUser>) -> anyhow::Result<()> {
-        let chat_id = chat_id.0 as i64;
+    pub async fn import(&self, chat_id: ChatId, users: &[ExternalUser]) -> anyhow::Result<()> {
+        let chat_id = chat_id.0;
         let mut tx = self.pool.begin().await?;
-        let uids = Self::insert_into_imports_table(&mut tx, chat_id, &users).await?;
+        let uids = Self::insert_into_imports_table(&mut tx, chat_id, users).await?;
         Self::update_dicks(&mut tx, chat_id, uids).await?;
         tx.commit().await?;
         Ok(())
     }
 ,
-    async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &Vec<ExternalUser>) -> anyhow::Result<Vec<i64>> {
+    async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &[ExternalUser]) -> anyhow::Result<Vec<i64>> {
         let (uids, lengths): (Vec<i64>, Vec<i32>) = users.iter()
             .map(|user| (user.uid, user.length))
             .unzip();

@@ -36,6 +36,19 @@ commands:
         initiator: "Meh. The initiator's dick is not long enough for such a big bet!"
         acceptor: "Your gun is not long enough 😣"
       same_person: "You cannot fight with yourself!"
+  loan:
+    description: "Take a loan if you have a deep cave"
+    debt: "Left to pay <b>%{debt} cm</b>"
+    confirmation:
+      text: "Your deep hole will be reset to zero, but each growth will be lowered by <b>%{payout_percentage}%</b> until all <b>%{debt} cm</b> is repaid."
+      buttons:
+        agree: "I'm in!"
+        disagree: "Disagree"
+    callback:
+      success: "Perk «Where is my centimeters, Lebowski?» has been assigned successfully!"
+      refused: "The patient refused gender reassignment on credit."
+    errors:
+      positive_length: "I cannot make your little bro bigger. Only change your gender."
   import:
     description: "Import dicks from other bots"
     result:
@@ -72,6 +85,7 @@ inline:
       top: "Get the biggest dicks of the chat"
       dick_of_day: "Elect the Dick of a Day"
       pvp: "Challenge others with a bet of %{bet} cm!"
+      loan: "Take a loan to reset your tool to zero"
   callback:
     errors:
       another_user: "This message was sent by another person."
@@ -82,7 +96,11 @@ titles:
   greeting: "Hello"
   time_till_next_day:
     none: " Come back tomorrow!"
-    some: "\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
+    some: "\n\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
+  perks:
+    top_line: "The following perks affected the result"
+    help-pussies: "Deep hole"
+    loan-payout: "Micro-loaner"
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   feature_disabled: "This feature is currently temporarily disabled."

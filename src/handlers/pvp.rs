@@ -19,26 +19,26 @@ const CALLBACK_PREFIX: &str = "pvp:";
 #[command(rename_rule = "lowercase")]
 pub enum BattleCommands {
     #[command(description = "pvp")]
-    PVP(u32),
-    Battle(u32),
-    Attack(u32),
-    Fight(u32),
+    Pvp(u16),
+    Battle(u16),
+    Attack(u16),
+    Fight(u16),
 }
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
 pub enum BattleCommandsNoArgs {
-    PVP,
+    Pvp,
     Battle,
     Attack,
     Fight,
 }
 
 impl BattleCommands {
-    fn bet(&self) -> u32 {
-        match self.clone() {
+    fn bet(&self) -> u16 {
+        match *self {
             Self::Battle(bet) => bet,
-            Self::PVP(bet) => bet,
+            Self::Pvp(bet) => bet,
             Self::Attack(bet) => bet,
             Self::Fight(bet) => bet,
         }
@@ -60,7 +60,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     let (text, keyboard) = pvp_impl_start(params, user, cmd.bet()).await?;
 
     let mut answer = reply_html(bot, msg, text);
-    answer.reply_markup = keyboard.map(|k| ReplyMarkup::InlineKeyboard(k));
+    answer.reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard);
     answer.await?;
     Ok(())
 }
@@ -128,15 +128,12 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
             .then_some(query.inline_message_id.as_ref())
             .flatten()
             .and_then(|msg_id| utils::resolve_inline_message_id(msg_id)
-                .or_else(|e| {
-                    log::error!("couldn't resolve inline_message_id: {e}");
-                    Err(e)
-                })
+                .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
                 .ok()
             )
             .map(|info| ChatId(info.chat_id))
         )
-        .map(|chat_id| ChatIdPartiality::from(chat_id))
+        .map(ChatIdPartiality::from)
         .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));
 
     let params = BattleParams {
@@ -189,13 +186,14 @@ impl From<User> for UserInfo {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl Into<UserId> for UserInfo {
     fn into(self) -> UserId {
         self.uid
     }
 }
 
-pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u32) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     let data = if enough {
         let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name, bet = bet);
@@ -211,7 +209,7 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u3
     Ok(data)
 }
 
-async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u32) -> anyhow::Result<CallbackResult> {
+async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u16) -> anyhow::Result<CallbackResult> {
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
@@ -247,21 +245,21 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
 }
 
 fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {
-    if OsRng::default().gen_bool(0.5) {
+    if OsRng.gen_bool(0.5) {
         (acceptor, initiator)
     } else {
         (initiator, acceptor)
     }
 }
 
-fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u32)> {
+fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u16)> {
     let parts = maybe_data.as_ref()
         .and_then(|data| data.strip_prefix(CALLBACK_PREFIX).map(|s| s.to_owned()))
-        .map(|data| data.split(":").map(|s| s.to_owned()).collect::<Vec<String>>())
+        .map(|data| data.split(':').map(|s| s.to_owned()).collect::<Vec<String>>())
         .ok_or(anyhow!("callback data must be present!"))?;
     if parts.len() == 2 {
         let uid: u64 = parts[0].parse()?;
-        let bet: u32 = parts[1].parse()?;
+        let bet: u16 = parts[1].parse()?;
         Ok((UserId(uid), bet))
     } else {
         Err(anyhow!("invalid number of arguments ({}) in the callback data: {:?}", parts.len(), parts))

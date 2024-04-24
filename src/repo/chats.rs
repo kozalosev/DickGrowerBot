@@ -1,9 +1,8 @@
 use std::fmt::Formatter;
 use anyhow::anyhow;
 use sqlx::{Postgres, Transaction};
-use sqlx::postgres::PgQueryResult;
 use teloxide::types::ChatId;
-use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
+use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ensure_only_one_row_updated};
 use crate::repository;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -158,17 +157,10 @@ fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, 
             main: MergedChat {
                 internal_id: chat_ids[0].0,
                 chat_id: chat_ids[0].1,
-                chat_instance: &chat_instances[0].1,
+                chat_instance: chat_instances[0].1,
             },
             deleted: (chat_instances[0].0, &chat_instances[0].1)
         })
-    }
-}
-
-fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<PgQueryResult, anyhow::Error> {
-    match res.rows_affected() {
-        1 => Ok(res),
-        x => Err(anyhow!("not only one row was updated but {x}"))
     }
 }
 

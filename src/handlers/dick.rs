@@ -1,21 +1,21 @@
 use std::future::IntoFuture;
-use std::ops::RangeInclusive;
+
 use anyhow::anyhow;
 use chrono::{Datelike, Utc};
 use futures::future::join;
 use futures::TryFutureExt;
-use rand::Rng;
-use rand::rngs::OsRng;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, Message, MessageId, ParseMode, ReplyMarkup, User};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup, User};
+
 use page::{InvalidPage, Page};
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
+
 use crate::{config, metrics, repo};
-use crate::handlers::utils::page;
-use crate::repo::{ChatIdKind, ChatIdPartiality};
+use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
+use crate::handlers::utils::{callbacks, Incrementor, page};
+use crate::repo::ChatIdPartiality;
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const LTR_MARK: char = '\u{200E}';
@@ -31,14 +31,15 @@ pub enum DickCommands {
 }
 
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
-                              repos: repo::Repositories, config: config::AppConfig) -> HandlerResult {
+                              repos: repo::Repositories, incr: Incrementor,
+                              config: config::AppConfig) -> HandlerResult {
     let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     match cmd {
         DickCommands::Grow => {
             metrics::CMD_GROW_COUNTER.chat.inc();
-            let answer = grow_impl(&repos, config, from_refs).await?;
+            let answer = grow_impl(&repos, incr, from_refs).await?;
             reply_html(bot, msg, answer)
         },
         DickCommands::Top => {
@@ -57,26 +58,21 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
 
 pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdPartiality);
 
-pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppConfig, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let name = utils::get_full_name(from);
     let user = repos.users.create_or_update(from.id, &name).await?;
     let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
-    let grow_shrink_ratio = if days_since_registration > config.newcomers_grace_days {
-        config.grow_shrink_ratio
-    } else {
-        1.0
-    };
-    let increment = gen_increment(config.growth_range, grow_shrink_ratio);
-    let grow_result = repos.dicks.create_or_grow(from.id, chat_id, increment).await;
+    let increment = incr.growth_increment(from.id, chat_id.kind(), days_since_registration).await;
+    let grow_result = repos.dicks.create_or_grow(from.id, chat_id, increment.total).await;
     let lang_code = ensure_lang_code(Some(from));
 
     let main_part = match grow_result {
         Ok(repo::GrowthResult { new_length, pos_in_top }) => {
-            let event_key = if increment.is_negative() { "shrunk" } else { "grown" };
+            let event_key = if increment.total.is_negative() { "shrunk" } else { "grown" };
             let event = t!(&format!("commands.grow.direction.{event_key}"), locale = &lang_code);
             let answer = t!("commands.grow.result", locale = &lang_code,
-                event = event, incr = increment.abs(), length = new_length);
+                event = event, incr = increment.total.abs(), length = new_length);
             if let Some(pos) = pos_in_top {
                 let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
                 format!("{answer}\n{position}")
@@ -96,8 +92,9 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, config: config::AppCon
             }
         }
     };
+    let perks_part = increment.perks_part_of_answer(&lang_code);
     let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-    Ok(format!("{main_part}{time_left_part}"))
+    Ok(format!("{main_part}{perks_part}{time_left_part}"))
 }
 
 pub(crate) struct Top {
@@ -125,10 +122,11 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let lang_code = ensure_lang_code(Some(from));
-    let offset = page * config.top_limit;
+    let top_limit = config.top_limit as u32;
+    let offset = page * top_limit;
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
-    let has_more_pages = dicks.len() as u32 > config.top_limit;
+    let has_more_pages = dicks.len() as u32 > top_limit;
     let lines = dicks.into_iter()
         .take(config.top_limit as usize)
         .enumerate()
@@ -168,31 +166,9 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
         .is_some()
 }
 
-#[derive(Clone)]
-enum EditMessageReqParamsKind {
-    Chat(ChatId, MessageId),
-    Inline { chat_instance: String, inline_message_id: String },
-}
-
-impl Into<ChatIdKind> for EditMessageReqParamsKind {
-    fn into(self) -> ChatIdKind {
-        match self {
-            EditMessageReqParamsKind::Chat(chat_id, _) => chat_id.into(),
-            EditMessageReqParamsKind::Inline { chat_instance, .. } => chat_instance.into(),
-        }
-    }
-}
-
 pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                               config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
-    let edit_msg_req_params = q.message.as_ref()
-        .map(|m| EditMessageReqParamsKind::Chat(m.chat.id, m.id))
-        .or(q.inline_message_id.as_ref().map(|inline_message_id| EditMessageReqParamsKind::Inline {
-            chat_instance: q.chat_instance.clone(),
-            inline_message_id: inline_message_id.clone()
-        }))
-        .ok_or("no message")?;
-
+    let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
         return answer_callback_feature_disabled(bot, q, edit_msg_req_params).await
     }
@@ -204,7 +180,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             .ok_or(InvalidPage::for_value(&d, "invalid prefix")))
         .and_then(|r| r.parse()
             .map_err(|e| InvalidPage::for_value(&r, e)))
-        .map(|p| Page(p))
+        .map(Page)
         .map_err(|e| anyhow!(e))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
@@ -213,7 +189,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
     let (answer_callback_query_result, edit_message_result) = match edit_msg_req_params {
-        EditMessageReqParamsKind::Chat(chat_id, message_id) => {
+        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
             let mut edit_message_text_req = bot.edit_message_text(chat_id, message_id, top.lines);
             edit_message_text_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_req.reply_markup.replace(keyboard);
@@ -222,7 +198,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                 edit_message_text_req.into_future().map_ok(|_| ())
             ).await
         },
-        EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
+        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
             let mut edit_message_text_inline_req = bot.edit_message_text_inline(inline_message_id, top.lines);
             edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_inline_req.reply_markup.replace(keyboard);
@@ -248,28 +224,7 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
     InlineKeyboardMarkup::new(vec![buttons])
 }
 
-fn gen_increment(range: RangeInclusive<i32>, sign_ratio: f32) -> i32 {
-    let sign_ratio_percent = match (sign_ratio * 100.0).round() as u32 {
-        ..=0 => 0,
-        100.. => 100,
-        x => x
-    };
-    let mut rng = OsRng::default();
-    if range.start() > &0 {
-        return rng.gen_range(range)
-    }
-    let positive = rng.gen_ratio(sign_ratio_percent, 100);
-    if positive {
-        let end = *range.end();
-        rng.gen_range(1..=end)
-    } else {
-        let start = *range.start();
-        rng.gen_range(start..=-1)
-    }
-
-}
-
-async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: EditMessageReqParamsKind) -> HandlerResult {
+async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
     let lang_code = ensure_lang_code(Some(&q.from));
 
     let mut answer = bot.answer_callback_query(q.id);
@@ -277,38 +232,13 @@ async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_r
     answer.text.replace(t!("errors.feature_disabled", locale = &lang_code));
     answer.await?;
 
-    return Ok(match edit_msg_req_params {
-        EditMessageReqParamsKind::Chat(chat_id, message_id) =>
+    match edit_msg_req_params {
+        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
             bot.edit_message_reply_markup(chat_id, message_id)
                 .await.map(|_| ())?,
-        EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
+        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
             bot.edit_message_reply_markup_inline(inline_message_id)
                 .await.map(|_| ())?
-    })
-}
-
-#[cfg(test)]
-mod test {
-    use super::gen_increment;
-
-    #[test]
-    fn test_gen_increment() {
-        let increments: Vec<i32> = (0..100)
-            .map(|_| gen_increment(-5..=10, 0.5))
-            .collect();
-        assert!(increments.iter().any(|n| n > &0));
-        assert!(increments.iter().any(|n| n < &0));
-        assert!(increments.iter().all(|n| n != &0));
-        assert!(increments.iter().all(|n| n <= &10));
-        assert!(increments.iter().all(|n| n >= &-5));
-    }
-
-    #[test]
-    fn test_gen_increment_with_positive_range() {
-        let increments: Vec<i32> = (0..100)
-            .map(|_| gen_increment(5..=10, 0.5))
-            .collect();
-        assert!(increments.iter().all(|n| n <= &10));
-        assert!(increments.iter().all(|n| n >= &5));
-    }
+    };
+    Ok(())
 }
