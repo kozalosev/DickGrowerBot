@@ -44,9 +44,13 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, incr
 pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, incr: Incrementor) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
     let (from, chat_id_part) = (from_refs.0, from_refs.1);
     let chat_id_kind = chat_id_part.kind();
-
-    let length = repos.dicks.fetch_length(from.id, &chat_id_kind).await?;
     let lang_code = ensure_lang_code(Some(from));
+    
+    let active_loan = repos.loans.get_active_loan(from.id, &chat_id_kind).await?;
+    if active_loan > 0 {
+        let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = active_loan);
+        return Ok(HandlerImplResult::OnlyText(left_to_pay))
+    }
 
     let payout_percentage = if let Some(payout_ratio) = incr.find_perk_config::<LoanPayoutPerk>() {
         payout_ratio * 100.0
@@ -54,7 +58,8 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
         let err_text = t!("errors.feature_disabled", locale = &lang_code);
         return Ok(HandlerImplResult::OnlyText(err_text))
     };
-    
+
+    let length = repos.dicks.fetch_length(from.id, &chat_id_kind).await?;
     let res = if length < 0 {
         let debt = length.unsigned_abs() as u16;
 
