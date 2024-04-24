@@ -25,7 +25,7 @@ pub enum LoanCommands {
 }
 
 pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, incr: Incrementor) -> HandlerResult {
-    metrics::CMD_LOAN_COUNTER.chat.inc();
+    metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
     let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
@@ -101,6 +101,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
 
     match data.action {
         LoanCallbackAction::Confirmed { value } => {
+            metrics::CMD_LOAN_COUNTER.finished.inc();
             let updated_text = t!("commands.loan.callback.success", locale = &lang_code);
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {

@@ -34,11 +34,16 @@ pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
         inline: Counter::new("command_top (inline)", opts.const_label("mode", "inline")),
     }
 });
-pub static CMD_LOAN_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
+pub static CMD_LOAN_COUNTER: Lazy<BothModesComplexCommandCounters> = Lazy::new(|| {
     let opts = Opts::new("command_loan_usage_total", "count of /loan invocations");
-    BothModesCounters {
-        chat: Counter::new("command_loan (chat)", opts.clone().const_label("mode", "chat")),
-        inline: Counter::new("command_loan (inline)", opts.const_label("mode", "inline")),
+    let invoked_opts = opts.clone().const_label("state", "query");
+    BothModesComplexCommandCounters {
+        invoked: BothModesCounters {
+            chat: Counter::new("command_loan (chat)", invoked_opts.clone().const_label("mode", "chat")),
+            inline: Counter::new("command_loan (inline)", invoked_opts.const_label("mode", "inline"))
+        },
+        finished: Counter::new("command_loan (finished)", opts.const_label("state", "chosen")
+            .const_label("mode", "unknown"))
     }
 });
 pub static CMD_DOD_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
@@ -75,14 +80,15 @@ pub fn init() -> axum::Router {
     let prometheus = REGISTRY
         .register(&INLINE_COUNTER.invoked)
         .register(&INLINE_COUNTER.finished)
-        .register(&*CMD_START_COUNTER)
-        .register(&*CMD_HELP_COUNTER)
+        .register(&CMD_START_COUNTER)
+        .register(&CMD_HELP_COUNTER)
         .register(&CMD_GROW_COUNTER.chat)
         .register(&CMD_GROW_COUNTER.inline)
         .register(&CMD_TOP_COUNTER.chat)
         .register(&CMD_TOP_COUNTER.inline)
-        .register(&CMD_LOAN_COUNTER.chat)
-        .register(&CMD_LOAN_COUNTER.inline)
+        .register(&CMD_LOAN_COUNTER.invoked.chat)
+        .register(&CMD_LOAN_COUNTER.invoked.inline)
+        .register(&CMD_LOAN_COUNTER.finished)
         .register(&CMD_DOD_COUNTER.chat)
         .register(&CMD_DOD_COUNTER.inline)
         .register(&CMD_PVP_COUNTER.chat)
@@ -118,12 +124,16 @@ pub struct BothModesCounters {
     pub chat: Counter,
     pub inline: Counter
 }
+pub struct BothModesComplexCommandCounters {
+    pub invoked: BothModesCounters,
+    pub finished: Counter
+}
 struct Registry(prometheus::Registry);
 
 impl Counter {
     fn new(name: &str, opts: Opts) -> Counter {
         let c = prometheus::Counter::with_opts(opts)
-            .expect(format!("unable to create {name} counter").as_str());
+            .unwrap_or_else(|e| panic!("unable to create {name} counter: {e}"));
         Counter { inner: c, name: name.to_string() }
     }
 
@@ -145,7 +155,7 @@ impl ComplexCommandCounters {
 impl Registry {
     fn register(&self, counter: &Counter) -> &Self {
         self.0.register(Box::new(counter.inner.clone()))
-            .expect(format!("unable to register the {} counter", counter.name).as_str());
+            .unwrap_or_else(|e| panic!("unable to register the {} counter: {e}", counter.name));
         self
     }
 

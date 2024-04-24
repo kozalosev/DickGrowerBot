@@ -77,7 +77,7 @@ impl InlineCommand {
                     .map(InlineResult::text)
             },
             InlineCommand::Loan => {
-                metrics::CMD_LOAN_COUNTER.inline.inc();
+                metrics::CMD_LOAN_COUNTER.invoked.inline.inc();
                 loan::loan_impl(repos, from_refs, incr)
                     .await
                     .map(InlineResult::from)
