@@ -12,7 +12,8 @@ services:
       - DATABASE_URL=postgres://${POSTGRES_USER:?error}:${POSTGRES_PASSWORD:?error}@${POSTGRES_HOST:?error}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:?error}
       - DATABASE_MAX_CONNECTIONS
       - HELP_ADMIN_USERNAME
-      - HELP_ADMIN_CHANNEL
+      - HELP_ADMIN_CHANNEL_RU
+      - HELP_ADMIN_CHANNEL_EN
       - HELP_GIT_REPO
       - CHATS_MERGING_ENABLED
       - TOP_UNLIMITED_ENABLED
@@ -23,6 +24,8 @@ services:
       - GROWTH_DOD_BONUS_MAX
       - NEWCOMERS_GRACE_DAYS
       - TOP_LIMIT
+      - HELP_PUSSIES_COEF
+      - LOAN_PAYOUT_COEF
     expose:
       - 8080
     networks:

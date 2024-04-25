@@ -21,7 +21,7 @@ pub fn all(pool: &Pool<Postgres>, features: FeatureToggles) -> Vec<Box<dyn Perk>
     ]
 }
 
-struct HelpPussiesPerk {
+pub struct HelpPussiesPerk {
     coefficient: f64
 }
 
@@ -47,7 +47,15 @@ impl Perk for HelpPussiesPerk {
     }
 }
 
-pub(super) struct LoanPayoutPerk {
+impl ConfigurablePerk for HelpPussiesPerk {
+    type Config = f64;
+
+    fn get_config(&self) -> Self::Config {
+        self.coefficient
+    }
+}
+
+pub struct LoanPayoutPerk {
     payout_coefficient: f64,
     loans: repo::Loans,
 }

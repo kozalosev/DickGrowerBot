@@ -32,8 +32,10 @@ pub struct Context {
     pub grow_max: String,
     pub other_bots: String,
     pub admin_username: String,
-    pub admin_channel: String,
+    pub admin_channel_ru: String,
+    pub admin_channel_en: String,
     pub git_repo: String,
+    pub help_pussies_percentage: f64
 }
 
 pub fn render_help_messages(context: Context) -> Result<HelpContainer, tinytemplate::error::Error> {

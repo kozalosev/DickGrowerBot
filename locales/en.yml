@@ -99,8 +99,8 @@ titles:
     some: "\n\nNext attempt in <b>%{hours}</b>h <b>%{minutes}</b>m."
   perks:
     top_line: "The following perks affected the result"
-    help-pussies: "Deep hole"
-    loan-payout: "Micro-loaner"
+    help-pussies: "deep hole"
+    loan-payout: "micro-loaner"
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   feature_disabled: "This feature is currently temporarily disabled."

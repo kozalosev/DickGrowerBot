@@ -36,13 +36,13 @@ pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
 });
 pub static CMD_LOAN_COUNTER: Lazy<BothModesComplexCommandCounters> = Lazy::new(|| {
     let opts = Opts::new("command_loan_usage_total", "count of /loan invocations");
-    let invoked_opts = opts.clone().const_label("state", "query");
+    let invoked_opts = opts.clone().const_label("state", "invoked");
     BothModesComplexCommandCounters {
         invoked: BothModesCounters {
             chat: Counter::new("command_loan (chat)", invoked_opts.clone().const_label("mode", "chat")),
             inline: Counter::new("command_loan (inline)", invoked_opts.const_label("mode", "inline"))
         },
-        finished: Counter::new("command_loan (finished)", opts.const_label("state", "chosen")
+        finished: Counter::new("command_loan (finished)", opts.const_label("state", "finished")
             .const_label("mode", "unknown"))
     }
 });

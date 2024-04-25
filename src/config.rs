@@ -4,6 +4,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use reqwest::Url;
 use teloxide::types::Me;
+use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
 
@@ -84,8 +85,12 @@ pub fn build_context_for_help_messages(me: Me, incr: &Incrementor, competitor_bo
         grow_max: incr_cfg.growth_range_max().to_string(),
         other_bots,
         admin_username: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_USERNAME")?),
-        admin_channel: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_CHANNEL")?),
+        admin_channel_ru: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_CHANNEL_RU")?),
+        admin_channel_en: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_CHANNEL_EN")?),
         git_repo: get_env_mandatory_value("HELP_GIT_REPO")?,
+        help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
+            .map(|payout_ratio| payout_ratio * 100.0)
+            .unwrap_or(0.0)
     })
 }
 
