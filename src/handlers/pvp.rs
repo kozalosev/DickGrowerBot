@@ -11,7 +11,7 @@ use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardB
 use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, utils};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
-use crate::repo::{ChatIdPartiality, Repositories};
+use crate::repo::{ChatIdPartiality, GrowthResult, Repositories};
 
 const CALLBACK_PREFIX: &str = "pvp:";
 
@@ -221,11 +221,20 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         let acceptor_uid = acceptor.clone().into();
         let (winner, loser) = choose_winner(initiator, acceptor_uid);
         let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
+        
+        let (winner_res, withheld_part) = pay_for_loan_if_needed(&p, winner, bet).await
+            .inspect_err(|e| log::error!("couldn't pay for a loan from a battle award: {e}"))
+            .ok().flatten()
+            .map(|(res, withheld)| {
+                let withheld_part = format!("\n\n{}", t!("commands.pvp.results.withheld", locale = &p.lang_code, payout = withheld));
+                (res, withheld_part)
+            })
+            .unwrap_or((winner_res, String::default()));
 
         let winner_info = get_user_info(&p.repos.users, winner, &acceptor).await?;
         let loser_info = get_user_info(&p.repos.users, loser, &acceptor).await?;
         let main_part = t!("commands.pvp.results.finish", locale = &p.lang_code,
-            winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length);
+            winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length, bet = bet);
         let text = if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
             let winner_pos = t!("commands.pvp.results.position.winner", locale = &p.lang_code, name = winner_info.name, pos = winner_pos);
             let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.name, pos = loser_pos);
@@ -233,7 +242,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         } else {
             main_part
         };
-        CallbackResult::EditMessage(text, None)
+        CallbackResult::EditMessage(format!("{text}{withheld_part}"), None)
     } else if enough_acceptor {
         let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code);
         CallbackResult::EditMessage(text, None)
@@ -278,4 +287,20 @@ async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInf
             .ok_or(anyhow!("pvp participant must present in the database!"))?
     };
     Ok(user)
+}
+
+async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: u16) -> anyhow::Result<Option<(GrowthResult, u16)>> {
+    let chat_id_kind = p.chat_id.kind();
+    let loan = match p.repos.loans.get_active_loan(winner_id, &chat_id_kind).await? {
+        Some(loan) => loan,
+        None => return Ok(None)
+    };
+    let payout = (loan.payout_ratio * award as f32).round() as u16;
+    let payout = payout.min(loan.debt);
+    
+    p.repos.loans.pay(winner_id, &chat_id_kind, payout).await?;
+    
+    let withheld = -(payout as i32);
+    let growth_res = p.repos.dicks.create_or_grow(winner_id, &p.chat_id, withheld).await?;
+    Ok(Some((growth_res, payout)))
 }

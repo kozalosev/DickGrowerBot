@@ -33,7 +33,7 @@ impl Perk for HelpPussiesPerk {
         
         let current_deepness = change_intent.current_length.abs()
             .to_f64().expect("conversion is always Some");
-        let change = (self.coefficient * current_deepness).ceil() as i32;
+        let change = (self.coefficient * current_deepness).round() as i32;
         AdditionalChange(change)
     }
 
@@ -74,7 +74,7 @@ impl Perk for LoanPayoutPerk {
 
         let payout = if change_intent.base_increment.is_positive() {
             let base_increment = change_intent.base_increment as f32;
-            let payout = (base_increment * payout_coefficient).ceil() as u16;
+            let payout = (base_increment * payout_coefficient).round() as u16;
             payout.min(debt)
         } else {
             0
@@ -153,12 +153,12 @@ mod test {
             .debt;
         assert_eq!(debt, 9);
 
-        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment_small).await.0, -1);
+        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment_small).await.0, 0);
         assert_eq!(perk.apply(&dick_id, change_intent_negative_increment).await.0, 0);
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")
             .debt;
-        assert_eq!(debt, 8);
+        assert_eq!(debt, 9);
     }
 }

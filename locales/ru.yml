@@ -25,10 +25,11 @@ commands:
     description: "Сражайся с пипирками друзей!"
     results:
       start: "<b>%{name}</b> бросил чату вызов со ставкой <b>%{bet} см</b>!"
-      finish: "Победитель — <b>%{winner_name}</b>! Его пипирик теперь равен <b>%{winner_length} см</b>, а проигравшего — <b>%{loser_length} см</b>."
+      finish: "Победитель — <b>%{winner_name}</b>! Его пипирик теперь равен <b>%{winner_length} см</b>, а проигравшего — <b>%{loser_length} см</b>.\nСтавка была <b>%{bet} см</b>."
       position:
         winner: "<b>%{name}</b> занимает <b>%{pos}</b> место в топе."
         loser: "<b>%{name}</b> занимает <b>%{pos}</b> место в топе."
+      withheld: "<b>%{payout} см</b> было удержано с победителя для погашения задолженности."
     button: "Атаковать!"
     errors:
       no_args: "Вызови команду с числом сантиметров, которые готов поставить."
