@@ -9,7 +9,7 @@ use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID};
 async fn create_or_update() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let users = repo::Users::new(db.clone(), Default::default());
+    let users = repo::Users::new(db.clone());
 
     let members = users.get_all().await
         .expect("couldn't fetch the empty list of members");
@@ -38,7 +38,7 @@ async fn create_or_update() {
 async fn get_chat_members() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let users = repo::Users::new(db.clone(), Default::default());
+    let users = repo::Users::new(db.clone());
 
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
     let members = users.get_chat_members(&chat_id)
@@ -56,7 +56,7 @@ async fn get_chat_members() {
 async fn get_random_active_member() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let users = repo::Users::new(db.clone(), Default::default());
+    let users = repo::Users::new(db.clone());
 
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
     let user = users.get_random_active_member(&chat_id)
@@ -85,7 +85,7 @@ fn check_member_with_name(members: &[repo::User], name: &str) {
 }
 
 async fn create_member(db: &Pool<Postgres>) {
-    let users = repo::Users::new(db.clone(), Default::default());
+    let users = repo::Users::new(db.clone());
     let dicks = repo::Dicks::new(db.clone(), Default::default());
 
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));

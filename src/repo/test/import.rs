@@ -9,7 +9,7 @@ use crate::repo::test::dicks::{check_dick, create_dick, create_user};
 async fn test_all() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let import = repo::Import::new(db.clone(), Default::default());
+    let import = repo::Import::new(db.clone());
     let chat_id = ChatId(CHAT_ID);
 
     create_user(&db).await;

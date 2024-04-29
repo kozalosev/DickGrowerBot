@@ -12,6 +12,7 @@ use crate::help;
 pub struct AppConfig {
     pub features: FeatureToggles,
     pub top_limit: u16,
+    pub loan_payout_ratio: f32,
 }
 
 #[derive(Clone)]
@@ -46,6 +47,7 @@ pub struct BattlesFeatureToggles {
 impl AppConfig {
     pub fn from_env() -> Self {
         let top_limit = get_env_value_or_default("TOP_LIMIT", 10);
+        let loan_payout_ratio = get_env_value_or_default("LOAN_PAYOUT_COEF", 0.0);
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
@@ -58,6 +60,7 @@ impl AppConfig {
                 }
             },
             top_limit,
+            loan_payout_ratio,
         }
     }
 }

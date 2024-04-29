@@ -31,8 +31,12 @@ pub struct Config {
 #[async_trait]
 pub trait Perk: Send + Sync + Downcast {
     fn name(&self) -> &str;
-    fn enabled(&self) -> bool;
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange;
+
+    fn enabled(&self) -> bool {
+        let env_key = format!("DISABLE_{}", self.name().to_uppercase().replace('-', "_"));
+        !config::get_env_value_or_default(&env_key, false)
+    }
 }
 impl_downcast!(Perk);
 
