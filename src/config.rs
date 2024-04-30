@@ -4,6 +4,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use reqwest::Url;
 use teloxide::types::Me;
+use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
 
@@ -11,6 +12,7 @@ use crate::help;
 pub struct AppConfig {
     pub features: FeatureToggles,
     pub top_limit: u16,
+    pub loan_payout_ratio: f32,
 }
 
 #[derive(Clone)]
@@ -45,6 +47,7 @@ pub struct BattlesFeatureToggles {
 impl AppConfig {
     pub fn from_env() -> Self {
         let top_limit = get_env_value_or_default("TOP_LIMIT", 10);
+        let loan_payout_ratio = get_env_value_or_default("LOAN_PAYOUT_COEF", 0.0);
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
@@ -57,6 +60,7 @@ impl AppConfig {
                 }
             },
             top_limit,
+            loan_payout_ratio,
         }
     }
 }
@@ -84,8 +88,12 @@ pub fn build_context_for_help_messages(me: Me, incr: &Incrementor, competitor_bo
         grow_max: incr_cfg.growth_range_max().to_string(),
         other_bots,
         admin_username: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_USERNAME")?),
-        admin_channel: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_CHANNEL")?),
+        admin_channel_ru: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_CHANNEL_RU")?),
+        admin_channel_en: ensure_starts_with_at_sign(get_env_mandatory_value("HELP_ADMIN_CHANNEL_EN")?),
         git_repo: get_env_mandatory_value("HELP_GIT_REPO")?,
+        help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
+            .map(|payout_ratio| payout_ratio * 100.0)
+            .unwrap_or(0.0)
     })
 }
 

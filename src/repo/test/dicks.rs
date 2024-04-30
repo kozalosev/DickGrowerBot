@@ -144,13 +144,13 @@ async fn test_pvp() {
 }
 
 pub async fn create_user(db: &Pool<Postgres>) {
-    let users = repo::Users::new(db.clone(), Default::default());
+    let users = repo::Users::new(db.clone());
     users.create_or_update(UserId(UID as u64), NAME)
         .await.expect("couldn't create a user");
 }
 
 async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartiality, name: &str) {
-        let users = repo::Users::new(db.clone(), Default::default());
+        let users = repo::Users::new(db.clone());
         let dicks = repo::Dicks::new(db.clone(), Default::default());
         let uid2 = UserId((UID + 1) as u64);
         users.create_or_update(uid2, name)

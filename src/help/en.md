@@ -12,18 +12,23 @@ This bot has been created as a replacement for all competitors abusing their abi
 
 Using the /import command, sent as a reply to a message from another bot, describing positions of the users in its top, any administrator of a chat may import already existing cocks. Currently, the following bots are supported: {other_bots}.
 
-For import to be done successfully, a player must already have a dick in this bot! Both lengths will be summed, so no progress is lost.
+For import to be done successfully, a player must already have a dick in this bot! Both lengths will be summed, so no progress is lost. Also, the bot must be granted temporary administrator privileges to be able to read the message of the other bot. This allows us to keep the privacy mode enabled, preventing even theoretical possibility for the bot to read all messages in the chat.
 
-<b>The administrator of the chat, I participate in, doesn't allow to add unknown bots, especially with privacy mode disabled</b>
+<b>The administrator of the chat, I participate in, doesn't allow to add unknown bots</b>
 
-Unfortunately, I had to disable the privacy mode to make the import feature work. Otherwise, Telegram doesn't give the access to the messages sent by the other bots. In the future, however, when this command will be less demanded, it may be removed.
-
-Nevertheless, there is a way to play without the bot being in a chat at all! Just use inline queries! Type the username of the bot after the <code>@</code> sign and a trailing space to get the same commands!
-
-<i>NB!</i> The rating used via inline mode is different from the rating used by the bot added to the chat. The process of their <a href="https://github.com/kozalosev/DickGrowerBot/issues/17">synchronization</a> may be implemented later.
+There is a way to play without the bot being in a chat at all! Just use inline queries! Type the username of the bot after the <code>@</code> sign and a trailing space to get the same commands!
 
 <b>Contacts and links</b>
 
 In case of any problems, write to {admin_username} or create an issue in the source code repository.
 
 The source code of the bot, written in Rust, is available on GitHub under a bit modified MIT license, forbidding the use of the code to create competitor bots or take a commercial profit by any ways: {git_repo}
+
+Subscribe to {admin_channel_en} to stay informed about future updates and other bots of mine.
+
+
+<b>For those who are stuck very deep below minus</b>
+
+Since release <a href="https://github.com/kozalosev/DickGrowerBot/releases/tag/v1.2.0">1.2</a>, there is no way anymore to accept a fight with a bet greater than the size of your weapon. However, many of you are already below zero very much. To smooth out this issue, the following measures were taken:
+1️⃣ every growth will be increased by <b>{help_pussies_percentage}%</b> of the "debt";
+2️⃣ as an alternative option, the /loan command has been added, allowing you to reset your little sis to zero on credit, which will be gradually paid out by each subsequent growth.

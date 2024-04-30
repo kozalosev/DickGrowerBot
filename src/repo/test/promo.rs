@@ -13,7 +13,7 @@ async fn activate() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
 
-    let promo = repo::Promo::new(db.clone(), Default::default());
+    let promo = repo::Promo::new(db.clone());
     promo.create(PromoCodeParams{
         code: PROMO_CODE.to_owned(),
         bonus_length: PROMO_BONUS,

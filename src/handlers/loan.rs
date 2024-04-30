@@ -1,6 +1,7 @@
 use std::str::{FromStr, Split};
 use anyhow::anyhow;
 use derive_more::Display;
+use num_traits::Zero;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
@@ -9,12 +10,12 @@ use teloxide::requests::Requester;
 use teloxide::types::ReplyMarkup;
 use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
 
-use crate::{check_invoked_by_owner_and_get_answer_params, config, metrics, repo};
+use crate::{check_invoked_by_owner_and_get_answer_params, metrics, repo};
+use crate::config::AppConfig;
 use crate::handlers::{CallbackButton, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, reply_html, try_resolve_chat_id};
-use crate::handlers::perks::LoanPayoutPerk;
-use crate::handlers::utils::{callbacks, Incrementor};
+use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
-use crate::repo::ChatIdPartiality;
+use crate::repo::{ChatIdPartiality, Loan};
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -24,14 +25,14 @@ pub enum LoanCommands {
     Borrow,
 }
 
-pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, incr: Incrementor) -> HandlerResult {
+pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, config: AppConfig) -> HandlerResult {
     metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
     let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
 
-    let result = loan_impl(&repos, from_refs, incr).await?;
+    let result = loan_impl(&repos, from_refs, config).await?;
     let markup = result.keyboard().map(ReplyMarkup::InlineKeyboard);
 
     let mut request = reply_html(bot, msg, result.text());
@@ -41,33 +42,35 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, incr
     Ok(())
 }
 
-pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, incr: Incrementor) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
+pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, config: AppConfig) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
     let (from, chat_id_part) = (from_refs.0, from_refs.1);
     let chat_id_kind = chat_id_part.kind();
     let lang_code = ensure_lang_code(Some(from));
     
-    let active_loan = repos.loans.get_active_loan(from.id, &chat_id_kind).await?;
-    if active_loan > 0 {
-        let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = active_loan);
+    let maybe_loan = repos.loans.get_active_loan(from.id, &chat_id_kind).await?;
+    if let Some(Loan { debt, .. }) = maybe_loan {
+        let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt);
         return Ok(HandlerImplResult::OnlyText(left_to_pay))
     }
 
-    let payout_percentage = if let Some(payout_ratio) = incr.find_perk_config::<LoanPayoutPerk>() {
-        payout_ratio * 100.0
-    } else {
+    if config.loan_payout_ratio <= 0.0 || config.loan_payout_ratio >= 1.0 {
         let err_text = t!("errors.feature_disabled", locale = &lang_code);
         return Ok(HandlerImplResult::OnlyText(err_text))
-    };
+    }
 
     let length = repos.dicks.fetch_length(from.id, &chat_id_kind).await?;
     let res = if length < 0 {
         let debt = length.unsigned_abs() as u16;
+        let payout_percentage = format!("{:.2}%", config.loan_payout_ratio * 100.0);
 
         let btn_agree = CallbackButton::new(
             t!("commands.loan.confirmation.buttons.agree", locale = &lang_code),
             LoanCallbackData {
                 uid: from.id,
-                action: LoanCallbackAction::Confirmed { value: debt }
+                action: LoanCallbackAction::Confirmed {
+                    value: debt,
+                    payout_ratio: config.loan_payout_ratio
+                }
             }
         );
         let btn_disagree = CallbackButton::new(
@@ -78,7 +81,8 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
             }
         );
         HandlerImplResult::WithKeyboard {
-            text: t!("commands.loan.confirmation.text", locale = &lang_code, debt = debt, payout_percentage = payout_percentage),
+            text: t!("commands.loan.confirmation.text", locale = &lang_code,
+                debt = debt, payout_percentage = payout_percentage),
             buttons: vec![btn_agree, btn_disagree]
         }
     } else {
@@ -94,13 +98,17 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
-                              repos: repo::Repositories, config: config::AppConfig) -> HandlerResult {
+                              repos: repo::Repositories, config: AppConfig) -> HandlerResult {
     let data = LoanCallbackData::parse(&query)?;
-    let (answer, lang_code) = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let (mut answer, lang_code) = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
-
     match data.action {
-        LoanCallbackAction::Confirmed { value } => {
+        LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {
+            answer.show_alert.replace(true);
+            answer.text.replace(t!("errors.feature_disabled", locale = &lang_code));
+        }
+        LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == config.loan_payout_ratio => {            
             metrics::CMD_LOAN_COUNTER.finished.inc();
             let updated_text = t!("commands.loan.callback.success", locale = &lang_code);
             match edit_msg_params {
@@ -122,6 +130,17 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                     };
 
                     borrow(repos, chat_id, data.uid, value).await?;
+                    bot.edit_message_text_inline(inline_message_id, updated_text).await?;
+                }
+            }
+        }
+        LoanCallbackAction::Confirmed { .. } => {
+            let updated_text = t!("commands.loan.callback.payout_ratio_changed", locale = &lang_code);
+            match edit_msg_params {
+                EditMessageReqParamsKind::Chat(chat_id, message_id) => {
+                    bot.edit_message_text(chat_id, message_id, updated_text).await?;
+                }
+                EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
                     bot.edit_message_text_inline(inline_message_id, updated_text).await?;
                 }
             }
@@ -163,10 +182,10 @@ pub(crate) struct LoanCallbackData {
 }
 
 #[derive(Display)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+#[cfg_attr(test, derive(PartialEq, Debug))]
 pub(crate) enum LoanCallbackAction {
-    #[display("confirmed:{value}")]
-    Confirmed { value: u16 },
+    #[display("confirmed:{value}:{payout_ratio}")]
+    Confirmed { value: u16, payout_ratio: f32 },
     #[display("refused")]
     Refused
 }
@@ -189,7 +208,15 @@ impl TryFrom<String> for LoanCallbackData {
         let action = match action {
             "confirmed" => {
                 let value = Self::parse_part(&mut parts, &err, "value")?;
-                LoanCallbackAction::Confirmed { value }
+                let payout_ratio = match Self::parse_part(&mut parts, &err, "payout_ratio") {
+                    Ok(ratio) => ratio,
+                    // for backward compatibility; zero ratio disables the loans completely,
+                    // so this value is out of possible ones, thus either the "rate changed" or
+                    // "feature disabled" message will always be sent.
+                    Err(InvalidCallbackData::MissingPart { .. }) => 0.0,
+                    Err(e) => return Err(e)
+                };
+                LoanCallbackAction::Confirmed { value, payout_ratio }
             }
             "refused" => LoanCallbackAction::Refused,
             _ => return Err(err.split_err())
@@ -220,14 +247,14 @@ mod test {
 
     #[test]
     fn test_parse() {
-        let (uid, value) = get_test_params();
-        let [cd_confirmed, cd_refused] = get_strings(uid, value)
+        let (uid, value, payout_ratio) = get_test_params();
+        let [cd_confirmed, cd_refused] = get_strings(uid, value, payout_ratio)
             .map(build_callback_query);
         {
             let lcd_confirmed = LoanCallbackData::parse(&cd_confirmed)
                 .expect("callback data for 'confirmed' must be parsed successfully");
             assert_eq!(lcd_confirmed.uid, uid);
-            assert_eq!(lcd_confirmed.action, LoanCallbackAction::Confirmed { value });
+            assert_eq!(lcd_confirmed.action, LoanCallbackAction::Confirmed { value, payout_ratio });
         }{
             let lcd_refused = LoanCallbackData::parse(&cd_refused)
                 .expect("callback data for 'refused' must be parsed successfully");
@@ -235,31 +262,42 @@ mod test {
             assert_eq!(lcd_refused.action, LoanCallbackAction::Refused)
         }
     }
+    
+    #[test]
+    fn test_parse_old() {
+        let (uid, value, _) = get_test_params();
+        let cd_confirmed = build_callback_query(format!("loan:{uid}:confirmed:{value}"));
+        
+        let lcd_confirmed = LoanCallbackData::parse(&cd_confirmed)
+            .expect("callback data for 'confirmed' must be parsed successfully");
+        assert_eq!(lcd_confirmed.uid, uid);
+        assert_eq!(lcd_confirmed.action, LoanCallbackAction::Confirmed { value, payout_ratio: 0.0 });
+    }
 
     #[test]
     fn test_serialize() {
-        let (uid, value) = get_test_params();
+        let (uid, value, payout_ratio) = get_test_params();
         let lcd_confirmed = LoanCallbackData {
             uid,
-            action: LoanCallbackAction::Confirmed { value }
+            action: LoanCallbackAction::Confirmed { value, payout_ratio }
         };
         let lcd_refused = LoanCallbackData {
             uid,
             action: LoanCallbackAction::Refused
         };
 
-        let [expected_confirmed, expected_refused] = get_strings(uid, value);
+        let [expected_confirmed, expected_refused] = get_strings(uid, value, payout_ratio);
 
         assert_eq!(lcd_confirmed.to_data_string(), expected_confirmed);
         assert_eq!(lcd_refused.to_data_string(), expected_refused);
     }
 
-    fn get_test_params() -> (UserId, u16) {
-        (UserId(123456), 10)
+    fn get_test_params() -> (UserId, u16, f32) {
+        (UserId(123456), 10, 0.1)
     }
 
-    fn get_strings(uid: UserId, value: u16) -> [String; 2] {[
-        format!("loan:{uid}:confirmed:{value}"),
+    fn get_strings(uid: UserId, value: u16, payout_ratio: f32) -> [String; 2] {[
+        format!("loan:{uid}:confirmed:{value}:{payout_ratio}"),
         format!("loan:{uid}:refused"),
     ]}
 

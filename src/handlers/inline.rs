@@ -78,7 +78,7 @@ impl InlineCommand {
             },
             InlineCommand::Loan => {
                 metrics::CMD_LOAN_COUNTER.invoked.inline.inc();
-                loan::loan_impl(repos, from_refs, incr)
+                loan::loan_impl(repos, from_refs, config)
                     .await
                     .map(InlineResult::from)
             }

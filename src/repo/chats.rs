@@ -28,7 +28,7 @@ impl TryInto<ChatIdPartiality> for Chat {
     }
 }
 
-repository!(Chats,
+repository!(Chats, with_feature_toggles,
     pub async fn get_chat(&self, chat_id: ChatIdKind) -> anyhow::Result<Option<Chat>> {
         sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
                 WHERE chat_id = $1::bigint OR chat_instance = $1::text",
