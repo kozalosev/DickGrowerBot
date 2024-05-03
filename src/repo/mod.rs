@@ -39,7 +39,7 @@ impl Repositories {
             chats: Chats::new(db_conn.clone(), config.features),
             import: Import::new(db_conn.clone()),
             promo: Promo::new(db_conn.clone()),
-            loans: Loans::new(db_conn.clone(), config.loan_payout_ratio),
+            loans: Loans::new(db_conn.clone(), config),
         }
     }
 }

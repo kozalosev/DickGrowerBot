@@ -73,11 +73,12 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
             let event = t!(&format!("commands.grow.direction.{event_key}"), locale = &lang_code);
             let answer = t!("commands.grow.result", locale = &lang_code,
                 event = event, incr = increment.total.abs(), length = new_length);
+            let perks_part = increment.perks_part_of_answer(&lang_code);
             if let Some(pos) = pos_in_top {
                 let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
-                format!("{answer}\n{position}")
+                format!("{answer}\n{position}{perks_part}")
             } else {
-                answer
+                format!("{answer}{perks_part}")
             }
         },
         Err(e) => {
@@ -92,9 +93,8 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
             }
         }
     };
-    let perks_part = increment.perks_part_of_answer(&lang_code);
     let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-    Ok(format!("{main_part}{perks_part}{time_left_part}"))
+    Ok(format!("{main_part}{time_left_part}"))
 }
 
 pub(crate) struct Top {
@@ -133,7 +133,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
         .map(|(i, d)| {
             let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
             let name = teloxide::utils::html::escape(&ltr_name);
-            let can_grow = chrono::Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
+            let can_grow = Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
             let pos = d.position.unwrap_or((i+1) as i64);
             let line = t!("commands.top.line", locale = &lang_code,
                 n = pos, name = name, length = d.length);

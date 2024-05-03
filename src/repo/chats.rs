@@ -15,6 +15,13 @@ pub struct Chat {
 #[derive(Debug, derive_more::Error, derive_more::Display)]
 pub struct NoChatIdError(#[error(not(source))] i64);
 
+/// SearchError is used when Option<T> may be returned theoretically but shouldn't in practice.
+#[derive(Debug, derive_more::Error, derive_more::Display)]
+pub enum SearchError<KEY> {
+    NotFound(#[error(not(source))] KEY),
+    Internal(anyhow::Error)
+}
+
 impl TryInto<ChatIdPartiality> for Chat {
     type Error = NoChatIdError;
 
@@ -36,6 +43,13 @@ repository!(Chats, with_feature_toggles,
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| e.into())
+    }
+,
+    pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<i64, SearchError<ChatIdKind>> {
+        self.get_chat(chat_id.clone()).await
+            .map_err(SearchError::Internal)?
+            .map(|chat| chat.internal_id)
+            .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {

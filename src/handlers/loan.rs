@@ -113,7 +113,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
             let updated_text = t!("commands.loan.callback.success", locale = &lang_code);
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-                    borrow(repos, chat_id.into(), data.uid, value).await?;
+                    repos.loans.borrow(data.uid, &chat_id.into(), value).await?;
                     bot.edit_message_text(chat_id, message_id, updated_text).await?;
                 }
                 EditMessageReqParamsKind::Inline { chat_instance, inline_message_id } => {
@@ -129,7 +129,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                         chat_instance.into()
                     };
 
-                    borrow(repos, chat_id, data.uid, value).await?;
+                    repos.loans.borrow(data.uid, &chat_id.kind(), value).await?;
                     bot.edit_message_text_inline(inline_message_id, updated_text).await?;
                 }
             }
@@ -164,13 +164,6 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     }
 
     answer.await?;
-    Ok(())
-}
-
-async fn borrow(repos: repo::Repositories, chat_id: ChatIdPartiality, user_id: UserId, debt: u16) -> HandlerResult {
-    let loan_tx = repos.loans.borrow(user_id, &chat_id.kind(), debt).await?;
-    repos.dicks.create_or_grow(user_id, &chat_id, debt.into()).await?;
-    loan_tx.commit().await?;
     Ok(())
 }
 

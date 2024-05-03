@@ -1,8 +1,9 @@
 use anyhow::anyhow;
-use derive_more::Constructor;
-use sqlx::{Postgres, Transaction};
+use sqlx::Postgres;
 use teloxide::types::UserId;
-use crate::repo::{ChatIdKind, ensure_only_one_row_updated};
+
+use crate::config;
+use crate::repo::{ChatIdKind, Chats, Dicks, ensure_only_one_row_updated};
 
 #[derive(Debug)]
 pub struct Loan {
@@ -26,13 +27,20 @@ impl TryFrom<LoanEntity> for Loan {
     }
 }
 
-#[derive(Clone, Constructor)]
+#[derive(Clone)]
 pub struct Loans {
     pool: sqlx::Pool<Postgres>,
-    payout_ratio: f32
+    chats: Chats,
+    payout_ratio: f32,
 }
 
-impl Loans {    
+impl Loans {
+    pub fn new(pool: sqlx::Pool<Postgres>, cfg: &config::AppConfig) -> Self {
+        let chats = Chats::new(pool.clone(), cfg.features);
+        let payout_ratio = cfg.loan_payout_ratio;
+        Self { pool, chats, payout_ratio }
+    }
+
     pub async fn get_active_loan(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Loan>> {
         let maybe_loan = sqlx::query_as!(LoanEntity,
             "SELECT debt, payout_ratio FROM loans \
@@ -47,16 +55,18 @@ impl Loans {
         Ok(maybe_loan)
     }
 
-    pub async fn borrow(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<Transaction<Postgres>> {
+    pub async fn borrow(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<()> {
+        let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
         let mut tx = self.pool.begin().await?;
-        sqlx::query!("INSERT INTO Loans (chat_id, uid, debt, payout_ratio) VALUES (\
-                        (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text),\
-                        $2, $3, $4)",
-                chat_id.value() as String, uid.0 as i64, value as i32, self.payout_ratio)
+
+        sqlx::query!("INSERT INTO Loans (chat_id, uid, debt, payout_ratio) VALUES ($1, $2, $3, $4)",
+                chat_internal_id, uid.0 as i64, value as i32, self.payout_ratio)
             .execute(&mut *tx)
-            .await
-            .map(|_| tx)
-            .map_err(Into::into)
+            .await?;
+        Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, uid.0 as i64, value.into()).await?;
+
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn pay(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<()> {

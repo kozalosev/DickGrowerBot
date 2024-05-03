@@ -1,5 +1,6 @@
+use anyhow::anyhow;
 use futures::TryFutureExt;
-use sqlx::{Pool, Postgres, Transaction};
+use sqlx::{Executor, Pool, Postgres, Transaction};
 use teloxide::types::UserId;
 use crate::config::FeatureToggles;
 use super::{ChatIdKind, ChatIdPartiality, Chats};
@@ -78,7 +79,7 @@ impl Dicks {
 
         let mut tx = self.pool.begin().await?;
         let uid = user_id.0 as i64;
-        let new_length = match Self::grow_dods_dick(&mut tx, internal_chat_id, uid, bonus as i32).await? {
+        let new_length = match Self::grow_no_attempts_check_internal(&mut *tx, internal_chat_id, uid, bonus as i32).await? {
             Some(length) => length,
             None => return Ok(None)
         };
@@ -147,14 +148,27 @@ impl Dicks {
             .map(|pos| Some(pos as u64))
             .map_err(|e| e.into())
     }
+    
+    pub async fn grow_no_attempts_check(&self, chat_id: &ChatIdKind, user_id: UserId, change: i32) -> anyhow::Result<GrowthResult> {
+        let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
+        let uid = user_id.0 as i64;
+    
+        let new_length = Self::grow_no_attempts_check_internal(&self.pool, chat_internal_id, uid, change).await?
+            .ok_or(anyhow!("couldn't find a dick of ({chat_id}, {uid}) for some reason"))?;
+        let pos_in_top = self.get_position_in_top(chat_internal_id, uid).await?;
+        
+        Ok(GrowthResult { new_length, pos_in_top })
+    }
 
-    async fn grow_dods_dick(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: i64, bonus: i32) -> anyhow::Result<Option<i32>> {
+    pub(super) async fn grow_no_attempts_check_internal<'c, E>(executor: E, chat_id_internal: i64, user_id: i64, bonus: i32) -> anyhow::Result<Option<i32>>
+    where E: Executor<'c, Database = Postgres>,
+    {
         sqlx::query_scalar!(
             "UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $3)
                 WHERE chat_id = $1 AND uid = $2
                 RETURNING length",
                 chat_id_internal, user_id, bonus)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(executor)
             .await
             .map_err(|e| e.into())
     }

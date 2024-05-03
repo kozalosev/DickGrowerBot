@@ -6,7 +6,7 @@ use crate::{config, repo};
 
 pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>> {
     let help_pussies_coef = config::get_env_value_or_default("HELP_PUSSIES_COEF", 0.0);
-    let loans = repo::Loans::new(pool.clone(), cfg.loan_payout_ratio);
+    let loans = repo::Loans::new(pool.clone(), cfg);
     
     vec![
         Box::new(HelpPussiesPerk {
@@ -94,7 +94,7 @@ mod test {
     use testcontainers::clients;
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk};
     use crate::handlers::utils::{ChangeIntent, DickId, Perk};
-    use crate::repo;
+    use crate::{config, repo};
     use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
 
     #[tokio::test]
@@ -120,7 +120,13 @@ mod test {
     async fn test_loan_payout() {
         let docker = clients::Cli::default();
         let (_container, db) = start_postgres(&docker).await;
-        let loans = repo::Loans::new(db.clone(), 0.1);
+        let loans = {
+            let cfg = config::AppConfig {
+                loan_payout_ratio: 0.1,
+                ..Default::default()
+            };
+            repo::Loans::new(db.clone(), &cfg)
+        };
 
         {
             let users = repo::Users::new(db.clone());
@@ -142,9 +148,7 @@ mod test {
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, 0);
 
         loans.borrow(USER_ID, &CHAT_ID_KIND, 10)
-            .await.expect("couldn't create a loan")
-            .commit()
-            .await.expect("couldn't commit the creation of a loan");
+            .await.expect("couldn't create a loan");
 
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, -1);
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)

@@ -361,12 +361,12 @@ mod test_incrementor {
             &self.name
         }
 
-        fn enabled(&self) -> bool {
-            true
-        }
-
         async fn apply(&self, _: &DickId, _: ChangeIntent) -> AdditionalChange {
             AdditionalChange(self.value)
+        }
+
+        fn enabled(&self) -> bool {
+            true
         }
     }
 

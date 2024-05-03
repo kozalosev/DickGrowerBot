@@ -301,6 +301,6 @@ async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: u16)
     p.repos.loans.pay(winner_id, &chat_id_kind, payout).await?;
     
     let withheld = -(payout as i32);
-    let growth_res = p.repos.dicks.create_or_grow(winner_id, &p.chat_id, withheld).await?;
+    let growth_res = p.repos.dicks.grow_no_attempts_check(&chat_id_kind, winner_id, withheld).await?;
     Ok(Some((growth_res, payout)))
 }

@@ -41,11 +41,12 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, incr: Increment
                 Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
                     let answer = t!("commands.dod.result", locale = &lang_code,
                         name = winner.name, growth = increment.total, length = new_length);
+                    let perks_part = increment.perks_part_of_answer(&lang_code);
                     if let Some(pos) = pos_in_top {
                         let position = t!("commands.dod.position", locale = &lang_code, pos = pos);
-                        format!("{answer}\n{position}")
+                        format!("{answer}\n{position}{perks_part}")
                     } else {
-                        answer
+                        format!("{answer}{perks_part}")
                     }
                 },
                 Ok(None) => {
@@ -63,9 +64,8 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, incr: Increment
                     }
                 }
             };
-            let perks_part = increment.perks_part_of_answer(&lang_code);
             let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-            format!("{main_part}{perks_part}{time_left_part}")
+            format!("{main_part}{time_left_part}")
         },
         None => t!("commands.dod.no_candidates", locale = &lang_code)
     };

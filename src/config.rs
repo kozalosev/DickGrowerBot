@@ -9,6 +9,7 @@ use crate::handlers::utils::Incrementor;
 use crate::help;
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Default))]
 pub struct AppConfig {
     pub features: FeatureToggles,
     pub top_limit: u16,
