@@ -113,7 +113,7 @@ pub fn ensure_lang_code(user: Option<&User>) -> String {
         .and_then(|u| {
             u.language_code.as_ref()
                 .or_else(|| {
-                    log::warn!("no language_code for {}, using the default", u.id);
+                    log::debug!("no language_code for {}, using the default", u.id);
                     None
                 })
         })
