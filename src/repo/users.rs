@@ -1,15 +1,16 @@
 use chrono::{DateTime, Utc};
 use teloxide::types::UserId;
+
+use crate::domain::Username;
 use crate::repo::ChatIdKind;
-use crate::{impl_username_aware, repository};
+use crate::repository;
 
 #[derive(sqlx::FromRow, Debug)]
 pub struct User {
     pub uid: i64,
-    pub name: String,
+    pub name: Username,
     pub created_at: DateTime<Utc>
 }
-impl_username_aware!(User);
 
 repository!(Users,
     pub async fn create_or_update(&self, user_id: UserId, name: &str) -> anyhow::Result<User> {

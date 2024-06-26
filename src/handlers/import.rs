@@ -9,8 +9,8 @@ use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Message, UserId};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
-use crate::{impl_username_aware, metrics, repo};
-use crate::handlers::utils::username::UserNameAware;
+use crate::{metrics, repo};
+use crate::domain::Username;
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
@@ -73,13 +73,10 @@ impl <T: Into<anyhow::Error>> From<T> for BeforeImportCheckErrors {
     }
 }
 
-type Username = String;
-
 struct OriginalUser {
-    name: String,
+    name: Username,
     length: u32
 }
-impl_username_aware!(OriginalUser);
 
 struct ChatMember {
     uid: UserId,
@@ -88,10 +85,9 @@ struct ChatMember {
 
 struct UserInfo {
     uid: UserId,
-    name: String,
+    name: Username,
     length: u32
 }
-impl_username_aware!(UserInfo);
 
 struct ImportResult {
     imported: Vec<UserInfo>,
@@ -120,19 +116,19 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                     metrics::CMD_IMPORT.finished();
                     let imported = r.imported.into_iter()
                         .map(|u| t!("commands.import.result.line.imported", locale = &lang_code,
-                            name = u.username_escaped(),
+                            name = u.name.escaped(),
                             length = u.length))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let already_present = r.already_present.into_iter()
                         .map(|u| t!("commands.import.result.line.already_present", locale = &lang_code,
-                            name = u.username_escaped(),
+                            name = u.name.escaped(),
                             length = u.length))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let not_found = r.not_found.into_iter()
                         .map(|name| t!("commands.import.result.line.not_found", locale = &lang_code,
-                            name = name))
+                            name = name.escaped()))
                         .collect::<Vec<String>>()
                         .join("\n");
 
@@ -223,10 +219,10 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .await?.into_iter()
         .map(|m| {
             let uid = m.uid.try_into().expect("couldn't convert uid to u64");
-            let short_name = parsed.0.convert_name(&m.name);
+            let short_name = parsed.0.convert_name(m.name.value_ref());
             let member = ChatMember {
                 uid: UserId(uid),
-                full_name: m.name
+                full_name: m.name.value_clone()
             };
             (short_name, member)
         })
@@ -250,19 +246,19 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .filter_map(map_user)
         .collect();
     let (existing, not_existing): (Vec<OriginalUser>, Vec<OriginalUser>) = top.into_iter()
-        .partition(|u| member_names.contains(&u.name));
+        .partition(|u| member_names.contains(u.name.as_ref()));
     let existing: Vec<UserInfo> = existing.into_iter()
         .map(|u| {
-            let member = &members[&u.name];
+            let member = &members[u.name.value_ref()];
             UserInfo {
                 uid: member.uid,
-                name: member.full_name.clone(),
+                name: Username::new(member.full_name.clone()),
                 length: u.length
             }
         })
         .collect();
-    let not_found = not_existing.iter()
-        .map(UserNameAware::username_escaped)
+    let not_found = not_existing.into_iter()
+        .map(|u| u.name)
         .collect();
 
     let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
@@ -291,7 +287,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
 
 fn map_user(pos: Captures) -> Option<OriginalUser> {
     if let (Some(name), Some(length)) = (pos.name("name"), pos.name("length")) {
-        let name = name.as_str().to_owned();
+        let name = Username::new(name.as_str().to_owned());
         let length = length.as_str().parse().ok()?;
         return Some(OriginalUser { name, length })
     }

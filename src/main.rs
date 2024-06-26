@@ -1,3 +1,4 @@
+mod domain;
 mod handlers;
 mod repo;
 mod help;

@@ -7,7 +7,6 @@ use teloxide::types::{Message, UserId};
 use crate::{metrics, repo};
 use crate::handlers::{ensure_lang_code, FromRefs, HandlerResult, reply_html, utils};
 use crate::handlers::utils::Incrementor;
-use crate::handlers::utils::username::UserNameAware;
 
 const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
 
@@ -41,7 +40,7 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, incr: Increment
             let main_part = match dod_result {
                 Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
                     let answer = t!("commands.dod.result", locale = &lang_code,
-                        name = winner.username_escaped(), growth = increment.total, length = new_length);
+                        name = winner.name.escaped(), growth = increment.total, length = new_length);
                     let perks_part = increment.perks_part_of_answer(&lang_code);
                     if let Some(pos) = pos_in_top {
                         let position = t!("commands.dod.position", locale = &lang_code, pos = pos);
