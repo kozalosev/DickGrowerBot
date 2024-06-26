@@ -9,7 +9,8 @@ use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Message, UserId};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
-use crate::{metrics, repo};
+use crate::{impl_username_aware, metrics, repo};
+use crate::handlers::utils::username::UserNameAware;
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
@@ -78,6 +79,7 @@ struct OriginalUser {
     name: String,
     length: u32
 }
+impl_username_aware!(OriginalUser);
 
 struct ChatMember {
     uid: UserId,
@@ -89,6 +91,7 @@ struct UserInfo {
     name: String,
     length: u32
 }
+impl_username_aware!(UserInfo);
 
 struct ImportResult {
     imported: Vec<UserInfo>,
@@ -117,19 +120,19 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                     metrics::CMD_IMPORT.finished();
                     let imported = r.imported.into_iter()
                         .map(|u| t!("commands.import.result.line.imported", locale = &lang_code,
-                            name = teloxide::utils::html::escape(&u.name),
+                            name = u.username_escaped(),
                             length = u.length))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let already_present = r.already_present.into_iter()
                         .map(|u| t!("commands.import.result.line.already_present", locale = &lang_code,
-                            name = teloxide::utils::html::escape(&u.name),
+                            name = u.username_escaped(),
                             length = u.length))
                         .collect::<Vec<String>>()
                         .join("\n");
                     let not_found = r.not_found.into_iter()
                         .map(|name| t!("commands.import.result.line.not_found", locale = &lang_code,
-                            name = teloxide::utils::html::escape(&name)))
+                            name = name))
                         .collect::<Vec<String>>()
                         .join("\n");
 
@@ -243,8 +246,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
     }
 
     let top: Vec<OriginalUser> = top.into_iter()
-        .filter(Result::is_ok)
-        .map(Result::unwrap)
+        .flatten()
         .filter_map(map_user)
         .collect();
     let (existing, not_existing): (Vec<OriginalUser>, Vec<OriginalUser>) = top.into_iter()
@@ -259,8 +261,8 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
             }
         })
         .collect();
-    let not_found = not_existing.into_iter()
-        .map(|u| teloxide::utils::html::escape(&u.name))
+    let not_found = not_existing.iter()
+        .map(UserNameAware::username_escaped)
         .collect();
 
     let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)

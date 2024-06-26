@@ -9,8 +9,9 @@ use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
 use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, utils};
-use crate::{metrics, repo};
+use crate::{impl_username_aware, metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::handlers::utils::username::UserNameAware;
 use crate::repo::{ChatIdPartiality, GrowthResult, Repositories};
 
 const CALLBACK_PREFIX: &str = "pvp:";
@@ -170,6 +171,7 @@ pub(crate) struct UserInfo {
     uid: UserId,
     name: String,
 }
+impl_username_aware!(UserInfo);
 
 impl From<&User> for UserInfo {
     fn from(value: &User) -> Self {
@@ -186,6 +188,15 @@ impl From<User> for UserInfo {
     }
 }
 
+impl From<repo::User> for UserInfo {
+    fn from(value: repo::User) -> Self {
+        Self {
+            uid: UserId(value.uid as u64),
+            name: value.name
+        }
+    }
+}
+
 #[allow(clippy::from_over_into)]
 impl Into<UserId> for UserInfo {
     fn into(self) -> UserId {
@@ -196,7 +207,7 @@ impl Into<UserId> for UserInfo {
 pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     let data = if enough {
-        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name, bet = bet);
+        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.username_escaped(), bet = bet);
         let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
         let btn_data = format!("{CALLBACK_PREFIX}{}:{bet}", initiator.uid);
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
@@ -234,10 +245,10 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         let winner_info = get_user_info(&p.repos.users, winner, &acceptor).await?;
         let loser_info = get_user_info(&p.repos.users, loser, &acceptor).await?;
         let main_part = t!("commands.pvp.results.finish", locale = &p.lang_code,
-            winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length, bet = bet);
+            winner_name = winner_info.username_escaped(), winner_length = winner_res.new_length, loser_length = loser_res.new_length, bet = bet);
         let text = if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
-            let winner_pos = t!("commands.pvp.results.position.winner", locale = &p.lang_code, name = winner_info.name, pos = winner_pos);
-            let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.name, pos = loser_pos);
+            let winner_pos = t!("commands.pvp.results.position.winner", locale = &p.lang_code, name = winner_info.username_escaped(), pos = winner_pos);
+            let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.username_escaped(), pos = loser_pos);
             format!("{main_part}\n\n{winner_pos}\n{loser_pos}")
         } else {
             main_part
@@ -275,16 +286,13 @@ fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u16)> {
     }
 }
 
-async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInfo) -> anyhow::Result<repo::User> {
+async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInfo) -> anyhow::Result<UserInfo> {
     let user = if user_uid == acceptor.uid {
-        repo::User {
-            uid: acceptor.uid.0 as i64,
-            name: acceptor.name.clone(),
-            created_at: Default::default(),
-        }
+        acceptor.clone()
     } else {
         users.get(user_uid).await?
             .ok_or(anyhow!("pvp participant must present in the database!"))?
+            .into()
     };
     Ok(user)
 }
