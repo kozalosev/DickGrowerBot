@@ -87,7 +87,7 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
 pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
-    let bet: u32 = query.query.parse()?;
+    let bet: u16 = query.query.parse()?;
     let lang_code = ensure_lang_code(Some(&query.from));
     let name = utils::get_full_name(&query.from);
 
