@@ -38,7 +38,7 @@ commands:
         acceptor: "Your gun is not long enough 😣"
       same_person: "You cannot fight with yourself!"
   loan:
-    description: "Take a loan if you have a deep cave"
+    description: "Minus? Take a loan!"
     debt: "Left to pay <b>%{debt} cm</b>"
     confirmation:
       text: "Your deep hole will be reset to zero, but each growth will be lowered by <b>%{payout_percentage}</b> until all <b>%{debt} cm</b> is repaid."
@@ -50,7 +50,7 @@ commands:
       refused: "The patient refused gender reassignment on credit."
       payout_ratio_changed: "The payout rate has been changed since you sent the loan application. Please, invoke the command again."
     errors:
-      positive_length: "I cannot make your little bro bigger. Only change your gender."
+      positive_length: "Sorry, man, this social initiative is supposed only for girls have very very deep craves. I cannot make your big bro even longer :("
   import:
     description: "Import dicks from other bots"
     result:
@@ -87,7 +87,7 @@ inline:
       top: "Get the biggest dicks of the chat"
       dick_of_day: "Elect the Dick of a Day"
       pvp: "Challenge others with a bet of %{bet} cm!"
-      loan: "Take a loan to reset your tool to zero"
+      loan: "Minus? Take a loan!"
   callback:
     errors:
       another_user: "This message was sent by another person."
