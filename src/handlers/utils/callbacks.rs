@@ -1,3 +1,4 @@
+use std::str::{FromStr, Split};
 use derive_more::{Display, Error};
 use rust_i18n::t;
 use teloxide::Bot;
@@ -123,6 +124,18 @@ pub async fn prepare_callback_answer_params(bot: &Bot, query: &CallbackQuery, us
         CallbackAnswerParams::Answer{ answer, lang_code }
     };
     Ok(res)
+}
+
+/// Utility method to make easier to implement the CallbackDataWithPrefix::parse() method.
+pub fn parse_part<VT, PDT>(parts: &mut Split<char>, err_builder: &InvalidCallbackDataBuilder<VT>, part_name: &str) -> Result<PDT, InvalidCallbackData>
+where
+    VT: ToString,
+    PDT: FromStr,
+    <PDT as FromStr>::Err: std::error::Error + Send + Sync + 'static
+{
+    parts.next()
+        .ok_or_else(|| err_builder.missing_part(part_name))
+        .and_then(|uid| uid.parse().map_err(|e| err_builder.parsing_err(e)))
 }
 
 #[macro_export]

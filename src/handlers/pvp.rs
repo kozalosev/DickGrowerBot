@@ -12,9 +12,9 @@ use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_htm
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::Username;
+use crate::handlers::utils::callbacks;
+use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
 use crate::repo::{ChatIdPartiality, GrowthResult, Repositories};
-
-const CALLBACK_PREFIX: &str = "pvp:";
 
 #[derive(BotCommands, Clone, Copy)]
 #[command(rename_rule = "lowercase")]
@@ -43,6 +43,31 @@ impl BattleCommands {
             Self::Attack(bet) => bet,
             Self::Fight(bet) => bet,
         }
+    }
+}
+
+#[derive(derive_more::Display)]
+#[display("{initiator}:{bet}")]
+struct BattleCallbackData {
+    initiator: UserId,
+    bet: u16
+}
+
+impl CallbackDataWithPrefix for BattleCallbackData {
+    fn prefix() -> &'static str {
+        "pvp"
+    }
+}
+
+impl TryFrom<String> for BattleCallbackData {
+    type Error = callbacks::InvalidCallbackData;
+
+    fn try_from(data: String) -> Result<Self, Self::Error> {
+        let err = InvalidCallbackDataBuilder(&data);
+        let mut parts = data.split(':');
+        let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId)?;
+        let bet: u16 = callbacks::parse_part(&mut parts, &err, "bet")?;
+        Ok(Self { initiator, bet })
     }
 }
 
@@ -95,7 +120,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let text = t!("commands.pvp.results.start", locale = &lang_code, name = name, bet = bet);
     let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
     let btn_label = t!("commands.pvp.button", locale = &lang_code);
-    let btn_data = format!("{CALLBACK_PREFIX}{}:{bet}", query.from.id);
+    let btn_data = BattleCallbackData { initiator: query.from.id, bet }.to_data_string();
     let res = InlineQueryResultArticle::new("pvp", title, content)
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(btn_label, btn_data)
@@ -117,9 +142,7 @@ pub async fn inline_chosen_handler() -> HandlerResult {
 }
 
 pub fn callback_filter(query: CallbackQuery) -> bool {
-    query.data
-        .filter(|d| d.starts_with(CALLBACK_PREFIX))
-        .is_some()
+    BattleCallbackData::check_prefix(query)
 }
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig) -> HandlerResult {
@@ -143,7 +166,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         lang_code: ensure_lang_code(Some(&query.from)),
         chat_id: chat_id.clone(),
     };
-    let (initiator, bet) = parse_data(&query.data)?;
+    let BattleCallbackData { initiator, bet} = BattleCallbackData::parse(&query)?;
     if initiator == query.from.id {
         bot.answer_callback_query(query.id)
             .show_alert(true)
@@ -208,7 +231,7 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u1
     let data = if enough {
         let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet);
         let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
-        let btn_data = format!("{CALLBACK_PREFIX}{}:{bet}", initiator.uid);
+        let btn_data = BattleCallbackData { initiator: initiator.uid, bet }.to_data_string();
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(btn_label, btn_data)
         ]]);
@@ -268,20 +291,6 @@ fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {
         (acceptor, initiator)
     } else {
         (initiator, acceptor)
-    }
-}
-
-fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u16)> {
-    let parts = maybe_data.as_ref()
-        .and_then(|data| data.strip_prefix(CALLBACK_PREFIX).map(|s| s.to_owned()))
-        .map(|data| data.split(':').map(|s| s.to_owned()).collect::<Vec<String>>())
-        .ok_or(anyhow!("callback data must be present!"))?;
-    if parts.len() == 2 {
-        let uid: u64 = parts[0].parse()?;
-        let bet: u16 = parts[1].parse()?;
-        Ok((UserId(uid), bet))
-    } else {
-        Err(anyhow!("invalid number of arguments ({}) in the callback data: {:?}", parts.len(), parts))
     }
 }
 
