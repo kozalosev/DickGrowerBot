@@ -1,15 +1,20 @@
 use std::sync::Arc;
+use derive_more::Display;
 use flurry::HashSet;
 use crate::config::FeatureToggles;
 
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 // TODO: create a Redis based implementation
-pub trait LockCallbackServiceTrait<T> : Clone {
-    fn try_lock(&self, callback_data: &T) -> bool;
-
-    fn free_lock(&self, callback_data: T);
+pub trait LockCallbackServiceImplTrait : Clone + Send + Sync {
+    type Guard;
+    
+    fn try_lock<T>(&mut self, callback_data: &T) -> Option<Self::Guard> 
+    where Self::Guard: Guard,
+          T: CallbackDataWithPrefix;
 }
+
+pub trait Guard: Send + Sync {}
 
 #[derive(Clone)]
 pub enum LockCallbackServiceFacade {
@@ -20,51 +25,73 @@ pub enum LockCallbackServiceFacade {
 impl LockCallbackServiceFacade {
     pub fn from_config(features: FeatureToggles) -> Self {
         if features.pvp.callback_locks {
+            log::info!("LockCallbackService: in-memory");
             Self::InMemory(InMemoryLockCallbackService::default())
         } else {
+            log::info!("LockCallbackService: none");
             Self::NoOp
         }
     }
-}
 
-impl <T: CallbackDataWithPrefix> LockCallbackServiceTrait<T> for LockCallbackServiceFacade {
-    fn try_lock(&self, callback_data: &T) -> bool {
+    pub fn try_lock<T>(&mut self, callback_data: &T) -> Option<Box<dyn Guard>>
+    where T: CallbackDataWithPrefix,
+    {
         match self {
-            Self::NoOp => true,
-            Self::InMemory(service) => service.try_lock(callback_data),
-        }
-    }
-
-    fn free_lock(&self, callback_data: T) {
-        match self {
-            Self::NoOp => {},
-            Self::InMemory(service) => service.free_lock(callback_data),
+            Self::NoOp => Some(Box::<NoOpGuard>::default()),
+            Self::InMemory(service) => service.try_lock(callback_data)
+                .map(|guard| Box::new(guard) as Box<dyn Guard>),
         }
     }
 }
+
+#[derive(Default)]
+pub struct NoOpGuard {}
+impl Guard for NoOpGuard {}
 
 #[derive(Clone, Default)]
 pub struct InMemoryLockCallbackService {
     inner_set: Arc<HashSet<String>>
 }
 
-impl <T: CallbackDataWithPrefix> LockCallbackServiceTrait<T> for InMemoryLockCallbackService {
-    fn try_lock(&self, callback_data: &T) -> bool {
+impl LockCallbackServiceImplTrait for InMemoryLockCallbackService {
+    type Guard = InMemorySetGuard;
+    
+    fn try_lock<T>(&mut self, callback_data: &T) -> Option<Self::Guard>
+    where Self::Guard: Guard,
+          T: CallbackDataWithPrefix
+    {
         let key = callback_data.to_string();
-        let guard = self.inner_set.guard();
-        if self.inner_set.contains(&key, &guard) {
-            false
+        if self.inner_set.contains(&key, &self.inner_set.guard()) {
+            log::debug!("double attack on: {key}");
+            None
         } else {
-            log::debug!("lock the message with a key: {key}");
-            self.inner_set.insert(key, &guard);
-            true
+            self.inner_set.insert(key.clone(), &self.inner_set.guard());
+            Some(InMemorySetGuard::new(&self.inner_set, key))
         }
     }
+}
 
-    fn free_lock(&self, callback_data: T) {
-        let key = callback_data.to_string();
-        let guard = self.inner_set.guard();
-        self.inner_set.remove(&key, &guard);
-        log::debug!("unlock the message with a key: {key}");
+#[derive(Debug, Display, Clone)]
+#[display("InMemorySetGuard({key})")]
+pub struct InMemorySetGuard {
+    set_ref: Arc<HashSet<String>>,
+    key: String
+}
+
+impl InMemorySetGuard {
+    pub fn new(set_ref: &Arc<HashSet<String>>, key: String) -> Self {
+        let set_ref = Arc::clone(set_ref);
+        let guard = Self { set_ref, key };
+        log::debug!("taking a lock guard: {guard}");
+        guard
     }
 }
+
+impl Drop for InMemorySetGuard {
+    fn drop(&mut self) {
+        log::debug!("dropping the lock guard: {self}");
+        self.set_ref.remove(&self.key, &self.set_ref.guard());
+    }
+}
+
+impl Guard for InMemorySetGuard {}

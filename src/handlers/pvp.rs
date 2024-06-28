@@ -14,7 +14,7 @@ use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::Username;
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
-use crate::handlers::utils::locks::{LockCallbackServiceTrait, LockCallbackServiceFacade};
+use crate::handlers::utils::locks::LockCallbackServiceFacade;
 use crate::repo::{ChatIdPartiality, GrowthResult, Repositories};
 
 // let's calculate time offsets from 22.06.2024
@@ -163,7 +163,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig,
-                              battle_locker: LockCallbackServiceFacade) -> HandlerResult {
+                              mut battle_locker: LockCallbackServiceFacade) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat.id)
         .or_else(|| config.features.chats_merging
@@ -182,9 +182,10 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     if callback_data.initiator == query.from.id {
         return send_error_callback_answer(bot, query, "commands.pvp.errors.same_person").await;
     }
-    if !battle_locker.try_lock(&callback_data) {
-        return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await;
-    }
+    let _battle_guard = match battle_locker.try_lock(&callback_data) {
+        Some(lock) => lock,
+        None => return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await
+    };
 
     let params = BattleParams {
         repos,
@@ -195,7 +196,6 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;
     attack_result.apply(bot, query).await?;
 
-    battle_locker.free_lock(callback_data);
     metrics::CMD_PVP_COUNTER.inline.inc();
     Ok(())
 }
