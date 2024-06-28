@@ -11,6 +11,7 @@ pub mod loan;
 
 use std::borrow::ToOwned;
 use derive_more::Constructor;
+use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessage};
 use teloxide::requests::{JsonRequest, Requester};
@@ -113,7 +114,7 @@ pub fn ensure_lang_code(user: Option<&User>) -> String {
         .and_then(|u| {
             u.language_code.as_ref()
                 .or_else(|| {
-                    log::warn!("no language_code for {}, using the default", u.id);
+                    log::debug!("no language_code for {}, using the default", u.id);
                     None
                 })
         })
@@ -133,6 +134,15 @@ pub fn reply_html(bot: Bot, msg: Message, answer: String) -> JsonRequest<SendMes
         answer.reply_to_message_id.replace(msg.id);
     }
     answer
+}
+
+pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
+    let lang_code = ensure_lang_code(Some(&query.from));
+    bot.answer_callback_query(query.id)
+        .show_alert(true)
+        .text(t!(tr_key, locale = &lang_code))
+        .await?;
+    return Ok(())
 }
 
 pub mod checks {

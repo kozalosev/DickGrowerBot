@@ -70,18 +70,18 @@ async fn get_random_active_member() {
         .expect("couldn't fetch Some(User)")
         .expect("no active member");
     assert_eq!(user.uid, UID);
-    assert_eq!(user.name, NAME);
+    assert_eq!(user.name.value_ref(), NAME);
 }
 
 fn check_user_with_name(user: &repo::User, name: &str) {
     assert_eq!(user.uid, UID);
-    assert_eq!(user.name, name);
+    assert_eq!(user.name.value_ref(), name);
 }
 
 fn check_member_with_name(members: &[repo::User], name: &str) {
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].uid, UID);
-    assert_eq!(members[0].name, name);
+    assert_eq!(members[0].name.value_ref(), name);
 }
 
 async fn create_member(db: &Pool<Postgres>) {

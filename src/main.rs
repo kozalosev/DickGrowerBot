@@ -1,3 +1,4 @@
+mod domain;
 mod handlers;
 mod repo;
 mod help;
@@ -17,6 +18,7 @@ use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use crate::handlers::{checks, LoanCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
+use crate::handlers::utils::locks::LockCallbackServiceFacade;
 
 const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
 
@@ -73,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incrementor = handlers::utils::Incrementor::from_env(&repos.dicks, perks);
     let help_context = config::build_context_for_help_messages(me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
+    let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
 
     let webhook_url: Option<Url> = match std::env::var(ENV_WEBHOOK_URL) {
         Ok(env_url) if !env_url.is_empty() => Some(env_url.parse()?),
@@ -88,7 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repos,
         incrementor,
         app_config,
-        help_container
+        help_container,
+        battle_locker
     ];
 
     match webhook_url {

@@ -5,15 +5,20 @@ use rand::rngs::OsRng;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
+use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
-use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, utils};
+use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, send_error_callback_answer, utils};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::domain::Username;
+use crate::handlers::utils::callbacks;
+use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
+use crate::handlers::utils::locks::LockCallbackServiceFacade;
 use crate::repo::{ChatIdPartiality, GrowthResult, Repositories};
 
-const CALLBACK_PREFIX: &str = "pvp:";
+// let's calculate time offsets from 22.06.2024
+const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
 
 #[derive(BotCommands, Clone, Copy)]
 #[command(rename_rule = "lowercase")]
@@ -42,6 +47,44 @@ impl BattleCommands {
             Self::Attack(bet) => bet,
             Self::Fight(bet) => bet,
         }
+    }
+}
+
+#[derive(derive_more::Display)]
+#[display("{initiator}:{bet}:{timestamp}")]
+pub(crate) struct BattleCallbackData {
+    initiator: UserId,
+    bet: u16,
+
+    // used to prevent repeated clicks on the same button
+    timestamp: NewLayoutValue<i64>
+}
+
+impl BattleCallbackData {
+    fn new(initiator: UserId, bet: u16) -> Self {
+        Self {
+            initiator, bet,
+            timestamp: new_short_timestamp()
+        }
+    }
+}
+
+impl CallbackDataWithPrefix for BattleCallbackData {
+    fn prefix() -> &'static str {
+        "pvp"
+    }
+}
+
+impl TryFrom<String> for BattleCallbackData {
+    type Error = callbacks::InvalidCallbackData;
+
+    fn try_from(data: String) -> Result<Self, Self::Error> {
+        let err = InvalidCallbackDataBuilder(&data);
+        let mut parts = data.split(':');
+        let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId)?;
+        let bet: u16 = callbacks::parse_part(&mut parts, &err, "bet")?;
+        let timestamp = callbacks::parse_optional_part(&mut parts, &err)?;
+        Ok(Self { initiator, bet, timestamp })
     }
 }
 
@@ -86,7 +129,7 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
 pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
-    let bet: u32 = query.query.parse()?;
+    let bet: u16 = query.query.parse()?;
     let lang_code = ensure_lang_code(Some(&query.from));
     let name = utils::get_full_name(&query.from);
 
@@ -94,7 +137,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let text = t!("commands.pvp.results.start", locale = &lang_code, name = name, bet = bet);
     let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
     let btn_label = t!("commands.pvp.button", locale = &lang_code);
-    let btn_data = format!("{CALLBACK_PREFIX}{}:{bet}", query.from.id);
+    let btn_data = BattleCallbackData::new(query.from.id, bet).to_data_string();
     let res = InlineQueryResultArticle::new("pvp", title, content)
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(btn_label, btn_data)
@@ -116,12 +159,11 @@ pub async fn inline_chosen_handler() -> HandlerResult {
 }
 
 pub fn callback_filter(query: CallbackQuery) -> bool {
-    query.data
-        .filter(|d| d.starts_with(CALLBACK_PREFIX))
-        .is_some()
+    BattleCallbackData::check_prefix(query)
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig) -> HandlerResult {
+pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig,
+                              mut battle_locker: LockCallbackServiceFacade) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat.id)
         .or_else(|| config.features.chats_merging
@@ -136,22 +178,22 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         .map(ChatIdPartiality::from)
         .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));
 
+    let callback_data = BattleCallbackData::parse(&query)?;
+    if callback_data.initiator == query.from.id {
+        return send_error_callback_answer(bot, query, "commands.pvp.errors.same_person").await;
+    }
+    let _battle_guard = match battle_locker.try_lock(&callback_data) {
+        Some(lock) => lock,
+        None => return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await
+    };
+
     let params = BattleParams {
         repos,
         features: config.features.pvp,
         lang_code: ensure_lang_code(Some(&query.from)),
         chat_id: chat_id.clone(),
     };
-    let (initiator, bet) = parse_data(&query.data)?;
-    if initiator == query.from.id {
-        bot.answer_callback_query(query.id)
-            .show_alert(true)
-            .text(t!("commands.pvp.errors.same_person", locale = &params.lang_code))
-            .await?;
-        return Ok(())
-    }
-
-    let attack_result = pvp_impl_attack(params, initiator, query.from.clone().into(), bet).await?;
+    let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;
     attack_result.apply(bot, query).await?;
 
     metrics::CMD_PVP_COUNTER.inline.inc();
@@ -168,14 +210,14 @@ pub(crate) struct BattleParams {
 #[derive(Clone)]
 pub(crate) struct UserInfo {
     uid: UserId,
-    name: String,
+    name: Username,
 }
 
 impl From<&User> for UserInfo {
     fn from(value: &User) -> Self {
         Self {
             uid: value.id,
-            name: utils::get_full_name(value)
+            name: Username::new(utils::get_full_name(value))
         }
     }
 }
@@ -183,6 +225,15 @@ impl From<&User> for UserInfo {
 impl From<User> for UserInfo {
     fn from(value: User) -> Self {
         (&value).into()
+    }
+}
+
+impl From<repo::User> for UserInfo {
+    fn from(value: repo::User) -> Self {
+        Self {
+            uid: UserId(value.uid as u64),
+            name: value.name
+        }
     }
 }
 
@@ -196,9 +247,9 @@ impl Into<UserId> for UserInfo {
 pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     let data = if enough {
-        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name, bet = bet);
+        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet);
         let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
-        let btn_data = format!("{CALLBACK_PREFIX}{}:{bet}", initiator.uid);
+        let btn_data = BattleCallbackData::new(initiator.uid, bet).to_data_string();
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(btn_label, btn_data)
         ]]);
@@ -234,10 +285,10 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         let winner_info = get_user_info(&p.repos.users, winner, &acceptor).await?;
         let loser_info = get_user_info(&p.repos.users, loser, &acceptor).await?;
         let main_part = t!("commands.pvp.results.finish", locale = &p.lang_code,
-            winner_name = winner_info.name, winner_length = winner_res.new_length, loser_length = loser_res.new_length, bet = bet);
+            winner_name = winner_info.name.escaped(), winner_length = winner_res.new_length, loser_length = loser_res.new_length, bet = bet);
         let text = if let (Some(winner_pos), Some(loser_pos)) = (winner_res.pos_in_top, loser_res.pos_in_top) {
-            let winner_pos = t!("commands.pvp.results.position.winner", locale = &p.lang_code, name = winner_info.name, pos = winner_pos);
-            let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.name, pos = loser_pos);
+            let winner_pos = t!("commands.pvp.results.position.winner", locale = &p.lang_code, name = winner_info.name.escaped(), pos = winner_pos);
+            let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.name.escaped(), pos = loser_pos);
             format!("{main_part}\n\n{winner_pos}\n{loser_pos}")
         } else {
             main_part
@@ -261,30 +312,13 @@ fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {
     }
 }
 
-fn parse_data(maybe_data: &Option<String>) -> anyhow::Result<(UserId, u16)> {
-    let parts = maybe_data.as_ref()
-        .and_then(|data| data.strip_prefix(CALLBACK_PREFIX).map(|s| s.to_owned()))
-        .map(|data| data.split(':').map(|s| s.to_owned()).collect::<Vec<String>>())
-        .ok_or(anyhow!("callback data must be present!"))?;
-    if parts.len() == 2 {
-        let uid: u64 = parts[0].parse()?;
-        let bet: u16 = parts[1].parse()?;
-        Ok((UserId(uid), bet))
-    } else {
-        Err(anyhow!("invalid number of arguments ({}) in the callback data: {:?}", parts.len(), parts))
-    }
-}
-
-async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInfo) -> anyhow::Result<repo::User> {
+async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInfo) -> anyhow::Result<UserInfo> {
     let user = if user_uid == acceptor.uid {
-        repo::User {
-            uid: acceptor.uid.0 as i64,
-            name: acceptor.name.clone(),
-            created_at: Default::default(),
-        }
+        acceptor.clone()
     } else {
         users.get(user_uid).await?
             .ok_or(anyhow!("pvp participant must present in the database!"))?
+            .into()
     };
     Ok(user)
 }
@@ -303,4 +337,8 @@ async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: u16)
     let withheld = -(payout as i32);
     let growth_res = p.repos.dicks.grow_no_attempts_check(&chat_id_kind, winner_id, withheld).await?;
     Ok(Some((growth_res, payout)))
+}
+
+pub fn new_short_timestamp() -> NewLayoutValue<i64> {
+    NewLayoutValue::Some(chrono::Utc::now().timestamp_millis() - TIMESTAMP_MILLIS_SINCE_2024)
 }

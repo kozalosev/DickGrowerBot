@@ -1,5 +1,6 @@
 pub mod page;
 pub mod callbacks;
+pub mod locks;
 mod tghack;
 mod incrementor;
 

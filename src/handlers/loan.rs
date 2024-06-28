@@ -1,4 +1,3 @@
-use std::str::{FromStr, Split};
 use anyhow::anyhow;
 use derive_more::Display;
 use num_traits::Zero;
@@ -195,13 +194,13 @@ impl TryFrom<String> for LoanCallbackData {
     fn try_from(data: String) -> Result<Self, Self::Error> {
         let err = InvalidCallbackDataBuilder(&data);
         let mut parts = data.as_str().split(':');
-        let uid = Self::parse_part(&mut parts, &err, "uid").map(UserId)?;
+        let uid = callbacks::parse_part(&mut parts, &err, "uid").map(UserId)?;
         let action = parts.next()
             .ok_or_else(|| err.missing_part("action"))?;
         let action = match action {
             "confirmed" => {
-                let value = Self::parse_part(&mut parts, &err, "value")?;
-                let payout_ratio = match Self::parse_part(&mut parts, &err, "payout_ratio") {
+                let value = callbacks::parse_part(&mut parts, &err, "value")?;
+                let payout_ratio = match callbacks::parse_part(&mut parts, &err, "payout_ratio") {
                     Ok(ratio) => ratio,
                     // for backward compatibility; zero ratio disables the loans completely,
                     // so this value is out of possible ones, thus either the "rate changed" or
@@ -215,19 +214,6 @@ impl TryFrom<String> for LoanCallbackData {
             _ => return Err(err.split_err())
         };
         Ok(Self { uid, action })
-    }
-}
-
-impl LoanCallbackData {
-    fn parse_part<VT, PDT>(parts: &mut Split<char>, err_builder: &InvalidCallbackDataBuilder<VT>, part_name: &str) -> Result<PDT, InvalidCallbackData>
-    where
-        VT: ToString,
-        PDT: FromStr,
-        <PDT as FromStr>::Err: std::error::Error + Send + Sync + 'static
-    {
-        parts.next()
-            .ok_or_else(|| err_builder.missing_part(part_name))
-            .and_then(|uid| uid.parse().map_err(|e| err_builder.parsing_err(e)))
     }
 }
 

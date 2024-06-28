@@ -1,12 +1,14 @@
 use chrono::{DateTime, Utc};
 use teloxide::types::UserId;
+
+use crate::domain::Username;
 use crate::repo::ChatIdKind;
 use crate::repository;
 
 #[derive(sqlx::FromRow, Debug)]
 pub struct User {
     pub uid: i64,
-    pub name: String,
+    pub name: Username,
     pub created_at: DateTime<Utc>
 }
 
