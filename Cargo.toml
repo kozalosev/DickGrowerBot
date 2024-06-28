@@ -36,6 +36,7 @@ byteorder = "1.5.0"
 derive_more = { version = "1.0.0-beta.6", features = ["display", "error", "constructor", "from"] }
 num-traits = "0.2.18"
 downcast-rs = "1.2.0"
+flurry = "0.5.1"
 
 [dev-dependencies]
 testcontainers = "0.15.0"

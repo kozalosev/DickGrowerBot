@@ -37,6 +37,7 @@ commands:
         initiator: "Meh. The initiator's dick is not long enough for such a big bet!"
         acceptor: "Your gun is not long enough 😣"
       same_person: "You cannot fight with yourself!"
+      battle_already_in_progress: "The fight is in progress already! The message will be updated in a moment…"
   loan:
     description: "Minus? Take a loan!"
     debt: "Left to pay <b>%{debt} cm</b>"

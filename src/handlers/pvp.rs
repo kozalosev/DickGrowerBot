@@ -5,16 +5,20 @@ use rand::rngs::OsRng;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
+use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
-use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, utils};
+use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, send_error_callback_answer, utils};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::Username;
 use crate::handlers::utils::callbacks;
-use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
+use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
+use crate::handlers::utils::locks::{LockCallbackServiceTrait, LockCallbackServiceFacade};
 use crate::repo::{ChatIdPartiality, GrowthResult, Repositories};
+
+// let's calculate time offsets from 22.06.2024
+const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
 
 #[derive(BotCommands, Clone, Copy)]
 #[command(rename_rule = "lowercase")]
@@ -47,10 +51,22 @@ impl BattleCommands {
 }
 
 #[derive(derive_more::Display)]
-#[display("{initiator}:{bet}")]
-struct BattleCallbackData {
+#[display("{initiator}:{bet}:{timestamp}")]
+pub(crate) struct BattleCallbackData {
     initiator: UserId,
-    bet: u16
+    bet: u16,
+
+    // used to prevent repeated clicks on the same button
+    timestamp: NewLayoutValue<i64>
+}
+
+impl BattleCallbackData {
+    fn new(initiator: UserId, bet: u16) -> Self {
+        Self {
+            initiator, bet,
+            timestamp: new_short_timestamp()
+        }
+    }
 }
 
 impl CallbackDataWithPrefix for BattleCallbackData {
@@ -67,7 +83,8 @@ impl TryFrom<String> for BattleCallbackData {
         let mut parts = data.split(':');
         let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId)?;
         let bet: u16 = callbacks::parse_part(&mut parts, &err, "bet")?;
-        Ok(Self { initiator, bet })
+        let timestamp = callbacks::parse_optional_part(&mut parts, &err)?;
+        Ok(Self { initiator, bet, timestamp })
     }
 }
 
@@ -120,7 +137,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let text = t!("commands.pvp.results.start", locale = &lang_code, name = name, bet = bet);
     let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
     let btn_label = t!("commands.pvp.button", locale = &lang_code);
-    let btn_data = BattleCallbackData { initiator: query.from.id, bet }.to_data_string();
+    let btn_data = BattleCallbackData::new(query.from.id, bet).to_data_string();
     let res = InlineQueryResultArticle::new("pvp", title, content)
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(btn_label, btn_data)
@@ -145,7 +162,8 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     BattleCallbackData::check_prefix(query)
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig) -> HandlerResult {
+pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig,
+                              battle_locker: LockCallbackServiceFacade) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat.id)
         .or_else(|| config.features.chats_merging
@@ -160,24 +178,24 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         .map(ChatIdPartiality::from)
         .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));
 
+    let callback_data = BattleCallbackData::parse(&query)?;
+    if callback_data.initiator == query.from.id {
+        return send_error_callback_answer(bot, query, "commands.pvp.errors.same_person").await;
+    }
+    if !battle_locker.try_lock(&callback_data) {
+        return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await;
+    }
+
     let params = BattleParams {
         repos,
         features: config.features.pvp,
         lang_code: ensure_lang_code(Some(&query.from)),
         chat_id: chat_id.clone(),
     };
-    let BattleCallbackData { initiator, bet} = BattleCallbackData::parse(&query)?;
-    if initiator == query.from.id {
-        bot.answer_callback_query(query.id)
-            .show_alert(true)
-            .text(t!("commands.pvp.errors.same_person", locale = &params.lang_code))
-            .await?;
-        return Ok(())
-    }
-
-    let attack_result = pvp_impl_attack(params, initiator, query.from.clone().into(), bet).await?;
+    let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;
     attack_result.apply(bot, query).await?;
 
+    battle_locker.free_lock(callback_data);
     metrics::CMD_PVP_COUNTER.inline.inc();
     Ok(())
 }
@@ -231,7 +249,7 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u1
     let data = if enough {
         let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet);
         let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
-        let btn_data = BattleCallbackData { initiator: initiator.uid, bet }.to_data_string();
+        let btn_data = BattleCallbackData::new(initiator.uid, bet).to_data_string();
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(btn_label, btn_data)
         ]]);
@@ -319,4 +337,8 @@ async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: u16)
     let withheld = -(payout as i32);
     let growth_res = p.repos.dicks.grow_no_attempts_check(&chat_id_kind, winner_id, withheld).await?;
     Ok(Some((growth_res, payout)))
+}
+
+pub fn new_short_timestamp() -> NewLayoutValue<i64> {
+    NewLayoutValue::Some(chrono::Utc::now().timestamp_millis() - TIMESTAMP_MILLIS_SINCE_2024)
 }
