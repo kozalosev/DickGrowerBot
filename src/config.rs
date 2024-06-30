@@ -44,6 +44,7 @@ impl Default for FeatureToggles {
 pub struct BattlesFeatureToggles {
     pub check_acceptor_length: bool,
     pub callback_locks: bool,
+    pub show_stats: bool,
 }
 
 impl AppConfig {
@@ -54,6 +55,7 @@ impl AppConfig {
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
         let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
+        let show_stats = get_env_value_or_default("PVP_STATS_SHOW", false);
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -61,6 +63,7 @@ impl AppConfig {
                 pvp: BattlesFeatureToggles {
                     check_acceptor_length,
                     callback_locks,
+                    show_stats,
                 }
             },
             top_limit,

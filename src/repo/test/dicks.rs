@@ -149,7 +149,7 @@ pub async fn create_user(db: &Pool<Postgres>) {
         .await.expect("couldn't create a user");
 }
 
-async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartiality, name: &str) {
+pub async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartiality, name: &str) {
         let users = repo::Users::new(db.clone());
         let dicks = repo::Dicks::new(db.clone(), Default::default());
         let uid2 = UserId((UID + 1) as u64);

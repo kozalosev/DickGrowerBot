@@ -11,7 +11,7 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, loan, utils};
+use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::handlers::utils::page::Page;
@@ -25,6 +25,7 @@ enum InlineCommand {
     Top,
     DickOfDay,
     Loan,
+    Stats,
 }
 
 struct InlineResult {
@@ -81,7 +82,13 @@ impl InlineCommand {
                 loan::loan_impl(repos, from_refs, config)
                     .await
                     .map(InlineResult::from)
-            }
+            },
+            InlineCommand::Stats => {
+                metrics::CMD_STATS.inline.inc();
+                stats::stats_impl(repos, from_refs)
+                    .await
+                    .map(InlineResult::text)
+            },
         }
     }
 }

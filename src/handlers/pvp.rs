@@ -15,7 +15,7 @@ use crate::domain::Username;
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
-use crate::repo::{ChatIdPartiality, GrowthResult, Repositories};
+use crate::repo::{BattleStats, ChatIdPartiality, GrowthResult, Repositories, WinRateAware};
 
 // let's calculate time offsets from 22.06.2024
 const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
@@ -272,6 +272,25 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         let acceptor_uid = acceptor.clone().into();
         let (winner, loser) = choose_winner(initiator, acceptor_uid);
         let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
+
+        let battle_stats = p.repos.pvp_stats.send_battle_result(&p.chat_id.kind(), winner, loser).await
+            .inspect_err(|e| log::error!("couldn't send users' battle statistics for winner ({}) and loser ({}): {}", winner, loser, e))
+            .ok()
+            .filter(|_| p.features.show_stats)
+            .map(|BattleStats { winner: winner_stats, loser: loser_stats }| {
+                let mut stats_str = t!("commands.pvp.results.stats.text", locale = &p.lang_code,
+                    winner_win_rate = winner_stats.win_rate_formatted(), loser_win_rate = loser_stats.win_rate_formatted(),
+                    winner_win_streak = winner_stats.win_streak_current, winner_win_streak_max = winner_stats.win_streak_max,
+                );
+                if loser_stats.prev_win_streak > 1 {
+                    stats_str.push('\n');
+                    stats_str.push_str(&t!("commands.pvp.results.stats.lost_win_streak", locale = &p.lang_code,
+                        lost_win_streak = loser_stats.prev_win_streak));
+                }
+                stats_str
+            })
+            .map(|s| format!("\n\n{s}"))
+            .unwrap_or_default();
         
         let (winner_res, withheld_part) = pay_for_loan_if_needed(&p, winner, bet).await
             .inspect_err(|e| log::error!("couldn't pay for a loan from a battle award: {e}"))
@@ -293,7 +312,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         } else {
             main_part
         };
-        CallbackResult::EditMessage(format!("{text}{withheld_part}"), None)
+        CallbackResult::EditMessage(format!("{text}{withheld_part}{battle_stats}"), None)
     } else if enough_acceptor {
         let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code);
         CallbackResult::EditMessage(text, None)

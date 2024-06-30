@@ -6,6 +6,7 @@ use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
 use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LoanCommands, PromoCommands};
 use crate::handlers::pvp::BattleCommands;
+use crate::handlers::stats::StatsCommands;
 
 pub async fn set_my_commands(bot: &Bot, lang_code: &str) -> Result<(), RequestError> {
     let personal_commands = vec![
@@ -18,6 +19,7 @@ pub async fn set_my_commands(bot: &Bot, lang_code: &str) -> Result<(), RequestEr
         DickOfDayCommands::bot_commands(),
         BattleCommands::bot_commands(),
         LoanCommands::bot_commands(),
+        StatsCommands::bot_commands(),
     ];
     let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),

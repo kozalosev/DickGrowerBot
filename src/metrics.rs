@@ -60,6 +60,13 @@ pub static CMD_PVP_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
         inline: Counter::new("command_pvp (inline)", opts.const_label("mode", "inline")),
     }
 });
+pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(|| {
+    let opts = Opts::new("command_stats_usage_total", "count of /stats invocations");
+    BothModesCounters {
+        chat: Counter::new("command_stats (chat)", opts.clone().const_label("mode", "chat")),
+        inline: Counter::new("command_stats (inline)", opts.const_label("mode", "inline")),
+    }
+});
 pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(|| {
     let opts = Opts::new("command_import_usage_total", "count of /import invocations and successes");
     ComplexCommandCounters {
@@ -93,6 +100,8 @@ pub fn init() -> axum::Router {
         .register(&CMD_DOD_COUNTER.inline)
         .register(&CMD_PVP_COUNTER.chat)
         .register(&CMD_PVP_COUNTER.inline)
+        .register(&CMD_STATS.chat)
+        .register(&CMD_STATS.inline)
         .register(&CMD_IMPORT.invoked)
         .register(&CMD_IMPORT.finished)
         .register(&CMD_PROMO.invoked)
