@@ -180,5 +180,6 @@ async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i32) {
         .await.expect("couldn't fetch the top again");
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].length, length);
+    assert_eq!(d[0].owner_uid.0, UID);
     assert_eq!(d[0].owner_name, NAME);
 }

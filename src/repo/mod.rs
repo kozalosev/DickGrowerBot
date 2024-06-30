@@ -4,15 +4,15 @@ mod chats;
 mod import;
 mod promo;
 mod loans;
+mod pvpstats;
 
 #[cfg(test)]
 pub(crate) mod test;
-mod pvpstats;
 
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
 use sqlx::postgres::PgQueryResult;
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, UserId};
 pub use users::*;
 pub use dicks::*;
 pub use chats::*;
@@ -147,6 +147,23 @@ impl From<&ChatIdKind> for ChatIdType {
             ChatIdKind::ID(_) => ChatIdType::ID,
             ChatIdKind::Instance(_) => ChatIdType::Inst,
         }
+    }
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, derive_more::From)]
+pub struct UID(i64);
+
+impl From<UserId> for UID {
+    fn from(value: UserId) -> Self {
+        Self(value.0 as i64)
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<UserId> for UID {
+    fn into(self) -> UserId {
+        UserId(self.0 as u64)
     }
 }
 

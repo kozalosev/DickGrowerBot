@@ -3,11 +3,12 @@ use futures::TryFutureExt;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use teloxide::types::UserId;
 use crate::config::FeatureToggles;
-use super::{ChatIdKind, ChatIdPartiality, Chats};
+use super::{ChatIdKind, ChatIdPartiality, Chats, UID};
 
-#[derive(sqlx::FromRow, Debug, sqlx::Type)]
+#[derive(sqlx::FromRow, Debug)]
 pub struct Dick {
     pub length: i32,
+    pub owner_uid: UID,
     pub owner_name: String,
     pub grown_at: chrono::DateTime<chrono::Utc>,
     pub position: Option<i64>,
@@ -62,7 +63,7 @@ impl Dicks {
 
     pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u16) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
         sqlx::query_as!(Dick,
-            r#"SELECT length, name as owner_name, updated_at as grown_at,
+            r#"SELECT length, uid as owner_uid, name as owner_name, updated_at as grown_at,
                     ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
                 FROM dicks d
                 JOIN users using (uid)
