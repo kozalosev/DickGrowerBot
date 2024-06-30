@@ -43,7 +43,7 @@ commands:
       battle_already_in_progress: "The fight is in progress already! The message will be updated in a moment…"
   stats:
     description: "Win statistics"
-    result: "Win rate: <b>%{win_rate}</b>.\nFights: <b>%{battles}</b>.\nWins: <b>%{wins}</b>.\nMax win streak: <b>%{win_streak}</b>."
+    result: "Win rate: <b>%{win_rate}</b>.\nFights: <b>%{battles}</b>.\nWins: <b>%{wins}</b>.\nMax win streak: <b>%{win_streak}</b>.\nAcquired length: <b>%{acquired} cm</b>.\nLost length: <b>%{lost} cm</b>."
   loan:
     description: "Minus? Take a loan!"
     debt: "Left to pay <b>%{debt} cm</b>"

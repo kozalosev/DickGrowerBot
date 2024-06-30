@@ -43,7 +43,7 @@ commands:
       battle_already_in_progress: "Сражение уже началось! Сообщение обновится через мгновение…"
   stats:
     description: "Статистика побед"
-    result: "Процент выигрышей: <b>%{win_rate}</b>.\nСыгранных боёв: <b>%{battles}</b>.\nПобед: <b>%{wins}</b>.\nМаксимум побед подряд: <b>%{win_streak}</b>."
+    result: "Процент выигрышей: <b>%{win_rate}</b>.\nСыгранных боёв: <b>%{battles}</b>.\nПобед: <b>%{wins}</b>.\nМаксимум побед подряд: <b>%{win_streak}</b>.\nВыиграно: <b>%{acquired} см</b>.\nПроиграно: <b>%{lost} см</b>."
   loan:
     description: "Минус? Возьми кредит!"
     debt: "Осталось выплатить <b>%{debt} см</b>"

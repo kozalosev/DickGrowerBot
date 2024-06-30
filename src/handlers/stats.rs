@@ -31,5 +31,6 @@ pub(crate) async fn stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'
     repos.pvp_stats.get_stats(&from_refs.1.kind(), from_refs.0.id).await
         .map(|stats| t!("commands.stats.result", locale = &lang_code,
             win_rate = stats.win_rate_formatted(), win_streak = stats.win_streak_max,
-            battles = stats.battles_total, wins = stats.battles_won))
+            battles = stats.battles_total, wins = stats.battles_won,
+            acquired = stats.acquired_length, lost = stats.lost_length))
 }

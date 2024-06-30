@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT battles_total, battles_won, win_streak_max, win_streak_current FROM Battle_Stats WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text) AND uid = $2",
+  "query": "SELECT battles_total, battles_won, win_streak_max, win_streak_current, acquired_length, lost_length FROM Battle_Stats WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text) AND uid = $2",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,16 @@
         "ordinal": 3,
         "name": "win_streak_current",
         "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "acquired_length",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "lost_length",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
@@ -34,8 +44,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "b8facf47b327d20e8a82fc8d8a349603c381c351bc0b7497c2a3f95686e340f6"
+  "hash": "17dbefc1e1f2826550641b1d36af9d6a50f6217afe644ea850832d69bb90a285"
 }

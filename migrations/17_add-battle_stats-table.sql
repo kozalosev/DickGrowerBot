@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS Battle_Stats (
     win_streak_current smallint NOT NULL DEFAULT 0 CHECK ( win_streak_current >= 0 ),
     win_streak_max     smallint NOT NULL DEFAULT 0 CHECK ( win_streak_max >= win_streak_current ),
 
+    acquired_length int NOT NULL DEFAULT 0 CHECK (acquired_length >= 0),
+    lost_length     int NOT NULL DEFAULT 0 CHECK (lost_length >= 0),
+
     PRIMARY KEY (uid, chat_id)
 );
 

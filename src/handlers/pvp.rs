@@ -273,7 +273,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         let (winner, loser) = choose_winner(initiator, acceptor_uid);
         let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
 
-        let battle_stats = p.repos.pvp_stats.send_battle_result(&p.chat_id.kind(), winner, loser).await
+        let battle_stats = p.repos.pvp_stats.send_battle_result(&p.chat_id.kind(), winner, loser, bet).await
             .inspect_err(|e| log::error!("couldn't send users' battle statistics for winner ({}) and loser ({}): {}", winner, loser, e))
             .ok()
             .filter(|_| p.features.show_stats)
