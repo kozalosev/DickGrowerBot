@@ -85,7 +85,7 @@ impl InlineCommand {
             },
             InlineCommand::Stats => {
                 metrics::CMD_STATS.inline.inc();
-                stats::stats_impl(repos, from_refs)
+                stats::stats_impl(repos, from_refs, config.features.pvp)
                     .await
                     .map(InlineResult::text)
             },
@@ -93,7 +93,7 @@ impl InlineCommand {
     }
 }
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -> HandlerResult {
+pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
@@ -104,6 +104,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
     let btn_label = t!("inline.results.button", locale = &lang_code);
     let results: Vec<InlineQueryResult> = InlineCommand::iter()
         .map(|cmd| cmd.to_string())
+        .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {
             let title = t!(&format!("inline.results.titles.{key}"), locale = &lang_code);
             let content = InputMessageContent::Text(InputMessageContentText::new(

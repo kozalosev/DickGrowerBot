@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let set_my_commands_requests = _rust_i18n_available_locales()
         .into_iter()
-        .map(|locale| commands::set_my_commands(&bot, locale));
+        .map(|locale| commands::set_my_commands(&bot, locale, &app_config.command_toggles));
     let set_my_commands_failed = join_all(set_my_commands_requests)
         .await
         .into_iter()
