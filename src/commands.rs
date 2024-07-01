@@ -13,6 +13,7 @@ pub async fn set_my_commands(bot: &Bot, lang_code: &str, toggles: &CachedEnvTogg
     let personal_commands = vec![
         HelpCommands::bot_commands(),
         PromoCommands::bot_commands(),
+        StatsCommands::bot_commands(),
     ];
     let group_commands = vec![
         HelpCommands::bot_commands(),

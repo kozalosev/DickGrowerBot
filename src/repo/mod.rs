@@ -8,6 +8,7 @@ mod pvpstats;
 
 #[cfg(test)]
 pub(crate) mod test;
+mod stats;
 
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
@@ -20,6 +21,7 @@ pub use import::*;
 pub use promo::*;
 pub use loans::*;
 pub use pvpstats::*;
+pub use stats::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 
@@ -32,6 +34,7 @@ pub struct Repositories {
     pub promo: Promo,
     pub loans: Loans,
     pub pvp_stats: BattleStatsRepo,
+    pub personal_stats: PersonalStatsRepo,
 }
 
 impl Repositories {
@@ -43,7 +46,8 @@ impl Repositories {
             import: Import::new(db_conn.clone()),
             promo: Promo::new(db_conn.clone()),
             loans: Loans::new(db_conn.clone(), config),
-            pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features)
+            pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features),
+            personal_stats: PersonalStatsRepo::new(db_conn.clone()),
         }
     }
 }

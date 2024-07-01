@@ -23,7 +23,12 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
         let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
         let chat_id = msg.chat.id.into();
         let from_refs = FromRefs(from, &chat_id);
-        let answer = stats_impl(&repos, from_refs, features).await?;
+
+        let answer = if msg.chat.is_private() {
+            personal_stats_impl(&repos, from_refs).await?
+        } else {
+            chat_stats_impl(&repos, from_refs, features).await?
+        };
 
         reply_html(bot, msg, answer).await?;
     } else {
@@ -32,7 +37,14 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
     Ok(())
 }
 
-pub(crate) async fn stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, features: BattlesFeatureToggles) -> anyhow::Result<String> {
+async fn personal_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+    let lang_code = ensure_lang_code(Some(from_refs.0));
+    repos.personal_stats.get(from_refs.0.id).await
+        .map(|stats| t!("commands.stats.personal", locale = &lang_code,
+            chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length))
+}
+
+pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, features: BattlesFeatureToggles) -> anyhow::Result<String> {
     let lang_code = ensure_lang_code(Some(from_refs.0));
     let (length, position) = repos.dicks.fetch_dick(from_refs.0.id, &from_refs.1.kind()).await?
         .map(|dick| (dick.length, dick.position.unwrap_or_default()))

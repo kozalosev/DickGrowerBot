@@ -14,7 +14,7 @@ async fn test_all() {
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
     let bet = 42;
 
-    // create user and dick #2
+    // create user and dick #1
     create_user(&db).await;
     create_dick(&db).await;
     let uid_1 = UserId(UID as u64);

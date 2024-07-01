@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter_command::<DickOfDayCommands>().filter(checks::is_group_chat).endpoint(handlers::dod_cmd_handler))
         .branch(Update::filter_message().filter_command::<BattleCommands>().filter(checks::is_group_chat).endpoint(handlers::pvp::cmd_handler))
         .branch(Update::filter_message().filter_command::<BattleCommandsNoArgs>().filter(checks::is_group_chat).endpoint(handlers::pvp::cmd_handler_no_args))
-        .branch(Update::filter_message().filter_command::<StatsCommands>().filter(checks::is_group_chat).endpoint(handlers::stats::cmd_handler))
+        .branch(Update::filter_message().filter_command::<StatsCommands>().endpoint(handlers::stats::cmd_handler))
         .branch(Update::filter_message().filter_command::<LoanCommands>().filter(checks::is_group_chat).endpoint(handlers::loan::cmd_handler))
         .branch(Update::filter_message().filter_command::<ImportCommands>().filter(checks::is_group_chat).endpoint(handlers::import_cmd_handler))
         .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).endpoint(handlers::promo_cmd_handler))
