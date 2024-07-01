@@ -132,16 +132,20 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
         .enumerate()
         .map(|(i, d)| {
             let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
-            let name = teloxide::utils::html::escape(&ltr_name);
+            let escaped_name = teloxide::utils::html::escape(&ltr_name);
+            let name = if from.id == d.owner_uid.into() {
+                format!("<u>{escaped_name}</u>")
+            } else {
+                escaped_name
+            };
             let can_grow = Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
             let pos = d.position.unwrap_or((i+1) as i64);
-            let line = t!("commands.top.line", locale = &lang_code,
+            let mut line = t!("commands.top.line", locale = &lang_code,
                 n = pos, name = name, length = d.length);
             if can_grow {
-                format!("{line} [+]")
-            } else {
-                line
-            }
+                line.push_str(" [+]")
+            };
+            line
         })
         .collect::<Vec<String>>();
 

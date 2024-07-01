@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
 use std::str::FromStr;
+use std::sync::{Arc, RwLock};
 use anyhow::anyhow;
 use reqwest::Url;
 use teloxide::types::Me;
@@ -8,12 +10,15 @@ use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
 
+const CACHED_ENV_TOGGLES_POISONED_MSG: &str = "CachedEnvToggles map was poisoned";
+
 #[derive(Clone)]
 #[cfg_attr(test, derive(Default))]
 pub struct AppConfig {
     pub features: FeatureToggles,
     pub top_limit: u16,
     pub loan_payout_ratio: f32,
+    pub command_toggles: CachedEnvToggles,
 }
 
 #[derive(Clone)]
@@ -44,6 +49,8 @@ impl Default for FeatureToggles {
 pub struct BattlesFeatureToggles {
     pub check_acceptor_length: bool,
     pub callback_locks: bool,
+    pub show_stats: bool,
+    pub show_stats_notice: bool,
 }
 
 impl AppConfig {
@@ -54,6 +61,8 @@ impl AppConfig {
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
         let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
+        let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
+        let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -61,10 +70,13 @@ impl AppConfig {
                 pvp: BattlesFeatureToggles {
                     check_acceptor_length,
                     callback_locks,
+                    show_stats,
+                    show_stats_notice,
                 }
             },
             top_limit,
             loan_payout_ratio,
+            command_toggles: Default::default(),
         }
     }
 }
@@ -75,6 +87,30 @@ impl DatabaseConfig {
             url: get_env_mandatory_value("DATABASE_URL")?,
             max_connections: get_env_value_or_default("DATABASE_MAX_CONNECTIONS", 10)
         })
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct CachedEnvToggles {
+    map: Arc<RwLock<HashMap<String, bool>>>
+}
+
+impl CachedEnvToggles {
+    pub fn enabled(&self, key: &str) -> bool {
+        log::debug!("trying to take a read lock for key '{key}'...");
+        let maybe_enabled = self.map.read().expect(CACHED_ENV_TOGGLES_POISONED_MSG).get(key).copied();
+        // maybe_enabled is required to drop the read lock
+        maybe_enabled.unwrap_or_else(|| {
+            let enabled = Self::enabled_in_env(key);
+            log::debug!("trying to take a write lock for key '{key}'...");
+            self.map.write().expect(CACHED_ENV_TOGGLES_POISONED_MSG)
+                .insert(key.to_owned(), enabled);
+            enabled
+        })
+    }
+
+    fn enabled_in_env(key: &str) -> bool {
+        std::env::var_os(format!("DISABLE_CMD_{}", key.to_uppercase())).is_none()
     }
 }
 

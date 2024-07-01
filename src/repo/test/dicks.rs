@@ -149,7 +149,7 @@ pub async fn create_user(db: &Pool<Postgres>) {
         .await.expect("couldn't create a user");
 }
 
-async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartiality, name: &str) {
+pub async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartiality, name: &str) {
         let users = repo::Users::new(db.clone());
         let dicks = repo::Dicks::new(db.clone(), Default::default());
         let uid2 = UserId((UID + 1) as u64);
@@ -180,5 +180,6 @@ async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i32) {
         .await.expect("couldn't fetch the top again");
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].length, length);
+    assert_eq!(d[0].owner_uid.0, UID);
     assert_eq!(d[0].owner_name, NAME);
 }

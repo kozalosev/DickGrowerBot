@@ -4,20 +4,24 @@ mod chats;
 mod import;
 mod promo;
 mod loans;
+mod pvpstats;
 
 #[cfg(test)]
 pub(crate) mod test;
+mod stats;
 
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
 use sqlx::postgres::PgQueryResult;
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, UserId};
 pub use users::*;
 pub use dicks::*;
 pub use chats::*;
 pub use import::*;
 pub use promo::*;
 pub use loans::*;
+pub use pvpstats::*;
+pub use stats::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 
@@ -29,6 +33,8 @@ pub struct Repositories {
     pub import: Import,
     pub promo: Promo,
     pub loans: Loans,
+    pub pvp_stats: BattleStatsRepo,
+    pub personal_stats: PersonalStatsRepo,
 }
 
 impl Repositories {
@@ -40,6 +46,8 @@ impl Repositories {
             import: Import::new(db_conn.clone()),
             promo: Promo::new(db_conn.clone()),
             loans: Loans::new(db_conn.clone(), config),
+            pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features),
+            personal_stats: PersonalStatsRepo::new(db_conn.clone()),
         }
     }
 }
@@ -146,6 +154,23 @@ impl From<&ChatIdKind> for ChatIdType {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, derive_more::From)]
+pub struct UID(i64);
+
+impl From<UserId> for UID {
+    fn from(value: UserId) -> Self {
+        Self(value.0 as i64)
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<UserId> for UID {
+    fn into(self) -> UserId {
+        UserId(self.0 as u64)
+    }
+}
+
 
 pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Pool<Postgres>, anyhow::Error> {
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -168,6 +193,24 @@ macro_rules! repository {
         impl $name {
             pub fn new(pool: sqlx::Pool<sqlx::Postgres>, features: $crate::config::FeatureToggles) -> Self {
                 Self { pool, features }
+            }
+
+            $($methods)*
+        }
+    };
+    
+    ($name:ident, with_($repoName:ident)_($repoType:tt), $($methods:item),*) => {
+        #[derive(Clone)]
+        pub struct $name {
+            pool: sqlx::Pool<sqlx::Postgres>,
+            #[allow(dead_code)] features: $crate::config::FeatureToggles,
+            $repoName: $crate::repo::$repoType,
+        }
+
+        impl $name {
+            pub fn new(pool: sqlx::Pool<sqlx::Postgres>, features: $crate::config::FeatureToggles) -> Self {
+                let inner_repo = $crate::repo::$repoType::new(pool.clone(), features);
+                Self { pool, features, $repoName: inner_repo }
             }
 
             $($methods)*

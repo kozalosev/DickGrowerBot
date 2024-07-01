@@ -29,6 +29,9 @@ commands:
       position:
         winner: "<b>%{name}</b>'s position in the top is <b>%{pos}</b>."
         loser: "<b>%{name}</b>'s position in the top is <b>%{pos}</b>."
+      stats:
+        text: "Win rate of the <b>winner</b> — <b>%{winner_win_rate}</b>.\nHis current win streak — <b>%{winner_win_streak}</b>, max win streak — <b>%{winner_win_streak_max}</b>.\nWin rate of the <b>loser</b> — <b>%{loser_win_rate}</b>."
+        lost_win_streak: "The streak of <b>%{lost_win_rate}</b> victories in a row was lost."
       withheld: "<b>%{payout} cm</b> were withheld from the winner to pay off the loan."
     button: "Attack!"
     errors:
@@ -38,6 +41,12 @@ commands:
         acceptor: "Your gun is not long enough 😣"
       same_person: "You cannot fight with yourself!"
       battle_already_in_progress: "The fight is in progress already! The message will be updated in a moment…"
+  stats:
+    description: "Statistics"
+    length: "Length: <b>%{length}</b>\nPosition in the top: <b>%{pos}</b>"
+    pvp: "Win rate: <b>%{win_rate}</b>.\nFights: <b>%{battles}</b>.\nWins: <b>%{wins}</b>.\nMax win streak: <b>%{win_streak}</b>.\nAcquired length: <b>%{acquired} cm</b>.\nLost length: <b>%{lost} cm</b>."
+    notice: "The collection of statistics started on July 2, 2024."
+    personal: "<i>Your personal statistics:</i>\n— Number of the chats in which you play: <b>%{chats}</b>.\n— Maximum length: <b>%{max_length}</b>.\n— Sum of dicks across all the chats: <b>%{total_length}</b>."
   loan:
     description: "Minus? Take a loan!"
     debt: "Left to pay <b>%{debt} cm</b>"
@@ -88,6 +97,7 @@ inline:
       top: "Get the biggest dicks of the chat"
       dick_of_day: "Elect the Dick of a Day"
       pvp: "Challenge others with a bet of %{bet} cm!"
+      stats: "Win statistics"
       loan: "Minus? Take a loan!"
   callback:
     errors:

@@ -8,6 +8,7 @@ pub mod utils;
 pub mod pvp;
 pub mod perks;
 pub mod loan;
+pub mod stats;
 
 use std::borrow::ToOwned;
 use derive_more::Constructor;

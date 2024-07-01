@@ -41,3 +41,8 @@ cargo sqlx prepare -- --tests
 ### Adjustment hints
 
 It's most probably you want to change the value of the `GROW_SHRINK_RATIO` environment variable to make the players upset and disappointed more or less often.
+
+### How to disable a command?
+
+Most of the command can be hidden from both lists: command hints and inline results. To do so, specify an environment variable like `DISABLE_CMD_STATS` (where `STATS` is a command key) with any value.
+Don't forget to pass this variable to the container by adding it to the `docker-compose.yml` file!

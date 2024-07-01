@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Battle_Stats(uid, chat_id, battles_total, battles_won, win_streak_current, lost_length) VALUES ($1, $2, 1, 0, 0, $3) ON CONFLICT (uid, chat_id) DO UPDATE SET battles_total = Battle_Stats.battles_total + 1, win_streak_current = 0, lost_length = Battle_Stats.lost_length + $3 RETURNING battles_total, battles_won",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "battles_total",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "battles_won",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b6871b9eddbe134b125c3240256794cf556560bfc1b3c3e1844ec908fc310f37"
+}

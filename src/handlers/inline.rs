@@ -11,7 +11,7 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, loan, utils};
+use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::handlers::utils::page::Page;
@@ -25,6 +25,7 @@ enum InlineCommand {
     Top,
     DickOfDay,
     Loan,
+    Stats,
 }
 
 struct InlineResult {
@@ -81,12 +82,18 @@ impl InlineCommand {
                 loan::loan_impl(repos, from_refs, config)
                     .await
                     .map(InlineResult::from)
-            }
+            },
+            InlineCommand::Stats => {
+                metrics::CMD_STATS.inline.inc();
+                stats::chat_stats_impl(repos, from_refs, config.features.pvp)
+                    .await
+                    .map(InlineResult::text)
+            },
         }
     }
 }
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -> HandlerResult {
+pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
@@ -97,6 +104,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories) -
     let btn_label = t!("inline.results.button", locale = &lang_code);
     let results: Vec<InlineQueryResult> = InlineCommand::iter()
         .map(|cmd| cmd.to_string())
+        .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {
             let title = t!(&format!("inline.results.titles.{key}"), locale = &lang_code);
             let content = InputMessageContent::Text(InputMessageContentText::new(
