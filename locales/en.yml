@@ -43,7 +43,8 @@ commands:
       battle_already_in_progress: "The fight is in progress already! The message will be updated in a moment…"
   stats:
     description: "Win statistics"
-    result: "Win rate: <b>%{win_rate}</b>.\nFights: <b>%{battles}</b>.\nWins: <b>%{wins}</b>.\nMax win streak: <b>%{win_streak}</b>.\nAcquired length: <b>%{acquired} cm</b>.\nLost length: <b>%{lost} cm</b>."
+    length: "Length: <b>%{length}</b>\nPosition in the top: <b>%{pos}</b>"
+    pvp: "Win rate: <b>%{win_rate}</b>.\nFights: <b>%{battles}</b>.\nWins: <b>%{wins}</b>.\nMax win streak: <b>%{win_streak}</b>.\nAcquired length: <b>%{acquired} cm</b>.\nLost length: <b>%{lost} cm</b>."
     notice: "The collection of statistics started on July 2, 2024."
   loan:
     description: "Minus? Take a loan!"

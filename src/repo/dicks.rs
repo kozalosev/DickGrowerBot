@@ -61,6 +61,22 @@ impl Dicks {
             .map_err(Into::into)
     }
 
+    pub async fn fetch_dick(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Dick>> {
+        sqlx::query_as!(Dick,
+            r#"SELECT length, uid as owner_uid, name as owner_name, updated_at as grown_at, position FROM (
+                 SELECT uid, name, d.length as length, updated_at, ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
+                   FROM Dicks d
+                   JOIN users using (uid)
+                   JOIN Chats c ON d.chat_id = c.id
+                   WHERE c.chat_id = $2::bigint OR c.chat_instance = $2::text
+               ) AS _
+               WHERE uid = $1"#,
+                uid.0 as i64, chat_id.value() as String)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u16) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
         sqlx::query_as!(Dick,
             r#"SELECT length, uid as owner_uid, name as owner_name, updated_at as grown_at,
