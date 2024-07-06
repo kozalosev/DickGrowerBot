@@ -1,5 +1,6 @@
 mod dick;
 mod help;
+mod start;
 mod dod;
 mod import;
 mod promo;
@@ -21,6 +22,7 @@ use teloxide::types::ParseMode::Html;
 
 pub use dick::*;
 pub use help::*;
+pub use start::*;
 pub use dod::*;
 pub use import::*;
 pub use inline::*;

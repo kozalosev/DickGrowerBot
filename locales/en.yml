@@ -88,6 +88,8 @@ commands:
       no_activations_left: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
       already_activated: "It seems you already used this promocode earlier 🤨"
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
+    inline:
+      switch_button: "Activate promo code '%{code}'…"
 inline:
   results:
     text: "Since I cannot determine the chat by an inline query, you should click on the button bellow to get the result."

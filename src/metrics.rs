@@ -74,10 +74,11 @@ pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(|| {
         finished: Counter::new("command_import (finished)", opts.const_label("state", "finished")),
     }
 });
-pub static CMD_PROMO: Lazy<ComplexCommandCounters> = Lazy::new(|| {
+pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(|| {
     let opts = Opts::new("command_promo_usage_total", "count of /promo invocations and successes");
-    ComplexCommandCounters {
-        invoked: Counter::new("command_promo (invoked)", opts.clone().const_label("state", "invoked")),
+    DeepLinkedCommandsCounters {
+        invoked_by_command: Counter::new("command_promo (invoked)", opts.clone().const_label("state", "invoked_by_command")),
+        invoked_by_deeplink: Counter::new("deeplink_promo (invoked)", opts.clone().const_label("state", "invoked_by_deeplink")),
         finished: Counter::new("command_promo (finished)", opts.const_label("state", "finished")),
     }
 });
@@ -104,7 +105,8 @@ pub fn init() -> axum::Router {
         .register(&CMD_STATS.inline)
         .register(&CMD_IMPORT.invoked)
         .register(&CMD_IMPORT.finished)
-        .register(&CMD_PROMO.invoked)
+        .register(&CMD_PROMO.invoked_by_command)
+        .register(&CMD_PROMO.invoked_by_deeplink)
         .register(&CMD_PROMO.finished)
         .unwrap();
 
@@ -136,6 +138,11 @@ pub struct BothModesCounters {
 pub struct BothModesComplexCommandCounters {
     pub invoked: BothModesCounters,
     pub finished: Counter
+}
+pub struct DeepLinkedCommandsCounters {
+    pub invoked_by_command: Counter,
+    pub invoked_by_deeplink: Counter,
+    pub finished: Counter,
 }
 struct Registry(prometheus::Registry);
 
