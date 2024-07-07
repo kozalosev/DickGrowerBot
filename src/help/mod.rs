@@ -2,8 +2,8 @@ use rust_i18n::t;
 use serde::Serialize;
 use tinytemplate::TinyTemplate;
 
-static EN_HELP: &str = include_str!("en.md");
-static RU_HELP: &str = include_str!("ru.md");
+static EN_HELP: &str = include_str!("en.html");
+static RU_HELP: &str = include_str!("ru.html");
 
 #[derive(Clone)]
 pub struct HelpContainer {

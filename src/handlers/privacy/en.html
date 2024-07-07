@@ -1,0 +1,16 @@
+The most authoritative, actual and comprehensive source of the truth, what information the bot is collected and stored, is <a href="https://github.com/kozalosev/DickGrowerBot/tree/main/migrations">database migrations</a>, published, as the rest of the source code, on GitHub.
+
+However, let's take a closer look at the most important parts shortly:
+1️⃣ The bot has to store IDs and names of its users to be able to show the top and the results of PvP battles;
+2️⃣ The creation date of a user's account is required to provide a welcome bonus, i.e. a grace period of positive growth without shrinks.
+3️⃣ Chats IDs are used for users to have different dicks in different chats, and to support the bot to be working in both modes: via commands and inline mode.
+4️⃣ Obviously, it's necessary to store lengths, the dates of last growths, and loans info (sum, dates of receipt and repayment, payout rate) per chat.
+5️⃣ We collect statistics of won/lost battles, acquired/lost centimeters as an accumulated table, without a full log of all battles.
+6️⃣ The full log is collected for:
+    ➖ winners of «the Dick of the Day» contest (for statistics purposes, and to determine whether a winner was already chosen today or nor; however, this may be optimized in the future);
+    ➖ imports of the data from other bots (to investigate any issues, and to prevent double imports when a command is invoked several times);
+    ➖ promo codes activations (for statistics and investigation purposes).
+7️⃣ None of the data, described above, is provided to third party organizations, except for:
+    ➖ Russian hosting company <a href="https://timeweb.cloud">TimeWeb</a>, providing cloud infrastructure to run the code of applications;
+    ➖ French hosting company <a href="https://www.scaleway.com/en/">Scaleway</a>, providing S3 compatible storage to store backups of the database;
+    ➖ international company <a href="https://grafana.com">Grafana Labs</a>, in whose cloud infrastructure metrics and logs are stored.

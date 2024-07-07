@@ -1,6 +1,8 @@
 commands:
   help:
     description: "Я обязательно помогу тебе, друг"
+  privacy:
+    description: "политика по работе с персональными данными"
   grow:
     description: "Вырасти пиписю!"
     result: "Твоя пися %{event} на <b>%{incr}</b> см и теперь её длина составляет <b>%{length} см</b>."

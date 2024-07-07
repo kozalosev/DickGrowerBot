@@ -15,7 +15,7 @@ use rust_i18n::i18n;
 use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
-use crate::handlers::{checks, HelpCommands, LoanCommands, StartCommands};
+use crate::handlers::{checks, HelpCommands, LoanCommands, PrivacyCommands, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handler = dptree::entry()
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
+        .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
         .branch(Update::filter_message().filter_command::<DickCommands>().filter(checks::is_group_chat).endpoint(handlers::dick_cmd_handler))
         .branch(Update::filter_message().filter_command::<DickOfDayCommands>().filter(checks::is_group_chat).endpoint(handlers::dod_cmd_handler))
         .branch(Update::filter_message().filter_command::<BattleCommands>().filter(checks::is_group_chat).endpoint(handlers::pvp::cmd_handler))

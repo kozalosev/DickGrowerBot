@@ -1,6 +1,8 @@
 commands:
   help:
     description: "I'll help you, my friend"
+  privacy:
+    description: "Privacy Policy detailing what data we store"
   grow:
     description: "Grow your dick!"
     result: "Your dick has %{event} by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."

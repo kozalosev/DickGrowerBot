@@ -20,6 +20,9 @@ pub static CMD_START_COUNTER: Lazy<Counter> = Lazy::new(|| {
 pub static CMD_HELP_COUNTER: Lazy<Counter> = Lazy::new(|| {
     Counter::new("command_help", Opts::new("command_help_usage_total", "count of /help invocations"))
 });
+pub static CMD_PRIVACY_COUNTER: Lazy<Counter> = Lazy::new(|| {
+    Counter::new("command_privacy", Opts::new("command_privacy_usage_total", "count of /privacy invocations"))
+});
 pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(|| {
     let opts = Opts::new("command_grow_usage_total", "count of /grow invocations");
     BothModesCounters {
@@ -90,6 +93,7 @@ pub fn init() -> axum::Router {
         .register(&INLINE_COUNTER.finished)
         .register(&CMD_START_COUNTER)
         .register(&CMD_HELP_COUNTER)
+        .register(&CMD_PRIVACY_COUNTER)
         .register(&CMD_GROW_COUNTER.chat)
         .register(&CMD_GROW_COUNTER.inline)
         .register(&CMD_TOP_COUNTER.chat)

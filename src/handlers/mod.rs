@@ -1,6 +1,7 @@
 mod dick;
 mod help;
 mod start;
+mod privacy;
 mod dod;
 mod import;
 mod promo;
@@ -23,6 +24,7 @@ use teloxide::types::ParseMode::Html;
 pub use dick::*;
 pub use help::*;
 pub use start::*;
+pub use privacy::*;
 pub use dod::*;
 pub use import::*;
 pub use inline::*;
@@ -129,7 +131,7 @@ pub fn ensure_lang_code(user: Option<&User>) -> String {
         .to_owned()
 }
 
-pub fn reply_html(bot: Bot, msg: Message, answer: String) -> JsonRequest<SendMessage> {
+pub fn reply_html<T: Into<String>>(bot: Bot, msg: Message, answer: T) -> JsonRequest<SendMessage> {
     // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer);
     answer.parse_mode = Some(Html);
