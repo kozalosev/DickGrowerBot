@@ -12,10 +12,16 @@ _(compared with some competitors)_
 * **The Dick of the Day** daily contest to grow a randomly chosen dick for a bit more.
 * A way to play the game without the necessity to add the bot into a group (via inline queries with a callback button).
 * Import from _@pipisabot_ and _@kraft28_bot_ (not tested! help of its users is required).
-* PvP fights.
+* PvP fights with statistics.
 
 ### Soon (but not very, I guess)
-* global monthly events
+* an option to show mercy and return the award for the battle back;
+* support for those who loses battles the most;
+* more perks;
+* achievements;
+* referral promo codes;
+* global monthly events;
+* a shop.
 
 Features
 --------
