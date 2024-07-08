@@ -12,10 +12,11 @@ use axum::Router;
 use futures::future::join_all;
 use reqwest::Url;
 use rust_i18n::i18n;
+use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
-use crate::handlers::{checks, HelpCommands, LoanCommands, PrivacyCommands, StartCommands};
+use crate::handlers::{checks, HelpCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
@@ -47,7 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter_command::<StatsCommands>().endpoint(handlers::stats::cmd_handler))
         .branch(Update::filter_message().filter_command::<LoanCommands>().filter(checks::is_group_chat).endpoint(handlers::loan::cmd_handler))
         .branch(Update::filter_message().filter_command::<ImportCommands>().filter(checks::is_group_chat).endpoint(handlers::import_cmd_handler))
-        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).endpoint(handlers::promo_cmd_handler))
+        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, InMemStorage<PromoCommandState>, PromoCommandState>()
+            .branch(dptree::case![PromoCommandState::Start].endpoint(handlers::promo_cmd_handler)))
+        .branch(Update::filter_message().enter_dialogue::<Message, InMemStorage<PromoCommandState>, PromoCommandState>()
+            .branch(dptree::case![PromoCommandState::Requested].endpoint(handlers::promo_requested_handler)))
         .branch(Update::filter_message().filter(checks::is_not_group_chat).endpoint(checks::handle_not_group_chat))
         .branch(Update::filter_inline_query().filter(checks::inline::is_group_chat).filter(handlers::pvp::inline_filter).endpoint(handlers::pvp::inline_handler))
         .branch(Update::filter_inline_query().filter(handlers::promo_inline_filter).endpoint(handlers::promo_inline_handler))
@@ -97,7 +101,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         incrementor,
         app_config,
         help_container,
-        battle_locker
+        battle_locker,
+        InMemStorage::<PromoCommandState>::new()
     ];
 
     match webhook_url {

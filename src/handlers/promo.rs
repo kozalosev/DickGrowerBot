@@ -1,9 +1,10 @@
 use once_cell::sync::Lazy;
 use rust_i18n::t;
 use teloxide::Bot;
+use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
-use teloxide::prelude::{InlineQuery, Requester};
+use teloxide::prelude::{Dialogue, InlineQuery, Requester};
 use teloxide::types::{Message, User};
 use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
 use crate::{metrics, repo};
@@ -20,16 +21,53 @@ static PROMO_CODE_FORMAT_REGEXP: Lazy<regex::Regex> = Lazy::new(||
 #[command(rename_rule = "lowercase")]
 pub enum PromoCommands {
     #[command(description = "promo")]
-    Promo(String)
+    Promo(String),
 }
 
-pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands,
+#[derive(Clone, Default)]
+pub enum PromoCommandState {
+    #[default]
+    Start,
+    Requested,
+}
+
+pub type PromoCodeDialogue = Dialogue<PromoCommandState, InMemStorage<PromoCommandState>>;
+
+pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialogue: PromoCodeDialogue,
                                repos: repo::Repositories) -> HandlerResult {
     metrics::CMD_PROMO.invoked_by_command.inc();
-    let PromoCommands::Promo(code) = cmd;
     let user = msg.from().ok_or("no from user")?;
+    let answer = match cmd {
+        PromoCommands::Promo(code) if code.is_empty() => {
+            dialogue.update(PromoCommandState::Requested).await?;
 
-    let answer = promo_activation_impl(repos.promo, user, &code).await?;
+            let lang_code = ensure_lang_code(msg.from());
+            t!("commands.promo.request", locale = &lang_code)
+        }
+        PromoCommands::Promo(code) => {
+            dialogue.exit().await?;
+            
+            promo_activation_impl(repos.promo, user, &code).await?
+        },
+    };
+    reply_html(bot, msg, answer).await?;
+    Ok(())
+}
+
+pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCodeDialogue,
+                                     repos: repo::Repositories) -> HandlerResult {
+    let answer = match msg.text() {
+        Some(code) => {
+            dialogue.exit().await?;
+            
+            let user = msg.from().ok_or("no from user")?;
+            promo_activation_impl(repos.promo, user, code).await?
+        },
+        None => {
+            let lang_code = ensure_lang_code(msg.from());
+            t!("commands.promo.request", locale = &lang_code)
+        }
+    };
     reply_html(bot, msg, answer).await?;
     Ok(())
 }

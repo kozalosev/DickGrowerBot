@@ -82,6 +82,7 @@ commands:
         line: "➖ <b>%{line}</b>"
   promo:
     description: "Activate a promo code"
+    request: "Enter a promo code:"
     success:
       template: "You has activated this promo code successfully! %{ending}"
       singular: "Your dick has grown by <b>%{growth}</b> cm in one chat."

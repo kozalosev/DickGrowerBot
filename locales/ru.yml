@@ -82,6 +82,7 @@ commands:
         line: "➖ <b>%{line}</b>"
   promo:
     description: "Активировать промокод"
+    request: "Введи промокод:"
     success:
       template: "Промокод успешно активирован! %{ending}"
       singular: "Твой писюн вырос на <b>%{growth}</b> см в одном чате."
