@@ -33,7 +33,7 @@ commands:
         loser: "<b>%{name}</b>'s position in the top is <b>%{pos}</b>."
       stats:
         text: "Win rate of the <b>winner</b> — <b>%{winner_win_rate}</b>.\nHis current win streak — <b>%{winner_win_streak}</b>, max win streak — <b>%{winner_win_streak_max}</b>.\nWin rate of the <b>loser</b> — <b>%{loser_win_rate}</b>."
-        lost_win_streak: "The streak of <b>%{lost_win_rate}</b> victories in a row was lost."
+        lost_win_streak: "The streak of <b>%{lost_win_streak}</b> victories in a row was lost."
       withheld: "<b>%{payout} cm</b> were withheld from the winner to pay off the loan."
     button: "Attack!"
     errors:
