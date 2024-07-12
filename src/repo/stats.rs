@@ -12,16 +12,16 @@ struct PersonalStatsEntity {
 
 pub struct PersonalStats {
     pub chats: u64,
-    pub max_length: u32,
-    pub total_length: u64,
+    pub max_length: i32,
+    pub total_length: i64,
 }
 
 impl From<PersonalStatsEntity> for PersonalStats {
     fn from(value: PersonalStatsEntity) -> Self {
         Self {
             chats: value.chats.map(|x| x.to_u64().expect("chats count, fetched from the database, must fit into u64")).unwrap_or_default(),
-            max_length: value.max_length.map(|x| x.to_u32().expect("max_length, fetched from the database, must fit into u32")).unwrap_or_default(),
-            total_length: value.total_length.map(|x| x.to_u64().expect("total_length, fetched from the database, must fit into u64")).unwrap_or_default(),
+            max_length: value.max_length.unwrap_or_default(),
+            total_length: value.total_length.unwrap_or_default(),
         }
     }
 }
