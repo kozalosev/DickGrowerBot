@@ -71,6 +71,19 @@ async fn get_random_active_member() {
         .expect("no active member");
     assert_eq!(user.uid, UID);
     assert_eq!(user.name.value_ref(), NAME);
+    
+    // check inactive member is not found
+    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
+        .execute(&db)
+        .await.expect("couldn't drop the trigger");
+    sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
+        .execute(&db)
+        .await.expect("couldn't reset the updated_at column");
+
+    let user = users.get_random_active_member(&chat_id)
+        .await
+        .expect("couldn't fetch Some(User)");
+    assert!(user.is_none());
 }
 
 fn check_user_with_name(user: &repo::User, name: &str) {

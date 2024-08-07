@@ -42,7 +42,7 @@ repository!(Users,
             "SELECT u.uid, name, u.created_at FROM Users u
                 JOIN Dicks d ON u.uid = d.uid
                 JOIN Chats c ON d.chat_id = c.id
-                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text
+                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                     AND updated_at > current_timestamp - interval '1 week'
                 ORDER BY random() LIMIT 1",
                 chat_id.value() as String)
