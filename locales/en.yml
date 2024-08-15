@@ -19,7 +19,7 @@ commands:
     empty: "No one is in the game yet :("
   dod:
     description: "Elect the Dick of a Day"
-    result: "The Dick of the Day is <b>%{name}</b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."
+    result: "The Dick of the Day is <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."
     position: "His position in the top is <b>%{pos}</b>."
     already_chosen: "The Dick of the Day has been already chosen for today! It's <b>%{name}</b>."
     no_candidates: "There is no candidates for election. In this chat nobody is in the game yet 😢"
