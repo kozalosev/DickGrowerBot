@@ -295,6 +295,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         let (winner_res, withheld_part) = pay_for_loan_if_needed(&p, winner, bet).await
             .inspect_err(|e| log::error!("couldn't pay for a loan from a battle award: {e}"))
             .ok().flatten()
+            .filter(|(_, withheld)| *withheld > 0)
             .map(|(res, withheld)| {
                 let withheld_part = format!("\n\n{}", t!("commands.pvp.results.withheld", locale = &p.lang_code, payout = withheld));
                 (res, withheld_part)
