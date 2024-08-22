@@ -57,6 +57,8 @@ ARG NEWCOMERS_GRACE_DAYS
 ARG TOP_LIMIT
 ARG HELP_PUSSIES_COEF
 ARG LOAN_PAYOUT_COEF
+ARG DOD_SELECTION_MODE
+ARG DOD_RICH_EXCLUSION_RATIO
 ENTRYPOINT [ "/usr/local/bin/dickGrowerBot" ]
 
 LABEL org.opencontainers.image.source=https://github.com/kozalosev/DickGrowerBot

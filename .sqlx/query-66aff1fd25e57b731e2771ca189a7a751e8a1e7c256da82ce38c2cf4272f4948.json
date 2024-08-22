@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH user_weights AS (\n                SELECT u.uid, u.name, u.created_at, d.length,\n                       CASE\n                           WHEN d.length = 0 THEN 1.0\n                           ELSE 1.0 / d.length\n                       END AS weight,\n                       SUM(CASE\n                           WHEN d.length = 0 THEN 1.0\n                           ELSE 1.0 / d.length \n                       END) OVER () AS total_weight\n                FROM Users u\n                JOIN Dicks d USING (uid)\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                      AND d.updated_at > current_timestamp - interval '1 week'\n            ),\n            weighted_users AS (\n                SELECT uid, name, created_at, weight,\n                       total_weight,\n                       (RANDOM() * total_weight) AS rand_weight\n                FROM user_weights\n            )\n            SELECT uid, name, created_at\n            FROM weighted_users\n            WHERE rand_weight < weight\n            ORDER BY random()\n            LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "66aff1fd25e57b731e2771ca189a7a751e8a1e7c256da82ce38c2cf4272f4948"
+}

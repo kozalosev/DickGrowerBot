@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLock};
 use anyhow::anyhow;
 use reqwest::Url;
 use teloxide::types::Me;
+use crate::domain::Ratio;
 use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
@@ -18,6 +19,7 @@ pub struct AppConfig {
     pub features: FeatureToggles,
     pub top_limit: u16,
     pub loan_payout_ratio: f32,
+    pub dod_rich_exclusion_ratio: Option<Ratio>,
     pub command_toggles: CachedEnvToggles,
 }
 
@@ -31,6 +33,7 @@ pub struct DatabaseConfig {
 pub struct FeatureToggles {
     pub chats_merging: bool,
     pub top_unlimited: bool,
+    pub dod_selection_mode: DickOfDaySelectionMode,
     pub pvp: BattlesFeatureToggles,
 }
 
@@ -40,6 +43,7 @@ impl Default for FeatureToggles {
         Self {
             chats_merging: true,
             top_unlimited: true,
+            dod_selection_mode: Default::default(),
             pvp: Default::default(),
         }
     }
@@ -53,10 +57,20 @@ pub struct BattlesFeatureToggles {
     pub show_stats_notice: bool,
 }
 
+#[derive(Copy, Clone, Default, derive_more::FromStr, derive_more::Display)]
+pub enum DickOfDaySelectionMode {
+    WEIGHTS,
+    EXCLUSION,
+    #[default]
+    RANDOM
+}
+
 impl AppConfig {
     pub fn from_env() -> Self {
         let top_limit = get_env_value_or_default("TOP_LIMIT", 10);
         let loan_payout_ratio = get_env_value_or_default("LOAN_PAYOUT_COEF", 0.0);
+        let dod_selection_mode = get_optional_env_value("DOD_SELECTION_MODE");
+        let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
@@ -67,6 +81,7 @@ impl AppConfig {
             features: FeatureToggles {
                 chats_merging,
                 top_unlimited,
+                dod_selection_mode,
                 pvp: BattlesFeatureToggles {
                     check_acceptor_length,
                     callback_locks,
@@ -76,6 +91,7 @@ impl AppConfig {
             },
             top_limit,
             loan_payout_ratio,
+            dod_rich_exclusion_ratio,
             command_toggles: Default::default(),
         }
     }
@@ -163,6 +179,21 @@ where
                 anyhow!(e)
             }))
         .unwrap_or(default)
+}
+
+fn get_optional_env_value<T>(key: &str) -> T
+where
+    T: Default + FromStr + Display,
+    <T as FromStr>::Err: Error + Send + Sync + 'static
+{
+    get_env_value_or_default(key, T::default())
+}
+
+fn get_optional_env_ratio(key: &str) -> Option<Ratio> {
+    let value = get_env_value_or_default(key, -1.0);
+    Ratio::new(value)
+        .inspect_err(|_| log::warn!("{key} is disabled due to the invalid value: {value}"))
+        .ok()
 }
 
 fn ensure_starts_with_at_sign(s: String) -> String {

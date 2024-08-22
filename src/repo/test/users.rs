@@ -1,6 +1,7 @@
 use sqlx::{Pool, Postgres};
 use teloxide::types::{ChatId, UserId};
 use testcontainers::clients;
+use crate::domain::Ratio;
 use crate::repo;
 use crate::repo::ChatIdKind;
 use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID};
@@ -84,6 +85,81 @@ async fn get_random_active_member() {
         .await
         .expect("couldn't fetch Some(User)");
     assert!(user.is_none());
+}
+
+#[tokio::test]
+async fn get_random_active_poor_member() {
+    let docker = clients::Cli::default();
+    let (_container, db) = start_postgres(&docker).await;
+    let users = repo::Users::new(db.clone());
+    let ratio = Ratio::new(0.9).unwrap();
+
+    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+    let user = users.get_random_active_poor_member(&chat_id, ratio)
+        .await.expect("couldn't fetch None");
+    assert!(user.is_none());
+
+    create_member(&db).await;
+
+    let user = users.get_random_active_poor_member(&chat_id, ratio)
+        .await
+        .expect("couldn't fetch Some(User)")
+        .expect("no active member");
+    assert_eq!(user.uid, UID);
+    assert_eq!(user.name.value_ref(), NAME);
+
+    // check inactive member is not found
+    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
+        .execute(&db)
+        .await.expect("couldn't drop the trigger");
+    sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
+        .execute(&db)
+        .await.expect("couldn't reset the updated_at column");
+
+    let user = users.get_random_active_poor_member(&chat_id, ratio)
+        .await
+        .expect("couldn't fetch Some(User)");
+    assert!(user.is_none());
+
+    // TODO: create multiple users and check the top one is not chosen
+    // TODO: rewrite these tests to comply with the DRY principle
+}
+
+#[tokio::test]
+async fn get_random_active_member_with_poor_in_priority() {
+    let docker = clients::Cli::default();
+    let (_container, db) = start_postgres(&docker).await;
+    let users = repo::Users::new(db.clone());
+
+    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+    let user = users.get_random_active_member_with_poor_in_priority(&chat_id)
+        .await.expect("couldn't fetch None");
+    assert!(user.is_none());
+
+    create_member(&db).await;
+
+    let user = users.get_random_active_member_with_poor_in_priority(&chat_id)
+        .await
+        .expect("couldn't fetch Some(User)")
+        .expect("no active member");
+    assert_eq!(user.uid, UID);
+    assert_eq!(user.name.value_ref(), NAME);
+
+    // check inactive member is not found
+    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
+        .execute(&db)
+        .await.expect("couldn't drop the trigger");
+    sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
+        .execute(&db)
+        .await.expect("couldn't reset the updated_at column");
+
+    let user = users.get_random_active_member_with_poor_in_priority(&chat_id)
+        .await
+        .expect("couldn't fetch Some(User)");
+    assert!(user.is_none());
+    
+    // TODO: think how to check the probability in the test
+    // TODO: rewrite these tests to comply with the DRY principle
 }
 
 fn check_user_with_name(user: &repo::User, name: &str) {

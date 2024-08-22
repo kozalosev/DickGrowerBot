@@ -29,6 +29,8 @@ services:
       - TOP_LIMIT
       - HELP_PUSSIES_COEF
       - LOAN_PAYOUT_COEF
+      - DOD_SELECTION_MODE
+      - DOD_RICH_EXCLUSION_RATIO
     expose:
       - 8080
     networks:
