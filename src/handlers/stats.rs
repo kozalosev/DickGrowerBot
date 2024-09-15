@@ -3,9 +3,10 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
-use crate::handlers::{ensure_lang_code, FromRefs, HandlerResult, reply_html};
+use crate::handlers::{FromRefs, HandlerResult, reply_html};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::domain::LanguageCode;
 use crate::repo::WinRateAware;
 
 #[derive(BotCommands, Clone)]
@@ -38,14 +39,14 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
 }
 
 async fn personal_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
-    let lang_code = ensure_lang_code(Some(from_refs.0));
+    let lang_code = LanguageCode::from_user(from_refs.0);
     repos.personal_stats.get(from_refs.0.id).await
         .map(|stats| t!("commands.stats.personal", locale = &lang_code,
             chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length))
 }
 
 pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, features: BattlesFeatureToggles) -> anyhow::Result<String> {
-    let lang_code = ensure_lang_code(Some(from_refs.0));
+    let lang_code = LanguageCode::from_user(from_refs.0);
     let (length, position) = repos.dicks.fetch_dick(from_refs.0.id, &from_refs.1.kind()).await?
         .map(|dick| (dick.length, dick.position.unwrap_or_default()))
         .unwrap_or_default();

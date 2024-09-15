@@ -8,10 +8,10 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
-use crate::handlers::{CallbackResult, ensure_lang_code, HandlerResult, reply_html, send_error_callback_answer, utils};
+use crate::handlers::{CallbackResult, HandlerResult, reply_html, send_error_callback_answer, utils};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
-use crate::domain::Username;
+use crate::domain::{LanguageCode, Username};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
@@ -93,7 +93,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let user = msg.from().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
-    let lang_code = ensure_lang_code(msg.from());
+    let lang_code = LanguageCode::from_maybe_user(msg.from());
     let params = BattleParams {
         repos,
         features: config.features.pvp,
@@ -111,7 +111,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
 pub async fn cmd_handler_no_args(bot: Bot, msg: Message) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
-    let lang_code = ensure_lang_code(msg.from());
+    let lang_code = LanguageCode::from_maybe_user(msg.from());
     reply_html(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code)).await?;
     Ok(())
 }
@@ -130,7 +130,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let bet: u16 = query.query.parse()?;
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
 
     let title = t!("inline.results.titles.pvp", locale = &lang_code, bet = bet);
@@ -190,7 +190,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     let params = BattleParams {
         repos,
         features: config.features.pvp,
-        lang_code: ensure_lang_code(Some(&query.from)),
+        lang_code: LanguageCode::from_user(&query.from),
         chat_id: chat_id.clone(),
     };
     let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;
@@ -204,7 +204,7 @@ pub(crate) struct BattleParams {
     repos: Repositories,
     features: BattlesFeatureToggles,
     chat_id: ChatIdPartiality,
-    lang_code: String,
+    lang_code: LanguageCode,
 }
 
 #[derive(Clone)]

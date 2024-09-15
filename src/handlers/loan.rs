@@ -11,7 +11,8 @@ use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
 
 use crate::{check_invoked_by_owner_and_get_answer_params, metrics, repo};
 use crate::config::AppConfig;
-use crate::handlers::{CallbackButton, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, reply_html, try_resolve_chat_id};
+use crate::domain::LanguageCode;
+use crate::handlers::{CallbackButton, FromRefs, HandlerImplResult, HandlerResult, reply_html, try_resolve_chat_id};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
 use crate::repo::{ChatIdPartiality, Loan};
@@ -44,7 +45,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, conf
 pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, config: AppConfig) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
     let (from, chat_id_part) = (from_refs.0, from_refs.1);
     let chat_id_kind = chat_id_part.kind();
-    let lang_code = ensure_lang_code(Some(from));
+    let lang_code = LanguageCode::from_user(from);
     
     let maybe_loan = repos.loans.get_active_loan(from.id, &chat_id_kind).await?;
     if let Some(Loan { debt, .. }) = maybe_loan {

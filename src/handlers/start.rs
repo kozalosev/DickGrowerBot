@@ -1,8 +1,9 @@
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::Message;
-use crate::handlers::{ensure_lang_code, HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
+use crate::handlers::{HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, repo};
+use crate::domain::LanguageCode;
 use crate::help::HelpContainer;
 
 #[derive(BotCommands, Clone)]
@@ -13,7 +14,7 @@ pub enum StartCommands {
 
 pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
                                help: HelpContainer, repos: repo::Repositories) -> HandlerResult {
-    let lang_code = ensure_lang_code(msg.from());
+    let lang_code = LanguageCode::from_maybe_user(msg.from());
     let answer = if msg.from().is_none() {
         log::warn!("The /start command was invoked without a FROM field for message: {:?}", msg);
         help.get_help_message(lang_code).to_owned()

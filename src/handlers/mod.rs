@@ -12,13 +12,12 @@ pub mod perks;
 pub mod loan;
 pub mod stats;
 
-use std::borrow::ToOwned;
 use derive_more::Constructor;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessage};
 use teloxide::requests::{JsonRequest, Requester};
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message};
 use teloxide::types::ParseMode::Html;
 
 pub use dick::*;
@@ -30,7 +29,7 @@ pub use import::*;
 pub use inline::*;
 pub use promo::*;
 pub use loan::LoanCommands;
-
+use crate::domain::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -114,23 +113,6 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
     }
 }
 
-pub fn ensure_lang_code(user: Option<&User>) -> String {
-    user
-        .and_then(|u| {
-            u.language_code.as_ref()
-                .or_else(|| {
-                    log::debug!("no language_code for {}, using the default", u.id);
-                    None
-                })
-        })
-        .map(|code| match &code[..2] {
-            "uk" | "be" => "ru",
-            _ => code
-        })
-        .unwrap_or("en")
-        .to_owned()
-}
-
 pub fn reply_html<T: Into<String>>(bot: Bot, msg: Message, answer: T) -> JsonRequest<SendMessage> {
     // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer);
@@ -142,19 +124,20 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: Message, answer: T) -> JsonReq
 }
 
 pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     bot.answer_callback_query(query.id)
         .show_alert(true)
         .text(t!(tr_key, locale = &lang_code))
         .await?;
-    return Ok(())
+    Ok(())
 }
 
 pub mod checks {
     use rust_i18n::t;
     use teloxide::Bot;
     use teloxide::types::Message;
-    use super::{ensure_lang_code, HandlerResult, reply_html};
+    use crate::domain::LanguageCode;
+    use super::{HandlerResult, reply_html};
 
     pub fn is_group_chat(msg: Message) -> bool {
         if msg.chat.is_private() || msg.chat.is_channel() {
@@ -168,7 +151,7 @@ pub mod checks {
     }
 
     pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
-        let lang_code = ensure_lang_code(msg.from());
+        let lang_code = LanguageCode::from_maybe_user(msg.from());
         let answer = t!("errors.not_group_chat", locale = &lang_code);
         reply_html(bot, msg, answer).await?;
         Ok(())

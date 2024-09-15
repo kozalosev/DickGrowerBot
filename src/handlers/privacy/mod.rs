@@ -1,7 +1,9 @@
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
+use crate::domain::LanguageCode;
+use crate::domain::SupportedLanguage::{EN, RU};
+use crate::handlers::{HandlerResult, reply_html};
 use crate::metrics;
 
 static EN_POLICY: &str = include_str!("en.html");
@@ -16,10 +18,10 @@ pub enum PrivacyCommands {
 
 pub async fn privacy_cmd_handler(bot: Bot, msg: Message) -> HandlerResult {
     metrics::CMD_PRIVACY_COUNTER.inc();
-    let lang_code = ensure_lang_code(msg.from());
-    let policy = match lang_code.as_str() {
-        "ru" => RU_POLICY,
-        _    => EN_POLICY,
+    let lang_code = LanguageCode::from_maybe_user(msg.from());
+    let policy = match lang_code.to_supported_language() {
+        RU => RU_POLICY,
+        EN => EN_POLICY,
     };
     reply_html(bot, msg, policy).await?;
     Ok(())

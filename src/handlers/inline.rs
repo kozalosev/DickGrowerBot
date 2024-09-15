@@ -11,7 +11,8 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils};
+use crate::domain::LanguageCode;
+use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::handlers::utils::page::Page;
@@ -100,7 +101,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     repos.users.create_or_update(query.from.id, &name).await?;
 
     let uid = query.from.id.0;
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     let btn_label = t!("inline.results.button", locale = &lang_code);
     let results: Vec<InlineQueryResult> = InlineCommand::iter()
         .map(|cmd| cmd.to_string())
@@ -164,7 +165,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig,
                               incr: Incrementor) -> HandlerResult {
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     let mut answer = bot.answer_callback_query(&query.id);
 
     if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {

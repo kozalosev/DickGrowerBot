@@ -6,7 +6,8 @@ use teloxide::macros::BotCommands;
 use teloxide::types::{Message, UserId};
 use crate::{config, metrics, repo};
 use crate::config::DickOfDaySelectionMode;
-use crate::handlers::{ensure_lang_code, FromRefs, HandlerResult, reply_html, utils};
+use crate::domain::LanguageCode;
+use crate::handlers::{FromRefs, HandlerResult, reply_html, utils};
 use crate::handlers::utils::Incrementor;
 
 const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
@@ -33,7 +34,7 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
 pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repositories, incr: Incrementor,
                                      from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
-    let lang_code = ensure_lang_code(Some(from));
+    let lang_code = LanguageCode::from_user(from);
     let winner = match cfg.features.dod_selection_mode {
         DickOfDaySelectionMode::WEIGHTS => {
             repos.users.get_random_active_member_with_poor_in_priority(&chat_id.kind()).await?
