@@ -75,31 +75,27 @@ repository!(Users,
         sqlx::query_as!(User,
             "WITH user_weights AS (
                 SELECT u.uid, u.name, u.created_at, d.length,
-                       CASE
-                           WHEN d.length = 0 THEN 1.0
-                           ELSE 1.0 / d.length
-                       END AS weight,
-                       SUM(CASE
-                           WHEN d.length = 0 THEN 1.0
-                           ELSE 1.0 / d.length 
-                       END) OVER () AS total_weight
+                       1.0 / LOG(d.length + 2) AS weight  -- Logarithmic transformation to smooth the weights
                 FROM Users u
-                JOIN Dicks d USING (uid)
-                JOIN Chats c ON d.chat_id = c.id
+                  JOIN Dicks d USING (uid)
+                  JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
-                      AND d.updated_at > current_timestamp - interval '1 week'
+                  AND d.updated_at > current_timestamp - interval '1 week'
             ),
-            weighted_users AS (
-                SELECT uid, name, created_at, weight,
-                       total_weight,
-                       (RANDOM() * total_weight) AS rand_weight
-                FROM user_weights
-            )
+                 cumulative_weights AS (
+                     SELECT uid, name, created_at, weight,
+                            SUM(weight) OVER (ORDER BY uid) AS cumulative_weight, -- Cumulative weight
+                            SUM(weight) OVER () AS total_weight
+                     FROM user_weights
+                 ),
+                 random_value AS (
+                     SELECT RANDOM() * (SELECT total_weight FROM cumulative_weights LIMIT 1) AS rand_value  -- Generate one random value
+                 )
             SELECT uid, name, created_at
-            FROM weighted_users
-            WHERE rand_weight < weight
-            ORDER BY random()
-            LIMIT 1",
+            FROM cumulative_weights, random_value
+            WHERE cumulative_weight >= random_value.rand_value
+            ORDER BY cumulative_weight
+            LIMIT 1;  -- Select the first user whose cumulative weight exceeds the random value",
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await

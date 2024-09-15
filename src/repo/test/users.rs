@@ -3,8 +3,9 @@ use teloxide::types::{ChatId, UserId};
 use testcontainers::clients;
 use crate::domain::Ratio;
 use crate::repo;
-use crate::repo::ChatIdKind;
+use crate::repo::{ChatIdKind, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID};
+use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
 
 #[tokio::test]
 async fn create_or_update() {
@@ -53,113 +54,117 @@ async fn get_chat_members() {
     check_member_with_name(&members, NAME);
 }
 
+macro_rules! base_checks {
+    ($db:ident, $method:ident) => {
+        base_checks!($db, $method,)
+    };
+    ($db:ident, $method:ident, $($args:tt),*) => {
+        let users = repo::Users::new($db.clone());
+
+        let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+        let user = users.$method(&chat_id$(,$args)*)
+            .await.expect("couldn't fetch None");
+        assert!(user.is_none());
+
+        create_member(&$db).await;
+
+        let user = users.$method(&chat_id$(,$args)*)
+            .await
+            .expect("couldn't fetch Some(User)")
+            .expect("no active member");
+        assert_eq!(user.uid, UID);
+        assert_eq!(user.name.value_ref(), NAME);
+
+        // check inactive member is not found
+        sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
+            .execute(&$db)
+            .await.expect("couldn't drop the trigger");
+        sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
+            .execute(&$db)
+            .await.expect("couldn't reset the updated_at column");
+
+        let user = users.$method(&chat_id$(,$args)*)
+            .await
+            .expect("couldn't fetch Some(User)");
+        assert!(user.is_none());
+        
+        sqlx::query!("UPDATE Dicks SET updated_at = now() WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
+            .execute(&$db)
+            .await.expect("couldn't rollback the updated_at column");
+     };
+}
+
 #[tokio::test]
 async fn get_random_active_member() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let users = repo::Users::new(db.clone());
-
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let user = users.get_random_active_member(&chat_id)
-        .await.expect("couldn't fetch None");
-    assert!(user.is_none());
-
-    create_member(&db).await;
-
-    let user = users.get_random_active_member(&chat_id)
-        .await
-        .expect("couldn't fetch Some(User)")
-        .expect("no active member");
-    assert_eq!(user.uid, UID);
-    assert_eq!(user.name.value_ref(), NAME);
-    
-    // check inactive member is not found
-    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
-        .execute(&db)
-        .await.expect("couldn't drop the trigger");
-    sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
-        .execute(&db)
-        .await.expect("couldn't reset the updated_at column");
-
-    let user = users.get_random_active_member(&chat_id)
-        .await
-        .expect("couldn't fetch Some(User)");
-    assert!(user.is_none());
+    base_checks!(db, get_random_active_member);
 }
 
 #[tokio::test]
 async fn get_random_active_poor_member() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let users = repo::Users::new(db.clone());
     let ratio = Ratio::new(0.9).unwrap();
+    base_checks!(db, get_random_active_poor_member, ratio);
 
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let user = users.get_random_active_poor_member(&chat_id, ratio)
-        .await.expect("couldn't fetch None");
-    assert!(user.is_none());
-
-    create_member(&db).await;
-
-    let user = users.get_random_active_poor_member(&chat_id, ratio)
-        .await
-        .expect("couldn't fetch Some(User)")
-        .expect("no active member");
-    assert_eq!(user.uid, UID);
-    assert_eq!(user.name.value_ref(), NAME);
-
-    // check inactive member is not found
-    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
-        .execute(&db)
-        .await.expect("couldn't drop the trigger");
-    sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
-        .execute(&db)
-        .await.expect("couldn't reset the updated_at column");
-
-    let user = users.get_random_active_poor_member(&chat_id, ratio)
-        .await
-        .expect("couldn't fetch Some(User)");
-    assert!(user.is_none());
-
-    // TODO: create multiple users and check the top one is not chosen
-    // TODO: rewrite these tests to comply with the DRY principle
+    // create middle-class and rich users and ensure they will never be selected as a winner
+    let (users, chat_id) = prepare_for_additional_tests(&db).await;
+    
+    for attempt in 1..=10 {
+        let user = users.get_random_active_poor_member(&chat_id.kind(), ratio)
+            .await
+            .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
+            .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));
+        assert_ne!(user.uid, UID+2);
+    }
 }
 
 #[tokio::test]
 async fn get_random_active_member_with_poor_in_priority() {
     let docker = clients::Cli::default();
     let (_container, db) = start_postgres(&docker).await;
-    let users = repo::Users::new(db.clone());
+    base_checks!(db, get_random_active_member_with_poor_in_priority);
 
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let user = users.get_random_active_member_with_poor_in_priority(&chat_id)
-        .await.expect("couldn't fetch None");
-    assert!(user.is_none());
-
-    create_member(&db).await;
-
-    let user = users.get_random_active_member_with_poor_in_priority(&chat_id)
-        .await
-        .expect("couldn't fetch Some(User)")
-        .expect("no active member");
-    assert_eq!(user.uid, UID);
-    assert_eq!(user.name.value_ref(), NAME);
-
-    // check inactive member is not found
-    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
-        .execute(&db)
-        .await.expect("couldn't drop the trigger");
-    sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
-        .execute(&db)
-        .await.expect("couldn't reset the updated_at column");
-
-    let user = users.get_random_active_member_with_poor_in_priority(&chat_id)
-        .await
-        .expect("couldn't fetch Some(User)");
-    assert!(user.is_none());
+    // create middle-class and rich users and ensure the chance they win is the lower, the longer their dicks are
+    let (users, chat_id) = prepare_for_additional_tests(&db).await;
     
-    // TODO: think how to check the probability in the test
-    // TODO: rewrite these tests to comply with the DRY principle
+    let mut results = Vec::with_capacity(20);
+    for attempt in 1..=100 {
+        let user = users.get_random_active_member_with_poor_in_priority(&chat_id.kind())
+            .await
+            .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
+            .unwrap_or_else(| | {
+                panic!("nobody has been found on attempt {attempt}")
+            });
+        results.push(user.uid);
+    }
+    let user_1_wins = count(&results, UID);
+    let user_2_wins = count(&results, UID+1);
+    let user_3_wins = count(&results, UID+2);
+    
+    println!("=== DoD wins using smart mode ===");
+    println!("User #1: {user_1_wins}");
+    println!("User #2: {user_2_wins}");
+    println!("User #3: {user_3_wins}");
+    
+    assert!(user_1_wins > user_2_wins);
+    assert!(user_2_wins > user_3_wins);
+    assert!(user_3_wins > 0);
+}
+
+async fn prepare_for_additional_tests(db: &Pool<Postgres>) -> (repo::Users, ChatIdPartiality) {
+    let users = repo::Users::new(db.clone());
+    let chat_id = ChatId(CHAT_ID).into();
+    create_user_and_dick_2(db, &chat_id, "User-2").await;
+    create_another_user_and_dick(db, &chat_id, 3, "User-3", 10).await;
+    (users, chat_id)
+}
+
+fn count(v: &[i64], uid: i64) -> usize {
+    v.iter()
+        .filter(|u| **u == uid)
+        .count()
 }
 
 fn check_user_with_name(user: &repo::User, name: &str) {
