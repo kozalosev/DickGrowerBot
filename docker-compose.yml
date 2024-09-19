@@ -31,6 +31,9 @@ services:
       - LOAN_PAYOUT_COEF
       - DOD_SELECTION_MODE
       - DOD_RICH_EXCLUSION_RATIO
+      - ANNOUNCEMENT_MAX_SHOWS
+      - ANNOUNCEMENT_EN
+      - ANNOUNCEMENT_RU
     expose:
       - 8080
     networks:

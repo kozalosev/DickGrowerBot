@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
+use std::ops::Not;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use anyhow::anyhow;
 use reqwest::Url;
+use sha2::{Digest, Sha256};
+use sha2::digest::core_api::CoreWrapper;
 use teloxide::types::Me;
-use crate::domain::Ratio;
+use crate::domain::{LanguageCode, Ratio, SupportedLanguage};
+use crate::domain::SupportedLanguage::{EN, RU};
 use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
@@ -20,6 +24,7 @@ pub struct AppConfig {
     pub top_limit: u16,
     pub loan_payout_ratio: f32,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
+    pub announcements: AnnouncementsConfig,
     pub command_toggles: CachedEnvToggles,
 }
 
@@ -77,6 +82,9 @@ impl AppConfig {
         let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
         let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
+        let announcement_max_shows = get_optional_env_value("ANNOUNCEMENT_MAX_SHOWS");
+        let announcement_en = get_optional_env_value("ANNOUNCEMENT_EN");
+        let announcement_ru = get_optional_env_value("ANNOUNCEMENT_RU");
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -92,6 +100,16 @@ impl AppConfig {
             top_limit,
             loan_payout_ratio,
             dod_rich_exclusion_ratio,
+            announcements: AnnouncementsConfig {
+                max_shows: announcement_max_shows,
+                announcements: [
+                    (EN, announcement_en),
+                    (RU, announcement_ru),
+                ].map(|(lc, text)| (lc, Announcement::new(text)))
+                 .into_iter()
+                 .filter_map(|(lc, mb_ann)| mb_ann.map(|ann| (lc, ann)))
+                 .collect()
+            },
             command_toggles: Default::default(),
         }
     }
@@ -127,6 +145,33 @@ impl CachedEnvToggles {
 
     fn enabled_in_env(key: &str) -> bool {
         std::env::var_os(format!("DISABLE_CMD_{}", key.to_uppercase())).is_none()
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct AnnouncementsConfig {
+    pub max_shows: usize,
+    pub announcements: HashMap<SupportedLanguage, Announcement>,
+}
+
+impl AnnouncementsConfig {
+    pub fn get(&self, lang_code: &LanguageCode) -> Option<&Announcement> {
+        self.announcements.get(&lang_code.to_supported_language())
+    }
+}
+
+#[derive(Clone)]
+pub struct Announcement {
+    pub text: Arc<String>,
+    pub hash: Arc<Vec<u8>>,
+}
+
+impl Announcement {
+    fn new(text: String) -> Option<Self> {
+        text.is_empty().not().then(|| Self  {
+            hash: Arc::new(hash(&text)),
+            text: Arc::new(text),
+        })
     }
 }
 
@@ -202,6 +247,12 @@ fn ensure_starts_with_at_sign(s: String) -> String {
     } else {
         format!("@{s}")
     }
+}
+
+fn hash(s: &str) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    CoreWrapper::update(&mut hasher, s.as_bytes());
+    (*hasher.finalize()).to_vec()
 }
 
 #[cfg(test)]

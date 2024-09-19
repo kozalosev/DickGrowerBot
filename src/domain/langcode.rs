@@ -9,6 +9,8 @@ static DEFAULT: Lazy<LanguageCode> = Lazy::new(|| LanguageCode("en".to_string())
 #[derive(Clone, Constructor, From)]
 pub struct LanguageCode(String);
 
+#[derive(Hash, Copy, Clone, Eq, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "language_code", rename_all = "lowercase")]
 pub enum SupportedLanguage {
     EN,
     RU,
@@ -28,9 +30,9 @@ impl LanguageCode {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
-    
+
     pub fn to_supported_language(&self) -> SupportedLanguage {
-        match self.0.as_str() {
+        match self.as_str() {
             "ru" => SupportedLanguage::RU,
             _    => SupportedLanguage::EN
         }

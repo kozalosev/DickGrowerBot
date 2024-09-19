@@ -142,12 +142,12 @@ async fn get_random_active_member_with_poor_in_priority() {
     let user_1_wins = count(&results, UID);
     let user_2_wins = count(&results, UID+1);
     let user_3_wins = count(&results, UID+2);
-    
+
     println!("=== DoD wins using smart mode ===");
     println!("User #1: {user_1_wins}");
     println!("User #2: {user_2_wins}");
     println!("User #3: {user_3_wins}");
-    
+
     assert!(user_1_wins > user_2_wins);
     assert!(user_2_wins > user_3_wins);
     assert!(user_3_wins > 0);
