@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Promo_Codes SET capacity = (capacity - 1)\n                WHERE lower(code) = lower($1) AND capacity > 0 AND\n                    (current_date BETWEEN since AND until\n                    OR\n                    current_date >= since AND until IS NULL)\n                RETURNING bonus_length, code as found_code",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bonus_length",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "found_code",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b989376ed48326334c86b18411f0a613d735d73102c14a09cd6298783c347937"
+}

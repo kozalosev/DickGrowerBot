@@ -6,6 +6,7 @@ use crate::repo::test::{start_postgres, UID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user};
 
 const PROMO_CODE: &str = "test10";
+const PROMO_CODE_UPPERCASE: &str = "TEST10";
 const PROMO_BONUS: u32 = 10;
 
 #[tokio::test]
@@ -22,7 +23,7 @@ async fn activate() {
 
     create_user(&db).await;
     create_dick(&db).await;
-    let res = promo.activate(UserId(UID as u64), PROMO_CODE)
+    let res = promo.activate(UserId(UID as u64), PROMO_CODE_UPPERCASE)
         .await.expect("couldn't activate the promo code");
     assert_eq!(res.chats_affected, 1);
     assert_eq!(res.bonus_length, PROMO_BONUS as i32);

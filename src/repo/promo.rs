@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use anyhow::anyhow;
-use sqlx::Postgres;
+use sqlx::{FromRow, Postgres};
 use teloxide::types::UserId;
 use crate::repository;
 
@@ -33,6 +33,12 @@ pub struct PromoCodeParams {
     pub capacity: u32,
 }
 
+#[derive(FromRow)]
+struct PromoCodeInfo {
+    found_code: String,
+    bonus_length: i32,
+}
+
 repository!(Promo,
     #[cfg(test)]
     pub async fn create(&self, p: PromoCodeParams) -> anyhow::Result<()> {
@@ -46,14 +52,14 @@ repository!(Promo,
     pub async fn activate(&self, user_id: UserId, code: &str) -> Result<ActivationResult, ActivationError> {
         let mut tx = self.pool.begin().await?;
 
-        let bonus_length = Self::find_code_length_and_decr_capacity(&mut tx, code)
+        let PromoCodeInfo { found_code, bonus_length } = Self::find_code_length_and_decr_capacity(&mut tx, code)
             .await?
             .ok_or(ActivationError::NoActivationsLeft)?;
         let chats_affected = Self::grow_dick(&mut tx, user_id, bonus_length).await?;
         if chats_affected < 1 {
             return Err(ActivationError::NoDicks)
         }
-        Self::add_activation(&mut tx, user_id, code, chats_affected)
+        Self::add_activation(&mut tx, user_id, &found_code, chats_affected)
             .await
             .map_err(|err| {
                 match err.downcast() {
@@ -72,14 +78,14 @@ repository!(Promo,
         Ok(ActivationResult{ chats_affected, bonus_length })
     }
 ,
-    async fn find_code_length_and_decr_capacity(tx: &mut sqlx::Transaction<'_, Postgres>, code: &str) -> anyhow::Result<Option<i32>> {
-         sqlx::query_scalar!(
+    async fn find_code_length_and_decr_capacity(tx: &mut sqlx::Transaction<'_, Postgres>, code: &str) -> anyhow::Result<Option<PromoCodeInfo>> {
+         sqlx::query_as!(PromoCodeInfo,
             "UPDATE Promo_Codes SET capacity = (capacity - 1)
-                WHERE code = $1 AND capacity > 0 AND
+                WHERE lower(code) = lower($1) AND capacity > 0 AND
                     (current_date BETWEEN since AND until
                     OR
                     current_date >= since AND until IS NULL)
-                RETURNING bonus_length",
+                RETURNING bonus_length, code as found_code",
                 code)
             .fetch_optional(&mut **tx)
             .await
