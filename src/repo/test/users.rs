@@ -87,7 +87,7 @@ macro_rules! base_checks {
             .await
             .expect("couldn't fetch Some(User)");
         assert!(user.is_none());
-        
+
         sqlx::query!("UPDATE Dicks SET updated_at = now() WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
             .execute(&$db)
             .await.expect("couldn't rollback the updated_at column");

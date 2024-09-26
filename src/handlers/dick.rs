@@ -172,7 +172,7 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
 }
 
 pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
-                              config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
+                                   config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
         return answer_callback_feature_disabled(bot, q, edit_msg_req_params).await
