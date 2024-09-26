@@ -3,6 +3,7 @@ use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
+use teloxide::payloads::SendMessageSetters;
 use teloxide::types::{Message, UserId};
 use crate::{config, metrics, repo};
 use crate::config::DickOfDaySelectionMode;
@@ -27,7 +28,9 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     let answer = dick_of_day_impl(cfg, &repos, incr, from_refs).await?;
-    reply_html(bot, msg, answer).await?;
+    reply_html(bot, msg, answer)
+        .disable_web_page_preview(true)
+        .await?;
     Ok(())
 }
 
@@ -77,12 +80,12 @@ pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repos
                 }
             };
             let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-            let announcement_part = repos.announcements.get_new(&chat_id.kind(), &lang_code).await?
-                .map(|announcement| format!("\n\n<i>{announcement}</i>"))
-                .unwrap_or_default();
-            format!("{main_part}{time_left_part}{announcement_part}")
+            format!("{main_part}{time_left_part}")
         },
         None => t!("commands.dod.no_candidates", locale = &lang_code)
     };
-    Ok(answer)
+    let announcement = repos.announcements.get_new(&chat_id.kind(), &lang_code).await?
+        .map(|announcement| format!("\n\n<i>{announcement}</i>"))
+        .unwrap_or_default();
+    Ok(format!("{answer}{announcement}"))
 }

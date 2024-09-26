@@ -98,7 +98,7 @@ impl Announcements {
     }
 
     async fn update(&self, chat_id: ChatIdInternal, lang_code: &LanguageCode, hash: &[u8]) -> anyhow::Result<()> {
-        sqlx::query!("UPDATE Announcements SET hash = $3, times_shown = 0 WHERE chat_id = $1 AND language = $2",
+        sqlx::query!("UPDATE Announcements SET hash = $3, times_shown = 1 WHERE chat_id = $1 AND language = $2",
                 chat_id.0, lang_code.to_supported_language() as SupportedLanguage, hash)
             .execute(&self.pool)
             .await

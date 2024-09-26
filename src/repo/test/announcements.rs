@@ -14,11 +14,18 @@ async fn test_configured() {
     let (_container, db) = start_postgres(&docker).await;
     create_chat(&db).await;
 
+    // test creation and update
+    for i in 1..=2 {
+        test_configured_impl(&db, i).await;
+    }
+}
+
+async fn test_configured_impl(db: &Pool<Postgres>, attempt: u8) {
     // Ensure our announcement will be shown once only:
 
     let announcements_config = config::AnnouncementsConfig {
         max_shows: 1,
-        announcements: get_announcements_as_map()
+        announcements: get_announcements_as_map(attempt)
     };
     let ann_repo = repo::Announcements::new(db.clone(), announcements_config);
     let [en, ru] = get_languages();
@@ -26,7 +33,7 @@ async fn test_configured() {
     let announcement = ann_repo.get_new(&CHAT_ID_KIND, &en)
         .await.expect("couldn't get an announcement");
     assert!(announcement.is_some());
-    assert_eq!(announcement.unwrap(), "test");
+    assert_eq!(announcement.unwrap(), format!("test {attempt}"));
 
     let announcement = ann_repo.get_new(&CHAT_ID_KIND, &en)
         .await.expect("couldn't get the announcement the second time");
@@ -37,7 +44,7 @@ async fn test_configured() {
     let announcement = ann_repo.get_new(&CHAT_ID_KIND, &ru)
         .await.expect("couldn't get an announcement in Russian");
     assert!(announcement.is_some());
-    assert_eq!(announcement.unwrap(), "тест");
+    assert_eq!(announcement.unwrap(), format!("тест {attempt}"));
 
     let announcement = ann_repo.get_new(&CHAT_ID_KIND, &ru)
         .await.expect("couldn't get the announcement in Russian the second time");
@@ -67,7 +74,7 @@ async fn test_no_announcements() {
 
     let announcements_config = config::AnnouncementsConfig {
         max_shows: 0,
-        announcements: get_announcements_as_map()
+        announcements: get_announcements_as_map(1)
     };
     let ann_repo = repo::Announcements::new(db.clone(), announcements_config);
 
@@ -87,10 +94,10 @@ fn get_languages() -> [LanguageCode; 2] {
         .map(LanguageCode::new)
 }
 
-fn get_announcements_as_map() -> HashMap<SupportedLanguage, Announcement> {
-    [(EN, "test"), (RU, "тест")]
+fn get_announcements_as_map(n: u8) -> HashMap<SupportedLanguage, Announcement> {
+    [(EN, format!("test {n}")), (RU, format!("тест {n}"))]
         .map(|(lang, ann)| (lang, Announcement {
-            text: Arc::new(ann.to_owned()),
+            text: Arc::new(ann.clone()),
             hash: Arc::new(ann.as_bytes().to_vec())
         }))
         .into_iter().collect()
