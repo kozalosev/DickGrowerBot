@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub top_limit: u16,
     pub loan_payout_ratio: f32,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
+    pub pvp_default_bet: u16,
     pub announcements: AnnouncementsConfig,
     pub command_toggles: CachedEnvToggles,
 }
@@ -30,6 +31,7 @@ impl AppConfig {
         let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
+        let pvp_default_bet = get_env_value_or_default("PVP_DEFAULT_BET", 1);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
         let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
@@ -52,6 +54,7 @@ impl AppConfig {
             top_limit,
             loan_payout_ratio,
             dod_rich_exclusion_ratio,
+            pvp_default_bet,
             announcements: AnnouncementsConfig {
                 max_shows: announcement_max_shows,
                 announcements: [

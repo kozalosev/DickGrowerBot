@@ -7,7 +7,7 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
+use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
 use crate::handlers::{CallbackResult, HandlerResult, reply_html, send_error_callback_answer, utils};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
@@ -132,17 +132,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let bet: u16 = query.query.parse()?;
     let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
-
-    let title = t!("inline.results.titles.pvp", locale = &lang_code, bet = bet);
-    let text = t!("commands.pvp.results.start", locale = &lang_code, name = name, bet = bet);
-    let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
-    let btn_label = t!("commands.pvp.button", locale = &lang_code);
-    let btn_data = BattleCallbackData::new(query.from.id, bet).to_data_string();
-    let res = InlineQueryResultArticle::new("pvp", title, content)
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-            InlineKeyboardButton::callback(btn_label, btn_data)
-        ]]))
-        .into();
+    let res = build_inline_keyboard_article_result(query.from.id, &lang_code, name, bet);
 
     let mut answer = bot.answer_inline_query(query.id, vec![res])
         .is_personal(true);
@@ -151,6 +141,19 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     }
     answer.await?;
     Ok(())
+}
+
+pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: String, bet: u16) -> InlineQueryResult {
+    let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
+    let text = t!("commands.pvp.results.start", locale = lang_code, name = name, bet = bet);
+    let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
+    let btn_label = t!("commands.pvp.button", locale = lang_code);
+    let btn_data = BattleCallbackData::new(uid, bet).to_data_string();
+    InlineQueryResultArticle::new("pvp", title, content)
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(btn_label, btn_data)
+        ]]))
+        .into()
 }
 
 pub async fn inline_chosen_handler() -> HandlerResult {

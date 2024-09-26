@@ -12,7 +12,7 @@ use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::domain::LanguageCode;
-use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils};
+use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::handlers::utils::page::Page;
@@ -103,7 +103,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     let uid = query.from.id.0;
     let lang_code = LanguageCode::from_user(&query.from);
     let btn_label = t!("inline.results.button", locale = &lang_code);
-    let results: Vec<InlineQueryResult> = InlineCommand::iter()
+    let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {
@@ -120,6 +120,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
             InlineQueryResult::Article(article)
         })
         .collect();
+    results.push(pvp::build_inline_keyboard_article_result(query.from.id, &lang_code, name, app_config.pvp_default_bet));
 
     let mut answer = bot.answer_inline_query(query.id, results)
         .is_personal(true);
