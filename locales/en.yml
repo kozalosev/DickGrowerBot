@@ -58,7 +58,7 @@ commands:
         agree: "I'm in!"
         disagree: "Disagree"
     callback:
-      success: "Perk «Where is my centimeters, Lebowski?» has been assigned successfully!"
+      success: "The microloan has been issued successfully!"
       refused: "The patient refused gender reassignment on credit."
       payout_ratio_changed: "The payout rate has been changed since you sent the loan application. Please, invoke the command again."
     errors:

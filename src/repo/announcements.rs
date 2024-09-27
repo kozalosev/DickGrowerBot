@@ -44,7 +44,7 @@ impl Announcements {
     }
 
     async fn check_conditions(&self, chat_id_kind: &ChatIdKind, announcement: &config::Announcement, lang_code: &LanguageCode) -> anyhow::Result<bool> {
-        let res = match self.get(&chat_id_kind, lang_code).await? {
+        let res = match self.get(chat_id_kind, lang_code).await? {
             _ if self.announcements.max_shows == 0 => false,
             Some(entity) if entity.hash[..] != announcement.hash[..] => {
                 self.update(entity.chat_id, lang_code, &announcement.hash).await?;
@@ -57,7 +57,7 @@ impl Announcements {
                 true
             }
             None => {
-                self.create(&chat_id_kind, lang_code, &announcement.hash).await?;
+                self.create(chat_id_kind, lang_code, &announcement.hash).await?;
                 true
             }
         };

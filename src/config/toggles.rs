@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 const CACHED_ENV_TOGGLES_POISONED_MSG: &str = "CachedEnvToggles map was poisoned";
 
 #[derive(Copy, Clone, Default, derive_more::FromStr, derive_more::Display)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum DickOfDaySelectionMode {
     WEIGHTS,
     EXCLUSION,
