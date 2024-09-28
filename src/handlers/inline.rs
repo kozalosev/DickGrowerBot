@@ -5,7 +5,7 @@ use futures::TryFutureExt;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
-use teloxide::Bot;
+use teloxide::{ApiError, Bot, RequestError};
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
@@ -153,10 +153,12 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
-            let mut request = bot.edit_message_text_inline(inline_message_id, inline_result.text);
+            let mut request = bot.edit_message_text_inline(inline_message_id, &inline_result.text);
             request.reply_markup = inline_result.keyboard;
             request.parse_mode.replace(Html);
-            request.await?;
+            request.disable_web_page_preview.replace(true);
+            request.await
+                .inspect_err(|e| log_text_if_unknown_api_error(&inline_result.text, e))?;
         }
     }
 
@@ -189,10 +191,12 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
-            let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
+            let mut edit = bot.edit_message_text_inline(inline_msg_id, &inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
-            edit.await?;
+            edit.disable_web_page_preview.replace(true);
+            edit.await
+                .inspect_err(|e| log_text_if_unknown_api_error(&inline_result.text, e))?;
         } else {
             let key = match parse_res {
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",
@@ -242,4 +246,11 @@ pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<ChatId> {
         .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
         .ok()
         .map(|info| ChatId(info.chat_id))
+}
+
+// TODO: move to mod.rs and use in message handlers too
+fn log_text_if_unknown_api_error(text: &str, err: &RequestError) {
+    if let RequestError::Api(ApiError::Unknown(_)) = err {
+        log::error!("Couldn't send an answer: {text}")
+    }
 }

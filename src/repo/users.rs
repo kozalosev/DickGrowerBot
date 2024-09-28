@@ -75,7 +75,7 @@ repository!(Users,
         sqlx::query_as!(User,
             "WITH user_weights AS (
                 SELECT u.uid, u.name, u.created_at, d.length,
-                       1.0 / LOG(d.length + 2) AS weight  -- Logarithmic transformation to smooth the weights
+                       1.0 / (1.0 + EXP(d.length / 6.0)) AS weight  -- Sigmoid-like transformation
                 FROM Users u
                   JOIN Dicks d USING (uid)
                   JOIN Chats c ON d.chat_id = c.id

@@ -128,26 +128,29 @@ async fn get_random_active_member_with_poor_in_priority() {
 
     // create middle-class and rich users and ensure the chance they win is the lower, the longer their dicks are
     let (users, chat_id) = prepare_for_additional_tests(&db).await;
+    // test the users with negative length as well
+    create_another_user_and_dick(&db, &chat_id, 4, "User-0", -10).await;
     
     let mut results = Vec::with_capacity(20);
     for attempt in 1..=100 {
         let user = users.get_random_active_member_with_poor_in_priority(&chat_id.kind())
             .await
             .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
-            .unwrap_or_else(| | {
-                panic!("nobody has been found on attempt {attempt}")
-            });
+            .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));
         results.push(user.uid);
     }
+    let user_0_wins = count(&results, UID+3);
     let user_1_wins = count(&results, UID);
     let user_2_wins = count(&results, UID+1);
     let user_3_wins = count(&results, UID+2);
 
     println!("=== DoD wins using smart mode ===");
+    println!("User #0: {user_0_wins}");
     println!("User #1: {user_1_wins}");
     println!("User #2: {user_2_wins}");
     println!("User #3: {user_3_wins}");
 
+    assert!(user_0_wins > user_1_wins);
     assert!(user_1_wins > user_2_wins);
     assert!(user_2_wins > user_3_wins);
     assert!(user_3_wins > 0);
