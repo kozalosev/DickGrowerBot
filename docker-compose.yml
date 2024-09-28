@@ -17,6 +17,7 @@ services:
       - HELP_GIT_REPO
       - CHATS_MERGING_ENABLED
       - TOP_UNLIMITED_ENABLED
+      - PVP_DEFAULT_BET
       - PVP_CHECK_ACCEPTOR_LENGTH
       - PVP_CALLBACK_LOCKS_ENABLED
       - PVP_STATS_SHOW
@@ -29,6 +30,11 @@ services:
       - TOP_LIMIT
       - HELP_PUSSIES_COEF
       - LOAN_PAYOUT_COEF
+      - DOD_SELECTION_MODE
+      - DOD_RICH_EXCLUSION_RATIO
+      - ANNOUNCEMENT_MAX_SHOWS
+      - ANNOUNCEMENT_EN
+      - ANNOUNCEMENT_RU
     expose:
       - 8080
     networks:

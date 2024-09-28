@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.uid, name, u.created_at FROM Users u\n                JOIN Dicks d ON u.uid = d.uid\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                    AND updated_at > current_timestamp - interval '1 week'\n                ORDER BY random() LIMIT 1",
+  "query": "SELECT u.uid, name, u.created_at FROM Users u\n                JOIN Dicks d USING (uid)\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                    AND updated_at > current_timestamp - interval '1 week'\n                ORDER BY random() LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -30,5 +30,5 @@
       false
     ]
   },
-  "hash": "6b411f90d3986ddaa5dcd5d118e7f1d5ab5e712c04a59749b2083884b8490e4d"
+  "hash": "4079c268a863593fca4c7bde9b456b9cf6b89ed0b113fe039d49476f3264f9c6"
 }

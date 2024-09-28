@@ -11,7 +11,8 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::handlers::{build_pagination_keyboard, dick, dod, ensure_lang_code, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils};
+use crate::domain::LanguageCode;
+use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::handlers::utils::page::Page;
@@ -73,7 +74,7 @@ impl InlineCommand {
             },
             InlineCommand::DickOfDay => {
                 metrics::CMD_DOD_COUNTER.inline.inc();
-                dod::dick_of_day_impl(repos, incr, from_refs)
+                dod::dick_of_day_impl(config, repos, incr, from_refs)
                     .await
                     .map(InlineResult::text)
             },
@@ -100,9 +101,9 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     repos.users.create_or_update(query.from.id, &name).await?;
 
     let uid = query.from.id.0;
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     let btn_label = t!("inline.results.button", locale = &lang_code);
-    let results: Vec<InlineQueryResult> = InlineCommand::iter()
+    let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {
@@ -119,6 +120,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
             InlineQueryResult::Article(article)
         })
         .collect();
+    results.push(pvp::build_inline_keyboard_article_result(query.from.id, &lang_code, name, app_config.pvp_default_bet));
 
     let mut answer = bot.answer_inline_query(query.id, results)
         .is_personal(true);
@@ -164,7 +166,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig,
                               incr: Incrementor) -> HandlerResult {
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     let mut answer = bot.answer_callback_query(&query.id);
 
     if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {

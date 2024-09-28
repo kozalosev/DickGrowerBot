@@ -6,8 +6,7 @@ use teloxide::payloads::AnswerCallbackQuery;
 use teloxide::prelude::ChatId;
 use teloxide::requests::{JsonRequest, Requester};
 use teloxide::types::{CallbackQuery, MessageId, UserId};
-
-use crate::handlers::ensure_lang_code;
+use crate::domain::LanguageCode;
 use crate::repo::ChatIdKind;
 
 #[derive(Debug, Display, Error)]
@@ -127,12 +126,12 @@ pub fn get_params_for_message_edit(q: &CallbackQuery) -> Result<EditMessageReqPa
 }
 
 pub enum CallbackAnswerParams {
-    Answer { answer: JsonRequest<AnswerCallbackQuery>, lang_code: String },
+    Answer { answer: JsonRequest<AnswerCallbackQuery>, lang_code: LanguageCode },
     AnotherUser,
 }
 
 pub async fn prepare_callback_answer_params(bot: &Bot, query: &CallbackQuery, user_id: UserId) -> Result<CallbackAnswerParams, teloxide::RequestError> {
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     let mut answer = bot.answer_callback_query(&query.id);
     let res = if query.from.id != user_id {
         answer.show_alert.replace(true);

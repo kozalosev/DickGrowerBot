@@ -6,6 +6,7 @@ mod promo;
 mod loans;
 mod pvpstats;
 mod stats;
+mod announcements;
 
 use std::str::FromStr;
 use reqwest::Url;

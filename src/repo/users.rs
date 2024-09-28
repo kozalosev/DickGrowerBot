@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use teloxide::types::UserId;
 
-use crate::domain::Username;
+use crate::domain::{Ratio, Username};
 use crate::repo::ChatIdKind;
 use crate::repository;
 
@@ -28,7 +28,7 @@ repository!(Users,
     pub async fn get_chat_members(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User,
             "SELECT u.uid, name, created_at FROM Users u
-                JOIN Dicks d ON u.uid = d.uid
+                JOIN Dicks d USING (uid)
                 JOIN Chats c ON d.chat_id = c.id
                 WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text",
                 chat_id.value() as String)
@@ -40,11 +40,62 @@ repository!(Users,
     pub async fn get_random_active_member(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             "SELECT u.uid, name, u.created_at FROM Users u
-                JOIN Dicks d ON u.uid = d.uid
+                JOIN Dicks d USING (uid)
                 JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                     AND updated_at > current_timestamp - interval '1 week'
                 ORDER BY random() LIMIT 1",
+                chat_id.value() as String)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| e.into())
+    }
+,
+    pub async fn get_random_active_poor_member(&self, chat_id: &ChatIdKind, rich_exclusion_ratio: Ratio) -> anyhow::Result<Option<User>> {
+        sqlx::query_as!(User,
+            "WITH ranked_users AS (
+                SELECT u.uid, name, u.created_at, PERCENT_RANK() OVER (ORDER BY length) AS percentile_rank
+                    FROM Users u
+                    JOIN Dicks d USING (uid)
+                    JOIN Chats c ON d.chat_id = c.id
+                    WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
+                        AND updated_at > current_timestamp - interval '1 week'
+            )
+            SELECT uid, name, created_at
+            FROM ranked_users
+            WHERE percentile_rank <= $2
+            ORDER BY random() LIMIT 1",
+                chat_id.value() as String, 1.0 - rich_exclusion_ratio.to_value())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| e.into())
+    }
+,
+    pub async fn get_random_active_member_with_poor_in_priority(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
+        sqlx::query_as!(User,
+            "WITH user_weights AS (
+                SELECT u.uid, u.name, u.created_at, d.length,
+                       1.0 / LOG(d.length + 2) AS weight  -- Logarithmic transformation to smooth the weights
+                FROM Users u
+                  JOIN Dicks d USING (uid)
+                  JOIN Chats c ON d.chat_id = c.id
+                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
+                  AND d.updated_at > current_timestamp - interval '1 week'
+            ),
+                 cumulative_weights AS (
+                     SELECT uid, name, created_at, weight,
+                            SUM(weight) OVER (ORDER BY uid) AS cumulative_weight, -- Cumulative weight
+                            SUM(weight) OVER () AS total_weight
+                     FROM user_weights
+                 ),
+                 random_value AS (
+                     SELECT RANDOM() * (SELECT total_weight FROM cumulative_weights LIMIT 1) AS rand_value  -- Generate one random value
+                 )
+            SELECT uid, name, created_at
+            FROM cumulative_weights, random_value
+            WHERE cumulative_weight >= random_value.rand_value
+            ORDER BY cumulative_weight
+            LIMIT 1;  -- Select the first user whose cumulative weight exceeds the random value",
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await

@@ -5,10 +5,11 @@ mod import;
 mod promo;
 mod loans;
 mod pvpstats;
+mod stats;
+mod announcements;
 
 #[cfg(test)]
 pub(crate) mod test;
-mod stats;
 
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
@@ -22,6 +23,7 @@ pub use promo::*;
 pub use loans::*;
 pub use pvpstats::*;
 pub use stats::*;
+pub use announcements::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 
@@ -33,6 +35,7 @@ pub struct Repositories {
     pub import: Import,
     pub promo: Promo,
     pub loans: Loans,
+    pub announcements: Announcements,
     pub pvp_stats: BattleStatsRepo,
     pub personal_stats: PersonalStatsRepo,
 }
@@ -46,6 +49,7 @@ impl Repositories {
             import: Import::new(db_conn.clone()),
             promo: Promo::new(db_conn.clone()),
             loans: Loans::new(db_conn.clone(), config),
+            announcements: Announcements::new(db_conn.clone(), config.announcements.clone()),
             pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features),
             personal_stats: PersonalStatsRepo::new(db_conn.clone()),
         }
@@ -154,6 +158,10 @@ impl From<&ChatIdKind> for ChatIdType {
     }
 }
 
+#[derive(Debug, Copy, Clone, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct ChatIdInternal(i64);
+
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, derive_more::From)]
 pub struct UID(i64);
@@ -233,9 +241,9 @@ macro_rules! repository {
     };
 }
 
-fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<PgQueryResult, anyhow::Error> {
+fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<(), anyhow::Error> {
     match res.rows_affected() {
         1 => Ok(res),
         x => Err(anyhow!("not only one row was updated but {x}"))
-    }
+    }.map(|_| ())
 }

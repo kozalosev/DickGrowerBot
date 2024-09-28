@@ -1,3 +1,4 @@
+use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use teloxide::types::{ChatId, UserId};
 use testcontainers::clients;
@@ -150,13 +151,21 @@ pub async fn create_user(db: &Pool<Postgres>) {
 }
 
 pub async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartiality, name: &str) {
-        let users = repo::Users::new(db.clone());
-        let dicks = repo::Dicks::new(db.clone(), Default::default());
-        let uid2 = UserId((UID + 1) as u64);
-        users.create_or_update(uid2, name)
-            .await.expect("couldn't create a user #2");
-        dicks.create_or_grow(uid2, chat_id, 1)
-            .await.expect("couldn't create a dick #2");
+    create_another_user_and_dick(db, chat_id, 2, name, 1).await;
+}
+
+pub async fn create_another_user_and_dick(db: &Pool<Postgres>, chat_id: &ChatIdPartiality,
+                                          n: u8, name: &str, increment: i32) {
+    assert!(n > 1);
+    let n = n.to_i64().expect("couldn't convert n to i64");
+    
+    let users = repo::Users::new(db.clone());
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let uid2 = UserId((UID + n - 1) as u64);
+    users.create_or_update(uid2, name)
+        .await.unwrap_or_else(|_| panic!("couldn't create a user #{n}"));
+    dicks.create_or_grow(uid2, chat_id, increment)
+        .await.unwrap_or_else(|_| panic!("couldn't create a dick #{n}"));
 }
 
 pub async fn create_dick(db: &Pool<Postgres>) {

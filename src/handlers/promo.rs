@@ -6,8 +6,9 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{Dialogue, InlineQuery, Requester};
 use teloxide::types::{Message, User};
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
+use crate::handlers::{HandlerResult, reply_html};
 use crate::{metrics, repo};
+use crate::domain::LanguageCode;
 use crate::repo::ActivationError;
 
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
@@ -41,7 +42,7 @@ pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialo
         PromoCommands::Promo(code) if code.is_empty() => {
             dialogue.update(PromoCommandState::Requested).await?;
 
-            let lang_code = ensure_lang_code(msg.from());
+            let lang_code = LanguageCode::from_maybe_user(msg.from());
             t!("commands.promo.request", locale = &lang_code)
         }
         PromoCommands::Promo(code) => {
@@ -64,7 +65,7 @@ pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCode
             promo_activation_impl(repos.promo, user, code).await?
         },
         None => {
-            let lang_code = ensure_lang_code(msg.from());
+            let lang_code = LanguageCode::from_maybe_user(msg.from());
             t!("commands.promo.request", locale = &lang_code)
         }
     };
@@ -79,7 +80,7 @@ pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
 pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
-    let lang_code = ensure_lang_code(Some(&query.from));
+    let lang_code = LanguageCode::from_user(&query.from);
     let promo_code = query.query;
     let encoded_query = base64::encode_engine(promo_code.as_bytes(), &base64::engine::general_purpose::URL_SAFE_NO_PAD);
     let deeplink_start_param = format!("{}{}", PROMO_START_PARAM_PREFIX, encoded_query);
@@ -97,7 +98,7 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult
 }
 
 pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, promo_code: &str) -> anyhow::Result<String> {
-    let lang_code = ensure_lang_code(Some(user));
+    let lang_code = LanguageCode::from_user(user);
     let answer = match promo_repo.activate(user.id, promo_code).await {
         Ok(res) => {
             metrics::CMD_PROMO.finished.inc();

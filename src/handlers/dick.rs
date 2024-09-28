@@ -13,7 +13,8 @@ use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
 use page::{InvalidPage, Page};
 
 use crate::{config, metrics, repo};
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html, utils};
+use crate::domain::LanguageCode;
+use crate::handlers::{HandlerResult, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, page};
 use crate::repo::ChatIdPartiality;
 
@@ -65,7 +66,7 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
     let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
     let increment = incr.growth_increment(from.id, chat_id.kind(), days_since_registration).await;
     let grow_result = repos.dicks.create_or_grow(from.id, chat_id, increment.total).await;
-    let lang_code = ensure_lang_code(Some(from));
+    let lang_code = LanguageCode::from_user(from);
 
     let main_part = match grow_result {
         Ok(repo::GrowthResult { new_length, pos_in_top }) => {
@@ -121,7 +122,7 @@ impl Top {
 pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppConfig, from_refs: FromRefs<'_>,
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
-    let lang_code = ensure_lang_code(Some(from));
+    let lang_code = LanguageCode::from_user(from);
     let top_limit = config.top_limit as u32;
     let offset = page * top_limit;
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
@@ -171,7 +172,7 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
 }
 
 pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
-                              config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
+                                   config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
         return answer_callback_feature_disabled(bot, q, edit_msg_req_params).await
@@ -229,7 +230,7 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
 }
 
 async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
-    let lang_code = ensure_lang_code(Some(&q.from));
+    let lang_code = LanguageCode::from_user(&q.from);
 
     let mut answer = bot.answer_callback_query(q.id);
     answer.show_alert.replace(true);

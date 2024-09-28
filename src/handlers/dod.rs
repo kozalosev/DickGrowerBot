@@ -3,9 +3,12 @@ use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
+use teloxide::payloads::SendMessageSetters;
 use teloxide::types::{Message, UserId};
-use crate::{metrics, repo};
-use crate::handlers::{ensure_lang_code, FromRefs, HandlerResult, reply_html, utils};
+use crate::{config, metrics, repo};
+use crate::config::DickOfDaySelectionMode;
+use crate::domain::LanguageCode;
+use crate::handlers::{FromRefs, HandlerResult, reply_html, utils};
 use crate::handlers::utils::Incrementor;
 
 const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
@@ -19,20 +22,32 @@ pub enum DickOfDayCommands {
 }
 
 pub async fn dod_cmd_handler(bot: Bot, msg: Message,
-                             repos: repo::Repositories, incr: Incrementor) -> HandlerResult {
+                             cfg: config::AppConfig, repos: repo::Repositories, incr: Incrementor) -> HandlerResult {
     metrics::CMD_DOD_COUNTER.chat.inc();
     let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
-    let answer = dick_of_day_impl(&repos, incr, from_refs).await?;
-    reply_html(bot, msg, answer).await?;
+    let answer = dick_of_day_impl(cfg, &repos, incr, from_refs).await?;
+    reply_html(bot, msg, answer)
+        .disable_web_page_preview(true)
+        .await?;
     Ok(())
 }
 
-pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repositories, incr: Incrementor,
+                                     from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
-    let lang_code = ensure_lang_code(Some(from));
-    let winner = repos.users.get_random_active_member(&chat_id.kind()).await?;
+    let lang_code = LanguageCode::from_user(from);
+    let winner = match cfg.features.dod_selection_mode {
+        DickOfDaySelectionMode::WEIGHTS => {
+            repos.users.get_random_active_member_with_poor_in_priority(&chat_id.kind()).await?
+        },
+        DickOfDaySelectionMode::EXCLUSION if cfg.dod_rich_exclusion_ratio.is_some() => {
+            let rich_exclusion_ratio = cfg.dod_rich_exclusion_ratio.unwrap();
+            repos.users.get_random_active_poor_member(&chat_id.kind(), rich_exclusion_ratio).await?
+        },
+        _ => repos.users.get_random_active_member(&chat_id.kind()).await?
+    };
     let answer = match winner {
         Some(winner) => {
             let increment = incr.dod_increment(from.id, chat_id.kind()).await;
@@ -69,5 +84,8 @@ pub(crate) async fn dick_of_day_impl(repos: &repo::Repositories, incr: Increment
         },
         None => t!("commands.dod.no_candidates", locale = &lang_code)
     };
-    Ok(answer)
+    let announcement = repos.announcements.get_new(&chat_id.kind(), &lang_code).await?
+        .map(|announcement| format!("\n\n<i>{announcement}</i>"))
+        .unwrap_or_default();
+    Ok(format!("{answer}{announcement}"))
 }

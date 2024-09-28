@@ -78,7 +78,6 @@ impl Loans {
             .execute(&self.pool)
             .await
             .map_err(|e| anyhow!(e))
-            .and_then(ensure_only_one_row_updated)?;
-        Ok(())
+            .and_then(ensure_only_one_row_updated)
     }
 }

@@ -8,9 +8,9 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Message, UserId};
-use crate::handlers::{ensure_lang_code, HandlerResult, reply_html};
+use crate::handlers::{HandlerResult, reply_html};
 use crate::{metrics, repo};
-use crate::domain::Username;
+use crate::domain::{LanguageCode, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
@@ -108,7 +108,7 @@ impl Display for InvalidLines {
 
 pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories) -> HandlerResult {
     metrics::CMD_IMPORT.invoked();
-    let lang_code = ensure_lang_code(msg.from());
+    let lang_code = LanguageCode::from_maybe_user(msg.from());
     let answer = match check_and_parse_message(&bot, &msg).await {
         Ok(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {
