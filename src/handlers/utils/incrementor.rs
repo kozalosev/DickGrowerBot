@@ -214,7 +214,8 @@ impl <T: PrimInt + std::fmt::Display + Into<i32>> Increment<T> {
             let top_line = t!("titles.perks.top_line", locale = lang_code);
             let perks = self.by_perks.iter()
                 .map(|(perk, value)| {
-                    let name = t!(&format!("titles.perks.{perk}"), locale = lang_code);
+                    let t_key = format!("titles.perks.{perk}");
+                    let name = t!(&t_key, locale = lang_code);
                     format!("— {name} ({value:+})")
                 })
                 .collect::<Vec<String>>()
@@ -284,7 +285,6 @@ mod test_incrementor {
 
     use async_trait::async_trait;
     use futures::future::join_all;
-    use testcontainers::clients;
 
     use crate::handlers::utils::{AdditionalChange, ChangeIntent, Config, DickId, Incrementor, Perk};
     use crate::repo;
@@ -292,8 +292,7 @@ mod test_incrementor {
 
     #[tokio::test]
     async fn test_incrementor() {
-        let docker = clients::Cli::default();
-        let (_container, db) = start_postgres(&docker).await;
+        let (_container, db) = start_postgres().await;
         let dicks = repo::Dicks::new(db.clone(), Default::default());
         let incr = Incrementor {
             config: Config {

@@ -107,14 +107,15 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {
-            let title = t!(&format!("inline.results.titles.{key}"), locale = &lang_code);
+            let t_key = format!("inline.results.titles.{key}");
+            let title = t!(&t_key, locale = &lang_code);
             let content = InputMessageContent::Text(InputMessageContentText::new(
                 t!("inline.results.text", locale = &lang_code)));
             let mut article = InlineQueryResultArticle::new(
                 key.clone(), title, content
             );
             let buttons = vec![vec![
-                InlineKeyboardButton::callback(&btn_label, format!("{uid}:{key}"))
+                InlineKeyboardButton::callback(btn_label.clone(), format!("{uid}:{key}"))
             ]];
             article.reply_markup.replace(InlineKeyboardMarkup::new(buttons));
             InlineQueryResult::Article(article)
@@ -207,12 +208,13 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                 }
                 Ok(CallbackDataParseResult::Ok(_)) => panic!("unexpected CallbackDataParseResult::Ok(_)")
             };
-            let text = t!(&format!("inline.callback.errors.{key}"), locale = &lang_code);
+            let t_key = format!("inline.callback.errors.{key}");
+            let text = t!(&t_key, locale = &lang_code).to_string();
             answer.text.replace(text);
             answer.show_alert.replace(true);
         }
     } else {
-        let text = t!("inline.callback.errors.no_data", locale = &lang_code);
+        let text = t!("inline.callback.errors.no_data", locale = &lang_code).to_string();
         answer.text.replace(text);
         answer.show_alert.replace(true);
     };

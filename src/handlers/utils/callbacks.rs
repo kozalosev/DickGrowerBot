@@ -117,7 +117,7 @@ impl Into<ChatIdKind> for EditMessageReqParamsKind {
 
 pub fn get_params_for_message_edit(q: &CallbackQuery) -> Result<EditMessageReqParamsKind, &'static str> {
     q.message.as_ref()
-        .map(|m| EditMessageReqParamsKind::Chat(m.chat.id, m.id))
+        .map(|m| EditMessageReqParamsKind::Chat(m.chat().id, m.id()))
         .or(q.inline_message_id.as_ref().map(|inline_message_id| EditMessageReqParamsKind::Inline {
             chat_instance: q.chat_instance.clone(),
             inline_message_id: inline_message_id.clone()
@@ -135,7 +135,7 @@ pub async fn prepare_callback_answer_params(bot: &Bot, query: &CallbackQuery, us
     let mut answer = bot.answer_callback_query(&query.id);
     let res = if query.from.id != user_id {
         answer.show_alert.replace(true);
-        answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code));
+        answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code).to_string());
         answer.await?;
         CallbackAnswerParams::AnotherUser
     } else {

@@ -1,5 +1,7 @@
 use std::fmt::Formatter;
 use anyhow::anyhow;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 #[derive(Debug)]
@@ -15,7 +17,7 @@ impl TryFrom<&str> for InlineMessageIdInfo {
     type Error = InvalidIDFormat;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let bytes = base64::decode_engine(value, &base64::engine::general_purpose::URL_SAFE_NO_PAD)?;
+        let bytes = URL_SAFE_NO_PAD.decode(value)?;
         let format: IDFormatKind = value.try_into()?;
         let info = format.decode(bytes)?;
         Ok(info)

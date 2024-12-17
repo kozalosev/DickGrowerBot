@@ -17,7 +17,7 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessage};
 use teloxide::requests::{JsonRequest, Requester};
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters};
 use teloxide::types::ParseMode::Html;
 
 pub use dick::*;
@@ -45,13 +45,13 @@ impl CallbackResult {
         match self {
             CallbackResult::EditMessage(text, keyboard) => {
                 if let Some(message) = callback_query.message {
-                    let mut edit_req = bot.edit_message_text(message.chat.id, message.id, text);
+                    let mut edit_req = bot.edit_message_text(message.chat().id, message.id(), text);
                     edit_req.parse_mode.replace(Html);
                     edit_req.reply_markup = keyboard;
 
                     let edit_req_resp = edit_req.await;
                     if let Err(err) = edit_req_resp {
-                        log::error!("couldn't edit the message ({}:{}): {}", message.chat.id, message.id, err);
+                        log::error!("couldn't edit the message ({}:{}): {}", message.chat().id, message.id(), err);
                         Err(err)?;
                     }
                 } else if let Some(inline_message_id) = callback_query.inline_message_id {
@@ -118,7 +118,7 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: Message, answer: T) -> JsonReq
     let mut answer = bot.send_message(msg.chat.id, answer);
     answer.parse_mode = Some(Html);
     if msg.chat.is_group() || msg.chat.is_supergroup() {
-        answer.reply_to_message_id.replace(msg.id);
+        answer.reply_parameters.replace(ReplyParameters::new(msg.id));
     }
     answer
 }
@@ -151,7 +151,7 @@ pub mod checks {
     }
 
     pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
-        let lang_code = LanguageCode::from_maybe_user(msg.from());
+        let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         let answer = t!("errors.not_group_chat", locale = &lang_code);
         reply_html(bot, msg, answer).await?;
         Ok(())

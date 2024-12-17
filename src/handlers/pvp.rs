@@ -92,8 +92,8 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
                          repos: Repositories, config: AppConfig) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
-    let user = msg.from().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
-    let lang_code = LanguageCode::from_maybe_user(msg.from());
+    let user = msg.from.as_ref().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
+    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     let params = BattleParams {
         repos,
         features: config.features.pvp,
@@ -111,7 +111,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
 pub async fn cmd_handler_no_args(bot: Bot, msg: Message) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
-    let lang_code = LanguageCode::from_maybe_user(msg.from());
+    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     reply_html(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code)).await?;
     Ok(())
 }
@@ -168,7 +168,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig,
                               mut battle_locker: LockCallbackServiceFacade) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
-        .map(|msg| msg.chat.id)
+        .map(|msg| msg.chat().id)
         .or_else(|| config.features.chats_merging
             .then_some(query.inline_message_id.as_ref())
             .flatten()
@@ -250,7 +250,7 @@ impl Into<UserId> for UserInfo {
 pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     let data = if enough {
-        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet);
+        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).to_string();
         let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
         let btn_data = BattleCallbackData::new(initiator.uid, bet).to_data_string();
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
@@ -258,7 +258,7 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u1
         ]]);
         (text, Some(keyboard))
     } else {
-        (t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code), None)
+        (t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string(), None)
     };
     Ok(data)
 }
@@ -284,7 +284,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
                 let mut stats_str = t!("commands.pvp.results.stats.text", locale = &p.lang_code,
                     winner_win_rate = winner_stats.win_rate_formatted(), loser_win_rate = loser_stats.win_rate_formatted(),
                     winner_win_streak = winner_stats.win_streak_current, winner_win_streak_max = winner_stats.win_streak_max,
-                );
+                ).to_string();
                 if loser_stats.prev_win_streak > 1 {
                     stats_str.push('\n');
                     stats_str.push_str(&t!("commands.pvp.results.stats.lost_win_streak", locale = &p.lang_code,
@@ -314,14 +314,14 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
             let loser_pos = t!("commands.pvp.results.position.loser", locale = &p.lang_code, name = loser_info.name.escaped(), pos = loser_pos);
             format!("{main_part}\n\n{winner_pos}\n{loser_pos}")
         } else {
-            main_part
+            main_part.to_string()
         };
         CallbackResult::EditMessage(format!("{text}{withheld_part}{battle_stats}"), None)
     } else if enough_acceptor {
-        let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code);
+        let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string();
         CallbackResult::EditMessage(text, None)
     } else {
-        let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code);
+        let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code).to_string();
         CallbackResult::ShowError(text)
     };
     Ok(result)

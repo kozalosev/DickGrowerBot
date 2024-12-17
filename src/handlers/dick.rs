@@ -8,7 +8,7 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup, User};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup, User, UserId};
 
 use page::{InvalidPage, Page};
 
@@ -16,7 +16,7 @@ use crate::{config, metrics, repo};
 use crate::domain::LanguageCode;
 use crate::handlers::{HandlerResult, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, page};
-use crate::repo::ChatIdPartiality;
+use crate::repo::{ChatIdPartiality, UID};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const LTR_MARK: char = '\u{200E}';
@@ -34,7 +34,7 @@ pub enum DickCommands {
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                               repos: repo::Repositories, incr: Incrementor,
                               config: config::AppConfig) -> HandlerResult {
-    let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+    let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     match cmd {
@@ -71,7 +71,8 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
     let main_part = match grow_result {
         Ok(repo::GrowthResult { new_length, pos_in_top }) => {
             let event_key = if increment.total.is_negative() { "shrunk" } else { "grown" };
-            let event = t!(&format!("commands.grow.direction.{event_key}"), locale = &lang_code);
+            let event_template = format!("commands.grow.direction.{event_key}");
+            let event = t!(&event_template, locale = &lang_code);
             let answer = t!("commands.grow.result", locale = &lang_code,
                 event = event, incr = increment.total.abs(), length = new_length);
             let perks_part = increment.perks_part_of_answer(&lang_code);
@@ -87,7 +88,7 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
             if let sqlx::Error::Database(e) = db_err {
                 e.code()
                     .filter(|c| c == TOMORROW_SQL_CODE)
-                    .map(|_| t!("commands.grow.tomorrow", locale = &lang_code))
+                    .map(|_| t!("commands.grow.tomorrow", locale = &lang_code).to_string())
                     .ok_or(anyhow!(e))?
             } else {
                 Err(db_err)?
@@ -134,7 +135,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
         .map(|(i, d)| {
             let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
             let escaped_name = teloxide::utils::html::escape(&ltr_name);
-            let name = if from.id == d.owner_uid.into() {
+            let name = if from.id == <UID as Into<UserId>>::into(d.owner_uid) {
                 format!("<u>{escaped_name}</u>")
             } else {
                 escaped_name
@@ -142,7 +143,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
             let can_grow = Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
             let pos = d.position.unwrap_or((i+1) as i64);
             let mut line = t!("commands.top.line", locale = &lang_code,
-                n = pos, name = name, length = d.length);
+                n = pos, name = name, length = d.length).to_string();
             if can_grow {
                 line.push_str(" [+]")
             };
@@ -234,7 +235,7 @@ async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_r
 
     let mut answer = bot.answer_callback_query(q.id);
     answer.show_alert.replace(true);
-    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code));
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
     answer.await?;
 
     match edit_msg_req_params {

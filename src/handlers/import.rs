@@ -108,7 +108,7 @@ impl Display for InvalidLines {
 
 pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories) -> HandlerResult {
     metrics::CMD_IMPORT.invoked();
-    let lang_code = LanguageCode::from_maybe_user(msg.from());
+    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     let answer = match check_and_parse_message(&bot, &msg).await {
         Ok(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {
@@ -118,17 +118,20 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                         .map(|u| t!("commands.import.result.line.imported", locale = &lang_code,
                             name = u.name.escaped(),
                             length = u.length))
+                        .map(|cow_str| cow_str.to_string())
                         .collect::<Vec<String>>()
                         .join("\n");
                     let already_present = r.already_present.into_iter()
                         .map(|u| t!("commands.import.result.line.already_present", locale = &lang_code,
                             name = u.name.escaped(),
                             length = u.length))
+                        .map(|cow_str| cow_str.to_string())
                         .collect::<Vec<String>>()
                         .join("\n");
                     let not_found = r.not_found.into_iter()
                         .map(|name| t!("commands.import.result.line.not_found", locale = &lang_code,
                             name = name.escaped()))
+                        .map(|cow_str| cow_str.to_string())
                         .collect::<Vec<String>>()
                         .join("\n");
 
@@ -143,6 +146,7 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                             let title = t!(&title_key, locale = &lang_code);
                             format!("{}\n{}", title, t.1)
                         })
+                        .map(|cow_str| cow_str.to_string())
                         .collect::<Vec<String>>()
                         .join("\n\n")
                 }
@@ -151,10 +155,11 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
                     let invalid_lines = lines.iter()
                         .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
                             line = line))
+                        .map(|cow_str| cow_str.to_string())
                         .collect::<Vec<String>>()
                         .join("\n");
                     t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
-                        invalid_lines = invalid_lines)
+                        invalid_lines = invalid_lines).to_string()
                 } else {
                     Err(e)?
                 }
@@ -162,11 +167,15 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
 
         },
         Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
-        Err(BeforeImportCheckErrors::NotReply) => t!("commands.import.errors.not_reply",
-            locale = lang_code.as_str(),
-            origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ")),
-        Err(e) => t!(format!("commands.import.errors.{e}").as_str(),
-            locale = lang_code.as_str()),
+        Err(BeforeImportCheckErrors::NotReply) => {
+            let origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ");
+            t!("commands.import.errors.not_reply", locale = &lang_code,
+                origin_bots = origin_bots).to_string()
+        },
+        Err(e) => {
+            let t_key = format!("commands.import.errors.{e}");
+            t!(&t_key, locale = &lang_code).to_string()
+        },
     };
     reply_html(bot, msg, answer).await?;
     Ok(())
@@ -177,7 +186,7 @@ async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult
         .await?
         .into_iter()
         .map(|m| m.user.id);
-    let from_id = msg.from()
+    let from_id = msg.from.as_ref()
         .ok_or(BeforeImportCheckErrors::Other(anyhow!("not from a user")))?
         .id;
     let invoked_by_admin = admin_ids.into_iter().any(|id| id == from_id);
@@ -186,7 +195,7 @@ async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult
     }
 
     let result = msg.reply_to_message()
-        .filter(|m| m.forward().is_none())
+        .filter(|m| m.forward_origin().is_none())
         .and_then(check_reply_source_and_text);
     let result = match result {
         None => return Err(BeforeImportCheckErrors::NotReply),
@@ -197,7 +206,7 @@ async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult
 }
 
 fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
-    reply.from().as_ref()
+    reply.from.as_ref()
         .filter(|u| u.is_bot)
         .and_then(|u| u.username.as_ref())
         .filter(|name| ORIGINAL_BOT_USERNAMES.contains(&name.as_ref()))

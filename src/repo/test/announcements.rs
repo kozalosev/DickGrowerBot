@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use sqlx::{Pool, Postgres};
-use testcontainers::clients;
 use crate::{config, repo};
 use crate::config::Announcement;
 use crate::domain::{LanguageCode, SupportedLanguage};
@@ -10,8 +9,7 @@ use crate::repo::test::{dicks, start_postgres, CHAT_ID_KIND};
 
 #[tokio::test]
 async fn test_configured() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     create_chat(&db).await;
 
     // test creation and update
@@ -53,8 +51,7 @@ async fn test_configured_impl(db: &Pool<Postgres>, attempt: u8) {
 
 #[tokio::test]
 async fn test_no_announcements() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let [en, _] = get_languages();
     create_chat(&db).await;
 

@@ -16,10 +16,11 @@ pub fn get_full_name(user: &User) -> String {
 }
 
 pub mod date {
+    use std::borrow::Cow;
     use chrono::{DateTime, Duration, Timelike, Utc};
     use rust_i18n::t;
 
-    pub fn get_time_till_next_day_string(lang_code: &str) -> String {
+    pub fn get_time_till_next_day_string(lang_code: &str) -> Cow<str> {
         let now = if cfg!(test) {
             DateTime::parse_from_rfc3339("2023-10-21T22:10:57+00:00")
                 .expect("invalid datetime string")

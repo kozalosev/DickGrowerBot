@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use once_cell::sync::Lazy;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -5,7 +7,7 @@ use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{Dialogue, InlineQuery, Requester};
-use teloxide::types::{Message, User};
+use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, User};
 use crate::handlers::{HandlerResult, reply_html};
 use crate::{metrics, repo};
 use crate::domain::LanguageCode;
@@ -37,13 +39,13 @@ pub type PromoCodeDialogue = Dialogue<PromoCommandState, InMemStorage<PromoComma
 pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialogue: PromoCodeDialogue,
                                repos: repo::Repositories) -> HandlerResult {
     metrics::CMD_PROMO.invoked_by_command.inc();
-    let user = msg.from().ok_or("no from user")?;
+    let user = msg.from.as_ref().ok_or("no from user")?;
     let answer = match cmd {
         PromoCommands::Promo(code) if code.is_empty() => {
             dialogue.update(PromoCommandState::Requested).await?;
 
-            let lang_code = LanguageCode::from_maybe_user(msg.from());
-            t!("commands.promo.request", locale = &lang_code)
+            let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+            t!("commands.promo.request", locale = &lang_code).to_string()
         }
         PromoCommands::Promo(code) => {
             dialogue.exit().await?;
@@ -61,12 +63,12 @@ pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCode
         Some(code) => {
             dialogue.exit().await?;
             
-            let user = msg.from().ok_or("no from user")?;
+            let user = msg.from.as_ref().ok_or("no from user")?;
             promo_activation_impl(repos.promo, user, code).await?
         },
         None => {
-            let lang_code = LanguageCode::from_maybe_user(msg.from());
-            t!("commands.promo.request", locale = &lang_code)
+            let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+            t!("commands.promo.request", locale = &lang_code).to_string()
         }
     };
     reply_html(bot, msg, answer).await?;
@@ -82,14 +84,16 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult
 
     let lang_code = LanguageCode::from_user(&query.from);
     let promo_code = query.query;
-    let encoded_query = base64::encode_engine(promo_code.as_bytes(), &base64::engine::general_purpose::URL_SAFE_NO_PAD);
+    let button_text = t!("commands.promo.inline.switch_button", locale = &lang_code, code = promo_code);
+    let encoded_query = URL_SAFE_NO_PAD.encode(promo_code.as_bytes());
     let deeplink_start_param = format!("{}{}", PROMO_START_PARAM_PREFIX, encoded_query);
+    let button = InlineQueryResultsButton {
+        text: button_text.to_string(),
+        kind: InlineQueryResultsButtonKind::StartParameter(deeplink_start_param)
+    };
     let mut answer = bot.answer_inline_query(query.id, Vec::default())
         .is_personal(true)
-        // TODO: migrate to InlineQueryResultsButton when teloxide is upgraded
-        .switch_pm_parameter(deeplink_start_param)
-        .switch_pm_text(t!("commands.promo.inline.switch_button", locale = &lang_code,
-            code = promo_code));
+        .button(button);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
@@ -112,13 +116,15 @@ pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, 
                 ending = t!(&format!("commands.promo.success.{suffix}"), locale = &lang_code,
                     growth = res.bonus_length, affected_chats = res.chats_affected,
                     word_chats = chats_in_russian))
+                .to_string()
         },
         Err(e) => {
             let suffix = match e {
                 ActivationError::Other(e) => Err(e)?,
                 e => format!("{e}")
             };
-            t!(&format!("commands.promo.errors.{suffix}"), locale = &lang_code)
+            let t_key = format!("commands.promo.errors.{suffix}");
+            t!(&t_key, locale = &lang_code).to_string()
         }
     };
     Ok(answer)

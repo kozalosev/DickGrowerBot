@@ -1,5 +1,4 @@
 use teloxide::types::{ChatId, UserId};
-use testcontainers::clients;
 use crate::repo;
 use crate::repo::ExternalUser;
 use crate::repo::test::{CHAT_ID, start_postgres, UID};
@@ -7,8 +6,7 @@ use crate::repo::test::dicks::{check_dick, create_dick, create_user};
 
 #[tokio::test]
 async fn test_all() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let import = repo::Import::new(db.clone());
     let chat_id = ChatId(CHAT_ID);
 
