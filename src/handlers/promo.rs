@@ -131,10 +131,9 @@ pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, 
 }
 
 fn get_chats_in_russian(count: u64) -> String {
-    match count % 10 {
-        1 if count != 11 => "чат",
-        2..=4 if !(12..=14).contains(&count) => "чата",
-        _ => "чатов"
+    match count {
+        1 => "чате",
+        _ => "чатах"
     }.to_owned()
 }
 
