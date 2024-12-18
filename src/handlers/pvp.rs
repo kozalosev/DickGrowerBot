@@ -161,6 +161,7 @@ pub async fn inline_chosen_handler() -> HandlerResult {
     Ok(())
 }
 
+#[inline]
 pub fn callback_filter(query: CallbackQuery) -> bool {
     BattleCallbackData::check_prefix(query)
 }

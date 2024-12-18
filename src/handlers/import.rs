@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use rust_i18n::t;
@@ -247,7 +247,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .map(|pos| pos.as_ref().unwrap_err().clone())
         .collect();
     if !invalid_lines.is_empty() {
-        return Err(anyhow!(InvalidLines(invalid_lines)))
+        bail!(InvalidLines(invalid_lines))
     }
 
     let top: Vec<OriginalUser> = top.into_iter()
@@ -283,7 +283,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .map(|u| repo::ExternalUser::new(u.uid, u.length))
         .collect();
     if users.len() != to_import.len() {
-        return Err(anyhow!("couldn't convert integers for external users"))
+        bail!("couldn't convert integers for external users")
     }
     repos.import.import(chat_id, &users).await?;
 

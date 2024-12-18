@@ -32,7 +32,7 @@ tinytemplate = "1.2.1"
 strum = "0.26.3"
 strum_macros = "0.26.4"
 derive_more = { version = "1.0.0", features = ["display", "from", "constructor", "error", "from_str"] }
-anyhow = "1.0.94"
+anyhow = { version = "1.0.94", features = ["backtrace"] }
 # Other basic stuff
 regex = "1.11.1"
 rand = "0.8.5"

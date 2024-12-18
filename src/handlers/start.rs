@@ -46,3 +46,23 @@ fn decode_promo_code(promo_code_base64: &str) -> anyhow::Result<String> {
     let promo_code = String::from_utf8(bytes)?;
     Ok(promo_code)
 }
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    // TODO: implement a separate domain type for promo codes
+    #[test]
+    fn test_encode_decode_promo_code() {
+        let code = "TEST_CODE";
+        let encoded = URL_SAFE_NO_PAD.encode(code);
+
+        let decoded_bytes = URL_SAFE_NO_PAD.decode(encoded.as_bytes())
+            .expect("couldn't decode the encoded promo code");
+        let decoded_str = String::from_utf8(decoded_bytes)
+            .expect("couldn't convert promo code to a string");
+
+        assert_eq!(code, decoded_str);
+    }
+}

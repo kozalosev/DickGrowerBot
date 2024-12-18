@@ -1,5 +1,5 @@
 use std::fmt::Formatter;
-use anyhow::anyhow;
+use anyhow::bail;
 use sqlx::{Postgres, Transaction};
 use teloxide::types::ChatId;
 use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ensure_only_one_row_updated};
@@ -71,7 +71,7 @@ repository!(Chats, with_feature_toggles,
             1 => Self::update_chat(&mut tx, chats[0].internal_id, id, instance).await,
             0 => Self::create_chat(&mut tx, id, instance).await,
             2 => Self::merge_chats(&mut tx, [&chats[0], &chats[1]]).await,
-            x => Err(anyhow!("unexpected count of chats ({x}): {chats:?}")),
+            x => bail!("unexpected count of chats ({x}): {chats:?}"),
         }?;
         tx.commit().await?;
         Ok(internal_id)

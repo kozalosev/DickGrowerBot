@@ -235,6 +235,7 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             if uid == user_id.0.to_string() {
                 InlineCommand::from_str(data)
                     .map(CallbackDataParseResult::Ok)
+                    .inspect_err(|err| log::error!("couldn't parse callback data '{data}': {err}"))
             } else {
                 Ok(CallbackDataParseResult::AnotherUser)
             }
