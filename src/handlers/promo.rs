@@ -20,14 +20,14 @@ static PROMO_CODE_FORMAT_REGEXP: Lazy<regex::Regex> = Lazy::new(||
         .expect("promo code format regular expression must be valid")
 );
 
-#[derive(BotCommands, Clone)]
+#[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
 pub enum PromoCommands {
     #[command(description = "promo")]
     Promo(String),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub enum PromoCommandState {
     #[default]
     Start,
@@ -36,6 +36,7 @@ pub enum PromoCommandState {
 
 pub type PromoCodeDialogue = Dialogue<PromoCommandState, InMemStorage<PromoCommandState>>;
 
+#[tracing::instrument]
 pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialogue: PromoCodeDialogue,
                                repos: repo::Repositories) -> HandlerResult {
     metrics::CMD_PROMO.invoked_by_command.inc();
@@ -57,6 +58,7 @@ pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialo
     Ok(())
 }
 
+#[tracing::instrument]
 pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCodeDialogue,
                                      repos: repo::Repositories) -> HandlerResult {
     let answer = match msg.text() {
@@ -79,6 +81,7 @@ pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
     PROMO_CODE_FORMAT_REGEXP.is_match(&query)
 }
 
+#[tracing::instrument]
 pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
@@ -101,6 +104,7 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult
     Ok(())
 }
 
+#[tracing::instrument]
 pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, promo_code: &str) -> anyhow::Result<String> {
     let lang_code = LanguageCode::from_user(user);
     let answer = match promo_repo.activate(user.id, promo_code).await {

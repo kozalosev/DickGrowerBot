@@ -4,7 +4,7 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use crate::domain::{LanguageCode, SupportedLanguage};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AnnouncementsConfig {
     pub max_shows: usize,
     pub announcements: HashMap<SupportedLanguage, Announcement>,
@@ -16,7 +16,7 @@ impl AnnouncementsConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Announcement {
     pub text: Arc<String>,
     pub hash: Arc<Vec<u8>>,

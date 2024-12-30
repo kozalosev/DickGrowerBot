@@ -7,7 +7,7 @@ use crate::domain::LanguageCode;
 static EN_HELP: &str = include_str!("en.html");
 static RU_HELP: &str = include_str!("ru.html");
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HelpContainer {
     en: String,
     ru: String,

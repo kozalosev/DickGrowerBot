@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 
 const CACHED_ENV_TOGGLES_POISONED_MSG: &str = "CachedEnvToggles map was poisoned";
 
-#[derive(Copy, Clone, Default, derive_more::FromStr, derive_more::Display)]
+#[derive(Copy, Clone, Debug, Default, derive_more::FromStr, derive_more::Display)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum DickOfDaySelectionMode {
     WEIGHTS,
@@ -12,7 +12,7 @@ pub enum DickOfDaySelectionMode {
     RANDOM
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct FeatureToggles {
     pub chats_merging: bool,
     pub top_unlimited: bool,
@@ -32,7 +32,7 @@ impl Default for FeatureToggles {
     }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct BattlesFeatureToggles {
     pub check_acceptor_length: bool,
     pub callback_locks: bool,
@@ -40,7 +40,7 @@ pub struct BattlesFeatureToggles {
     pub show_stats_notice: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CachedEnvToggles {
     map: Arc<RwLock<HashMap<String, bool>>>
 }

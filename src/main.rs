@@ -8,6 +8,7 @@ mod commands;
 
 use std::env::VarError;
 use std::net::SocketAddr;
+use std::process;
 use futures::future::join_all;
 use reqwest::Url;
 use rust_i18n::i18n;
@@ -16,6 +17,8 @@ use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::UpdateListener;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use crate::handlers::{checks, HelpCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
@@ -32,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv()?;
 
     pretty_env_logger::init();
+    init_tracing()?;
 
     let app_config = config::AppConfig::from_env();
     let database_config = config::DatabaseConfig::from_env()?;
@@ -166,4 +170,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             res
         }
     }?.map_err(|e| e.into())
+}
+
+fn init_tracing_loki() -> anyhow::Result<()> {
+    let (layer, task) = tracing_loki::builder()
+        .label("host", "mine")?
+        .extra_field("pid", format!("{}", process::id()))?
+        .build_url(Url::parse("http://127.0.0.1:3100").unwrap())?;
+
+    // We need to register our layer with `tracing`.
+    let subscriber = tracing_subscriber::registry().with(layer);
+    if cfg!(debug_assertions) {
+        subscriber.with(tracing_subscriber::fmt::Layer::new()).init()
+    } else {
+        subscriber.init()
+    };
+
+    // The background task needs to be spawned so the logs actually get
+    // delivered.
+    tokio::spawn(task);
+
+    tracing::info!(
+        task = "tracing_setup",
+        result = "success",
+        "tracing successfully set up",
+    );
+
+    Ok(())
+}
+
+fn init_tracing_opentelemetry() -> anyhow::Result<()> {
+    use opentelemetry::trace::{Tracer, TracerProvider as _};
+
+    // Create a new OpenTelemetry trace pipeline that prints to stdout
+    let provider = TracerProvider::builder()
+        .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
+        .build();
+    let tracer = provider.tracer("readme_example");
+
+    // Create a tracing layer with the configured tracer
+    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    // Use the tracing subscriber `Registry`, or any other subscriber
+    // that impls `LookupSpan`
+    let subscriber = Registry::default().with(telemetry);
+
+    // Trace executed code
+    tracing::subscriber::with_default(subscriber, || {
+        // Spans will be sent to the configured OpenTelemetry exporter
+        let root = span!(tracing::Level::TRACE, "app_start", work_units = 2);
+        let _enter = root.enter();
+
+        error!("This event will be logged in the root span.");
+    });
+    
+    Ok(())
 }

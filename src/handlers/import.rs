@@ -26,6 +26,7 @@ pub enum ImportCommands {
     Import
 }
 
+#[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 enum OriginalBotKind {
     Pipisa,
@@ -57,6 +58,7 @@ impl TryFrom<&str> for OriginalBotKind {
     }
 }
 
+#[derive(Debug)]
 struct ParseResult(OriginalBotKind, String);
 
 #[derive(strum_macros::Display)]
@@ -106,6 +108,7 @@ impl Display for InvalidLines {
     }
 }
 
+#[tracing::instrument]
 pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories) -> HandlerResult {
     metrics::CMD_IMPORT.invoked();
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
@@ -181,6 +184,7 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
     Ok(())
 }
 
+#[tracing::instrument]
 async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult, BeforeImportCheckErrors> {
     let admin_ids = bot.get_chat_administrators(msg.chat.id)
         .await?
@@ -222,6 +226,7 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
         })
 }
 
+#[tracing::instrument]
 async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseResult) -> anyhow::Result<ImportResult> {
     let chat_id_kind = chat_id.into();
     let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)

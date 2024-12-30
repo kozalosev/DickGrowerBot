@@ -20,7 +20,7 @@ use crate::repo::{BattleStats, ChatIdPartiality, GrowthResult, Repositories, Win
 // let's calculate time offsets from 22.06.2024
 const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
 
-#[derive(BotCommands, Clone, Copy)]
+#[derive(BotCommands, Clone, Copy, Debug)]
 #[command(rename_rule = "lowercase")]
 pub enum BattleCommands {
     #[command(description = "pvp")]
@@ -88,6 +88,7 @@ impl TryFrom<String> for BattleCallbackData {
     }
 }
 
+#[tracing::instrument]
 pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
                          repos: Repositories, config: AppConfig) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
@@ -108,6 +109,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     Ok(())
 }
 
+#[tracing::instrument]
 pub async fn cmd_handler_no_args(bot: Bot, msg: Message) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
@@ -126,6 +128,7 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
     maybe_bet.is_ok()
 }
 
+#[tracing::instrument]
 pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
@@ -166,6 +169,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     BattleCallbackData::check_prefix(query)
 }
 
+#[tracing::instrument]
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig,
                               mut battle_locker: LockCallbackServiceFacade) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
@@ -204,6 +208,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     Ok(())
 }
 
+#[derive(Debug)]
 pub(crate) struct BattleParams {
     repos: Repositories,
     features: BattlesFeatureToggles,
@@ -211,7 +216,7 @@ pub(crate) struct BattleParams {
     lang_code: LanguageCode,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct UserInfo {
     uid: UserId,
     name: Username,
@@ -248,6 +253,7 @@ impl Into<UserId> for UserInfo {
     }
 }
 
+#[tracing::instrument]
 pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     let data = if enough {
@@ -264,6 +270,7 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u1
     Ok(data)
 }
 
+#[tracing::instrument]
 async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u16) -> anyhow::Result<CallbackResult> {
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
@@ -336,6 +343,7 @@ fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {
     }
 }
 
+#[tracing::instrument]
 async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInfo) -> anyhow::Result<UserInfo> {
     let user = if user_uid == acceptor.uid {
         acceptor.clone()
@@ -347,6 +355,7 @@ async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInf
     Ok(user)
 }
 
+#[tracing::instrument]
 async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: u16) -> anyhow::Result<Option<(GrowthResult, u16)>> {
     let chat_id_kind = p.chat_id.kind();
     let loan = match p.repos.loans.get_active_loan(winner_id, &chat_id_kind).await? {

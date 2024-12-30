@@ -8,12 +8,13 @@ use crate::{metrics, repo};
 use crate::domain::LanguageCode;
 use crate::help::HelpContainer;
 
-#[derive(BotCommands, Clone)]
+#[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
 pub enum StartCommands {
     Start(String),
 }
 
+#[tracing::instrument]
 pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
                                help: HelpContainer, repos: repo::Repositories) -> HandlerResult {
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());

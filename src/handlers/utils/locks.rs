@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::sync::Arc;
 use derive_more::Display;
 use flurry::HashSet;
@@ -6,7 +7,7 @@ use crate::config::FeatureToggles;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 // TODO: create a Redis based implementation
-pub trait LockCallbackServiceImplTrait : Clone + Send + Sync {
+pub trait LockCallbackServiceImplTrait : Debug + Clone + Send + Sync {
     type Guard;
     
     fn try_lock<T>(&mut self, callback_data: &T) -> Option<Self::Guard> 
@@ -16,7 +17,7 @@ pub trait LockCallbackServiceImplTrait : Clone + Send + Sync {
 
 pub trait Guard: Send + Sync {}
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum LockCallbackServiceFacade {
     NoOp,
     InMemory(InMemoryLockCallbackService),
@@ -48,7 +49,7 @@ impl LockCallbackServiceFacade {
 pub struct NoOpGuard {}
 impl Guard for NoOpGuard {}
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct InMemoryLockCallbackService {
     inner_set: Arc<HashSet<String>>
 }

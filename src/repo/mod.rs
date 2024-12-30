@@ -27,7 +27,7 @@ pub use announcements::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Repositories {
     pub users: Users,
     pub dicks: Dicks,
@@ -192,7 +192,7 @@ pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Po
 #[macro_export]
 macro_rules! repository {
     ($name:ident, with_feature_toggles, $($methods:item),*) => {
-        #[derive(Clone)]
+        #[derive(Clone, Debug)]
         pub struct $name {
             pool: sqlx::Pool<sqlx::Postgres>,
             features: $crate::config::FeatureToggles,
@@ -208,7 +208,7 @@ macro_rules! repository {
     };
     
     ($name:ident, with_($repoName:ident)_($repoType:tt), $($methods:item),*) => {
-        #[derive(Clone)]
+        #[derive(Clone, Debug)]
         pub struct $name {
             pool: sqlx::Pool<sqlx::Postgres>,
             #[allow(dead_code)] features: $crate::config::FeatureToggles,
@@ -226,7 +226,7 @@ macro_rules! repository {
     };
     
     ($name:ident, $($methods:item),*) => {
-        #[derive(Clone)]
+        #[derive(Clone, Debug)]
         pub struct $name {
             pool: sqlx::Pool<sqlx::Postgres>,
         }

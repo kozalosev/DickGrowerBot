@@ -22,7 +22,7 @@ const TOMORROW_SQL_CODE: &str = "GD0E1";
 const LTR_MARK: char = '\u{200E}';
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
 
-#[derive(BotCommands, Clone)]
+#[derive(BotCommands, Clone, Debug)]
 #[command(rename_rule = "lowercase")]
 pub enum DickCommands {
     #[command(description = "grow")]
@@ -31,6 +31,7 @@ pub enum DickCommands {
     Top,
 }
 
+#[tracing::instrument]
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                               repos: repo::Repositories, incr: Incrementor,
                               config: config::AppConfig) -> HandlerResult {
@@ -57,8 +58,10 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdPartiality);
 
+#[tracing::instrument]
 pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let name = utils::get_full_name(from);
@@ -120,6 +123,7 @@ impl Top {
     }
 }
 
+#[tracing::instrument]
 pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppConfig, from_refs: FromRefs<'_>,
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
@@ -172,6 +176,7 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
         .is_some()
 }
 
+#[tracing::instrument]
 pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                                    config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
@@ -230,6 +235,7 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
     InlineKeyboardMarkup::new(vec![buttons])
 }
 
+#[tracing::instrument]
 async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&q.from);
 

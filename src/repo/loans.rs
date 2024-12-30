@@ -27,7 +27,7 @@ impl TryFrom<LoanEntity> for Loan {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Loans {
     pool: sqlx::Pool<Postgres>,
     chats: Chats,
@@ -35,12 +35,14 @@ pub struct Loans {
 }
 
 impl Loans {
+    #[tracing::instrument]
     pub fn new(pool: sqlx::Pool<Postgres>, cfg: &config::AppConfig) -> Self {
         let chats = Chats::new(pool.clone(), cfg.features);
         let payout_ratio = cfg.loan_payout_ratio;
         Self { pool, chats, payout_ratio }
     }
 
+    #[tracing::instrument]
     pub async fn get_active_loan(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Loan>> {
         let maybe_loan = sqlx::query_as!(LoanEntity,
             "SELECT debt, payout_ratio FROM loans \
@@ -55,6 +57,7 @@ impl Loans {
         Ok(maybe_loan)
     }
 
+    #[tracing::instrument]
     pub async fn borrow(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<()> {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
         let mut tx = self.pool.begin().await?;
@@ -69,6 +72,7 @@ impl Loans {
         Ok(())
     }
 
+    #[tracing::instrument]
     pub async fn pay(&self, uid: UserId, chat_id: &ChatIdKind, value: u16) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Loans SET debt = debt - $3 \
                         WHERE uid = $1 AND \

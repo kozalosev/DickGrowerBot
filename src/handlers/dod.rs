@@ -21,6 +21,7 @@ pub enum DickOfDayCommands {
     Dod,
 }
 
+#[tracing::instrument]
 pub async fn dod_cmd_handler(bot: Bot, msg: Message,
                              cfg: config::AppConfig, repos: repo::Repositories, incr: Incrementor) -> HandlerResult {
     metrics::CMD_DOD_COUNTER.chat.inc();
@@ -34,6 +35,7 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
     Ok(())
 }
 
+#[tracing::instrument]
 pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repositories, incr: Incrementor,
                                      from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);

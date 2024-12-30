@@ -6,10 +6,10 @@ use teloxide::types::User;
 
 static DEFAULT: Lazy<LanguageCode> = Lazy::new(|| LanguageCode("en".to_string()));
 
-#[derive(Clone, Constructor, From)]
+#[derive(Debug, Clone, Constructor, From)]
 pub struct LanguageCode(String);
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, sqlx::Type)]
+#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "language_code", rename_all = "lowercase")]
 pub enum SupportedLanguage {
     EN,

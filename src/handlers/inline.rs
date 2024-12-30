@@ -53,6 +53,7 @@ impl InlineResult {
 }
 
 impl InlineCommand {
+    #[tracing::instrument]
     async fn execute(&self, repos: &Repositories, config: AppConfig, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<InlineResult> {
         match self {
             InlineCommand::Grow => {
@@ -94,6 +95,7 @@ impl InlineCommand {
     }
 }
 
+#[tracing::instrument]
 pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
@@ -132,6 +134,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     Ok(())
 }
 
+#[tracing::instrument]
 pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                                    repos: Repositories, config: AppConfig,
                                    incr: Incrementor) -> HandlerResult {
@@ -166,6 +169,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
     Ok(())
 }
 
+#[tracing::instrument]
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig,
                               incr: Incrementor) -> HandlerResult {

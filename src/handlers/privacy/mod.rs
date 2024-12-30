@@ -16,6 +16,7 @@ pub enum PrivacyCommands {
     Privacy,
 }
 
+#[tracing::instrument]
 pub async fn privacy_cmd_handler(bot: Bot, msg: Message) -> HandlerResult {
     metrics::CMD_PRIVACY_COUNTER.inc();
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());

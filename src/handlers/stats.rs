@@ -16,6 +16,7 @@ pub enum StatsCommands {
     Stats
 }
 
+#[tracing::instrument]
 pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_config: AppConfig) -> HandlerResult {
     metrics::CMD_STATS.chat.inc();
     
@@ -38,6 +39,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
     Ok(())
 }
 
+#[tracing::instrument]
 async fn personal_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let lang_code = LanguageCode::from_user(from_refs.0);
     repos.personal_stats.get(from_refs.0.id).await
@@ -45,6 +47,7 @@ async fn personal_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>
             chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).to_string())
 }
 
+#[tracing::instrument]
 pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, features: BattlesFeatureToggles) -> anyhow::Result<String> {
     let lang_code = LanguageCode::from_user(from_refs.0);
     let (length, position) = repos.dicks.fetch_dick(from_refs.0.id, &from_refs.1.kind()).await?

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use async_trait::async_trait;
@@ -13,14 +14,14 @@ use teloxide::types::UserId;
 use crate::{config, repo};
 use crate::repo::ChatIdKind;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Incrementor {
     config: Config,
     perks: Vec<Arc<dyn Perk>>,
     dicks: repo::Dicks,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Config {
     growth_range: RangeInclusive<i16>,
     grow_shrink_ratio: f32,
@@ -29,7 +30,7 @@ pub struct Config {
 }
 
 #[async_trait]
-pub trait Perk: Send + Sync + Downcast {
+pub trait Perk: Send + Sync + Downcast + Debug {
     fn name(&self) -> &str;
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange;
 
@@ -46,11 +47,11 @@ pub trait ConfigurablePerk: Perk {
     fn get_config(&self) -> Self::Config;
 }
 
-#[derive(Display, Clone, Hash, PartialEq)]
+#[derive(Debug, Display, Clone, Hash, PartialEq)]
 #[display("(user_id={_0}, chat_id={_1}")]
 pub struct DickId(pub(crate) UserId, pub(crate) ChatIdKind);
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct ChangeIntent {
     pub current_length: i32,
     pub base_increment: i32,
@@ -339,7 +340,7 @@ mod test_incrementor {
         assert!(val.iter().all(|n| { n.base == 1 || n.base == 2 }))
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct AddPerk {
         value: i32,
         name: String,

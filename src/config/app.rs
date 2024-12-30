@@ -5,7 +5,7 @@ use crate::config::announcements::*;
 use crate::domain::Ratio;
 use crate::domain::SupportedLanguage::{EN, RU};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct AppConfig {
     pub features: FeatureToggles,

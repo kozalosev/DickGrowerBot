@@ -16,6 +16,7 @@ pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>>
     ]
 }
 
+#[derive(Debug)]
 pub struct HelpPussiesPerk {
     coefficient: f64
 }
@@ -26,6 +27,7 @@ impl Perk for HelpPussiesPerk {
         "help-pussies"
     }
 
+    #[tracing::instrument]
     async fn apply(&self, _: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
         if change_intent.current_length >= 0 {
             return AdditionalChange(0)
@@ -50,6 +52,7 @@ impl ConfigurablePerk for HelpPussiesPerk {
     }
 }
 
+#[derive(Debug)]
 pub struct LoanPayoutPerk {
     loans: repo::Loans,
 }
@@ -60,6 +63,7 @@ impl Perk for LoanPayoutPerk {
         "loan-payout"
     }
 
+    #[tracing::instrument]
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
         let maybe_loan_components = self.loans.get_active_loan(dick_id.0, &dick_id.1)
             .await

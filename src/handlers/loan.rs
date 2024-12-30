@@ -25,6 +25,7 @@ pub enum LoanCommands {
     Borrow,
 }
 
+#[tracing::instrument]
 pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, config: AppConfig) -> HandlerResult {
     metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
@@ -42,6 +43,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, conf
     Ok(())
 }
 
+#[tracing::instrument]
 pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, config: AppConfig) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
     let (from, chat_id_part) = (from_refs.0, from_refs.1);
     let chat_id_kind = chat_id_part.kind();
@@ -97,6 +99,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     LoanCallbackData::check_prefix(query)
 }
 
+#[tracing::instrument]
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: repo::Repositories, config: AppConfig) -> HandlerResult {
     let data = LoanCallbackData::parse(&query)?;

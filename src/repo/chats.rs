@@ -36,6 +36,7 @@ impl TryInto<ChatIdPartiality> for Chat {
 }
 
 repository!(Chats, with_feature_toggles,
+    #[tracing::instrument]
     pub async fn get_chat(&self, chat_id: ChatIdKind) -> anyhow::Result<Option<Chat>> {
         sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
                 WHERE chat_id = $1::bigint OR chat_instance = $1::text",
@@ -45,6 +46,7 @@ repository!(Chats, with_feature_toggles,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<i64, SearchError<ChatIdKind>> {
         self.get_chat(chat_id.clone()).await
             .map_err(SearchError::Internal)?
@@ -52,6 +54,7 @@ repository!(Chats, with_feature_toggles,
             .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,
+    #[tracing::instrument]
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
         let (id, instance) = match chat_id {
             ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
@@ -77,6 +80,7 @@ repository!(Chats, with_feature_toggles,
         Ok(internal_id)
     }
 ,
+    #[tracing::instrument]
     async fn create_chat(tx: &mut Transaction<'_, Postgres>, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
         log::info!("creating a chat with chat_id = {chat_id:?} and chat_instance = {chat_instance:?}");
         sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
@@ -86,6 +90,7 @@ repository!(Chats, with_feature_toggles,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     async fn update_chat(tx: &mut Transaction<'_, Postgres>, internal_id: i64, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
         log::debug!("updating the chat with id = {internal_id}, chat_id = {chat_id:?}, and chat_instance = {chat_instance:?}");
         sqlx::query!("UPDATE Chats SET chat_id = coalesce($2, chat_id), chat_instance = coalesce($3, chat_instance) WHERE id = $1",
@@ -96,6 +101,7 @@ repository!(Chats, with_feature_toggles,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<i64> {
         let state = merge_chat_objects(&chats)?;
         let updated_dicks = sqlx::query!(

@@ -19,7 +19,7 @@ pub struct GrowthResult {
     pub pos_in_top: Option<u64>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Dicks {
     pool: Pool<Postgres>,
     chats: Chats,
@@ -35,6 +35,7 @@ impl Dicks {
         }
     }
 
+    #[tracing::instrument]
     pub async fn create_or_grow(&self, uid: UserId, chat_id: &ChatIdPartiality, increment: i32) -> anyhow::Result<GrowthResult> {
         let uid = uid.0 as i64;
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
@@ -49,6 +50,7 @@ impl Dicks {
         Ok(GrowthResult { new_length, pos_in_top })
     }
 
+    #[tracing::instrument]
     pub async fn fetch_length(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<i32> {
         sqlx::query_scalar!("SELECT d.length FROM Dicks d \
                 JOIN Chats c ON d.chat_id = c.id \
@@ -61,6 +63,7 @@ impl Dicks {
             .map_err(Into::into)
     }
 
+    #[tracing::instrument]
     pub async fn fetch_dick(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Dick>> {
         sqlx::query_as!(Dick,
             r#"SELECT length, uid as owner_uid, name as owner_name, updated_at as grown_at, position FROM (
@@ -77,6 +80,7 @@ impl Dicks {
             .map_err(Into::into)
     }
 
+    #[tracing::instrument]
     pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u16) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
         sqlx::query_as!(Dick,
             r#"SELECT length, uid as owner_uid, name as owner_name, updated_at as grown_at,
@@ -91,6 +95,7 @@ impl Dicks {
             .await
     }
 
+    #[tracing::instrument]
     pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: u16) -> anyhow::Result<Option<GrowthResult>> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
@@ -107,6 +112,7 @@ impl Dicks {
         Ok(Some(GrowthResult { new_length, pos_in_top }))
     }
 
+    #[tracing::instrument]
     pub async fn check_dick(&self, chat_id: &ChatIdKind, user_id: UserId, length: u16) -> anyhow::Result<bool> {
         sqlx::query_scalar!(r#"SELECT length >= $3 AS "enough!" FROM Dicks d
                 JOIN Chats c ON d.chat_id = c.id
@@ -119,6 +125,7 @@ impl Dicks {
             .await
     }
 
+    #[tracing::instrument]
     pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u16) -> anyhow::Result<(GrowthResult, GrowthResult)> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
@@ -140,6 +147,7 @@ impl Dicks {
         Ok((gr_from, gr_to))
     }
 
+    #[tracing::instrument]
     async fn move_length_for_one_user(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: u64, change: i32) -> Result<i32, sqlx::Error> {
         sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
                     chat_id_internal, user_id as i64, change)
@@ -147,6 +155,7 @@ impl Dicks {
             .await
     }
 
+    #[tracing::instrument]
     async fn get_position_in_top(&self, chat_id_internal: i64, uid: i64) -> anyhow::Result<Option<u64>> {
         if !self.features.top_unlimited {
             return Ok(None)
@@ -165,7 +174,8 @@ impl Dicks {
             .map(|pos| Some(pos as u64))
             .map_err(|e| e.into())
     }
-    
+
+    #[tracing::instrument]
     pub async fn grow_no_attempts_check(&self, chat_id: &ChatIdKind, user_id: UserId, change: i32) -> anyhow::Result<GrowthResult> {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
         let uid = user_id.0 as i64;
@@ -177,6 +187,7 @@ impl Dicks {
         Ok(GrowthResult { new_length, pos_in_top })
     }
 
+    #[tracing::instrument]
     pub(super) async fn grow_no_attempts_check_internal<'c, E>(executor: E, chat_id_internal: i64, user_id: i64, bonus: i32) -> anyhow::Result<Option<i32>>
     where E: Executor<'c, Database = Postgres>,
     {
@@ -190,6 +201,7 @@ impl Dicks {
             .map_err(|e| e.into())
     }
 
+    #[tracing::instrument]
     async fn insert_to_dod_table(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: i64) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
                 chat_id_internal, user_id)

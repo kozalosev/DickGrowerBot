@@ -27,6 +27,7 @@ impl From<PersonalStatsEntity> for PersonalStats {
 }
 
 repository!(PersonalStatsRepo,
+    #[tracing::instrument]
     pub async fn get(&self, user_id: UserId) -> anyhow::Result<PersonalStats> {
         sqlx::query_as!(PersonalStatsEntity,
                 r#"SELECT count(chat_id) AS chats,

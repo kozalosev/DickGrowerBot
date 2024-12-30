@@ -34,12 +34,14 @@ use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
+#[derive(Debug)]
 pub enum CallbackResult {
     EditMessage(String, Option<InlineKeyboardMarkup>),
     ShowError(String),
 }
 
 impl CallbackResult {
+    #[tracing::instrument]
     pub async fn apply(self, bot: Bot, callback_query: CallbackQuery) -> anyhow::Result<()> {
         let answer_req = bot.answer_callback_query(callback_query.id);
         match self {
@@ -123,6 +125,7 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: Message, answer: T) -> JsonReq
     answer
 }
 
+#[tracing::instrument]
 pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&query.from);
     bot.answer_callback_query(query.id)
@@ -150,6 +153,7 @@ pub mod checks {
         !is_group_chat(msg)
     }
 
+    #[tracing::instrument]
     pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         let answer = t!("errors.not_group_chat", locale = &lang_code);
@@ -174,6 +178,7 @@ pub mod checks {
             !is_group_chat(query)
         }
 
+        #[tracing::instrument]
         pub async fn handle_not_group_chat(bot: Bot, query: InlineQuery) -> HandlerResult {
             bot.answer_inline_query(query.id, vec![])
                 .is_personal(true)

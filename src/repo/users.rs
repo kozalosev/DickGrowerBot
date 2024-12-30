@@ -13,6 +13,7 @@ pub struct User {
 }
 
 repository!(Users,
+    #[tracing::instrument]
     pub async fn create_or_update(&self, user_id: UserId, name: &str) -> anyhow::Result<User> {
         let uid = user_id.0 as i64;
         sqlx::query_as!(User,
@@ -25,6 +26,7 @@ repository!(Users,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     pub async fn get_chat_members(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User,
             "SELECT u.uid, name, created_at FROM Users u
@@ -37,6 +39,7 @@ repository!(Users,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     pub async fn get_random_active_member(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             "SELECT u.uid, name, u.created_at FROM Users u
@@ -51,6 +54,7 @@ repository!(Users,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     pub async fn get_random_active_poor_member(&self, chat_id: &ChatIdKind, rich_exclusion_ratio: Ratio) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             "WITH ranked_users AS (
@@ -71,6 +75,7 @@ repository!(Users,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     pub async fn get_random_active_member_with_poor_in_priority(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             "WITH user_weights AS (
@@ -102,6 +107,7 @@ repository!(Users,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     pub async fn get(&self, user_id: UserId) -> Result<Option<User>, sqlx::Error> {
         sqlx::query_as!(User, "SELECT uid, name, created_at FROM Users WHERE uid = $1",
                 user_id.0 as i64)

@@ -18,6 +18,7 @@ impl ExternalUser {
 }
 
 repository!(Import,
+    #[tracing::instrument]
     pub async fn get_imported_users(&self, chat_id: ChatId) -> anyhow::Result<Vec<ExternalUser>> {
         sqlx::query_as!(ExternalUser,
                 "SELECT uid, original_length AS length FROM Imports WHERE chat_id = $1",
@@ -27,6 +28,7 @@ repository!(Import,
             .map_err(|e| e.into())
     }
 ,
+    #[tracing::instrument]
     pub async fn import(&self, chat_id: ChatId, users: &[ExternalUser]) -> anyhow::Result<()> {
         let chat_id = chat_id.0;
         let mut tx = self.pool.begin().await?;
@@ -36,6 +38,7 @@ repository!(Import,
         Ok(())
     }
 ,
+    #[tracing::instrument]
     async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &[ExternalUser]) -> anyhow::Result<Vec<i64>> {
         let (uids, lengths): (Vec<i64>, Vec<i32>) = users.iter()
             .map(|user| (user.uid, user.length))
@@ -47,6 +50,7 @@ repository!(Import,
         Ok(uids)
     }
 ,
+    #[tracing::instrument]
     async fn update_dicks(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uids: Vec<i64>) -> anyhow::Result<()> {
         sqlx::query!("WITH original AS (SELECT c.id as chat_id, uid, original_length
                         FROM Imports JOIN Chats c USING (chat_id)
