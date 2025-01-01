@@ -143,9 +143,9 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     Ok(())
 }
 
-pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: String, bet: u16) -> InlineQueryResult {
+pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: Username, bet: u16) -> InlineQueryResult {
     let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
-    let text = t!("commands.pvp.results.start", locale = lang_code, name = name, bet = bet);
+    let text = t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet);
     let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
     let btn_label = t!("commands.pvp.button", locale = lang_code);
     let btn_data = BattleCallbackData::new(uid, bet).to_data_string();
@@ -221,7 +221,7 @@ impl From<&User> for UserInfo {
     fn from(value: &User) -> Self {
         Self {
             uid: value.id,
-            name: Username::new(utils::get_full_name(value))
+            name: utils::get_full_name(value)
         }
     }
 }

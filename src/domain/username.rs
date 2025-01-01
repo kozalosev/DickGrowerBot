@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use derive_more::{Constructor, From};
 
 #[derive(Debug, Clone, Constructor, From, Eq, PartialEq)]
@@ -20,5 +21,13 @@ impl Username {
 impl AsRef<String> for Username {
     fn as_ref(&self) -> &String {
         &self.0
+    }
+}
+
+impl Deref for Username {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
     }
 }
