@@ -1,6 +1,8 @@
 use std::ops::Deref;
 use derive_more::{Constructor, From};
 
+const LTR_MARK: char = '\u{200E}';
+
 #[derive(Debug, Clone, Constructor, From, Eq, PartialEq)]
 pub struct Username(String);
 
@@ -14,7 +16,8 @@ impl Username {
     }
 
     pub fn escaped(&self) -> String {
-        teloxide::utils::html::escape(self.value_ref())
+        let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", self.value_ref());
+        teloxide::utils::html::escape(&ltr_name)
     }
 }
 

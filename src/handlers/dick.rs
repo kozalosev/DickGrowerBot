@@ -13,13 +13,12 @@ use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
 use page::{InvalidPage, Page};
 
 use crate::{config, metrics, repo};
-use crate::domain::LanguageCode;
+use crate::domain::{LanguageCode, Username};
 use crate::handlers::{HandlerResult, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, page};
 use crate::repo::{ChatIdPartiality, UID};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
-const LTR_MARK: char = '\u{200E}';
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
 
 #[derive(BotCommands, Clone)]
@@ -133,8 +132,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
         .take(config.top_limit as usize)
         .enumerate()
         .map(|(i, d)| {
-            let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
-            let escaped_name = teloxide::utils::html::escape(&ltr_name);
+            let escaped_name = Username::new(d.owner_name).escaped();
             let name = if from.id == <UID as Into<UserId>>::into(d.owner_uid) {
                 format!("<u>{escaped_name}</u>")
             } else {
