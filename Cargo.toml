@@ -8,7 +8,7 @@ license-file = "LICENSE"
 
 [dependencies]
 # Telegram Bot framework and localization library
-teloxide = { version = "0.13.0", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler"] }
+teloxide = { git = "https://github.com/LasterAlex/teloxide/", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler"] }
 rust-i18n = "3.1.2"
 # Asynchronous runtime, web server, metrics
 tokio = { version =  "1.42.0", default-features = false, features = ["rt-multi-thread", "macros"] }
