@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::str::FromStr;
 use anyhow::anyhow;
 use futures::TryFutureExt;
+use once_cell::sync::Lazy;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
@@ -11,7 +13,7 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::domain::LanguageCode;
+use crate::domain::{LanguageCode, Username};
 use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
@@ -94,6 +96,38 @@ impl InlineCommand {
     }
 }
 
+type ExternalVariantBuilder = fn(&InlineQuery, &LanguageCode, &AppConfig, &Username) -> InlineQueryResult;
+
+struct ExternalVariant {
+    result_id: &'static str,
+    builder: ExternalVariantBuilder
+}
+
+struct ExternalVariants {
+    result_ids: HashSet<&'static str>,
+    builders: Vec<ExternalVariantBuilder>
+}
+impl ExternalVariants {
+    fn new(variants: &'static [ExternalVariant]) -> Self {
+        let result_ids = variants.iter()
+            .map(|v| v.result_id)
+            .collect();
+        let builders = variants.iter()
+            .map(|v| v.builder)
+            .collect();
+        Self { result_ids, builders }
+    }
+}
+
+static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants::new(&[
+    ExternalVariant {
+        result_id: "pvp",
+        builder: |query, lang_code, app_config, name| {
+            pvp::build_inline_keyboard_article_result(query.from.id, &lang_code, name, app_config.pvp_default_bet)
+        }
+    }
+]));
+
 pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
@@ -121,7 +155,9 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
             InlineQueryResult::Article(article)
         })
         .collect();
-    results.push(pvp::build_inline_keyboard_article_result(query.from.id, &lang_code, name, app_config.pvp_default_bet));
+    for builder in &EXTERNAL_VARIANTS.builders {
+        results.push(builder(&query, &lang_code, &app_config, &name))
+    }
 
     let mut answer = bot.answer_inline_query(query.id, results)
         .is_personal(true);
@@ -136,6 +172,10 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                                    repos: Repositories, config: AppConfig,
                                    incr: Incrementor) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
+
+    if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
+        return Ok(())
+    }
 
     let maybe_chat_in_sync = result.inline_message_id.as_ref()
         .and_then(try_resolve_chat_id)

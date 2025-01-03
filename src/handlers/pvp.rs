@@ -132,7 +132,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let bet: u16 = query.query.parse()?;
     let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
-    let res = build_inline_keyboard_article_result(query.from.id, &lang_code, name, bet);
+    let res = build_inline_keyboard_article_result(query.from.id, &lang_code, &name, bet);
 
     let mut answer = bot.answer_inline_query(query.id, vec![res])
         .is_personal(true);
@@ -143,7 +143,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     Ok(())
 }
 
-pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: Username, bet: u16) -> InlineQueryResult {
+pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: &Username, bet: u16) -> InlineQueryResult {
     let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
     let text = t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet);
     let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
