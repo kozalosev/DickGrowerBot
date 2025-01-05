@@ -99,7 +99,7 @@ pub trait CallbackDataWithPrefix<E = InvalidCallbackData>: TryFrom<String, Error
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum EditMessageReqParamsKind {
     Chat(ChatId, MessageId),
     Inline { chat_instance: String, inline_message_id: String },

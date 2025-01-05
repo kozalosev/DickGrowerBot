@@ -1,3 +1,4 @@
+use anyhow::Context;
 use derive_more::Constructor;
 use sqlx::{Pool, Postgres};
 use crate::repo::{ensure_only_one_row_updated, ChatIdInternal, ChatIdKind};
@@ -73,7 +74,7 @@ impl Announcements {
             .fetch_optional(&self.pool)
             .await
             .map(|opt| opt.map(Into::into))
-            .map_err(Into::into)
+            .context(format!("couldn't get the announcement for {chat_id_kind}, {lang_code:?}"))
     }
 
     async fn create(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode, hash: &[u8]) -> anyhow::Result<()> {
@@ -86,6 +87,7 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't create the announcement for {chat_id_kind}, {lang_code:?}, {hash:?}"))
     }
 
     async fn increment_times_shown(&self, chat_id: ChatIdInternal, lang_code: &LanguageCode) -> anyhow::Result<()> {
@@ -95,6 +97,7 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't increment shown times for {chat_id:?}, {lang_code:?}"))
     }
 
     async fn update(&self, chat_id: ChatIdInternal, lang_code: &LanguageCode, hash: &[u8]) -> anyhow::Result<()> {
@@ -104,5 +107,6 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't update announcement for {chat_id:?}, {lang_code:?}, {hash:?}"))
     }
 }

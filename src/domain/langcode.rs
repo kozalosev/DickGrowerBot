@@ -9,8 +9,7 @@ use teloxide::types::User;
 
 static DEFAULT: Lazy<LanguageCode> = Lazy::new(|| LanguageCode("en".to_string()));
 
-#[derive(Clone, Constructor, From)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Debug, Constructor, From)]
 pub struct LanguageCode(String);
 
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, sqlx::Type)]

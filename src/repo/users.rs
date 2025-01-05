@@ -1,3 +1,4 @@
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use teloxide::types::UserId;
 
@@ -22,7 +23,7 @@ repository!(Users,
                 uid, name)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't upsert a user with id = {user_id}"))
     }
 ,
     pub async fn get_chat_members(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<User>> {
@@ -34,7 +35,7 @@ repository!(Users,
                 chat_id.value() as String)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get users of the chat with id = {chat_id}"))
     }
 ,
     pub async fn get_random_active_member(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
@@ -48,7 +49,7 @@ repository!(Users,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
     pub async fn get_random_active_poor_member(&self, chat_id: &ChatIdKind, rich_exclusion_ratio: Ratio) -> anyhow::Result<Option<User>> {
@@ -68,7 +69,7 @@ repository!(Users,
                 chat_id.value() as String, 1.0 - rich_exclusion_ratio.to_value())
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get a random active poor user of the chat with id = {chat_id}"))
     }
 ,
     pub async fn get_random_active_member_with_poor_in_priority(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
@@ -99,14 +100,15 @@ repository!(Users,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
-    pub async fn get(&self, user_id: UserId) -> Result<Option<User>, sqlx::Error> {
+    pub async fn get(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User, "SELECT uid, name, created_at FROM Users WHERE uid = $1",
                 user_id.0 as i64)
             .fetch_optional(&self.pool)
             .await
+            .context(format!("couldn't get a user with id = {user_id}"))
     }
 ,
     #[cfg(test)]
@@ -114,6 +116,6 @@ repository!(Users,
         sqlx::query_as!(User, "SELECT * FROM Users")
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .map_err(Into::into)
     }
 );

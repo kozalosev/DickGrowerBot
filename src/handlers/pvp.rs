@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::join;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -9,7 +9,7 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
 use crate::handlers::{CallbackResult, HandlerResult, reply_html, send_error_callback_answer, utils};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::{LanguageCode, Username};
 use crate::handlers::utils::callbacks;
@@ -102,7 +102,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     };
     let (text, keyboard) = pvp_impl_start(params, user, cmd.bet()).await?;
 
-    let mut answer = reply_html(bot, msg, text);
+    let mut answer = reply_html(bot, &msg, text);
     answer.reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard);
     answer.await?;
     Ok(())
@@ -112,7 +112,7 @@ pub async fn cmd_handler_no_args(bot: Bot, msg: Message) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
-    reply_html(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code)).await?;
+    reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
     Ok(())
 }
 
@@ -134,12 +134,12 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id, &lang_code, &name, bet);
 
-    let mut answer = bot.answer_inline_query(query.id, vec![res])
+    let mut answer = bot.answer_inline_query(&query.id, vec![res.clone()])
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await?;
+    answer.await.context(format!("couldn't answer a callback query {query:?} with {res:?}"))?;
     Ok(())
 }
 

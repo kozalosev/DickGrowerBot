@@ -1,5 +1,5 @@
 use std::fmt::Formatter;
-use anyhow::bail;
+use anyhow::{bail, Context};
 use sqlx::{Postgres, Transaction};
 use teloxide::types::ChatId;
 use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ensure_only_one_row_updated};
@@ -42,7 +42,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get the information about the chat with id = {chat_id}"))
     }
 ,
     pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<i64, SearchError<ChatIdKind>> {
@@ -65,7 +65,8 @@ repository!(Chats, with_feature_toggles,
                 WHERE chat_id = $1 OR chat_instance = $2",
                 id, instance)
             .fetch_all(&mut *tx)
-            .await?;
+            .await
+            .context(format!("couldn't find the chat with id = {chat_id}"))?;
         let internal_id = match chats.len() {
             1 if chats[0].chat_id == id && chats[0].chat_instance == instance => Ok(chats[0].internal_id),
             1 => Self::update_chat(&mut tx, chats[0].internal_id, id, instance).await,
@@ -83,7 +84,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id, chat_instance)
             .fetch_one(&mut **tx)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't create a chat with chat_id = {chat_id:?} or chat_instance = {chat_instance:?}"))
     }
 ,
     async fn update_chat(tx: &mut Transaction<'_, Postgres>, internal_id: i64, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
@@ -93,7 +94,7 @@ repository!(Chats, with_feature_toggles,
             .execute(&mut **tx)
             .await
             .map(|_| internal_id)
-            .map_err(|e| e.into())
+            .context(format!("couldn't update the chat with id = {internal_id} to chat_id = {chat_id:?}, chat_instance = {chat_instance:?}))"))
     }
 ,
     async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<i64> {
@@ -104,11 +105,13 @@ repository!(Chats, with_feature_toggles,
                     FROM sum_dicks WHERE chat_id = $1 AND d.uid = sum_dicks.uid",
                 state.main.internal_id, state.deleted.0)
             .execute(&mut **tx)
-            .await?
+            .await
+            .context(format!("couldn't update dicks while merging in the chats = {chats:?}"))?
             .rows_affected();
         let deleted_dicks = sqlx::query!("DELETE FROM Dicks WHERE chat_id = $1", state.deleted.0)
             .execute(&mut **tx)
-            .await?
+            .await
+            .context(format!("couldn't delete dicks from the old chat with id = {}", state.deleted.0))?
             .rows_affected();
         log::info!("merging chats: {chats:?}, updated dicks: {updated_dicks}, deleted: {deleted_dicks}");
 
@@ -116,14 +119,16 @@ repository!(Chats, with_feature_toggles,
                 state.deleted.0, state.deleted.1)
             .execute(&mut **tx)
             .await
-            .map_err(|e| e.into())
-            .and_then(ensure_only_one_row_updated)?;
+            .map_err(Into::into)
+            .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't delete the old chat with id = {} and chat_instance = {}", state.deleted.0, state.deleted.1))?;
         sqlx::query!("UPDATE Chats SET chat_instance = $3 WHERE id = $1 AND chat_id = $2",
                 state.main.internal_id, state.main.chat_id, state.main.chat_instance)
             .execute(&mut **tx)
             .await
-            .map_err(|e| e.into())
-            .and_then(ensure_only_one_row_updated)?;
+            .map_err(Into::into)
+            .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't update chat_instance of the new chat with ids = {} and {} to {}", state.main.internal_id, state.main.chat_id, state.main.chat_instance))?;
         Ok(state.main.internal_id)
     }
 );
@@ -173,7 +178,7 @@ fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, 
                 chat_id: chat_ids[0].1,
                 chat_instance: chat_instances[0].1,
             },
-            deleted: (chat_instances[0].0, &chat_instances[0].1)
+            deleted: (chat_instances[0].0, chat_instances[0].1)
         })
     }
 }

@@ -35,7 +35,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, conf
     let result = loan_impl(&repos, from_refs, config).await?;
     let markup = result.keyboard().map(ReplyMarkup::InlineKeyboard);
 
-    let mut request = reply_html(bot, msg, result.text());
+    let mut request = reply_html(bot, &msg, result.text());
     request.reply_markup = markup;
     request.await?;
 

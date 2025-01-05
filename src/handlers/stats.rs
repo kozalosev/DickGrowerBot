@@ -4,7 +4,7 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
 use crate::handlers::{FromRefs, HandlerResult, reply_html};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::LanguageCode;
 use crate::repo::WinRateAware;
@@ -31,7 +31,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
             chat_stats_impl(&repos, from_refs, features).await?
         };
 
-        reply_html(bot, msg, answer).await?;
+        reply_html!(bot, msg, answer);
     } else {
         log::info!("ignoring the /stats command since it's disabled");
     }

@@ -28,7 +28,7 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     let answer = dick_of_day_impl(cfg, &repos, incr, from_refs).await?;
-    reply_html(bot, msg, answer)
+    reply_html(bot, &msg, answer)
         .link_preview_options(disabled_link_preview())
         .await?;
     Ok(())

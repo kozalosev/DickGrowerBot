@@ -9,7 +9,7 @@ use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Message, UserId};
 use crate::handlers::{HandlerResult, reply_html};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html, repo};
 use crate::domain::{LanguageCode, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
@@ -177,7 +177,7 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
             t!(&t_key, locale = &lang_code).to_string()
         },
     };
-    reply_html(bot, msg, answer).await?;
+    reply_html!(bot, msg, answer);
     Ok(())
 }
 

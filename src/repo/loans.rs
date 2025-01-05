@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::Context;
 use sqlx::Postgres;
 use teloxide::types::UserId;
 
@@ -49,9 +49,11 @@ impl Loans {
                     AND repaid_at IS NULL",
                 uid.0 as i64, chat_id.value() as String)
             .fetch_optional(&self.pool)
-            .await?
+            .await
+            .context(format!("couldn't get an active loan for {chat_id} and {uid}"))?
             .map(Loan::try_from)
-            .transpose()?;
+            .transpose()
+            .context(format!("couldn't convert the loan for {chat_id} and {uid}"))?;
         Ok(maybe_loan)
     }
 
@@ -62,7 +64,8 @@ impl Loans {
         sqlx::query!("INSERT INTO Loans (chat_id, uid, debt, payout_ratio) VALUES ($1, $2, $3, $4)",
                 chat_internal_id, uid.0 as i64, value as i32, self.payout_ratio)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .context(format!("couldn't insert a loan for {chat_id} and {uid} with value of {value}"))?;
         Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, uid.0 as i64, value.into()).await?;
 
         tx.commit().await?;
@@ -77,7 +80,8 @@ impl Loans {
                 uid.0 as i64, chat_id.value() as String, value as i32)
             .execute(&self.pool)
             .await
-            .map_err(|e| anyhow!(e))
+            .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't pay for a loan: {chat_id}, {uid}, {value}"))
     }
 }

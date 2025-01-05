@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::str::FromStr;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::TryFutureExt;
 use once_cell::sync::Lazy;
 use rust_i18n::t;
@@ -123,7 +123,7 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
     ExternalVariant {
         result_id: "pvp",
         builder: |query, lang_code, app_config, name| {
-            pvp::build_inline_keyboard_article_result(query.from.id, &lang_code, name, app_config.pvp_default_bet)
+            pvp::build_inline_keyboard_article_result(query.from.id, lang_code, name, app_config.pvp_default_bet)
         }
     }
 ]));
@@ -159,12 +159,12 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
         results.push(builder(&query, &lang_code, &app_config, &name))
     }
 
-    let mut answer = bot.answer_inline_query(query.id, results)
+    let mut answer = bot.answer_inline_query(&query.id, results.clone())
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await?;
+    answer.await.context(format!("couldn't answer inline query {query:?} with results {results:?}"))?;
     Ok(())
 }
 
@@ -187,7 +187,8 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
         if let Some(chat) = maybe_chat {
             log::debug!("[inline_chosen_handler] chat: {chat:?}, user_id: {}", result.from.id);
 
-            let cmd = InlineCommand::from_str(&result.result_id)?;
+            let cmd = InlineCommand::from_str(&result.result_id)
+                .context(format!("couldn't parse inline command '{}'", result.result_id))?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
@@ -212,9 +213,9 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     let lang_code = LanguageCode::from_user(&query.from);
     let mut answer = bot.answer_callback_query(&query.id);
 
-    if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {
+    if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {
         let chat_id = config.features.chats_merging
-            .then(|| utils::resolve_inline_message_id(&inline_msg_id))
+            .then(|| utils::resolve_inline_message_id(inline_msg_id))
             .map(|res| match res {
                 Ok(info) => ChatIdFull {
                     id: ChatId(info.chat_id),
@@ -228,7 +229,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
             .unwrap_or(query.chat_instance.clone().into());
         log::debug!("[callback_handler] chat_id: {chat_id:?}, user_id: {}", query.from.id);
 
-        let parse_res = parse_callback_data(&data, query.from.id);
+        let parse_res = parse_callback_data(data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
@@ -259,7 +260,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
         answer.show_alert.replace(true);
     };
 
-    answer.await?;
+    answer.await.context(format!("couldn't answer a callback query {query:?}"))?;
     Ok(())
 }
 
