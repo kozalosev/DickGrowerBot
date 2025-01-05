@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sqlx::{Postgres, Transaction};
 use teloxide::types::{ChatId, UserId};
 use crate::repository;
@@ -24,7 +25,7 @@ repository!(Import,
                 chat_id.0 as i64)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get imported users of {chat_id}"))
     }
 ,
     pub async fn import(&self, chat_id: ChatId, users: &[ExternalUser]) -> anyhow::Result<()> {
@@ -43,7 +44,8 @@ repository!(Import,
         sqlx::query!("INSERT INTO Imports (chat_id, uid, original_length) SELECT $1, * FROM UNNEST($2::bigint[], $3::int[])",
                 chat_id, &uids, &lengths)
             .execute(&mut **tx)
-            .await?;
+            .await
+            .context(format!("couldn't insert into imports table with chat_id = {chat_id} and users = {users:?}"))?;
         Ok(uids)
     }
 ,
@@ -55,7 +57,8 @@ repository!(Import,
                             FROM original o WHERE d.chat_id = o.chat_id AND d.uid = o.uid",
                 chat_id, &uids)
             .execute(&mut **tx)
-            .await?;
+            .await
+            .context(format!("couldn't update dicks while importing in the chat with id = {chat_id}: {uids:?}"))?;
         Ok(())
     }
 );

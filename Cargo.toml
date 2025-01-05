@@ -7,37 +7,47 @@ license-file = "LICENSE"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-teloxide = { version = "0.12", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler"] }
-log = "0.4"
+# Telegram Bot framework and localization library
+teloxide = { git = "https://github.com/LasterAlex/teloxide/", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler"] }
+rust-i18n = "3.1.2"
+# Asynchronous runtime, web server, metrics
+tokio = { version =  "1.42.0", default-features = false, features = ["rt-multi-thread", "macros"] }
+axum = "0.7.9"
+axum-prometheus = "0.8.0"
+prometheus = "0.13.4"
+# Logging and envs
+log = "0.4.22"
 pretty_env_logger = "0.5.0"
-tokio = { version =  "1.32.0", features = ["rt-multi-thread", "macros"] }
-reqwest = { version = "0.11.17", default-features = false, features = ["rustls-tls"] }
-once_cell = "1.17.1"
-serde = { version = "1.0.188", features = ["derive"] }
-serde_json = "1.0.96"
-axum = "0.6.20"
-axum-prometheus = "0.4.0"
-hyper = "1.0.0-rc.3"
-futures = "0.3.28"
-prometheus = "0.13.3"
-rust-i18n = "2.1.0"
-async-trait = "0.1.68"
-anyhow = "1.0.71"
-sqlx = { version = "0.7", features = [ "runtime-tokio", "postgres", "chrono", "tls-rustls" ] }
-rand = "0.8.5"
 dotenvy = "0.15.7"
-regex = "1.9.5"
-strum = "0.25.0"
-strum_macros = "0.25.2"
-chrono = { version = "0.4.31", features = [ "serde" ] }
+# Database and SQL
+sqlx = { version = "0.8.3", features = [ "runtime-tokio", "postgres", "chrono", "tls-rustls" ] }
+# HTTP client with caching
+reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls", "json"] }
+# Serialization / deserialization
+serde = { version = "1.0.217", features = ["derive"] }
+# HTML and templates
 tinytemplate = "1.2.1"
-base64 = { package = "simple-base64", version = "0.23.2" }
+# Derive macros
+strum = "0.26.3"
+strum_macros = "0.26.4"
+derive_more = { version = "1.0.0", features = ["display", "from", "constructor", "error", "from_str"] }
+anyhow = { version = "1.0.95", features = ["backtrace"] }
+# Other basic stuff
+regex = "1.11.1"
+rand = "0.8.5"
+chrono = { version = "0.4.39", features = [ "serde" ] }
+base64 = "0.22.1"
 byteorder = "1.5.0"
-derive_more = { version = "1.0.0-beta.6", features = ["display", "error", "constructor", "from", "from_str"] }
-num-traits = "0.2.18"
-downcast-rs = "1.2.0"
-flurry = "0.5.1"
+flurry = "0.5.2"
 sha2 = "0.10.8"
+language-tags = "0.3.2"
+unicode-general-category = "1.0.0"
+# Rust specific stuff
+once_cell = "1.20.2"
+futures = "0.3.31"
+async-trait = "0.1.84"
+num-traits = "0.2.19"
+downcast-rs = "1.2.1"
 
 [dev-dependencies]
-testcontainers = "0.15.0"
+testcontainers = "0.23.1"

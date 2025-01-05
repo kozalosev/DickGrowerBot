@@ -12,8 +12,9 @@ use std::str::FromStr;
 use reqwest::Url;
 use sqlx::{Pool, Postgres};
 use teloxide::types::{ChatId, UserId};
-use testcontainers::{clients, Container, GenericImage};
-use testcontainers::core::WaitFor;
+use testcontainers::{ContainerAsync, GenericImage, ImageExt};
+use testcontainers::core::{IntoContainerPort, WaitFor};
+use testcontainers::runners::AsyncRunner;
 use crate::config::DatabaseConfig;
 use crate::repo;
 use crate::repo::ChatIdKind;
@@ -30,18 +31,22 @@ pub const NAME: &str = "test";
 pub const USER_ID: UserId = UserId(UID as u64);
 pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(ChatId(CHAT_ID));
 
-pub async fn start_postgres(docker: &clients::Cli) -> (Container<GenericImage>, Pool<Postgres>) {
-    let postgres_image = GenericImage::new("postgres", "latest")
-        .with_exposed_port(POSTGRES_PORT)
+pub async fn start_postgres() -> (ContainerAsync<GenericImage>, Pool<Postgres>) {
+    let postgres_container = GenericImage::new("postgres", "latest")
+        .with_exposed_port(POSTGRES_PORT.tcp())
         .with_wait_for(WaitFor::message_on_stdout("PostgreSQL init process complete; ready for start up."))
         .with_wait_for(WaitFor::message_on_stdout("PostgreSQL init process complete; ready for start up."))
         .with_wait_for(WaitFor::millis(300))
         .with_env_var("POSTGRES_USER", POSTGRES_USER)
         .with_env_var("POSTGRES_PASSWORD", POSTGRES_PASSWORD)
-        .with_env_var("POSTGRES_DB", POSTGRES_DB);
+        .with_env_var("POSTGRES_DB", POSTGRES_DB)
+        .start()
+        .await
+        .expect("couldn't start Postgres database");
 
-    let postgres_container = docker.run(postgres_image);
-    let postgres_port = postgres_container.get_host_port_ipv4(POSTGRES_PORT);
+    let postgres_port = postgres_container.get_host_port_ipv4(POSTGRES_PORT)
+        .await
+        .expect("couldn't fetch port from PostgreSQL server");
     let db_url = Url::from_str(&format!("postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@localhost:{postgres_port}/{POSTGRES_DB}"))
         .expect("invalid database URL");
     let conf = DatabaseConfig{

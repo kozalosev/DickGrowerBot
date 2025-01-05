@@ -1,5 +1,4 @@
 use teloxide::types::UserId;
-use testcontainers::clients;
 use crate::repo;
 use crate::repo::PromoCodeParams;
 use crate::repo::test::{start_postgres, UID};
@@ -11,8 +10,7 @@ const PROMO_BONUS: u32 = 10;
 
 #[tokio::test]
 async fn activate() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
 
     let promo = repo::Promo::new(db.clone());
     promo.create(PromoCodeParams{

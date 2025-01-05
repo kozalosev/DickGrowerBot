@@ -91,7 +91,6 @@ impl Perk for LoanPayoutPerk {
 
 #[cfg(test)]
 mod test {
-    use testcontainers::clients;
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk};
     use crate::handlers::utils::{ChangeIntent, DickId, Perk};
     use crate::{config, repo};
@@ -118,8 +117,7 @@ mod test {
 
     #[tokio::test]
     async fn test_loan_payout() {
-        let docker = clients::Cli::default();
-        let (_container, db) = start_postgres(&docker).await;
+        let (_container, db) = start_postgres().await;
         let loans = {
             let cfg = config::AppConfig {
                 loan_payout_ratio: 0.1,

@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::TryFutureExt;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use teloxide::types::UserId;
@@ -44,7 +44,8 @@ impl Dicks {
                 RETURNING length",
                 uid, internal_chat_id, increment)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
         Ok(GrowthResult { new_length, pos_in_top })
     }
@@ -58,7 +59,7 @@ impl Dicks {
             .fetch_optional(&self.pool)
             .await
             .map(Option::unwrap_or_default)
-            .map_err(Into::into)
+            .context(format!("couldn't fetch length for {chat_id} and {uid}"))
     }
 
     pub async fn fetch_dick(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Dick>> {
@@ -74,10 +75,10 @@ impl Dicks {
                 uid.0 as i64, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .map_err(Into::into)
+            .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
-    pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u16) -> anyhow::Result<Vec<Dick>, sqlx::Error> {
+    pub async fn get_top(&self, chat_id: &ChatIdKind, offset: u32, limit: u16) -> anyhow::Result<Vec<Dick>> {
         sqlx::query_as!(Dick,
             r#"SELECT length, uid as owner_uid, name as owner_name, updated_at as grown_at,
                     ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
@@ -89,6 +90,7 @@ impl Dicks {
                 chat_id.value() as String, offset as i64, limit as i32)
             .fetch_all(&self.pool)
             .await
+            .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
     pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: u16) -> anyhow::Result<Option<GrowthResult>> {
@@ -115,8 +117,8 @@ impl Dicks {
                 chat_id.value() as String, user_id.0 as i64, length as i32)
             .fetch_optional(&self.pool)
             .map_ok(|opt| opt.unwrap_or(false))
-            .map_err(|e| e.into())
             .await
+            .context(format!("couldn't check the dick {chat_id}, {user_id} to have at least {length} cm"))
     }
 
     pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: u16) -> anyhow::Result<(GrowthResult, GrowthResult)> {
@@ -140,11 +142,12 @@ impl Dicks {
         Ok((gr_from, gr_to))
     }
 
-    async fn move_length_for_one_user(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: u64, change: i32) -> Result<i32, sqlx::Error> {
+    async fn move_length_for_one_user(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: u64, change: i32) -> anyhow::Result<i32> {
         sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
                     chat_id_internal, user_id as i64, change)
             .fetch_one(&mut **tx)
             .await
+            .context(format!("couldn't update the length by {change} for {chat_id_internal}, {user_id}"))
     }
 
     async fn get_position_in_top(&self, chat_id_internal: i64, uid: i64) -> anyhow::Result<Option<u64>> {
@@ -163,7 +166,7 @@ impl Dicks {
             .fetch_one(&self.pool)
             .await
             .map(|pos| Some(pos as u64))
-            .map_err(|e| e.into())
+            .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
     }
     
     pub async fn grow_no_attempts_check(&self, chat_id: &ChatIdKind, user_id: UserId, change: i32) -> anyhow::Result<GrowthResult> {
@@ -187,14 +190,15 @@ impl Dicks {
                 chat_id_internal, user_id, bonus)
             .fetch_optional(executor)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
     }
 
     async fn insert_to_dod_table(tx: &mut Transaction<'_, Postgres>, chat_id_internal: i64, user_id: i64) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
                 chat_id_internal, user_id)
             .execute(&mut **tx)
-            .await?;
+            .await
+            .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))?;
         Ok(())
     }
 }

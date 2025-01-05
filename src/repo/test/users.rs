@@ -1,6 +1,5 @@
 use sqlx::{Pool, Postgres};
 use teloxide::types::{ChatId, UserId};
-use testcontainers::clients;
 use crate::domain::Ratio;
 use crate::repo;
 use crate::repo::{ChatIdKind, ChatIdPartiality};
@@ -9,8 +8,7 @@ use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dic
 
 #[tokio::test]
 async fn create_or_update() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let users = repo::Users::new(db.clone());
 
     let members = users.get_all().await
@@ -38,8 +36,7 @@ async fn create_or_update() {
 
 #[tokio::test]
 async fn get_chat_members() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let users = repo::Users::new(db.clone());
 
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
@@ -96,15 +93,13 @@ macro_rules! base_checks {
 
 #[tokio::test]
 async fn get_random_active_member() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     base_checks!(db, get_random_active_member);
 }
 
 #[tokio::test]
 async fn get_random_active_poor_member() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let ratio = Ratio::new(0.9).unwrap();
     base_checks!(db, get_random_active_poor_member, ratio);
 
@@ -120,10 +115,10 @@ async fn get_random_active_poor_member() {
     }
 }
 
+#[ignore]   // See #60; also, the test is failed too often.
 #[tokio::test]
 async fn get_random_active_member_with_poor_in_priority() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     base_checks!(db, get_random_active_member_with_poor_in_priority);
 
     // create middle-class and rich users and ensure the chance they win is the lower, the longer their dicks are

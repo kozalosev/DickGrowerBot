@@ -28,14 +28,14 @@ pub enum LoanCommands {
 pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, config: AppConfig) -> HandlerResult {
     metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
-    let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+    let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
 
     let result = loan_impl(&repos, from_refs, config).await?;
     let markup = result.keyboard().map(ReplyMarkup::InlineKeyboard);
 
-    let mut request = reply_html(bot, msg, result.text());
+    let mut request = reply_html(bot, &msg, result.text());
     request.reply_markup = markup;
     request.await?;
 
@@ -49,12 +49,12 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
     
     let maybe_loan = repos.loans.get_active_loan(from.id, &chat_id_kind).await?;
     if let Some(Loan { debt, .. }) = maybe_loan {
-        let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt);
+        let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt).to_string();
         return Ok(HandlerImplResult::OnlyText(left_to_pay))
     }
 
     if config.loan_payout_ratio <= 0.0 || config.loan_payout_ratio >= 1.0 {
-        let err_text = t!("errors.feature_disabled", locale = &lang_code);
+        let err_text = t!("errors.feature_disabled", locale = &lang_code).to_string();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
@@ -64,7 +64,7 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
         let payout_percentage = format!("{:.2}%", config.loan_payout_ratio * 100.0);
 
         let btn_agree = CallbackButton::new(
-            t!("commands.loan.confirmation.buttons.agree", locale = &lang_code),
+            t!("commands.loan.confirmation.buttons.agree", locale = &lang_code).to_string(),
             LoanCallbackData {
                 uid: from.id,
                 action: LoanCallbackAction::Confirmed {
@@ -74,7 +74,7 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
             }
         );
         let btn_disagree = CallbackButton::new(
-            t!("commands.loan.confirmation.buttons.disagree", locale = &lang_code),
+            t!("commands.loan.confirmation.buttons.disagree", locale = &lang_code).to_string(),
             LoanCallbackData {
                 uid: from.id,
                 action: LoanCallbackAction::Refused
@@ -82,11 +82,11 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
         );
         HandlerImplResult::WithKeyboard {
             text: t!("commands.loan.confirmation.text", locale = &lang_code,
-                debt = debt, payout_percentage = payout_percentage),
+                debt = debt, payout_percentage = payout_percentage).to_string(),
             buttons: vec![btn_agree, btn_disagree]
         }
     } else {
-        let err_text = t!("commands.loan.errors.positive_length", locale = &lang_code);
+        let err_text = t!("commands.loan.errors.positive_length", locale = &lang_code).to_string();
         HandlerImplResult::OnlyText(err_text)
     };
     Ok(res)
@@ -106,7 +106,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     match data.action {
         LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {
             answer.show_alert.replace(true);
-            answer.text.replace(t!("errors.feature_disabled", locale = &lang_code));
+            answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
         }
         LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == config.loan_payout_ratio => {            
             metrics::CMD_LOAN_COUNTER.finished.inc();

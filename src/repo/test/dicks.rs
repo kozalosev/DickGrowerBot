@@ -1,7 +1,6 @@
 use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use teloxide::types::{ChatId, UserId};
-use testcontainers::clients;
 use crate::config::FeatureToggles;
 use crate::repo;
 use crate::repo::{ChatIdKind, ChatIdPartiality};
@@ -9,8 +8,7 @@ use crate::repo::test::{CHAT_ID, get_chat_id_and_dicks, NAME, start_postgres, UI
 
 #[tokio::test]
 async fn test_all() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     create_user(&db).await;
 
@@ -40,8 +38,7 @@ async fn test_all() {
 
 #[tokio::test]
 async fn test_all_with_top_pagination_disabled() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let dicks = {
         let features = FeatureToggles {
             top_unlimited: false,
@@ -77,8 +74,7 @@ async fn test_all_with_top_pagination_disabled() {
 
 #[tokio::test]
 async fn test_top_page() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
     let chat_id_partiality = chat_id.clone().into();
@@ -105,8 +101,7 @@ async fn test_top_page() {
 
 #[tokio::test]
 async fn test_pvp() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
     let chat_id_part: &ChatIdPartiality = &chat_id.clone().into();

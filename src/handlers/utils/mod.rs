@@ -8,18 +8,21 @@ pub use tghack::*;
 pub use incrementor::*;
 
 use teloxide::types::User;
+use crate::domain::Username;
 
-pub fn get_full_name(user: &User) -> String {
-    user.last_name.as_ref()
+pub fn get_full_name(user: &User) -> Username {
+    let name = user.last_name.as_ref()
         .map(|last_name| format!("{} {}", user.first_name, last_name))
-        .unwrap_or(user.first_name.clone())
+        .unwrap_or(user.first_name.clone());
+    Username::new(name)
 }
 
 pub mod date {
+    use std::borrow::Cow;
     use chrono::{DateTime, Duration, Timelike, Utc};
     use rust_i18n::t;
 
-    pub fn get_time_till_next_day_string(lang_code: &str) -> String {
+    pub fn get_time_till_next_day_string(lang_code: &str) -> Cow<str> {
         let now = if cfg!(test) {
             DateTime::parse_from_rfc3339("2023-10-21T22:10:57+00:00")
                 .expect("invalid datetime string")

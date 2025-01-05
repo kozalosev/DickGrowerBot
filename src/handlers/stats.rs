@@ -4,7 +4,7 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
 use crate::handlers::{FromRefs, HandlerResult, reply_html};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::LanguageCode;
 use crate::repo::WinRateAware;
@@ -21,7 +21,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
     
     let features = app_config.features.pvp;
     if features.show_stats {
-        let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+        let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
         let chat_id = msg.chat.id.into();
         let from_refs = FromRefs(from, &chat_id);
 
@@ -31,7 +31,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
             chat_stats_impl(&repos, from_refs, features).await?
         };
 
-        reply_html(bot, msg, answer).await?;
+        reply_html!(bot, msg, answer);
     } else {
         log::info!("ignoring the /stats command since it's disabled");
     }
@@ -42,7 +42,7 @@ async fn personal_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>
     let lang_code = LanguageCode::from_user(from_refs.0);
     repos.personal_stats.get(from_refs.0.id).await
         .map(|stats| t!("commands.stats.personal", locale = &lang_code,
-            chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length))
+            chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).to_string())
 }
 
 pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, features: BattlesFeatureToggles) -> anyhow::Result<String> {
@@ -61,7 +61,7 @@ pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromR
             let notice = t!("commands.stats.notice", locale = &lang_code);
             format!("{}\n\n<i>{}</i>", s, notice)
         } else {
-            s
+            s.to_string()
         })?;
     Ok(format!("{length_stats}\n\n{pvp_stats}"))
 }

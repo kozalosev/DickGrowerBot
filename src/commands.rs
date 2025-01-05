@@ -50,7 +50,8 @@ async fn set_commands(bot: &Bot, commands: Vec<Vec<BotCommand>>, scope: BotComma
         .filter(|cmd| !cmd.description.is_empty())
         .filter(|cmd| toggles.enabled(&cmd.description))
         .map(|mut cmd| {
-            cmd.description = t!(&format!("commands.{}.description", cmd.description), locale = lang_code);
+            let t_key = format!("commands.{}.description", cmd.description);
+            cmd.description = t!(&t_key, locale = lang_code).to_string();
             cmd
         })
         .collect();

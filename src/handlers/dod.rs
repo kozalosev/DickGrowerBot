@@ -4,7 +4,7 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
-use teloxide::types::{Message, UserId};
+use teloxide::types::{LinkPreviewOptions, Message, UserId};
 use crate::{config, metrics, repo};
 use crate::config::DickOfDaySelectionMode;
 use crate::domain::LanguageCode;
@@ -24,12 +24,12 @@ pub enum DickOfDayCommands {
 pub async fn dod_cmd_handler(bot: Bot, msg: Message,
                              cfg: config::AppConfig, repos: repo::Repositories, incr: Incrementor) -> HandlerResult {
     metrics::CMD_DOD_COUNTER.chat.inc();
-    let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+    let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     let answer = dick_of_day_impl(cfg, &repos, incr, from_refs).await?;
-    reply_html(bot, msg, answer)
-        .disable_web_page_preview(true)
+    reply_html(bot, &msg, answer)
+        .link_preview_options(disabled_link_preview())
         .await?;
     Ok(())
 }
@@ -67,13 +67,13 @@ pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repos
                 Ok(None) => {
                     log::error!("there was an attempt to set a non-existent dick as a winner (UserID={}, ChatId={})",
                         winner.uid, chat_id);
-                    t!("commands.dod.no_candidates", locale = &lang_code)
+                    t!("commands.dod.no_candidates", locale = &lang_code).to_string()
                 }
                 Err(e) => {
                     match e.downcast::<sqlx::Error>()? {
                         sqlx::Error::Database(e)
                         if e.code() == Some(Cow::Borrowed(DOD_ALREADY_CHOSEN_SQL_CODE)) => {
-                            t!("commands.dod.already_chosen", locale = &lang_code, name = e.message())
+                            t!("commands.dod.already_chosen", locale = &lang_code, name = e.message()).to_string()
                         }
                         e => Err(e)?
                     }
@@ -82,10 +82,21 @@ pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repos
             let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
             format!("{main_part}{time_left_part}")
         },
-        None => t!("commands.dod.no_candidates", locale = &lang_code)
+        None => t!("commands.dod.no_candidates", locale = &lang_code).to_string()
     };
     let announcement = repos.announcements.get_new(&chat_id.kind(), &lang_code).await?
         .map(|announcement| format!("\n\n<i>{announcement}</i>"))
         .unwrap_or_default();
     Ok(format!("{answer}{announcement}"))
+}
+
+fn disabled_link_preview() -> LinkPreviewOptions {
+    LinkPreviewOptions {
+        is_disabled: true,
+
+        url: None,
+        prefer_small_media: false,
+        prefer_large_media: false,
+        show_above_text: false,
+    }
 }

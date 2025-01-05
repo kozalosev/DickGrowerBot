@@ -1,6 +1,6 @@
 use std::future::IntoFuture;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use chrono::{Datelike, Utc};
 use futures::future::join;
 use futures::TryFutureExt;
@@ -8,18 +8,17 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup, User};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup, User, UserId};
 
 use page::{InvalidPage, Page};
 
 use crate::{config, metrics, repo};
-use crate::domain::LanguageCode;
+use crate::domain::{LanguageCode, Username};
 use crate::handlers::{HandlerResult, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, page};
-use crate::repo::ChatIdPartiality;
+use crate::repo::{ChatIdPartiality, UID};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
-const LTR_MARK: char = '\u{200E}';
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
 
 #[derive(BotCommands, Clone)]
@@ -34,26 +33,26 @@ pub enum DickCommands {
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                               repos: repo::Repositories, incr: Incrementor,
                               config: config::AppConfig) -> HandlerResult {
-    let from = msg.from().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+    let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     match cmd {
         DickCommands::Grow => {
             metrics::CMD_GROW_COUNTER.chat.inc();
             let answer = grow_impl(&repos, incr, from_refs).await?;
-            reply_html(bot, msg, answer)
+            reply_html(bot, &msg, answer)
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
             let top = top_impl(&repos, &config, from_refs, Page::first()).await?;
-            let mut request = reply_html(bot, msg, top.lines);
+            let mut request = reply_html(bot, &msg, top.lines);
             if top.has_more_pages && config.features.top_unlimited {
                 let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
                 request.reply_markup.replace(keyboard);
             }
             request
         }
-    }.await?;
+    }.await.context(format!("failed for {msg:?}"))?;
     Ok(())
 }
 
@@ -71,7 +70,8 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
     let main_part = match grow_result {
         Ok(repo::GrowthResult { new_length, pos_in_top }) => {
             let event_key = if increment.total.is_negative() { "shrunk" } else { "grown" };
-            let event = t!(&format!("commands.grow.direction.{event_key}"), locale = &lang_code);
+            let event_template = format!("commands.grow.direction.{event_key}");
+            let event = t!(&event_template, locale = &lang_code);
             let answer = t!("commands.grow.result", locale = &lang_code,
                 event = event, incr = increment.total.abs(), length = new_length);
             let perks_part = increment.perks_part_of_answer(&lang_code);
@@ -87,7 +87,7 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
             if let sqlx::Error::Database(e) = db_err {
                 e.code()
                     .filter(|c| c == TOMORROW_SQL_CODE)
-                    .map(|_| t!("commands.grow.tomorrow", locale = &lang_code))
+                    .map(|_| t!("commands.grow.tomorrow", locale = &lang_code).to_string())
                     .ok_or(anyhow!(e))?
             } else {
                 Err(db_err)?
@@ -132,9 +132,8 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
         .take(config.top_limit as usize)
         .enumerate()
         .map(|(i, d)| {
-            let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
-            let escaped_name = teloxide::utils::html::escape(&ltr_name);
-            let name = if from.id == d.owner_uid.into() {
+            let escaped_name = Username::new(d.owner_name).escaped();
+            let name = if from.id == <UID as Into<UserId>>::into(d.owner_uid) {
                 format!("<u>{escaped_name}</u>")
             } else {
                 escaped_name
@@ -142,7 +141,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
             let can_grow = Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
             let pos = d.position.unwrap_or((i+1) as i64);
             let mut line = t!("commands.top.line", locale = &lang_code,
-                n = pos, name = name, length = d.length);
+                n = pos, name = name, length = d.length).to_string();
             if can_grow {
                 line.push_str(" [+]")
             };
@@ -175,14 +174,14 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                                    config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
-        return answer_callback_feature_disabled(bot, q, edit_msg_req_params).await
+        return answer_callback_feature_disabled(bot, &q, edit_msg_req_params).await
     }
 
-    let page = q.data
+    let page = q.data.as_ref()
         .ok_or(InvalidPage::message("no data"))
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
             .map(str::to_owned)
-            .ok_or(InvalidPage::for_value(&d, "invalid prefix")))
+            .ok_or(InvalidPage::for_value(d, "invalid prefix")))
         .and_then(|r| r.parse()
             .map_err(|e| InvalidPage::for_value(&r, e)))
         .map(Page)
@@ -193,13 +192,13 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
     let top = top_impl(&repos, &config, from_refs, page).await?;
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
-    let (answer_callback_query_result, edit_message_result) = match edit_msg_req_params {
+    let (answer_callback_query_result, edit_message_result) = match &edit_msg_req_params {
         callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-            let mut edit_message_text_req = bot.edit_message_text(chat_id, message_id, top.lines);
+            let mut edit_message_text_req = bot.edit_message_text(*chat_id, *message_id, top.lines);
             edit_message_text_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_req.reply_markup.replace(keyboard);
             join(
-                bot.answer_callback_query(q.id).into_future(),
+                bot.answer_callback_query(&q.id).into_future(),
                 edit_message_text_req.into_future().map_ok(|_| ())
             ).await
         },
@@ -208,13 +207,13 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_inline_req.reply_markup.replace(keyboard);
             join(
-                bot.answer_callback_query(q.id).into_future(),
+                bot.answer_callback_query(&q.id).into_future(),
                 edit_message_text_inline_req.into_future().map_ok(|_| ())
             ).await
         }
     };
-    answer_callback_query_result?;
-    edit_message_result?;
+    answer_callback_query_result.context(format!("failed to answer a callback query {q:?}"))?;
+    edit_message_result.context(format!("failed to edit the message of {edit_msg_req_params:?}"))?;
     Ok(())
 }
 
@@ -229,12 +228,12 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
     InlineKeyboardMarkup::new(vec![buttons])
 }
 
-async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
+async fn answer_callback_feature_disabled(bot: Bot, q: &CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&q.from);
 
-    let mut answer = bot.answer_callback_query(q.id);
+    let mut answer = bot.answer_callback_query(&q.id);
     answer.show_alert.replace(true);
-    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code));
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
     answer.await?;
 
     match edit_msg_req_params {

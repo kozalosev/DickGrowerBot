@@ -1,6 +1,5 @@
 use sqlx::{Pool, Postgres};
 use teloxide::types::{ChatId, UserId};
-use testcontainers::clients;
 use crate::repo;
 use crate::repo::{ChatIdFull, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID, start_postgres, UID};
@@ -8,8 +7,7 @@ use crate::repo::test::dicks::create_user;
 
 #[tokio::test]
 async fn upsert_chat() {
-    let docker = clients::Cli::default();
-    let (_container, db) = start_postgres(&docker).await;
+    let (_container, db) = start_postgres().await;
     create_user(&db).await;
 
     sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
