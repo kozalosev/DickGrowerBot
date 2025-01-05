@@ -1,5 +1,7 @@
 use std::ops::Deref;
 use derive_more::{Constructor, From};
+use unicode_general_category::GeneralCategory::Format;
+use unicode_general_category::get_general_category;
 
 const LTR_MARK: char = '\u{200E}';
 
@@ -16,7 +18,10 @@ impl Username {
     }
 
     pub fn escaped(&self) -> String {
-        let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", self.value_ref());
+        let safe_name: String = self.value_ref().chars()
+            .filter(|c| get_general_category(*c) != Format)
+            .collect();
+        let ltr_name = format!("{LTR_MARK}{safe_name}{LTR_MARK}");
         teloxide::utils::html::escape(&ltr_name)
     }
 }
