@@ -115,7 +115,7 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
     }
 }
 
-pub fn reply_html<T: Into<String>>(bot: Bot, msg: Message, answer: T) -> JsonRequest<SendMessage> {
+pub fn reply_html<T: Into<String>>(bot: Bot, msg: &Message, answer: T) -> JsonRequest<SendMessage> {
     // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer);
     answer.parse_mode = Some(Html);
@@ -123,6 +123,16 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: Message, answer: T) -> JsonReq
         answer.reply_parameters.replace(ReplyParameters::new(msg.id));
     }
     answer
+}
+
+#[macro_export]
+macro_rules! reply_html {
+    ($bot:ident, $msg:ident, $answer:expr) => {
+        anyhow::Context::context(
+            reply_html($bot, &$msg, $answer).await,
+            format!("failed for {:?}", $msg)
+        )?
+    };
 }
 
 #[tracing::instrument]
@@ -157,7 +167,7 @@ pub mod checks {
     pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         let answer = t!("errors.not_group_chat", locale = &lang_code);
-        reply_html(bot, msg, answer).await?;
+        reply_html(bot, &msg, answer).await?;
         Ok(())
     }
 

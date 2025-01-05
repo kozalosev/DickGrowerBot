@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::join;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -9,7 +9,7 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
 use crate::handlers::{CallbackResult, HandlerResult, reply_html, send_error_callback_answer, utils};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::{LanguageCode, Username};
 use crate::handlers::utils::callbacks;
@@ -103,7 +103,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     };
     let (text, keyboard) = pvp_impl_start(params, user, cmd.bet()).await?;
 
-    let mut answer = reply_html(bot, msg, text);
+    let mut answer = reply_html(bot, &msg, text);
     answer.reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard);
     answer.await?;
     Ok(())
@@ -114,7 +114,7 @@ pub async fn cmd_handler_no_args(bot: Bot, msg: Message) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
-    reply_html(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code)).await?;
+    reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
     Ok(())
 }
 
@@ -135,20 +135,22 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let bet: u16 = query.query.parse()?;
     let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
-    let res = build_inline_keyboard_article_result(query.from.id, &lang_code, name, bet);
+    let res = build_inline_keyboard_article_result(query.from.id, &lang_code, &name, bet);
 
-    let mut answer = bot.answer_inline_query(query.id, vec![res])
+    let mut answer = bot.answer_inline_query(&query.id, vec![res.clone()])
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await?;
+    answer.await.context(format!("couldn't answer a callback query {query:?} with {res:?}"))?;
     Ok(())
 }
 
-pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: String, bet: u16) -> InlineQueryResult {
+pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: &Username, bet: u16) -> InlineQueryResult {
+    log::debug!("Starting a PvP for {uid} (bet = {bet})...");
+
     let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
-    let text = t!("commands.pvp.results.start", locale = lang_code, name = name, bet = bet);
+    let text = t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet);
     let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
     let btn_label = t!("commands.pvp.button", locale = lang_code);
     let btn_data = BattleCallbackData::new(uid, bet).to_data_string();
@@ -226,7 +228,7 @@ impl From<&User> for UserInfo {
     fn from(value: &User) -> Self {
         Self {
             uid: value.id,
-            name: Username::new(utils::get_full_name(value))
+            name: utils::get_full_name(value)
         }
     }
 }
@@ -256,6 +258,8 @@ impl Into<UserId> for UserInfo {
 #[tracing::instrument]
 pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
+    log::debug!("Starting a PvP for {} in the chat with id = {} (bet = {bet}, enough = {enough})...", initiator.uid, p.chat_id);
+
     let data = if enough {
         let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).to_string();
         let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
@@ -278,6 +282,9 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
        p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { 0 }),
     );
     let (enough_initiator, enough_acceptor) = (enough_initiator?, enough_acceptor?);
+
+    log::debug!("Executing the battle: chat_id = {}, initiator = {initiator} (enough = {enough_initiator}), acceptor = {} (enough = {enough_acceptor}), bet = {bet}...",
+        p.chat_id, acceptor.uid);
 
     let result = if enough_initiator && enough_acceptor {
         let acceptor_uid = acceptor.clone().into();

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use derive_more::Constructor;
 use sqlx::{Pool, Postgres};
 use crate::repo::{ensure_only_one_row_updated, ChatIdInternal, ChatIdKind};
@@ -76,7 +77,7 @@ impl Announcements {
             .fetch_optional(&self.pool)
             .await
             .map(|opt| opt.map(Into::into))
-            .map_err(Into::into)
+            .context(format!("couldn't get the announcement for {chat_id_kind}, {lang_code:?}"))
     }
 
     #[tracing::instrument]
@@ -90,6 +91,7 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't create the announcement for {chat_id_kind}, {lang_code:?}, {hash:?}"))
     }
 
     #[tracing::instrument]
@@ -100,6 +102,7 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't increment shown times for {chat_id:?}, {lang_code:?}"))
     }
 
     #[tracing::instrument]
@@ -110,5 +113,6 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't update announcement for {chat_id:?}, {lang_code:?}, {hash:?}"))
     }
 }

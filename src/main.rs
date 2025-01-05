@@ -169,7 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (res, _) = futures::join!(srv, bot_fut);
             res
         }
-    }?.map_err(|e| e.into())
+    }?.map_err(Into::into)
 }
 
 fn init_tracing_loki() -> anyhow::Result<()> {

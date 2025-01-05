@@ -1,6 +1,6 @@
 use std::future::IntoFuture;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use chrono::{Datelike, Utc};
 use futures::future::join;
 use futures::TryFutureExt;
@@ -13,13 +13,12 @@ use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
 use page::{InvalidPage, Page};
 
 use crate::{config, metrics, repo};
-use crate::domain::LanguageCode;
+use crate::domain::{LanguageCode, Username};
 use crate::handlers::{HandlerResult, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, page};
 use crate::repo::{ChatIdPartiality, UID};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
-const LTR_MARK: char = '\u{200E}';
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
 
 #[derive(BotCommands, Clone, Debug)]
@@ -42,19 +41,19 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
         DickCommands::Grow => {
             metrics::CMD_GROW_COUNTER.chat.inc();
             let answer = grow_impl(&repos, incr, from_refs).await?;
-            reply_html(bot, msg, answer)
+            reply_html(bot, &msg, answer)
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
             let top = top_impl(&repos, &config, from_refs, Page::first()).await?;
-            let mut request = reply_html(bot, msg, top.lines);
+            let mut request = reply_html(bot, &msg, top.lines);
             if top.has_more_pages && config.features.top_unlimited {
                 let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
                 request.reply_markup.replace(keyboard);
             }
             request
         }
-    }.await?;
+    }.await.context(format!("failed for {msg:?}"))?;
     Ok(())
 }
 
@@ -137,8 +136,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
         .take(config.top_limit as usize)
         .enumerate()
         .map(|(i, d)| {
-            let ltr_name = format!("{LTR_MARK}{}{LTR_MARK}", d.owner_name);
-            let escaped_name = teloxide::utils::html::escape(&ltr_name);
+            let escaped_name = Username::new(d.owner_name).escaped();
             let name = if from.id == <UID as Into<UserId>>::into(d.owner_uid) {
                 format!("<u>{escaped_name}</u>")
             } else {
@@ -181,14 +179,14 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
                                    config: config::AppConfig, repos: repo::Repositories) -> HandlerResult {
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
-        return answer_callback_feature_disabled(bot, q, edit_msg_req_params).await
+        return answer_callback_feature_disabled(bot, &q, edit_msg_req_params).await
     }
 
-    let page = q.data
+    let page = q.data.as_ref()
         .ok_or(InvalidPage::message("no data"))
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
             .map(str::to_owned)
-            .ok_or(InvalidPage::for_value(&d, "invalid prefix")))
+            .ok_or(InvalidPage::for_value(d, "invalid prefix")))
         .and_then(|r| r.parse()
             .map_err(|e| InvalidPage::for_value(&r, e)))
         .map(Page)
@@ -199,13 +197,13 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
     let top = top_impl(&repos, &config, from_refs, page).await?;
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
-    let (answer_callback_query_result, edit_message_result) = match edit_msg_req_params {
+    let (answer_callback_query_result, edit_message_result) = match &edit_msg_req_params {
         callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-            let mut edit_message_text_req = bot.edit_message_text(chat_id, message_id, top.lines);
+            let mut edit_message_text_req = bot.edit_message_text(*chat_id, *message_id, top.lines);
             edit_message_text_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_req.reply_markup.replace(keyboard);
             join(
-                bot.answer_callback_query(q.id).into_future(),
+                bot.answer_callback_query(&q.id).into_future(),
                 edit_message_text_req.into_future().map_ok(|_| ())
             ).await
         },
@@ -214,13 +212,13 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_inline_req.reply_markup.replace(keyboard);
             join(
-                bot.answer_callback_query(q.id).into_future(),
+                bot.answer_callback_query(&q.id).into_future(),
                 edit_message_text_inline_req.into_future().map_ok(|_| ())
             ).await
         }
     };
-    answer_callback_query_result?;
-    edit_message_result?;
+    answer_callback_query_result.context(format!("failed to answer a callback query {q:?}"))?;
+    edit_message_result.context(format!("failed to edit the message of {edit_msg_req_params:?}"))?;
     Ok(())
 }
 
@@ -236,10 +234,10 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
 }
 
 #[tracing::instrument]
-async fn answer_callback_feature_disabled(bot: Bot, q: CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
+async fn answer_callback_feature_disabled(bot: Bot, q: &CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&q.from);
 
-    let mut answer = bot.answer_callback_query(q.id);
+    let mut answer = bot.answer_callback_query(&q.id);
     answer.show_alert.replace(true);
     answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
     answer.await?;

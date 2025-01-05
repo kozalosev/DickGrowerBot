@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use sqlx::{FromRow, Postgres};
 use teloxide::types::UserId;
 use crate::repository;
@@ -56,7 +56,7 @@ repository!(Promo,
         let PromoCodeInfo { found_code, bonus_length } = Self::find_code_length_and_decr_capacity(&mut tx, code)
             .await?
             .ok_or(ActivationError::NoActivationsLeft)?;
-        let chats_affected = Self::grow_dick(&mut tx, user_id, bonus_length).await?;
+        let chats_affected = Self::grow_dicks(&mut tx, user_id, bonus_length).await?;
         if chats_affected < 1 {
             return Err(ActivationError::NoDicks)
         }
@@ -91,15 +91,16 @@ repository!(Promo,
                 code)
             .fetch_optional(&mut **tx)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't find a promo code length of {code}"))
     }
 ,
     #[tracing::instrument]
-    async fn grow_dick(tx: &mut sqlx::Transaction<'_, Postgres>, user_id: UserId, bonus: i32) -> anyhow::Result<u64> {
+    async fn grow_dicks(tx: &mut sqlx::Transaction<'_, Postgres>, user_id: UserId, bonus: i32) -> anyhow::Result<u64> {
         let rows_affected = sqlx::query!("UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $2) WHERE uid = $1",
                 user_id.0 as i64, bonus)
             .execute(&mut **tx)
-            .await?
+            .await
+            .context(format!("couldn't grow dicks of {user_id} by {bonus}"))?
             .rows_affected();
         Ok(rows_affected)
     }
@@ -110,7 +111,8 @@ repository!(Promo,
         sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats) VALUES ($1, $2, $3)",
                 uid.0 as i64, code, affected_chats)
             .execute(&mut **tx)
-            .await?;
+            .await
+            .context(format!("couldn't insert a promo code activation for {uid} and {code} with {affected_chats} affected chats"))?;
         Ok(())
     }
 );

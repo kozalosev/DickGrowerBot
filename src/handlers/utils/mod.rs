@@ -8,11 +8,13 @@ pub use tghack::*;
 pub use incrementor::*;
 
 use teloxide::types::User;
+use crate::domain::Username;
 
-pub fn get_full_name(user: &User) -> String {
-    user.last_name.as_ref()
+pub fn get_full_name(user: &User) -> Username {
+    let name = user.last_name.as_ref()
         .map(|last_name| format!("{} {}", user.first_name, last_name))
-        .unwrap_or(user.first_name.clone())
+        .unwrap_or(user.first_name.clone());
+    Username::new(name)
 }
 
 pub mod date {

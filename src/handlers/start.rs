@@ -4,7 +4,7 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::Message;
 use crate::handlers::{HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html, repo};
 use crate::domain::LanguageCode;
 use crate::help::HelpContainer;
 
@@ -38,7 +38,7 @@ pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
             }
         }
     };
-    reply_html(bot, msg, answer).await?;
+    reply_html!(bot, msg, answer);
     Ok(())
 }
 

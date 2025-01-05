@@ -4,7 +4,7 @@ use teloxide::prelude::Message;
 use crate::domain::LanguageCode;
 use crate::domain::SupportedLanguage::{EN, RU};
 use crate::handlers::{HandlerResult, reply_html};
-use crate::metrics;
+use crate::{metrics, reply_html};
 
 static EN_POLICY: &str = include_str!("en.html");
 static RU_POLICY: &str = include_str!("ru.html");
@@ -24,6 +24,6 @@ pub async fn privacy_cmd_handler(bot: Bot, msg: Message) -> HandlerResult {
         RU => RU_POLICY,
         EN => EN_POLICY,
     };
-    reply_html(bot, msg, policy).await?;
+    reply_html!(bot, msg, policy);
     Ok(())
 }

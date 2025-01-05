@@ -1,3 +1,4 @@
+use anyhow::Context;
 use num_traits::ToPrimitive;
 use sqlx::FromRow;
 use teloxide::types::UserId;
@@ -38,6 +39,6 @@ repository!(PersonalStatsRepo,
             .fetch_one(&self.pool)
             .await
             .map(PersonalStats::from)
-            .map_err(Into::into)
+            .context(format!("couldn't get the personal stats of {user_id}"))
     }
 );

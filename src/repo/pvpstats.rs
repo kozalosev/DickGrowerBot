@@ -1,3 +1,4 @@
+use anyhow::Context;
 use num_traits::{Num, ToPrimitive};
 use sqlx::{FromRow, Postgres, Transaction};
 use teloxide::types::UserId;
@@ -104,7 +105,7 @@ repository!(BattleStatsRepo, with_(chats)_(Chats),
         .await
         .map(Option::unwrap_or_default)
         .map(UserStats::from)
-        .map_err(|e| e.into())
+        .context(format!("couldn't get the stats for {chat_id_kind} and {user_id}"))
     }
 );
 
@@ -121,7 +122,7 @@ async fn update_winner(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uid: Us
         .fetch_one(&mut **tx)
         .await
         .map(WinnerStats::from)
-        .map_err(|e| e.into())
+        .context(format!("couldn't update the stats of the winner: {chat_id}, {uid}, {bet}"))
 }
 
 #[tracing::instrument]
@@ -129,7 +130,8 @@ async fn update_loser(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uid: Use
     let uid = uid.0 as i64;
     let prev_win_streak = sqlx::query_scalar!("SELECT win_streak_current FROM Battle_Stats WHERE chat_id = $1 AND uid = $2", chat_id, uid)
         .fetch_optional(&mut **tx)
-        .await?
+        .await
+        .context(format!("couldn't fetch the win streak of the loser: {chat_id}, {uid}"))?
         .unwrap_or(0);
     let win_rate = sqlx::query_as!(UserBattlesStatsEntity, "INSERT INTO Battle_Stats(uid, chat_id, battles_total, battles_won, win_streak_current, lost_length) VALUES ($1, $2, 1, 0, 0, $3) \
                 ON CONFLICT (uid, chat_id) DO UPDATE SET \
@@ -139,7 +141,8 @@ async fn update_loser(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uid: Use
                 RETURNING battles_total, battles_won",
             uid, chat_id, bet)
         .fetch_one(&mut **tx)
-        .await?;
+        .await
+        .context(format!("couldn't update the stats of the loser: {chat_id}, {uid}, {bet}"))?;
     Ok(LoserStats::new(win_rate, prev_win_streak))
 }
 

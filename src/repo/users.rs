@@ -1,3 +1,4 @@
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use teloxide::types::UserId;
 
@@ -23,7 +24,7 @@ repository!(Users,
                 uid, name)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't upsert a user with id = {user_id}"))
     }
 ,
     #[tracing::instrument]
@@ -36,7 +37,7 @@ repository!(Users,
                 chat_id.value() as String)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get users of the chat with id = {chat_id}"))
     }
 ,
     #[tracing::instrument]
@@ -51,7 +52,7 @@ repository!(Users,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
     #[tracing::instrument]
@@ -72,7 +73,7 @@ repository!(Users,
                 chat_id.value() as String, 1.0 - rich_exclusion_ratio.to_value())
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get a random active poor user of the chat with id = {chat_id}"))
     }
 ,
     #[tracing::instrument]
@@ -80,7 +81,7 @@ repository!(Users,
         sqlx::query_as!(User,
             "WITH user_weights AS (
                 SELECT u.uid, u.name, u.created_at, d.length,
-                       1.0 / (1.0 + EXP(d.length / 5.0)) AS weight  -- Sigmoid-like transformation
+                       1.0 / (1.0 + EXP(d.length / 6.0)) AS weight  -- Sigmoid-like transformation
                 FROM Users u
                   JOIN Dicks d USING (uid)
                   JOIN Chats c ON d.chat_id = c.id
@@ -104,15 +105,16 @@ repository!(Users,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
     #[tracing::instrument]
-    pub async fn get(&self, user_id: UserId) -> Result<Option<User>, sqlx::Error> {
+    pub async fn get(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User, "SELECT uid, name, created_at FROM Users WHERE uid = $1",
                 user_id.0 as i64)
             .fetch_optional(&self.pool)
             .await
+            .context(format!("couldn't get a user with id = {user_id}"))
     }
 ,
     #[cfg(test)]
@@ -120,6 +122,6 @@ repository!(Users,
         sqlx::query_as!(User, "SELECT * FROM Users")
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| e.into())
+            .map_err(Into::into)
     }
 );

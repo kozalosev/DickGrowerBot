@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::str::FromStr;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::TryFutureExt;
+use once_cell::sync::Lazy;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
@@ -11,7 +13,7 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::domain::LanguageCode;
+use crate::domain::{LanguageCode, Username};
 use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
@@ -95,6 +97,38 @@ impl InlineCommand {
     }
 }
 
+type ExternalVariantBuilder = fn(&InlineQuery, &LanguageCode, &AppConfig, &Username) -> InlineQueryResult;
+
+struct ExternalVariant {
+    result_id: &'static str,
+    builder: ExternalVariantBuilder
+}
+
+struct ExternalVariants {
+    result_ids: HashSet<&'static str>,
+    builders: Vec<ExternalVariantBuilder>
+}
+impl ExternalVariants {
+    fn new(variants: &'static [ExternalVariant]) -> Self {
+        let result_ids = variants.iter()
+            .map(|v| v.result_id)
+            .collect();
+        let builders = variants.iter()
+            .map(|v| v.builder)
+            .collect();
+        Self { result_ids, builders }
+    }
+}
+
+static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants::new(&[
+    ExternalVariant {
+        result_id: "pvp",
+        builder: |query, lang_code, app_config, name| {
+            pvp::build_inline_keyboard_article_result(query.from.id, lang_code, name, app_config.pvp_default_bet)
+        }
+    }
+]));
+
 #[tracing::instrument]
 pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
@@ -123,14 +157,16 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
             InlineQueryResult::Article(article)
         })
         .collect();
-    results.push(pvp::build_inline_keyboard_article_result(query.from.id, &lang_code, name, app_config.pvp_default_bet));
+    for builder in &EXTERNAL_VARIANTS.builders {
+        results.push(builder(&query, &lang_code, &app_config, &name))
+    }
 
-    let mut answer = bot.answer_inline_query(query.id, results)
+    let mut answer = bot.answer_inline_query(&query.id, results.clone())
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await?;
+    answer.await.context(format!("couldn't answer inline query {query:?} with results {results:?}"))?;
     Ok(())
 }
 
@@ -139,6 +175,10 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                                    repos: Repositories, config: AppConfig,
                                    incr: Incrementor) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
+
+    if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
+        return Ok(())
+    }
 
     let maybe_chat_in_sync = result.inline_message_id.as_ref()
         .and_then(try_resolve_chat_id)
@@ -150,7 +190,8 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
         if let Some(chat) = maybe_chat {
             log::debug!("[inline_chosen_handler] chat: {chat:?}, user_id: {}", result.from.id);
 
-            let cmd = InlineCommand::from_str(&result.result_id)?;
+            let cmd = InlineCommand::from_str(&result.result_id)
+                .context(format!("couldn't parse inline command '{}'", result.result_id))?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
@@ -176,9 +217,9 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     let lang_code = LanguageCode::from_user(&query.from);
     let mut answer = bot.answer_callback_query(&query.id);
 
-    if let (Some(inline_msg_id), Some(data)) = (query.inline_message_id, query.data) {
+    if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {
         let chat_id = config.features.chats_merging
-            .then(|| utils::resolve_inline_message_id(&inline_msg_id))
+            .then(|| utils::resolve_inline_message_id(inline_msg_id))
             .map(|res| match res {
                 Ok(info) => ChatIdFull {
                     id: ChatId(info.chat_id),
@@ -192,7 +233,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
             .unwrap_or(query.chat_instance.clone().into());
         log::debug!("[callback_handler] chat_id: {chat_id:?}, user_id: {}", query.from.id);
 
-        let parse_res = parse_callback_data(&data, query.from.id);
+        let parse_res = parse_callback_data(data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
@@ -223,7 +264,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
         answer.show_alert.replace(true);
     };
 
-    answer.await?;
+    answer.await.context(format!("couldn't answer a callback query {query:?}"))?;
     Ok(())
 }
 

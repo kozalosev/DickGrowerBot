@@ -9,7 +9,7 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, User};
 use crate::handlers::{HandlerResult, reply_html};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html, repo};
 use crate::domain::LanguageCode;
 use crate::repo::ActivationError;
 
@@ -54,7 +54,7 @@ pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialo
             promo_activation_impl(repos.promo, user, &code).await?
         },
     };
-    reply_html(bot, msg, answer).await?;
+    reply_html!(bot, msg, answer);
     Ok(())
 }
 
@@ -73,7 +73,7 @@ pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCode
             t!("commands.promo.request", locale = &lang_code).to_string()
         }
     };
-    reply_html(bot, msg, answer).await?;
+    reply_html!(bot, msg, answer);
     Ok(())
 }
 

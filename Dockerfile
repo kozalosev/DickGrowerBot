@@ -1,4 +1,4 @@
-FROM rust:1.76-alpine3.18 as builder
+FROM rust:1.83-alpine3.21 as builder
 WORKDIR /build
 
 RUN apk update && apk add --no-cache musl-dev
@@ -24,7 +24,7 @@ COPY Cargo.* ./
 ENV RUSTFLAGS='-C target-feature=-crt-static'
 RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 
-FROM alpine:3.18
+FROM alpine:3.21
 RUN apk update && apk add --no-cache libgcc
 COPY --from=builder /dickGrowerBot /usr/local/bin/
 # Import the user and group files from the builder
