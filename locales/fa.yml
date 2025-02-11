@@ -119,7 +119,7 @@ titles:
   perks:  
     top_line: "این قابلیت‌ها روی نتیجه تأثیر گذاشتن:"  
     help-pussies: "حفره عمیق"  
-    loan-payout: "وام‌دهنده خرد"  
+    loan-payout: "وام خور"  
 errors:  
   not_group_chat: "این بات فقط توی گروه‌ها کار می‌کنه!"  
   feature_disabled: "این قابلیت فعلاً غیرفعاله."  
