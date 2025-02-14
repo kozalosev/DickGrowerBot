@@ -2,7 +2,7 @@ use rust_i18n::t;
 use serde::Serialize;
 use tinytemplate::TinyTemplate;
 use crate::domain::SupportedLanguage::{EN, RU};
-use crate::domain::LanguageCode;
+use crate::domain::{LanguageCode, Username};
 
 static EN_HELP: &str = include_str!("en.html");
 static RU_HELP: &str = include_str!("ru.html");
@@ -14,9 +14,9 @@ pub struct HelpContainer {
 }
 
 impl HelpContainer {
-    pub fn get_start_message(&self, username: String, lang_code: LanguageCode) -> String {
+    pub fn get_start_message(&self, username: Username, lang_code: LanguageCode) -> String {
         let greeting = t!("titles.greeting", locale = &lang_code);
-        format!("{}, <b>{}</b>!\n\n{}", greeting, username, self.get_help_message(lang_code))
+        format!("{}, <b>{}</b>!\n\n{}", greeting, username.escaped(), self.get_help_message(lang_code))
     }
 
     pub fn get_help_message(&self, lang_code: LanguageCode) -> String {

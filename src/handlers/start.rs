@@ -5,7 +5,7 @@ use teloxide::macros::BotCommands;
 use teloxide::types::Message;
 use crate::handlers::{HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::LanguageCode;
+use crate::domain::{LanguageCode, Username};
 use crate::help::HelpContainer;
 
 #[derive(BotCommands, Clone)]
@@ -32,7 +32,7 @@ pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
             }
             StartCommands::Start(_) => {
                 metrics::CMD_START_COUNTER.inc();
-                let username = teloxide::utils::html::escape(&msg.from.as_ref().unwrap().first_name);
+                let username = Username::new(msg.from.as_ref().unwrap().first_name.clone());
                 help.get_start_message(username, lang_code)
             }
         }
