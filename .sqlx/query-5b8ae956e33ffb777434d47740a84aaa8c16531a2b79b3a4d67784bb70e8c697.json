@@ -1,15 +1,20 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT debt, payout_ratio FROM loans WHERE uid = $1 AND chat_id = (SELECT id FROM Chats WHERE chat_id = $2::bigint OR chat_instance = $2::text) AND repaid_at IS NULL",
+  "query": "SELECT id, debt, payout_ratio FROM loans\n                    WHERE uid = $1 AND chat_id = $2\n                    AND repaid_at IS NULL",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "debt",
+        "name": "id",
         "type_info": "Int4"
       },
       {
         "ordinal": 1,
+        "name": "debt",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
         "name": "payout_ratio",
         "type_info": "Float4"
       }
@@ -22,8 +27,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "5208c529f037af3be8532ac3094c728193501939d4edbfcdd28b07487aeb5bb3"
+  "hash": "5b8ae956e33ffb777434d47740a84aaa8c16531a2b79b3a4d67784bb70e8c697"
 }

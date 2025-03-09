@@ -47,4 +47,12 @@ async fn test_all() {
         .expect("the loan, which I left to pay, must be present")
         .debt;
     assert_eq!(left_to_pay, half_of_debt);
+
+    loans.borrow(user_id, &chat_id, half_of_debt)
+        .await.expect("couldn't increase the total som of the loan");
+
+    let loan = loans.get_active_loan(user_id, &chat_id)
+        .await.expect("couldn't fetch active loans after the second borrowing")
+        .expect("the loan must be present");
+    assert_eq!(loan.debt, value);
 }
