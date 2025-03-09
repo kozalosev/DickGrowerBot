@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Loans l SET debt = l.debt + $2, payout_ratio = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Float4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b2ed1b38f9da16b02828e5a636c95d4c095f20c7a3e632b0a8d170ccd7a471c2"
+}

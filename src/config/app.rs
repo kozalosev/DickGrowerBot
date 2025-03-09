@@ -31,6 +31,7 @@ impl AppConfig {
         let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
+        let multiple_loans = get_env_value_or_default("MULTIPLE_LOANS_ENABLED", false);
         let pvp_default_bet = get_env_value_or_default("PVP_DEFAULT_BET", 1);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
         let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
@@ -43,6 +44,7 @@ impl AppConfig {
             features: FeatureToggles {
                 chats_merging,
                 top_unlimited,
+                multiple_loans,
                 dod_selection_mode,
                 pvp: BattlesFeatureToggles {
                     check_acceptor_length,

@@ -49,8 +49,10 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
     
     let maybe_loan = repos.loans.get_active_loan(from.id, &chat_id_kind).await?;
     if let Some(Loan { debt, .. }) = maybe_loan {
-        let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt).to_string();
-        return Ok(HandlerImplResult::OnlyText(left_to_pay))
+        if !config.features.multiple_loans {
+            let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt).to_string();
+            return Ok(HandlerImplResult::OnlyText(left_to_pay))
+        }
     }
 
     if config.loan_payout_ratio <= 0.0 || config.loan_payout_ratio >= 1.0 {
@@ -59,37 +61,36 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
     }
 
     let length = repos.dicks.fetch_length(from.id, &chat_id_kind).await?;
-    let res = if length < 0 {
-        let debt = length.unsigned_abs() as u16;
-        let payout_percentage = format!("{:.2}%", config.loan_payout_ratio * 100.0);
-
-        let btn_agree = CallbackButton::new(
-            t!("commands.loan.confirmation.buttons.agree", locale = &lang_code).to_string(),
-            LoanCallbackData {
-                uid: from.id,
-                action: LoanCallbackAction::Confirmed {
-                    value: debt,
-                    payout_ratio: config.loan_payout_ratio
-                }
-            }
-        );
-        let btn_disagree = CallbackButton::new(
-            t!("commands.loan.confirmation.buttons.disagree", locale = &lang_code).to_string(),
-            LoanCallbackData {
-                uid: from.id,
-                action: LoanCallbackAction::Refused
-            }
-        );
-        HandlerImplResult::WithKeyboard {
-            text: t!("commands.loan.confirmation.text", locale = &lang_code,
-                debt = debt, payout_percentage = payout_percentage).to_string(),
-            buttons: vec![btn_agree, btn_disagree]
-        }
-    } else {
+    if length >= 0 {
         let err_text = t!("commands.loan.errors.positive_length", locale = &lang_code).to_string();
-        HandlerImplResult::OnlyText(err_text)
-    };
-    Ok(res)
+        return Ok(HandlerImplResult::OnlyText(err_text))
+    }
+
+    let debt = length.unsigned_abs() as u16;
+    let payout_percentage = format!("{:.2}%", config.loan_payout_ratio * 100.0);
+
+    let btn_agree = CallbackButton::new(
+        t!("commands.loan.confirmation.buttons.agree", locale = &lang_code).to_string(),
+        LoanCallbackData {
+            uid: from.id,
+            action: LoanCallbackAction::Confirmed {
+                value: debt,
+                payout_ratio: config.loan_payout_ratio
+            }
+        }
+    );
+    let btn_disagree = CallbackButton::new(
+        t!("commands.loan.confirmation.buttons.disagree", locale = &lang_code).to_string(),
+        LoanCallbackData {
+            uid: from.id,
+            action: LoanCallbackAction::Refused
+        }
+    );
+    Ok(HandlerImplResult::WithKeyboard {
+        text: t!("commands.loan.confirmation.text", locale = &lang_code,
+            debt = debt, payout_percentage = payout_percentage).to_string(),
+        buttons: vec![btn_agree, btn_disagree]
+    })
 }
 
 #[inline]
