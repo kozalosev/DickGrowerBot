@@ -1,19 +1,18 @@
 use std::borrow::ToOwned;
-use std::error::Error;
-use std::fmt::Display;
 use std::ops::Deref;
 use derive_more::{Constructor, From};
-use language_tags::LanguageTag;
 use once_cell::sync::Lazy;
 use teloxide::types::User;
 
 static DEFAULT: Lazy<LanguageCode> = Lazy::new(|| LanguageCode("en".to_string()));
+static RU_SPEAKING_LOCALES: [&str; 3] = ["ru", "uk", "be"];
 
 #[derive(Clone, Debug, Constructor, From)]
 pub struct LanguageCode(String);
 
-#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, sqlx::Type)]
+#[derive(Hash, Copy, Clone, Eq, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "language_code", rename_all = "lowercase")]
+#[cfg_attr(test, derive(Debug))]
 pub enum SupportedLanguage {
     EN,
     RU,
@@ -35,9 +34,13 @@ impl LanguageCode {
     }
 
     pub fn to_supported_language(&self) -> SupportedLanguage {
-        match self.to_ascii_lowercase().as_str() {
-            "ru" => SupportedLanguage::RU,
-            _    => SupportedLanguage::EN
+        let code = self.to_ascii_lowercase();
+        if code.len() < 2 {
+            SupportedLanguage::EN
+        } else if RU_SPEAKING_LOCALES.contains(&&code[..2]) {
+            SupportedLanguage::RU
+        } else {
+            SupportedLanguage::EN
         }
     }
 
@@ -51,12 +54,7 @@ impl LanguageCode {
 
     fn from_maybe_string(maybe_string: Option<&String>) -> Self {
         maybe_string
-            .map(|s| s.as_str())
-            .and_then(ok_or_log(LanguageTag::parse, "parse language tag"))
-            .map(|code: LanguageTag| match code.primary_language() {
-                "uk" | "be" => "ru",
-                tag => tag
-            }.to_owned())
+            .map(ToOwned::to_owned)
             .map(Self)
             .unwrap_or_else(|| DEFAULT.clone())
     }
@@ -80,16 +78,6 @@ impl From<Option<&User>> for LanguageCode {
     fn from(value: Option<&User>) -> Self {
         Self::from_maybe_user(value)
     }
-}
-
-fn ok_or_log<T: Display + ?Sized, R, E: Error>(
-    mapper: impl FnOnce(&T) -> Result<R, E>,
-    action_description: &'static str
-) -> impl FnOnce(&T) -> Option<R>
-{
-    move |value| mapper(value)
-        .inspect_err(|e| log::error!("couldn't {action_description} '{value}': {e}"))
-        .ok()
 }
 
 #[cfg(test)]
