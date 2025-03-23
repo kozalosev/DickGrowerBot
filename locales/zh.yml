@@ -82,7 +82,7 @@ commands:
         line: "➖ <b>%{line}</b>"
   promo:
     description: "激活神秘代码"
-    request: "输入神秘代："
+    request: "输入神秘代码："
     success:
       template: "你已成功激活此神秘代码！%{ending}"
       singular: "你的丁丁在一个聊天中增长了 <b>%{growth}</b> 厘米。"
@@ -113,7 +113,7 @@ inline:
 titles:
   greeting: "你好"
   time_till_next_day:
-    none: " 回去玩丁丁，明再来！"
+    none: " 回去玩丁丁，明天再来！"
     some: "\n\n下次尝试在 <b>%{hours}</b>小时 <b>%{minutes}</b>分钟后。"
   perks:
     top_line: "以下特权影响了结果"
