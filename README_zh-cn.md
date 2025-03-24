@@ -40,7 +40,7 @@ _（与某些竞争对手相比）_
 #### 如何重建 .sqlx 查询？
 在没有运行 RDBMS 的情况下构建应用程序）_
 
-``shell
+```shell
 cargo sqlx prepare -- --tests
 ```
 
