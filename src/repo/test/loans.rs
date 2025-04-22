@@ -14,7 +14,7 @@ async fn test_all() {
 
     let user_id = UserId(UID as u64);
     let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let value: u16 = 10;
+    let value: u32 = 10;
 
     let loans = repo::Loans::new(db.clone(), &config::AppConfig {
         loan_payout_ratio: payout_ratio,

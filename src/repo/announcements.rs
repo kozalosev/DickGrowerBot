@@ -3,11 +3,11 @@ use derive_more::Constructor;
 use sqlx::{Pool, Postgres};
 use crate::repo::{ensure_only_one_row_updated, ChatIdInternal, ChatIdKind};
 use crate::config;
-use crate::domain::{LanguageCode, SupportedLanguage};
+use crate::domain::{InternalChatId, LanguageCode, SupportedLanguage};
 
 #[derive(sqlx::FromRow)]
 struct AnnouncementEntity {
-    chat_id: i64,
+    chat_id: InternalChatId,
     hash: Vec<u8>,
     times_shown: isize,
 }

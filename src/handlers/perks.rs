@@ -33,7 +33,7 @@ impl Perk for HelpPussiesPerk {
         
         let current_deepness = change_intent.current_length.abs()
             .to_f64().expect("conversion is always Some");
-        let change = (self.coefficient * current_deepness).round() as i32;
+        let change = (self.coefficient * current_deepness).round() as i64;
         AdditionalChange(change)
     }
 
@@ -74,13 +74,13 @@ impl Perk for LoanPayoutPerk {
 
         let payout = if change_intent.base_increment.is_positive() {
             let base_increment = change_intent.base_increment as f32;
-            let payout = (base_increment * payout_coefficient).round() as u16;
+            let payout = (base_increment * payout_coefficient).round() as u32;
             payout.min(debt)
         } else {
             0
         };
         match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
-            Ok(()) => AdditionalChange(-i32::from(payout)),
+            Ok(()) => AdditionalChange(-i64::from(payout)),
             Err(e) => {
                 log::error!("couldn't pay {payout} cm for the loan ({dick_id}): {e}");
                 AdditionalChange(0)

@@ -1,7 +1,7 @@
+use crate::{f64_domain, number_wrapper};
 use derive_more::{Display, Error};
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Ratio(f64);
+f64_domain!(Ratio);
 
 #[derive(Debug, Display, Error)]
 pub struct InvalidRatioValue(#[error(not(source))] f64);

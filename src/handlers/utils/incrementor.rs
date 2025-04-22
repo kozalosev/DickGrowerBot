@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::num::TryFromIntError;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use async_trait::async_trait;
-use derive_more::Display;
+use derive_more::{Constructor, Display};
 use downcast_rs::{Downcast, impl_downcast};
 use num_traits::{PrimInt, Zero};
 use rand::distributions::uniform::SampleUniform;
@@ -12,6 +13,32 @@ use rust_i18n::t;
 use teloxide::types::UserId;
 use crate::{config, repo};
 use crate::repo::ChatIdKind;
+
+#[derive(Debug, Display, derive_more::Error)]
+struct DomainAssertionError(#[error(not(source))] &'static str);
+
+struct Debt(i32);
+
+impl TryFrom<i32> for Debt {
+    type Error = DomainAssertionError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        if value < 0 {
+            Err(DomainAssertionError("debt must be positive"))
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+impl TryFrom<u32> for Debt {
+    type Error = TryFromIntError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        let signed_value: i32 = value.try_into()?;
+        Ok(Self(signed_value))
+    }
+}
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -52,16 +79,16 @@ pub struct DickId(pub(crate) UserId, pub(crate) ChatIdKind);
 
 #[derive(Copy, Clone)]
 pub struct ChangeIntent {
-    pub current_length: i32,
-    pub base_increment: i32,
+    pub current_length: i64,
+    pub base_increment: i64,
 }
 
 #[derive(Copy, Clone)]
-pub struct AdditionalChange(pub i32);
+pub struct AdditionalChange(pub i64);
 
 pub struct Increment<T: PrimInt + std::fmt::Display> {
     pub base: T,
-    pub by_perks: HashMap<String, i32>,
+    pub by_perks: HashMap<String, i64>,
     pub total: T,
 }
 
@@ -143,9 +170,9 @@ impl Incrementor {
     
     async fn add_additional_incr<T, R>(&self, dick: DickId, base_increment: BaseIncrement<T>) -> Increment<R>
     where
-        T: PrimInt + std::fmt::Display + Into<i16>,
-        R: PrimInt + std::fmt::Display + From<T> + TryFrom<i32>,
-        <R as TryFrom<i32>>::Error: std::fmt::Display
+        T: PrimInt + std::fmt::Display + Into<i32>,
+        R: PrimInt + std::fmt::Display + From<T> + TryFrom<i64>,
+        <R as TryFrom<i64>>::Error: std::fmt::Display
     {
         let current_length = match self.dicks.fetch_length(dick.0, &dick.1).await {
             Ok(length) => length,
@@ -155,8 +182,8 @@ impl Incrementor {
             }
         };
         let change_intent = ChangeIntent {
-            base_increment: base_increment.i32(),
-            current_length
+            base_increment: base_increment.i64(),
+            current_length: current_length as i64,
         };
 
         let mut additional_change = 0;
@@ -188,9 +215,9 @@ impl Incrementor {
 }
 
 #[derive(Copy, Clone)]
-struct BaseIncrement<T: PrimInt + Copy + Into<i16>>(T);
+struct BaseIncrement<T: PrimInt + Copy + Into<i32>>(T);
 
-impl <T: PrimInt + Into<i16>> BaseIncrement<T> {
+impl <T: PrimInt + Into<i32>> BaseIncrement<T> {
     fn only<R>(self) -> Increment<R>
         where
             R: PrimInt + std::fmt::Display + From<T>
@@ -203,8 +230,8 @@ impl <T: PrimInt + Into<i16>> BaseIncrement<T> {
         }
     }
 
-    fn i32(self) -> i32 {
-        self.0.into() as i32
+    fn i64(self) -> i64 {
+        self.0.into() as i64
     }
 }
 
@@ -361,7 +388,7 @@ mod test_incrementor {
         }
 
         async fn apply(&self, _: &DickId, _: ChangeIntent) -> AdditionalChange {
-            AdditionalChange(self.value)
+            AdditionalChange(self.value as i64)
         }
 
         fn enabled(&self) -> bool {

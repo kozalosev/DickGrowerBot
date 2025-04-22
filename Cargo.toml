@@ -30,7 +30,7 @@ tinytemplate = "1.2.1"
 # Derive macros
 strum = "0.27.1"
 strum_macros = "0.27.1"
-derive_more = { version = "2.0.1", features = ["display", "from", "constructor", "error", "from_str"] }
+derive_more = { version = "2.0.1", features = ["display", "from", "constructor", "error", "from_str", "add", "mul", "not", "add_assign", "mul_assign"] }
 anyhow = { version = "1.0.95", features = ["backtrace"] }
 # Other basic stuff
 regex = "1.11.1"

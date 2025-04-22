@@ -10,7 +10,8 @@ static RU_SPEAKING_LOCALES: [&str; 3] = ["ru", "uk", "be"];
 #[derive(Clone, Debug, Constructor, From)]
 pub struct LanguageCode(String);
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, sqlx::Type)]
+#[derive(Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, sqlx::Type)]
+#[strum(serialize_all = "lowercase")]
 #[sqlx(type_name = "language_code", rename_all = "lowercase")]
 #[cfg_attr(test, derive(Debug))]
 pub enum SupportedLanguage {
