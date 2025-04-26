@@ -119,7 +119,6 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: &Message, answer: T) -> JsonRe
     let mut answer = bot.send_message(msg.chat.id, answer)
         .parse_mode(Html)
         .disable_link_preview(true);
-    answer.parse_mode = Some(Html);
     if msg.chat.is_group() || msg.chat.is_supergroup() {
         answer.reply_parameters.replace(ReplyParameters::new(msg.id));
     }
