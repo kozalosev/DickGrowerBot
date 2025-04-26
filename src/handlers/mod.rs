@@ -15,7 +15,7 @@ pub mod stats;
 use derive_more::Constructor;
 use rust_i18n::t;
 use teloxide::Bot;
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessage};
+use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessage, SendMessageSetters};
 use teloxide::requests::{JsonRequest, Requester};
 use teloxide::sugar::request::RequestLinkPreviewExt;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters};
@@ -116,7 +116,9 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
 
 pub fn reply_html<T: Into<String>>(bot: Bot, msg: &Message, answer: T) -> JsonRequest<SendMessage> {
     // TODO: split to several messages if the answer is too long
-    let mut answer = bot.send_message(msg.chat.id, answer).disable_link_preview(true);
+    let mut answer = bot.send_message(msg.chat.id, answer)
+        .parse_mode(Html)
+        .disable_link_preview(true);
     answer.parse_mode = Some(Html);
     if msg.chat.is_group() || msg.chat.is_supergroup() {
         answer.reply_parameters.replace(ReplyParameters::new(msg.id));
