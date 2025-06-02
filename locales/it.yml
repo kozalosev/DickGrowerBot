@@ -1,0 +1,124 @@
+commands:
+  help:
+    description: "Ti aiuterò, mio amico"
+  privacy:
+    description: "Informativa sulla privacy che descrive quali dati memorizziamo"
+  grow:
+    description: "Fai crescere il tuo pene!"
+    result: "Il tuo pene è %{event} di <b>%{incr} cm</b> e ora è lungo <b>%{length} cm</b>."
+    direction:
+      grown: "cresciuto"
+      shrunk: "rimpicciolito"
+    position: "La tua posizione nella classifica è <b>%{pos}</b>."
+    tomorrow: "Hai già giocato con il tuo pene oggi."
+  top:
+    description: "Mostra i peni più grandi del gruppo"
+    title: "Classifica dei peni più grandi:"
+    line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"
+    ending: "<i>[+] significa che un giocatore non ha ancora fatto crescere il suo pene oggi.</i>"
+    empty: "Nessuno sta giocando :("
+  dod:
+    description: "Eleggi il Pene del Giorno"
+    result: "Il Pene del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pene è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."
+    position: "La sua posizione nella classifica è <b>%{pos}</b>."
+    already_chosen: "Il Pene del Giorno è già stato scelto oggi! Si tratta di <b>%{name}</b>."
+    no_candidates: "Non ci sono candidati per l'elezione, in questo gruppo non gioca nessuno 😢"
+  pvp:
+    description: "Combatti con il pene del tuo amico!"
+    results:
+      start: "<b>%{name}</b> ha sfidato il gruppo con una scommessa di <b>%{bet} cm</b>!"
+      finish: "Il vincitore è <b>%{winner_name}</b>! Il suo pene ora è lungo <b>%{winner_length} cm</b>. Quello del giocatore perdente è ora di <b>%{loser_length}</b>.\nLa scommessa era di <b>%{bet} cm</b>."
+      position:
+        winner: "La posizione nella classifica di <b>%{name}</b> è <b>%{pos}</b>."
+        loser: "La posizione nella classifica di <b>%{name}</b> è <b>%{pos}</b>."
+      stats:
+        text: "Tasso di vittoria del <b>vincitore</b> — <b>%{winner_win_rate}</b>.\nLa sua serie di vittorie attuale — <b>%{winner_win_streak}</b>, serie di vittorie massima — <b>%{winner_win_streak_max}</b>.\nTasso di vittoria del <b>perdente</b> — <b>%{loser_win_rate}</b>."
+        lost_win_streak: "La serie di <b>%{lost_win_streak}</b> vittorie di fila è stata persa."
+      withheld: "<b>%{payout} cm</b> sono stati trattenuti dal vincitore per pagare il debito."
+    button: "Attacca!"
+    errors:
+      no_args: "Chiama il comando con un numero di centimetri che sei disposto a scommettere."
+      not_enough:
+        initiator: "Meh. Il pene dello sfidante non è lungo abbastanza per una tale scommessa!"
+        acceptor: "Il tuo membro non è abbastanza lungo 😣"
+      same_person: "Non puoi sfidarti da solo!"
+      battle_already_in_progress: "La battaglia è già in corso! Il messaggio verrà aggiornato in un momento…"
+  stats:
+    description: "Statistiche"
+    length: "Lunghezza: <b>%{length}</b>\nPosizione in classifica: <b>%{pos}</b>"
+    pvp: "Tasso di vittoria: <b>%{win_rate}</b>.\nSfide: <b>%{battles}</b>.\nVittorie: <b>%{wins}</b>.\nSerie di vittorie massima: <b>%{win_streak}</b>.\nLunghezza acquisita: <b>%{acquired} cm</b>.\nLunghezza persa: <b>%{lost} cm</b>."
+    notice: "La raccolta delle statistiche è iniziata il 2 Luglio 2024."
+    personal: "<i>Le tue statistiche personali:</i>\n— Numero di gruppi in cui giochi: <b>%{chats}</b>.\n— Lunghezza massima raggiunta: <b>%{max_length}</b>.\n— Somma dei tuoi peni in tutti i gruppi: <b>%{total_length}</b>."
+  loan:
+    description: "Debito? Prendi un prestito!"
+    debt: "Ti rimangono da pagare <b>%{debt} cm</b>"
+    confirmation:
+      text: "Il tuo debito verrà resettato, ma ogni crescita del tuo pene sarà ridotta del <b>%{payout_percentage}</b> finché il debito di <b>%{debt} cm</b> non sarà saldato."
+      buttons:
+        agree: "Va bene!"
+        disagree: "No, grazie"
+    callback:
+      success: "Il microprestito è stato emesso con successo!"
+      refused: "Il paziente ha rifiutato il cambio di genere per credito."
+      payout_ratio_changed: "Il tasso di rimborso è stato modificato poiché hai inviato la domanda di prestito. Rimanda il comando."
+    errors:
+      positive_length: "Mi dispiace, amico, questa iniziativa sociale è pensata solo per ragazze con desideri molto, molto profondi. Non posso far diventare il tuo amico ancora più grande :("
+  import:
+    description: "Importa peni da altri bot"
+    result:
+      titles:
+        imported: "I seguenti utenti sono stati importati:"
+        already_present: "I seguenti utenti erano già stati importati:"
+        not_found: "I seguenti utenti non sono ancora in gioco:"
+      line:
+        imported: "➖ <b>%{name}</b> (<i>%{length}</i> cm)"
+        already_present: "➖ <b>%{name}</b> (<i>%{length}</i> cm)"
+        not_found: "➖ <b>%{name}</b>"
+    errors:
+      not_admin: "Questo comando può essere utilizzato solo dagli admin!"
+      not_reply: "Devi rispondere a un messaggio inviato da uno di %{origin_bots}"
+      invalid_lines:
+        template: "Impossibile elaborare questo messaggio 🤔\nLe seguenti linee sono invalide:\n%{invalid_lines}"
+        line: "➖ <b>%{line}</b>"
+  promo:
+    description: "Attiva un codice promozionale"
+    request: "Inserisci un codice promozionale:"
+    success:
+      template: "Hai attivato questo codice promozionale con successo! %{ending}"
+      singular: "Il tuo pene è cresciuto di <b>%{growth}</b> cm in un gruppo."
+      plural: "Il tuo pene è cresciuto di <b>%{growth}</b> cm in <b>%{affected_chats}</b> gruppi!"
+    errors:
+      no_activations_left: "Mi dispiace ma questo codice promozionale non esiste o è scaduto 😞"
+      already_activated: "Sembra che tu abbia già utilizzato questo codice promozionale 🤨"
+      no_dicks: "Non hai ancora alcun pene. 🤔 Devi aggiungermi ad un gruppo ed eseguire il comando <code>/grow</code>!"
+    inline:
+      switch_button: "Attiva il codice promozionale '%{code}'…"
+inline:
+  results:
+    text: "Clicca il tasto qui sotto per avere il risultato!"
+    button: "Cliccami!"
+    titles:
+      grow: "Fai crescere il tuo pene!"
+      top: "Mostra i peni più grandi del gruppo"
+      dick_of_day: "Eleggi il Pene del Giorno"
+      pvp: "Sfida gli altri con una scommessa di %{bet} cm!"
+      stats: "Statistiche"
+      loan: "Sei in debito? Chiedi un prestito!"
+  callback:
+    errors:
+      another_user: "Questo messaggio è stato inviato da un'altra persona."
+      invalid_data: "Questo messaggio potrebbe essere stato mandato da una vecchia versione del bot. Prova a rimandarlo."
+      unknown_data: "Comando sconosciuto"
+      no_data: "Qualcosa è andato storto…"
+titles:
+  greeting: "Ciao"
+  time_till_next_day:
+    none: " Torna domani!"
+    some: "\n\nProssimo tentativo tra <b>%{hours}</b>h <b>%{minutes}</b>m."
+  perks:
+    top_line: "I seguenti vantaggi hanno influenzato il risultato:"
+    help-pussies: "buco profondo"
+    loan-payout: "micro-loaner"
+errors:
+  not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
+  feature_disabled: "Questa funzione non è al momento disponibile."
