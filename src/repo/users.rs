@@ -1,17 +1,8 @@
 use anyhow::Context;
-use chrono::{DateTime, Utc};
 use teloxide::types::UserId;
-
-use crate::domain::{Ratio, Username};
+use crate::domain::objects::User;
 use crate::repo::ChatIdKind;
 use crate::repository;
-
-#[derive(sqlx::FromRow, Debug)]
-pub struct User {
-    pub uid: i64,
-    pub name: Username,
-    pub created_at: DateTime<Utc>
-}
 
 repository!(Users,
     pub async fn create_or_update(&self, user_id: UserId, name: &str) -> anyhow::Result<User> {

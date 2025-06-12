@@ -3,8 +3,8 @@ use std::sync::Arc;
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
 use crate::config::Announcement;
-use crate::domain::{LanguageCode, SupportedLanguage};
-use crate::domain::SupportedLanguage::{EN, RU};
+use crate::domain::primitives::{LanguageCode, SupportedLanguage};
+use crate::domain::primitives::SupportedLanguage::{EN, RU};
 use crate::repo::test::{dicks, start_postgres, CHAT_ID_KIND};
 
 #[tokio::test]
@@ -93,9 +93,6 @@ fn get_languages() -> [LanguageCode; 2] {
 
 fn get_announcements_as_map(n: u8) -> HashMap<SupportedLanguage, Announcement> {
     [(EN, format!("test {n}")), (RU, format!("тест {n}"))]
-        .map(|(lang, ann)| (lang, Announcement {
-            text: Arc::new(ann.clone()),
-            hash: Arc::new(ann.as_bytes().to_vec())
-        }))
+        .map(|(lang, ann)| (lang, Announcement::new(ann)))
         .into_iter().collect()
 }

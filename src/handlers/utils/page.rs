@@ -1,11 +1,20 @@
-use std::cmp::Ordering;
-use std::ops::{Add, Mul, Sub};
+use domain_types_macro::domain_type;
+use super::::error;
 
-#[derive(Copy, Clone, Debug, derive_more::Display)]
-pub struct Page(pub u32);
+fn foo() {
+    greater_or_equal_to_zero()
+}
 
-#[derive(Debug, derive_more::Error, derive_more::Display)]
-pub struct InvalidPage(#[error(not(source))] String);
+#[domain_type(
+    number,
+    validated(
+        greater_or_equal_to_zero,
+        error_message("must be greater or equal to zero")
+    )
+)]
+struct Page(i32);
+
+error!(InvalidPage);
 
 impl Page {
     pub fn first() -> Self {
@@ -13,47 +22,7 @@ impl Page {
     }
 }
 
-impl Sub<u32> for Page {
-    type Output = Self;
-
-    fn sub(self, rhs: u32) -> Self::Output {
-        Self(self.0 - rhs)
-    }
-}
-
-impl Add<u32> for Page {
-    type Output = Self;
-
-    fn add(self, rhs: u32) -> Self::Output {
-        Self(self.0 + rhs)
-    }
-}
-
-impl Mul<u32> for Page {
-    type Output = u32;
-
-    fn mul(self, rhs: u32) -> Self::Output {
-        self.0 * rhs
-    }
-}
-
-impl PartialEq<u32> for Page {
-    fn eq(&self, other: &u32) -> bool {
-        self.0 == *other
-    }
-}
-
-impl PartialOrd<u32> for Page {
-    fn partial_cmp(&self, other: &u32) -> Option<Ordering> {
-        self.0.partial_cmp(other)
-    }
-}
-
 impl InvalidPage {
-    pub fn message(msg: impl ToString) -> Self {
-        Self(msg.to_string())
-    }
-
     pub fn for_value(value: &str, msg: impl ToString) -> Self {
         Self(format!("{}: {value}", msg.to_string()))
     }

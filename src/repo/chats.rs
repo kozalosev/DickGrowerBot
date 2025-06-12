@@ -2,6 +2,7 @@ use std::fmt::Formatter;
 use anyhow::{bail, Context};
 use sqlx::{Postgres, Transaction};
 use teloxide::types::ChatId;
+use crate::domain::primitives::InternalChatId;
 use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ensure_only_one_row_updated};
 use crate::repository;
 
@@ -52,7 +53,7 @@ repository!(Chats, with_feature_toggles,
             .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,
-    pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
+    pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<InternalChatId> {
         let (id, instance) = match chat_id {
             ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
             ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id.0), None),

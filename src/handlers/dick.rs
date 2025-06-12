@@ -13,10 +13,11 @@ use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
 use page::{InvalidPage, Page};
 
 use crate::{config, metrics, repo};
-use crate::domain::{LanguageCode, Username};
+use crate::domain::objects::GrowthResult;
+use crate::domain::primitives::chat::ChatIdPartiality;
+use crate::domain::primitives::{LanguageCode, Username, UserId as UID, Offset};
 use crate::handlers::{HandlerResult, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, page};
-use crate::repo::{ChatIdPartiality, UID};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
@@ -68,7 +69,7 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
     let lang_code = LanguageCode::from_user(from);
 
     let main_part = match grow_result {
-        Ok(repo::GrowthResult { new_length, pos_in_top }) => {
+        Ok(GrowthResult { new_length, pos_in_top }) => {
             let event_key = if increment.total.is_negative() { "shrunk" } else { "grown" };
             let event_template = format!("commands.grow.direction.{event_key}");
             let event = t!(&event_template, locale = &lang_code);
@@ -123,8 +124,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let lang_code = LanguageCode::from_user(from);
-    let top_limit = config.top_limit as u32;
-    let offset = page * top_limit;
+    let offset = Offset::new(page * config.top_limit);
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
     let has_more_pages = dicks.len() as u32 > top_limit;
@@ -184,7 +184,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             .ok_or(InvalidPage::for_value(d, "invalid prefix")))
         .and_then(|r| r.parse()
             .map_err(|e| InvalidPage::for_value(&r, e)))
-        .map(Page)
+        .map(Page::new)
         .map_err(|e| anyhow!(e))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);

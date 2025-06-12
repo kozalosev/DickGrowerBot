@@ -1,0 +1,10 @@
+[package]
+name = "macro_test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+domain_types = { version = "0.1.0", path = "../domain_types" }
+domain_types_macro = { version = "0.1.0", path = "../domain_types_macro" }
+derive_more = { version = "2.0.1", features = ["display", "from", "constructor", "error", "from_str", "add", "mul", "not", "add_assign", "mul_assign", "deref"] }
+sqlx = { version = "0.8.5", features = ["macros"] }

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::num::TryFromIntError;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 use async_trait::async_trait;
-use derive_more::{Constructor, Display};
+use derive_more::Display;
+use domain_types::traits::ValidatedDomainNumber;
 use downcast_rs::{Downcast, impl_downcast};
 use num_traits::{PrimInt, Zero};
 use rand::distributions::uniform::SampleUniform;
@@ -12,33 +12,8 @@ use rand::rngs::OsRng;
 use rust_i18n::t;
 use teloxide::types::UserId;
 use crate::{config, repo};
-use crate::repo::ChatIdKind;
-
-#[derive(Debug, Display, derive_more::Error)]
-struct DomainAssertionError(#[error(not(source))] &'static str);
-
-struct Debt(i32);
-
-impl TryFrom<i32> for Debt {
-    type Error = DomainAssertionError;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        if value < 0 {
-            Err(DomainAssertionError("debt must be positive"))
-        } else {
-            Ok(Self(value))
-        }
-    }
-}
-
-impl TryFrom<u32> for Debt {
-    type Error = TryFromIntError;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        let signed_value: i32 = value.try_into()?;
-        Ok(Self(signed_value))
-    }
-}
+use crate::domain::primitives::chat::ChatIdKind;
+use crate::domain::primitives::Ratio;
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -50,7 +25,7 @@ pub struct Incrementor {
 #[derive(Clone)]
 pub struct Config {
     growth_range: RangeInclusive<i16>,
-    grow_shrink_ratio: f32,
+    grow_shrink_ratio: Ratio,
     newcomers_grace_days: u32,
     dod_bonus_range: RangeInclusive<u8>,
 }
@@ -124,7 +99,7 @@ impl Incrementor {
         Self {
             config: Config {
                 growth_range: growth_range_min..=growth_range_max,
-                grow_shrink_ratio: config::get_env_value_or_default("GROW_SHRINK_RATIO", 0.5),
+                grow_shrink_ratio: config::get_env_value_or_default("GROW_SHRINK_RATIO", Ratio::literal(0.5)),
                 newcomers_grace_days: config::get_env_value_or_default("NEWCOMERS_GRACE_DAYS", 7),
                 dod_bonus_range: 1..=dod_max_bonus,
             },

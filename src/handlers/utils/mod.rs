@@ -3,12 +3,13 @@ pub mod callbacks;
 pub mod locks;
 mod tghack;
 mod incrementor;
+mod macros;
 
 pub use tghack::*;
 pub use incrementor::*;
 
 use teloxide::types::User;
-use crate::domain::Username;
+use crate::domain::primitives::Username;
 
 pub fn get_full_name(user: &User) -> Username {
     let name = user.last_name.as_ref()

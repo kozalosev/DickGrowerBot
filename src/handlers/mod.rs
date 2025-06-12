@@ -29,7 +29,7 @@ pub use import::*;
 pub use inline::*;
 pub use promo::*;
 pub use loan::LoanCommands;
-use crate::domain::LanguageCode;
+use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -146,7 +146,7 @@ pub mod checks {
     use rust_i18n::t;
     use teloxide::Bot;
     use teloxide::types::Message;
-    use crate::domain::LanguageCode;
+    use crate::domain::primitives::LanguageCode;
     use super::{HandlerResult, reply_html};
 
     pub fn is_group_chat(msg: Message) -> bool {

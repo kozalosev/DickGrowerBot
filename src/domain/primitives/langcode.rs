@@ -1,14 +1,13 @@
 use std::borrow::ToOwned;
-use std::ops::Deref;
-use derive_more::{Constructor, From};
 use once_cell::sync::Lazy;
 use teloxide::types::User;
+use domain_types_macro::domain_type;
 
 static DEFAULT: Lazy<LanguageCode> = Lazy::new(|| LanguageCode("en".to_string()));
 static RU_SPEAKING_LOCALES: [&str; 3] = ["ru", "uk", "be"];
 
-#[derive(Clone, Debug, Constructor, From)]
-pub struct LanguageCode(String);
+#[domain_type]
+struct LanguageCode(String);
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, sqlx::Type)]
 #[strum(serialize_all = "lowercase")]
@@ -61,14 +60,6 @@ impl LanguageCode {
     }
 }
 
-impl Deref for LanguageCode {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_str()
-    }
-}
-
 impl From<&User> for LanguageCode {
     fn from(value: &User) -> Self {
         Self::from_user(value)
@@ -83,8 +74,8 @@ impl From<Option<&User>> for LanguageCode {
 
 #[cfg(test)]
 mod test_from_maybe_string {
-    use crate::domain::LanguageCode;
-    use crate::domain::SupportedLanguage::{EN, RU};
+    use crate::domain::primitives::LanguageCode;
+    use crate::domain::primitives::SupportedLanguage::{EN, RU};
 
     #[test]
     fn success() {

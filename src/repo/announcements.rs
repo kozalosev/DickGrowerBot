@@ -1,32 +1,10 @@
 use anyhow::Context;
 use derive_more::Constructor;
 use sqlx::{Pool, Postgres};
-use crate::repo::{ensure_only_one_row_updated, ChatIdInternal, ChatIdKind};
+use crate::repo::{ensure_only_one_row_updated, ChatIdKind};
 use crate::config;
-use crate::domain::{InternalChatId, LanguageCode, SupportedLanguage};
-
-#[derive(sqlx::FromRow)]
-struct AnnouncementEntity {
-    chat_id: InternalChatId,
-    hash: Vec<u8>,
-    times_shown: isize,
-}
-
-struct Announcement {
-    chat_id: ChatIdInternal,
-    hash: Vec<u8>,
-    times_shown: usize,
-}
-
-impl From<AnnouncementEntity> for Announcement {
-    fn from(value: AnnouncementEntity) -> Self {
-        Self {
-            chat_id: ChatIdInternal(value.chat_id),
-            hash: value.hash,
-            times_shown: value.times_shown as usize
-        }
-    }
-}
+use crate::domain::objects::Announcement;
+use crate::domain::primitives::{InternalChatId, LanguageCode, SupportedLanguage};
 
 #[derive(Clone, Constructor)]
 pub struct Announcements {
@@ -66,7 +44,7 @@ impl Announcements {
     }
 
     async fn get(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode) -> anyhow::Result<Option<Announcement>> {
-        sqlx::query_as!(AnnouncementEntity,
+        sqlx::query_as!(Announcement,
             "SELECT chat_id, hash, times_shown FROM Announcements
                 WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text)
                 AND language = $2",
@@ -90,7 +68,7 @@ impl Announcements {
             .context(format!("couldn't create the announcement for {chat_id_kind}, {lang_code:?}, {hash:?}"))
     }
 
-    async fn increment_times_shown(&self, chat_id: ChatIdInternal, lang_code: &LanguageCode) -> anyhow::Result<()> {
+    async fn increment_times_shown(&self, chat_id: InternalChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET times_shown = times_shown + 1 WHERE chat_id = $1 AND language::text = $2",
                 chat_id.0, lang_code.as_str())
             .execute(&self.pool)
@@ -100,7 +78,7 @@ impl Announcements {
             .context(format!("couldn't increment shown times for {chat_id:?}, {lang_code:?}"))
     }
 
-    async fn update(&self, chat_id: ChatIdInternal, lang_code: &LanguageCode, hash: &[u8]) -> anyhow::Result<()> {
+    async fn update(&self, chat_id: InternalChatId, lang_code: &LanguageCode, hash: &[u8]) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET hash = $3, times_shown = 1 WHERE chat_id = $1 AND language = $2",
                 chat_id.0, lang_code.to_supported_language() as SupportedLanguage, hash)
             .execute(&self.pool)
