@@ -1,0 +1,12 @@
+services:
+  DickGrowerBot:
+    build: .
+    image: kozalosev/dickgrowerbot
+    container_name: dickgrowerbot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 8080
+    logging:
+      driver: local
