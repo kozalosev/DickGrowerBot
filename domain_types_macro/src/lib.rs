@@ -265,134 +265,6 @@ fn generate_domain_number_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
     quote! {
         #[automatically_derived]
-        impl std::ops::Add<#inner_type> for #name {
-            type Output = Self;
-        
-            fn add(self, rhs: #inner_type) -> Self::Output {
-                Self(self.0 + rhs)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::Sub<#inner_type> for #name {
-            type Output = Self;
-        
-            fn sub(self, rhs: #inner_type) -> Self::Output {
-                Self(self.0 - rhs)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::Mul for #name {
-            type Output = Self;
-        
-            fn mul(self, rhs: Self) -> Self::Output {
-                Self(self.0 * rhs.0)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::Mul<#inner_type> for #name {
-            type Output = Self;
-        
-            fn mul(self, rhs: #inner_type) -> Self::Output {
-                Self(self.0 * rhs)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::Div for #name {
-            type Output = Self;
-        
-            fn div(self, rhs: Self) -> Self::Output {
-                Self(self.0 / rhs.0)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::Rem<#inner_type> for #name {
-            type Output = Self;
-        
-            fn rem(self, rhs: #inner_type) -> Self::Output {
-                Self(self.0 % rhs)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::Rem for #name {
-            type Output = Self;
-        
-            fn rem(self, rhs: Self) -> Self::Output {
-                Self(self.0 % rhs.0)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::Div<#inner_type> for #name {
-            type Output = Self;
-        
-            fn div(self, rhs: #inner_type) -> Self::Output {
-                Self(self.0 / rhs)
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::AddAssign<#inner_type> for #name {
-            fn add_assign(&mut self, rhs: #inner_type) {
-                self.0 += rhs;
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::SubAssign<#inner_type> for #name {
-            fn sub_assign(&mut self, rhs: #inner_type) {
-                self.0 -= rhs;
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::MulAssign for #name {
-            fn mul_assign(&mut self, rhs: Self) {
-                self.0 *= rhs.0;
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::MulAssign<#inner_type> for #name {
-            fn mul_assign(&mut self, rhs: #inner_type) {
-                self.0 *= rhs;
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::DivAssign for #name {
-            fn div_assign(&mut self, rhs: Self) {
-                self.0 /= rhs.0;
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::DivAssign<#inner_type> for #name {
-            fn div_assign(&mut self, rhs: #inner_type) {
-                self.0 /= rhs;
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::RemAssign for #name {
-            fn rem_assign(&mut self, rhs: Self) {
-                self.0 %= rhs.0;
-            }
-        }
-        
-        #[automatically_derived]
-        impl std::ops::RemAssign<#inner_type> for #name {
-            fn rem_assign(&mut self, rhs: #inner_type) {
-                self.0 %= rhs;
-            }
-        }
-        
-        #[automatically_derived]
         impl ::domain_types::traits::DomainNumber<#inner_type> for #name {}
     }
 }
@@ -404,15 +276,6 @@ fn generate_validated_domain_number_impls(info: &TypeInfo) -> TokenStream {
     let error_msg = args.error_msg.as_ref()
         .expect("Error message must be provided to generate a constructor");
     quote! {
-        #[automatically_derived]
-        impl std::ops::Add<#inner_type> for #name {
-            type Output = Self;
-
-            fn add(self, rhs: #inner_type) -> Self::Output {
-                Self(self.0 + rhs)
-            }
-        }
-
         #[automatically_derived]
         impl ::domain_types::traits::ValidatedDomainNumber<#inner_type> for #name {
             fn new(value: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
@@ -431,6 +294,527 @@ fn generate_validated_domain_number_impls(info: &TypeInfo) -> TokenStream {
             pub const fn literal(value: #inner_type) -> Self {
                 assert!(#validator(&value), #error_msg);
                 Self(value)
+            }
+        }
+    }
+}
+
+fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    quote! {
+        pub fn overflowing_add_primitive(self, rhs: #inner_type) -> (Self, bool) {
+            let (new_value, is_overflow) = self.0.overflowing_add(rhs);
+            (Self(new_value), is_overflow)
+        }
+
+        pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
+            self.overflowing_add_primitive(rhs.0);
+        }
+
+        pub fn saturating_add_primitive(self, rhs: #inner_type) -> Self {
+            Self(self.0.saturating_add(rhs))
+        }
+
+        pub fn saturating_add(self, rhs: Self) -> Self {
+            self.saturating_add_primitive(rhs.0)
+        }
+
+        pub fn overflowing_sub_primitive(self, rhs: #inner_type) -> (Self, bool) {
+            let (new_value, is_overflow) = self.0.overflowing_sub(rhs);
+            (Self(new_value, is_overflow))
+        }
+
+        pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
+            self.overflowing_sub_primitive(rhs.0);
+        }
+
+        pub fn saturating_sub_primitive(self, rhs: #inner_type) -> Self {
+            Self(self.0.saturating_sub(rhs))
+        }
+
+        pub fn saturating_sub(self, rhs: Self) -> Self {
+            self.saturating_sub_primitive(rhs.0)
+        }
+
+        pub fn overflowing_mul_primitive(self, rhs: #inner_type) -> (Self, bool) {
+            let (new_value, is_overflow) = self.0.overflowing_mul(rhs);
+            (Self(new_value, is_overflow))
+        }
+
+        pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
+            self.overflowing_mul_primitive(rhs.0);
+        }
+
+        pub fn saturating_mul_primitive(self, rhs: #inner_type) -> Self {
+            Self(self.0.saturating_mul(rhs))
+        }
+
+        pub fn saturating_mul(self, rhs: Self) -> Self {
+            self.saturating_mul_primitive(rhs.0)
+        }
+
+        pub fn overflowing_div_primitive(self, rhs: #inner_type) -> (Self, bool) {
+            let (new_value, is_overflow) = self.0.overflowing_div(rhs);
+            (Self(new_value, is_overflow))
+        }
+
+        pub fn overflowing_div(self, rhs: Self) -> (Self, bool) {
+            self.overflowing_div_primitive(rhs.0);
+        }
+
+        pub fn saturating_div_primitive(self, rhs: #inner_type) -> Self {
+            Self(self.0.saturating_div(rhs))
+        }
+
+        pub fn saturating_div(self, rhs: Self) -> Self {
+            self.saturating_div_primitive(rhs.0)
+        }
+
+        pub fn overflowing_rem_primitive(self, rhs: #inner_type) -> (Self, bool) {
+            let (new_value, is_overflow) = self.0.overflowing_rem(rhs);
+            (Self(new_value, is_overflow))
+        }
+
+        pub fn overflowing_rem(self, rhs: Self) -> (Self, bool) {
+            self.overflowing_rem_primitive(rhs.0);
+        }
+
+        pub fn saturating_rem_primitive(self, rhs: #inner_type) -> Self {
+            Self(self.0.saturating_rem(rhs))
+        }
+
+        pub fn saturating_rem(self, rhs: Self) -> Self {
+            self.saturating_rem_primitive(rhs.0)
+        }
+
+        #[automatically_derived]
+        impl std::ops::Add<#inner_type> for #name {
+            type Output = Self;
+
+            fn add(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_add_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Sub<#inner_type> for #name {
+            type Output = Self;
+
+            fn sub(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_sub_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Mul<#inner_type> for #name {
+            type Output = Self;
+
+            fn mul(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_mul_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Div<#inner_type> for #name {
+            type Output = Self;
+
+            fn div(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_div_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Rem<#inner_type> for #name {
+            type Output = Self;
+
+            fn rem(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_rem_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Add for #name {
+            type Output = Self;
+
+            fn add(self, rhs: Self) -> Self::Output {
+                self.saturating_add(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Sub for #name {
+            type Output = Self;
+
+            fn sub(self, rhs: Self) -> Self::Output {
+                self.saturating_sub(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Mul for #name {
+            type Output = Self;
+
+            fn mul(self, rhs: Self) -> Self::Output {
+                self.saturating_mul(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Div for #name {
+            type Output = Self;
+
+            fn div(self, rhs: Self) -> Self::Output {
+                self.saturating_mul(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Rem for #name {
+            type Output = Self;
+
+            fn rem(self, rhs: Self) -> Self::Output {
+                self.saturating_rem(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::AddAssign<#inner_type> for #name {
+            fn add_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_add(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::SubAssign<#inner_type> for #name {
+            fn sub_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_sub(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::MulAssign<#inner_type> for #name {
+            fn mul_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_mul(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::DivAssign<#inner_type> for #name {
+            fn div_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_div(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::RemAssign<#inner_type> for #name {
+            fn rem_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_rem(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::AddAssign for #name {
+            fn add_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_add(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::SubAssign for #name {
+            fn sub_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_sub(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::MulAssign for #name {
+            fn mul_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_mul(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::DivAssign for #name {
+            fn div_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_div(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::RemAssign for #name {
+            fn rem_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_rem(rhs.0);
+            }
+        }
+    }
+}
+
+fn generate_domain_validated_integer_number_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    quote! {
+        impl #name {
+            fn perform_arithmetic_operation(
+                lhs: #inner_type, rhs: #inner_type,
+                op_enum: ::domain_types::errors::ArithmeticOperation,
+                op_func: fn(#inner_type, #inner_type) -> (#inner_type, bool)
+            ) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                let (new_value, overflow) = op_func(lhs, rhs);
+                if !overflow {
+                    <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(new_value)
+                } else {
+                    let cause = ::domain_types::errors::DomainArithmeticOverflowError::new(op_enum, lhs, rhs);
+                    Err(::domain_types::errors::DomainAssertionError::new(new_value, cause.to_string()))
+                }
+            }
+
+            pub fn add_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                let operation = ::domain_types::errors::ArithmeticOperation::Addition;
+                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingAdd::overflowing_add)
+            }
+
+            pub fn add(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.add_primitive(rhs.0)
+            }
+
+            pub fn saturating_add_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.saturating_add(rhs))
+            }
+
+            pub fn saturating_add(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.saturating_add_primitive(rhs.0)
+            }
+
+            pub fn sub_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                let operation = ::domain_types::errors::ArithmeticOperation::Subtraction;
+                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingSub::overflowing_sub)
+            }
+
+            pub fn sub(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.sub_primitive(rhs.0)
+            }
+
+            pub fn saturating_sub_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.saturating_sub(rhs))
+            }
+
+            pub fn saturating_sub(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.saturating_sub_primitive(rhs.0)
+            }
+
+            pub fn mul_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                let operation = ::domain_types::errors::ArithmeticOperation::Multiplication;
+                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingMul::overflowing_mul)
+            }
+
+            pub fn mul(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.mul_primitive(rhs.0)
+            }
+
+            pub fn saturating_mul_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.saturating_mul(rhs))
+            }
+
+            pub fn saturating_mul(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.saturating_mul_primitive(rhs.0)
+            }
+
+            pub fn div_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                let operation = ::domain_types::errors::ArithmeticOperation::Division;
+                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingDiv::overflowing_div)
+            }
+
+            pub fn div(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.div_primitive(rhs.0)
+            }
+
+            pub fn saturating_div_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.saturating_div(rhs))
+            }
+
+            pub fn saturating_div(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.saturating_div_primitive(rhs.0)
+            }
+
+            pub fn rem_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                let operation = ::domain_types::errors::ArithmeticOperation::Remainder;
+                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingRem::overflowing_rem)
+            }
+
+            pub fn rem(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.rem_primitive(rhs.0)
+            }
+
+            pub fn saturating_rem_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.saturating_rem(rhs))
+            }
+
+            pub fn saturating_rem(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.saturating_rem_primitive(rhs.0)
+            }
+        }
+    }
+}
+
+fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    quote! {
+        #[automatically_derived]
+        impl std::ops::Add<#inner_type> for #name {
+            type Output = Self;
+
+            fn add(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_add_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Sub<#inner_type> for #name {
+            type Output = Self;
+
+            fn sub(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_sub_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Mul<#inner_type> for #name {
+            type Output = Self;
+
+            fn mul(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_mul_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Div<#inner_type> for #name {
+            type Output = Self;
+
+            fn div(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_div_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Rem<#inner_type> for #name {
+            type Output = Self;
+
+            fn rem(self, rhs: #inner_type) -> Self::Output {
+                self.saturating_rem_primitive(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Add for #name {
+            type Output = Self;
+
+            fn add(self, rhs: Self) -> Self::Output {
+                self.saturating_add(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Sub for #name {
+            type Output = Self;
+
+            fn sub(self, rhs: Self) -> Self::Output {
+                self.saturating_sub(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Mul for #name {
+            type Output = Self;
+
+            fn mul(self, rhs: Self) -> Self::Output {
+                self.saturating_mul(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Div for #name {
+            type Output = Self;
+
+            fn div(self, rhs: Self) -> Self::Output {
+                self.saturating_mul(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Rem for #name {
+            type Output = Self;
+
+            fn rem(self, rhs: Self) -> Self::Output {
+                self.saturating_rem(rhs)
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::AddAssign<#inner_type> for #name {
+            fn add_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_add(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::SubAssign<#inner_type> for #name {
+            fn sub_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_sub(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::MulAssign<#inner_type> for #name {
+            fn mul_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_mul(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::DivAssign<#inner_type> for #name {
+            fn div_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_div(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::RemAssign<#inner_type> for #name {
+            fn rem_assign(&mut self, rhs: #inner_type) {
+                self.0 = self.0.saturating_rem(rhs);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::AddAssign for #name {
+            fn add_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_add(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::SubAssign for #name {
+            fn sub_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_sub(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::MulAssign for #name {
+            fn mul_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_mul(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::DivAssign for #name {
+            fn div_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_div(rhs.0);
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::RemAssign for #name {
+            fn rem_assign(&mut self, rhs: Self) {
+                self.0 = self.0.saturating_rem(rhs.0);
             }
         }
     }

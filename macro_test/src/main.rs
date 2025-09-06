@@ -1,5 +1,3 @@
-mod cv;
-
 use domain_types_macro::domain_type;
 
 const fn ratio_range_validator(x: &f64) -> bool {
@@ -26,5 +24,8 @@ struct Username(String);
 
 fn main() {
     let invalid_ratio = Ratio::literal(1.0);
+
+    // 1.0.
+
     println!("invalid_ratio = {invalid_ratio}");
 }

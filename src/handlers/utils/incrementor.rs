@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use async_trait::async_trait;
 use derive_more::Display;
-use domain_types::traits::ValidatedDomainNumber;
+use domain_types::traits::DomainValue;
 use downcast_rs::{Downcast, impl_downcast};
 use num_traits::{PrimInt, Zero};
 use rand::distributions::uniform::SampleUniform;
@@ -229,11 +229,11 @@ impl <T: PrimInt + std::fmt::Display + Into<i32>> Increment<T> {
     }
 }
 
-fn get_base_increment<T>(range: RangeInclusive<T>, sign_ratio: f32) -> T
+fn get_base_increment<T>(range: RangeInclusive<T>, sign_ratio: Ratio) -> T
 where
     T: PrimInt + PartialOrd + SampleUniform + From<i8>
 {
-    let sign_ratio_percent = match (sign_ratio * 100.0).round() as u32 {
+    let sign_ratio_percent = match (sign_ratio.value() * 100.0).round() as u32 {
         ..=0 => 0,
         100.. => 100,
         x => x
@@ -257,12 +257,13 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::domain::primitives::Ratio;
     use super::get_base_increment;
 
     #[test]
     fn test_gen_increment() {
         let increments: Vec<i32> = (0..100)
-            .map(|_| get_base_increment(-5..=10, 0.5))
+            .map(|_| get_base_increment(-5..=10, Ratio::literal(0.5)))
             .collect();
         assert!(increments.iter().any(|n| n > &0));
         assert!(increments.iter().any(|n| n < &0));
@@ -274,7 +275,7 @@ mod test {
     #[test]
     fn test_gen_increment_with_positive_range() {
         let increments: Vec<i32> = (0..100)
-            .map(|_| get_base_increment(5..=10, 0.5))
+            .map(|_| get_base_increment(5..=10, Ratio::literal(0.5)))
             .collect();
         assert!(increments.iter().all(|n| n <= &10));
         assert!(increments.iter().all(|n| n >= &5));
@@ -287,7 +288,7 @@ mod test_incrementor {
 
     use async_trait::async_trait;
     use futures::future::join_all;
-
+    use crate::domain::primitives::Ratio;
     use crate::handlers::utils::{AdditionalChange, ChangeIntent, Config, DickId, Incrementor, Perk};
     use crate::repo;
     use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
@@ -299,7 +300,7 @@ mod test_incrementor {
         let incr = Incrementor {
             config: Config {
                 growth_range: -1..=1,
-                grow_shrink_ratio: 0.5,
+                grow_shrink_ratio: Ratio::literal(0.5),
                 newcomers_grace_days: 1,
                 dod_bonus_range: 1..=2,
             },

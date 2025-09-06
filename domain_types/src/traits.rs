@@ -26,8 +26,7 @@ where T: Num +
 }
 
 /// Numeric domain type with all arithmetic operations
-pub trait DomainNumber<T>: DomainValue<T> +
-    Copy +
+pub trait DomainNumber<T>: DomainValue<T> + Copy +
     Add + Sub + Mul + Div + Rem +
     Add<T> + Sub<T> + Mul<T> + Div<T> + Rem<T> +
     AddAssign + SubAssign + MulAssign + DivAssign + RemAssign +
@@ -37,74 +36,17 @@ where T: Num +
     Debug + Display
 {}
 
-impl <Inner, T: DomainValue<Inner>> Add<T> for Self {
-    type Output = Self;
-
-    fn add(self, rhs: T) -> Self::Output {
-        Self(self.value() + rhs.value())
-    }
-}
-
-impl <Inner, T: DomainValue<Inner>> Sub<T> for Self {
-    type Output = ();
-
-    fn sub(self, rhs: T) -> Self::Output {
-        Self(self.value() - rhs.value())
-    }
-}
-
 /// Numeric domain type with all arithmetic operations and value validation
-pub trait ValidatedDomainNumber<T>: DomainValue<T>
+pub trait ValidatedDomainNumber<T>: DomainValue<T> + Copy
 where T: Num +
     Clone + Default +
     Debug + Display
 {
     fn new(value: T) -> Result<Self, DomainAssertionError<T>>;
-
-    fn add_inner(self, rhs: T) -> Result<Self, DomainAssertionError<T>> {
-        Self::new(self.value() + rhs)
-    }
-    
-    fn add(self, rhs: Self) -> Result<Self, DomainAssertionError<T>> {
-        self.add_inner(rhs.value())
-    }
-
-    fn sub_inner(self, rhs: T) -> Result<Self, DomainAssertionError<T>> {
-        Self::new(self.value() - rhs)
-    }
-
-    fn sub(self, rhs: Self) -> Result<Self, DomainAssertionError<T>> {
-        self.sub_inner(rhs.value())
-    }
-
-    fn mul_inner(self, rhs: T) -> Result<Self, DomainAssertionError<T>> {
-        Self::new(self.value() * rhs)
-    }
-
-    fn mul(self, rhs: Self) -> Result<Self, DomainAssertionError<T>> {
-        self.mul_inner(rhs.value())
-    }
-
-    fn div_inner(self, rhs: T) -> Result<Self, DomainAssertionError<T>> {
-        Self::new(self.value() / rhs)
-    }
-
-    fn div(self, rhs: Self) -> Result<Self, DomainAssertionError<T>> {
-        self.div_inner(rhs.value())
-    }
-
-    fn rem_inner(self, rhs: T) -> Result<Self, DomainAssertionError<T>> {
-        Self::new(self.value() % rhs)
-    }
-
-    fn rem(self, rhs: Self) -> Result<Self, DomainAssertionError<T>> {
-        self.rem_inner(rhs.value())
-    }
 }
 
 /// Integer domain type (not a number, i.e., ID or something like that)
-pub trait DomainIntegerValue<T>: DomainValue<T> +
-    Copy +
+pub trait DomainIntegerValue<T>: DomainValue<T> + Copy +
     Eq + Ord
 where T: PrimInt +
     Clone + Default +
@@ -126,8 +68,7 @@ where T: PrimInt +
 {}
 
 /// Float domain type (not a number, i.e., ID or something like that)
-pub trait DomainFloatValue<T>: DomainValue<T> +
-    Copy
+pub trait DomainFloatValue<T>: DomainValue<T> + Copy
 where T: Float +
     Clone + Default +
     Debug + Display
