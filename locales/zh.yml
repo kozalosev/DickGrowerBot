@@ -122,3 +122,4 @@ titles:
 errors:
   not_group_chat: "此机器人仅在群聊中执行任务！"
   feature_disabled: "此功能当前暂时禁用。"
+  private_bot: "抱歉，这是一个私人机器人，在单个聊天中工作 🙁"

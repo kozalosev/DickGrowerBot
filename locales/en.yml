@@ -122,3 +122,4 @@ titles:
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   feature_disabled: "This feature is currently temporarily disabled."
+  private_bot: "Sorry, this is a private bot, working in a single chat 🙁"

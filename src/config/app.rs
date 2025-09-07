@@ -1,7 +1,9 @@
 use reqwest::Url;
+use teloxide::types::ChatId;
 use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
+use crate::config::peezy::*;
 use crate::domain::Ratio;
 use crate::domain::SupportedLanguage::{EN, RU};
 
@@ -15,6 +17,7 @@ pub struct AppConfig {
     pub pvp_default_bet: u16,
     pub announcements: AnnouncementsConfig,
     pub command_toggles: CachedEnvToggles,
+    pub peezy_fork_settings: PeezyForkSettings,
 }
 
 #[derive(Clone)]
@@ -40,6 +43,11 @@ impl AppConfig {
         let announcement_max_shows = get_optional_env_value("ANNOUNCEMENT_MAX_SHOWS");
         let announcement_en = get_optional_env_value("ANNOUNCEMENT_EN");
         let announcement_ru = get_optional_env_value("ANNOUNCEMENT_RU");
+        // Peezy fork settings
+        let allowed_chat_id = ChatId(get_mandatory_env_value("ALLOWED_CHAT_ID"));
+        let centimeters_per_eggplant = get_optional_env_value("CENTIMETERS_PER_EGGPLANT");
+        let max_eggplants = get_optional_env_value("EGGPLANTS_MAX");
+        //
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -68,6 +76,11 @@ impl AppConfig {
                     .collect()
             },
             command_toggles: Default::default(),
+            peezy_fork_settings: PeezyForkSettings {
+                allowed_chat_id,
+                centimeters_per_eggplant,
+                max_eggplants,
+            }
         }
     }
 }

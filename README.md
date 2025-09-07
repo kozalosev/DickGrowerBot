@@ -1,5 +1,8 @@
-[@DickGrowerBot](https://t.me/DickGrowerBot)
-============================================
+[@PeezyBigDBot](https://t.me/PeezyBigDBot)
+==========================================
+
+> [!NOTE]
+> This is a fork of [@DickGrowerBot](https://github.com/kozalosev/DickGrowerBot) with some additional capabilities, created for a single chat use only.
 
 [![CI Build](https://github.com/kozalosev/DickGrowerBot/actions/workflows/ci-build.yaml/badge.svg?branch=main&event=push)](https://github.com/kozalosev/DickGrowerBot/actions/workflows/ci-build.yaml)
 

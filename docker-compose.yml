@@ -1,9 +1,9 @@
 version: "3.7"
 services:
-  DickGrowerBot:
+  PeezyBigDBot:
     build: .
-    image: kozalosev/dickgrowerbot
-    container_name: dickgrowerbot
+    image: peezybigd/peezybigdbot
+    container_name: peezybigdbot
     restart: unless-stopped
     environment:
       - TELOXIDE_TOKEN
@@ -37,6 +37,10 @@ services:
       - ANNOUNCEMENT_MAX_SHOWS
       - ANNOUNCEMENT_EN
       - ANNOUNCEMENT_RU
+      # additional parameters of the Peezy fork
+      - ALLOWED_CHAT_ID
+      - CENTIMETERS_PER_EGGPLANT
+      - EGGPLANTS_MAX
     expose:
       - 8080
     networks:
@@ -49,7 +53,7 @@ services:
       - postgres
   postgres:
     image: postgres:14.5-alpine
-    container_name: dickgrowerbot-postgresql
+    container_name: peezybigdbot-postgresql
     environment:
       - POSTGRES_PORT
       - POSTGRES_DB

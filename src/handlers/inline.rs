@@ -59,7 +59,7 @@ impl InlineCommand {
         match self {
             InlineCommand::Grow => {
                 metrics::CMD_GROW_COUNTER.inline.inc();
-                dick::grow_impl(repos, incr, from_refs)
+                dick::grow_impl(repos, incr, from_refs, config)
                     .await
                     .map(InlineResult::text)
             },

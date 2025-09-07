@@ -36,8 +36,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_config = config::AppConfig::from_env();
     let database_config = config::DatabaseConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
+    
+    let allowed_chat_id = app_config.peezy_fork_settings.allowed_chat_id;
 
     let handler = dptree::entry()
+        .branch(Update::filter_message().filter(checks::is_not_allowed_chat(allowed_chat_id)).endpoint(checks::handle_not_allowed_chat))
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
@@ -57,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_inline_query().filter(handlers::promo_inline_filter).endpoint(handlers::promo_inline_handler))
         .branch(Update::filter_inline_query().filter(checks::inline::is_group_chat).endpoint(handlers::inline_handler))
         .branch(Update::filter_inline_query().filter(checks::inline::is_not_group_chat).endpoint(checks::inline::handle_not_group_chat))
+        .branch(Update::filter_chosen_inline_result().filter_async(checks::inline::is_not_allowed_chat).endpoint(checks::inline::handle_no_op))
         .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::inline_chosen_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
         .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))

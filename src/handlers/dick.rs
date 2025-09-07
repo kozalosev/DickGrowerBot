@@ -15,7 +15,7 @@ use page::{InvalidPage, Page};
 use crate::{config, metrics, repo};
 use crate::domain::{LanguageCode, Username};
 use crate::handlers::{HandlerResult, reply_html, utils};
-use crate::handlers::utils::{callbacks, Incrementor, page};
+use crate::handlers::utils::{callbacks, Incrementor, page, calculate_eggplants_string};
 use crate::repo::{ChatIdPartiality, UID};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
@@ -39,7 +39,7 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
     match cmd {
         DickCommands::Grow => {
             metrics::CMD_GROW_COUNTER.chat.inc();
-            let answer = grow_impl(&repos, incr, from_refs).await?;
+            let answer = grow_impl(&repos, incr, from_refs, config).await?;
             reply_html(bot, &msg, answer)
         },
         DickCommands::Top => {
@@ -58,7 +58,7 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
 
 pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdPartiality);
 
-pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>, cfg: config::AppConfig) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let name = utils::get_full_name(from);
     let user = repos.users.create_or_update(from.id, &name).await?;
@@ -75,11 +75,12 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
             let answer = t!("commands.grow.result", locale = &lang_code,
                 event = event, incr = increment.total.abs(), length = new_length);
             let perks_part = increment.perks_part_of_answer(&lang_code);
+            let eggplants = calculate_eggplants_string(&increment, cfg.peezy_fork_settings);
             if let Some(pos) = pos_in_top {
                 let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
-                format!("{answer}\n{position}{perks_part}")
+                format!("{answer}\n{position}{perks_part}{eggplants}")
             } else {
-                format!("{answer}{perks_part}")
+                format!("{answer}{perks_part}{eggplants}")
             }
         },
         Err(e) => {

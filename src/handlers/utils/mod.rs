@@ -3,9 +3,11 @@ pub mod callbacks;
 pub mod locks;
 mod tghack;
 mod incrementor;
+mod eggplant;
 
 pub use tghack::*;
 pub use incrementor::*;
+pub use eggplant::*;
 
 use teloxide::types::User;
 use crate::domain::Username;

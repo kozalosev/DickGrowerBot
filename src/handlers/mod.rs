@@ -147,7 +147,7 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
 pub mod checks {
     use rust_i18n::t;
     use teloxide::Bot;
-    use teloxide::types::Message;
+    use teloxide::types::{ChatId, Message};
     use crate::domain::LanguageCode;
     use super::{HandlerResult, reply_html};
 
@@ -163,17 +163,35 @@ pub mod checks {
     }
 
     pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
+        handle_by_reply(bot, msg, "errors.not_group_chat").await
+    }
+    
+    /// Part of the PeezyBigDBot fork
+    pub fn is_not_allowed_chat(chat_id: ChatId) -> impl Fn(Message) -> bool {
+        move |msg| !msg.chat.is_private() && msg.chat.id != chat_id
+    }
+    
+    pub async fn handle_not_allowed_chat(bot: Bot, msg: Message) -> HandlerResult {
+        handle_by_reply(bot, msg, "errors.private_bot").await
+    }
+    // end of the fork code
+
+    async fn handle_by_reply(bot: Bot, msg: Message, answer_key: &str) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
-        let answer = t!("errors.not_group_chat", locale = &lang_code);
+        let answer = t!(answer_key, locale = &lang_code);
         reply_html(bot, &msg, answer).await?;
         Ok(())
     }
 
     pub mod inline {
+        use futures::TryFutureExt;
         use teloxide::Bot;
         use teloxide::payloads::AnswerInlineQuerySetters;
-        use teloxide::prelude::{InlineQuery, Requester};
-        use teloxide::types::ChatType;
+        use teloxide::prelude::{ChatId, InlineQuery, Requester};
+        use teloxide::types::{ChatType, ChosenInlineResult};
+        use crate::config::AppConfig;
+        use crate::handlers::try_resolve_chat_id;
+        use crate::repo::Repositories;
         use super::HandlerResult;
 
         pub fn is_group_chat(query: InlineQuery) -> bool {
@@ -193,5 +211,33 @@ pub mod checks {
                 .await?;
             Ok(())
         }
+
+
+        /// Part of the PeezyBigDBot fork
+        pub async fn is_not_allowed_chat(repos: Repositories, cfg: AppConfig, chosen_result: ChosenInlineResult) -> bool {
+            let maybe_chat_in_sync = chosen_result.inline_message_id.as_ref()
+                .and_then(try_resolve_chat_id)
+                .map(|chat_id| repos.chats.get_chat(chat_id.into()));
+            if let Some(chat_in_sync_future) = maybe_chat_in_sync {
+                chat_in_sync_future
+                    .map_ok(|res| res
+                        .filter(|c| c.chat_id.is_some() && c.chat_instance.is_some())
+                        .and_then(|c| c.chat_id)
+                        .map(ChatId))
+                    .await
+                    .inspect_err(|err| log::error!("[checks:inline:is_not_allowed_chat] error: {}", err))
+                    .ok()
+                    .flatten()
+                    .map(|chat_id| chat_id != cfg.peezy_fork_settings.allowed_chat_id)
+                    .unwrap_or(true)
+            } else {
+                true
+            }
+        }
+        
+        pub async fn handle_no_op() -> HandlerResult {
+            Ok(())
+        }
+        // end of the fork code
     }
 }

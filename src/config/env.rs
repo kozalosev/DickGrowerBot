@@ -32,6 +32,14 @@ where
         .unwrap_or(default)
 }
 
+pub(super) fn get_mandatory_env_value<T, E>(key: &str) -> T
+where
+    T: FromStr<Err = E>,
+    E: Error + Send + Sync + 'static
+{
+    get_env_mandatory_value(key).expect(&format!("{key} environment variable must be set!"))
+}
+
 pub(super) fn get_optional_env_value<T>(key: &str) -> T
 where
     T: Default + FromStr + Display,
