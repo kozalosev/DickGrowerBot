@@ -63,6 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_chosen_inline_result().filter_async(checks::inline::is_not_allowed_chat).endpoint(checks::inline::handle_no_op))
         .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::inline_chosen_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
+        .branch(Update::filter_callback_query().filter_async(checks::callback::is_not_allowed_chat).endpoint(checks::callback::handle_not_allowed_chat))
         .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::pvp::callback_filter).endpoint(handlers::pvp::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::callback_handler))

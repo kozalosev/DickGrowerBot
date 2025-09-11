@@ -234,10 +234,55 @@ pub mod checks {
                 true
             }
         }
-        
+
         pub async fn handle_no_op() -> HandlerResult {
             Ok(())
         }
         // end of the fork code
     }
+
+    /// Part of the PeezyBigDBot fork
+    pub mod callback {
+        use futures::TryFutureExt;
+        use rust_i18n::t;
+        use teloxide::Bot;
+        use teloxide::payloads::AnswerCallbackQuerySetters;
+        use teloxide::prelude::ChatId;
+        use teloxide::requests::Requester;
+        use teloxide::types::CallbackQuery;
+        use crate::config::AppConfig;
+        use crate::domain::LanguageCode;
+        use crate::handlers::{try_resolve_chat_id, HandlerResult};
+        use crate::repo::{ChatIdKind, Repositories};
+
+        pub async fn is_not_allowed_chat(repos: Repositories, cfg: AppConfig, query: CallbackQuery) -> bool {
+            let chat_id_kind = query.inline_message_id.as_ref()
+                .and_then(try_resolve_chat_id)
+                .map(ChatIdKind::from)
+                .unwrap_or(ChatIdKind::from(query.chat_instance));
+            repos.chats.get_chat(chat_id_kind)
+                .map_ok(|res| res
+                    .filter(|c| c.chat_id.is_some() && c.chat_instance.is_some())
+                    .and_then(|c| c.chat_id)
+                    .map(ChatId))
+                .await
+                .inspect_err(|err| log::error!("[checks:callback:is_not_allowed_chat] error: {}", err))
+                .ok()
+                .flatten()
+                .map(|chat_id| chat_id != cfg.peezy_fork_settings.allowed_chat_id)
+                .unwrap_or(true)
+        }
+
+        pub async fn handle_not_allowed_chat(bot: Bot, query: CallbackQuery) -> HandlerResult {
+            let lang_code = LanguageCode::from_user(&query.from);
+            let answer = t!("errors.private_bot", locale = &lang_code);
+            bot.answer_callback_query(&query.id)
+                .show_alert(true)
+                .text(answer)
+                .await
+                .map(|_| ())
+                .map_err(Into::into)
+        }
+    }
+
 }
