@@ -227,6 +227,17 @@ impl <T: PrimInt + std::fmt::Display + Into<i32>> Increment<T> {
     }
 }
 
+impl <T: Into<i32>> From<T> for Increment<i32> {
+    fn from(value: T) -> Self {
+        let v = value.into();
+        Increment {
+            base: v,
+            total: v,
+            by_perks: HashMap::default(),
+        }
+    }
+}
+
 fn get_base_increment<T>(range: RangeInclusive<T>, sign_ratio: f32) -> T
 where
     T: PrimInt + PartialOrd + SampleUniform + From<i8>

@@ -15,7 +15,6 @@ pub fn calculate_eggplants_string(growth: &SignedIncrement, peezy_settings: Peez
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use crate::config::PeezyForkSettings;
     use crate::handlers::utils::SignedIncrement;
     use super::{calculate_eggplants_string, EGGPLANT};
@@ -62,11 +61,7 @@ mod tests {
     }
 
     fn create_increment(total: i32) -> SignedIncrement {
-        SignedIncrement {
-            total,
-            base: total,
-            by_perks: HashMap::default()
-        }
+        total.into()
     }
 
     fn execute_test(increment: i32) -> String {

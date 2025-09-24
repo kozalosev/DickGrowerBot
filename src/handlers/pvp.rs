@@ -10,9 +10,9 @@ use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
 use crate::handlers::{CallbackResult, HandlerResult, reply_html, send_error_callback_answer, utils};
 use crate::{metrics, reply_html, repo};
-use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::config::{AppConfig, BattlesFeatureToggles, PeezyForkSettings};
 use crate::domain::{LanguageCode, Username};
-use crate::handlers::utils::callbacks;
+use crate::handlers::utils::{calculate_eggplants_string, callbacks, SignedIncrement};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
 use crate::repo::{BattleStats, ChatIdPartiality, GrowthResult, Repositories, WinRateAware};
@@ -97,6 +97,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     let params = BattleParams {
         repos,
         features: config.features.pvp,
+        peezy_fork_settings: config.peezy_fork_settings,
         chat_id: msg.chat.id.into(),
         lang_code,
     };
@@ -196,6 +197,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     let params = BattleParams {
         repos,
         features: config.features.pvp,
+        peezy_fork_settings: config.peezy_fork_settings,
         lang_code: LanguageCode::from_user(&query.from),
         chat_id: chat_id.clone(),
     };
@@ -209,6 +211,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
 pub(crate) struct BattleParams {
     repos: Repositories,
     features: BattlesFeatureToggles,
+    peezy_fork_settings: PeezyForkSettings,
     chat_id: ChatIdPartiality,
     lang_code: LanguageCode,
 }
@@ -324,7 +327,8 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
         } else {
             main_part.to_string()
         };
-        CallbackResult::EditMessage(format!("{text}{withheld_part}{battle_stats}"), None)
+        let eggplants = calculate_eggplants_string(&SignedIncrement::from(bet), p.peezy_fork_settings);
+        CallbackResult::EditMessage(format!("{text}{withheld_part}{battle_stats}{eggplants}"), None)
     } else if enough_acceptor {
         let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string();
         CallbackResult::EditMessage(text, None)
