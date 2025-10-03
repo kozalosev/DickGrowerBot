@@ -34,23 +34,6 @@ async fn create_or_update() {
     check_member_with_name(&members, NEW_NAME);
 }
 
-#[tokio::test]
-async fn get_chat_members() {
-    let (_container, db) = start_postgres().await;
-    let users = repo::Users::new(db.clone());
-
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let members = users.get_chat_members(&chat_id)
-        .await.expect("couldn't fetch the empty list of chat members");
-    assert_eq!(members.len(), 0);
-
-    create_member(&db).await;
-
-    let members = users.get_chat_members(&chat_id)
-        .await.expect("couldn't fetch the list of chat members");
-    check_member_with_name(&members, NAME);
-}
-
 macro_rules! base_checks {
     ($db:ident, $method:ident) => {
         base_checks!($db, $method,)

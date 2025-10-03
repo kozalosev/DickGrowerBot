@@ -1,7 +1,6 @@
 mod users;
 mod dicks;
 mod chats;
-mod import;
 mod promo;
 mod loans;
 mod pvpstats;
@@ -18,7 +17,6 @@ use teloxide::types::{ChatId, UserId};
 pub use users::*;
 pub use dicks::*;
 pub use chats::*;
-pub use import::*;
 pub use promo::*;
 pub use loans::*;
 pub use pvpstats::*;
@@ -32,7 +30,6 @@ pub struct Repositories {
     pub users: Users,
     pub dicks: Dicks,
     pub chats: Chats,
-    pub import: Import,
     pub promo: Promo,
     pub loans: Loans,
     pub announcements: Announcements,
@@ -46,7 +43,6 @@ impl Repositories {
             users: Users::new(db_conn.clone()),
             dicks: Dicks::new(db_conn.clone(), config.features),
             chats: Chats::new(db_conn.clone(), config.features),
-            import: Import::new(db_conn.clone()),
             promo: Promo::new(db_conn.clone()),
             loans: Loans::new(db_conn.clone(), config),
             announcements: Announcements::new(db_conn.clone(), config.announcements.clone()),

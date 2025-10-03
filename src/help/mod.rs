@@ -32,7 +32,6 @@ pub struct Context {
     pub bot_name: String,
     pub grow_min: String,
     pub grow_max: String,
-    pub other_bots: String,
     pub help_pussies_percentage: f64
 }
 

@@ -12,10 +12,6 @@ impl Username {
     pub fn value_ref(&self) -> &str {
         &self.0
     }
-    
-    pub fn value_clone(&self) -> String {
-        self.0.clone()
-    }
 
     pub fn escaped(&self) -> String {
         let safe_name: String = self.value_ref().chars()

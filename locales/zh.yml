@@ -63,23 +63,6 @@ commands:
       payout_ratio_changed: "自你发送贷款申请以来，支付率已更改。请重新调用该命令。"
     errors:
       positive_length: "抱歉，兄弟，这个提案只针对那些有非常非常深渴望的女孩。我不能让你的大兄弟变得更长 :("
-  import:
-    description: "从其他机器人导入丁丁"
-    result:
-      titles:
-        imported: "以下用户已被导入："
-        already_present: "以下用户之前已被导入："
-        not_found: "以下用户尚未加入游戏："
-      line:
-        imported: "➖ <b>%{name}</b> (<i>%{length}</i> 厘米)"
-        already_present: "➖ <b>%{name}</b> (<i>%{length}</i> 厘米)"
-        not_found: "➖ <b>%{name}</b>"
-    errors:
-      not_admin: "此命令仅供管理员使用！"
-      not_reply: "你必须回复由 %{origin_bots} 发送的非转发消息"
-      invalid_lines:
-        template: "无法解析此消息 🤔\n以下行无效：\n%{invalid_lines}"
-        line: "➖ <b>%{line}</b>"
   promo:
     description: "激活神秘代码"
     request: "输入神秘代码："

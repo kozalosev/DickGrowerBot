@@ -26,18 +26,6 @@ repository!(Users,
             .context(format!("couldn't upsert a user with id = {user_id}"))
     }
 ,
-    pub async fn get_chat_members(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<User>> {
-        sqlx::query_as!(User,
-            "SELECT u.uid, name, created_at FROM Users u
-                JOIN Dicks d USING (uid)
-                JOIN Chats c ON d.chat_id = c.id
-                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text",
-                chat_id.value() as String)
-            .fetch_all(&self.pool)
-            .await
-            .context(format!("couldn't get users of the chat with id = {chat_id}"))
-    }
-,
     pub async fn get_random_active_member(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             "SELECT u.uid, name, u.created_at FROM Users u
