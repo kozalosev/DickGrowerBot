@@ -10,10 +10,9 @@ use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
-use teloxide::types::UserId;
 use crate::{config, repo};
 use crate::domain::primitives::chat::ChatIdKind;
-use crate::domain::primitives::Ratio;
+use crate::domain::primitives::{Ratio, UserId};
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -131,7 +130,7 @@ impl Incrementor {
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
             self.config.grow_shrink_ratio
         } else {
-            1.0
+            Ratio::literal(1.0)
         };
         let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
         self.add_additional_incr(dick_id, BaseIncrement(base_incr)).await

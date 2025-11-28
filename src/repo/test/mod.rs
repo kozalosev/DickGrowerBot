@@ -11,11 +11,12 @@ mod announcements;
 use std::str::FromStr;
 use reqwest::Url;
 use sqlx::{Pool, Postgres};
-use teloxide::types::{ChatId, UserId};
+use teloxide::types::ChatId;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use crate::config::DatabaseConfig;
+use crate::domain::primitives::UserId;
 use crate::repo;
 use crate::repo::ChatIdKind;
 
@@ -28,7 +29,7 @@ pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = 67890;
 pub const NAME: &str = "test";
 
-pub const USER_ID: UserId = UserId(UID as u64);
+pub const USER_ID: UserId = UserId::new(UID);
 pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(ChatId(CHAT_ID));
 
 pub async fn start_postgres() -> (ContainerAsync<GenericImage>, Pool<Postgres>) {

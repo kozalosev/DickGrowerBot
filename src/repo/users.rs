@@ -1,17 +1,16 @@
 use anyhow::Context;
-use teloxide::types::UserId;
 use crate::domain::objects::User;
+use crate::domain::primitives::{Ratio, UserId};
 use crate::repo::ChatIdKind;
 use crate::repository;
 
 repository!(Users,
     pub async fn create_or_update(&self, user_id: UserId, name: &str) -> anyhow::Result<User> {
-        let uid = user_id.0 as i64;
         sqlx::query_as!(User,
             "INSERT INTO Users(uid, name) VALUES ($1, $2)
                 ON CONFLICT (uid) DO UPDATE SET name = $2
                 RETURNING uid, name, created_at",
-                uid, name)
+                user_id, name)
             .fetch_one(&self.pool)
             .await
             .context(format!("couldn't upsert a user with id = {user_id}"))

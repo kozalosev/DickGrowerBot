@@ -1,21 +1,21 @@
 use anyhow::Context;
 use sqlx::{Postgres, Transaction};
-use teloxide::types::UserId;
 
 use crate::config;
-use crate::domain::{Debt, InternalChatId, LoanId};
+use crate::domain::primitives::{Debt, LoanId, Ratio, UserId};
+use crate::domain::primitives::chat::InternalChatId;
 use crate::repo::{ChatIdKind, Chats, Dicks, ensure_only_one_row_updated};
 
 #[derive(Debug)]
 pub struct Loan {
     pub debt: Debt,
-    pub payout_ratio: f32,
+    pub payout_ratio: Ratio,
 }
 
 struct LoanEntity {
     id: LoanId,
     debt: Debt,
-    payout_ratio: f32
+    payout_ratio: Ratio,
 }
 
 impl TryFrom<LoanEntity> for Loan {
@@ -33,7 +33,7 @@ impl TryFrom<LoanEntity> for Loan {
 pub struct Loans {
     pool: sqlx::Pool<Postgres>,
     chats: Chats,
-    payout_ratio: f32,
+    payout_ratio: Ratio,
 }
 
 impl Loans {
@@ -60,7 +60,6 @@ impl Loans {
     }
 
     pub async fn borrow(&self, user_id: UserId, chat_id: &ChatIdKind, value: Debt) -> anyhow::Result<()> {
-        let uid = user_id.0 as i64;
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
         let signed_value: i32 = value.try_into()?;
         let mut tx = self.pool.begin().await?;
@@ -69,7 +68,7 @@ impl Loans {
             Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, signed_value, self.payout_ratio).await?,
             None => create_loan(&mut tx, chat_internal_id, uid, signed_value, self.payout_ratio).await?
         };
-        Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, uid, signed_value).await?;
+        Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, user_id, signed_value).await?;
 
         tx.commit().await?;
         Ok(())

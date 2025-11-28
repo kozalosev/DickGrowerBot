@@ -94,6 +94,7 @@ mod test {
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk};
     use crate::handlers::utils::{ChangeIntent, DickId, Perk};
     use crate::{config, repo};
+    use crate::domain::primitives::{Debt, LengthChange, Ratio};
     use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
 
     #[tokio::test]
@@ -120,7 +121,7 @@ mod test {
         let (_container, db) = start_postgres().await;
         let loans = {
             let cfg = config::AppConfig {
-                loan_payout_ratio: 0.1,
+                loan_payout_ratio: Ratio::literal(0.1),
                 ..Default::default()
             };
             repo::Loans::new(db.clone(), &cfg)
@@ -132,7 +133,7 @@ mod test {
                 .await.expect("couldn't create a user");
             
             let dicks = repo::Dicks::new(db, Default::default());
-            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), 0)
+            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::new(0))
                 .await.expect("couldn't create a dick");
         }
 
@@ -145,7 +146,7 @@ mod test {
         assert!(perk.enabled());
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, 0);
 
-        loans.borrow(USER_ID, &CHAT_ID_KIND, 10)
+        loans.borrow(USER_ID, &CHAT_ID_KIND, Debt::new(10))
             .await.expect("couldn't create a loan");
 
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, -1);
@@ -153,7 +154,7 @@ mod test {
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")
             .debt;
-        assert_eq!(debt, 9);
+        assert_eq!(debt, Debt::new(9));
 
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment_small).await.0, 0);
         assert_eq!(perk.apply(&dick_id, change_intent_negative_increment).await.0, 0);
@@ -161,6 +162,6 @@ mod test {
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")
             .debt;
-        assert_eq!(debt, 9);
+        assert_eq!(debt, Debt::new(9));
     }
 }
