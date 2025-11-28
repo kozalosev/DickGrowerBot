@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display};
-use std::ops::{Add, AddAssign, Deref, Div, DivAssign, Mul, MulAssign, Rem, RemAssign, Sub, SubAssign};
+use std::hash::Hash;
+use std::ops::{Add, AddAssign, Deref, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 use num_traits::{Float, Num, PrimInt};
 use crate::errors::DomainAssertionError;
 
@@ -27,10 +28,10 @@ where T: Num +
 
 /// Numeric domain type with all arithmetic operations
 pub trait DomainNumber<T>: DomainValue<T> + Copy +
-    Add + Sub + Mul + Div + Rem +
-    Add<T> + Sub<T> + Mul<T> + Div<T> + Rem<T> +
-    AddAssign + SubAssign + MulAssign + DivAssign + RemAssign +
-    AddAssign<T> + SubAssign<T> + MulAssign<T> + DivAssign<T> + RemAssign<T>
+    Add + Sub + Mul + Div +
+    Add<T> + Sub<T> + Mul<T> + Div<T> +
+    AddAssign + SubAssign + MulAssign + DivAssign +
+    AddAssign<T> + SubAssign<T> + MulAssign<T> + DivAssign<T>
 where T: Num +
     Clone + Default +
     Debug + Display
@@ -47,22 +48,22 @@ where T: Num +
 
 /// Integer domain type (not a number, i.e., ID or something like that)
 pub trait DomainIntegerValue<T>: DomainValue<T> + Copy +
-    Eq + Ord
-where T: PrimInt +
+    Eq + Ord + Hash
+where T: PrimInt + Hash +
     Clone + Default +
     Debug + Display
 {}
 
 /// Integer domain number with all arithmetic operations
 pub trait DomainIntegerNumber<T>: DomainNumber<T> + DomainIntegerValue<T>
-where T: PrimInt +
+where T: PrimInt + Hash +
     Clone + Default +
     Debug + Display
 {}
 
 /// Integer domain number with all arithmetic operations and value validation
 pub trait ValidatedDomainIntegerNumber<T>: ValidatedDomainNumber<T> + DomainIntegerValue<T>
-where T: PrimInt +
+where T: PrimInt + Hash +
     Clone + Default +
     Debug + Display
 {}
@@ -92,6 +93,7 @@ where T: Float +
 pub trait DomainString: DomainType<String> +
     PartialEq + Eq +
     PartialOrd + Ord +
+    Hash +
     AsRef<String> +
     Deref<Target=str>
 {

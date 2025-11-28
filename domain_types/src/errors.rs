@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Display;
 use num_traits::Num;
 
@@ -5,7 +6,7 @@ use num_traits::Num;
 #[display("DomainAssertionError for value {}: {}", value, message)]
 pub struct DomainAssertionError<T: Display> {
     value: T,
-    message: &'static str
+    message: Cow<'static, str>
 }
 
 #[derive(Debug, derive_more::Display, derive_more::Error, derive_more::Constructor)]

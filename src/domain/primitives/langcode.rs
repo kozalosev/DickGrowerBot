@@ -19,6 +19,12 @@ pub enum SupportedLanguage {
 }
 
 impl LanguageCode {
+
+    // TODO: generate by the macro
+    pub fn of(value: impl ToString) -> Self {
+        Self::new(value.to_string())
+    }
+
     pub fn from_user(user: &User) -> Self {
         let maybe_code = Self::get_language_code_or_log_if_missing(user);
         Self::from_maybe_string(maybe_code)

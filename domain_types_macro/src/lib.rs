@@ -178,19 +178,26 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         quote! { PartialEq },
         quote! { PartialOrd },
     ];
-    let eq_ord_derives = vec![
+    let eq_ord_hash_derives = vec![
         quote! { Eq },
         quote! { Ord },
+        quote! { Hash },
     ];
     let copy_derive = vec![
         quote! { Copy },
     ];
-    let number_derives = vec![
+    let float_derives = vec![
         quote! { ::derive_more::Add },
         quote! { ::derive_more::Sub },
+        quote! { ::derive_more::Mul },
+        quote! { ::derive_more::Div },
+        quote! { ::derive_more::Rem },
         quote! { ::derive_more::AddAssign },
         quote! { ::derive_more::SubAssign },
-        
+        quote! { ::derive_more::MulAssign },
+        quote! { ::derive_more::DivAssign },
+        quote! { ::derive_more::RemAssign },
+
     ];
     let neg_derive = vec![
         quote! { ::derive_more::Neg },
@@ -200,21 +207,21 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         DomainTypeKind::Value =>
             Vec::default(),
         DomainTypeKind::String =>
-            [domain_value_derives, eq_ord_derives].concat(),
+            [domain_value_derives, eq_ord_hash_derives].concat(),
         DomainTypeKind::Number(NumberKind::IntegerValue(IntegerSignedness::Unsigned)) |
         DomainTypeKind::Number(NumberKind::ValidatedIntegerNumber(IntegerSignedness::Unsigned)) =>
-            [domain_value_derives, eq_ord_derives, copy_derive].concat(),
+            [domain_value_derives, eq_ord_hash_derives, copy_derive].concat(),
         DomainTypeKind::Number(NumberKind::IntegerValue(IntegerSignedness::Signed)) |
         DomainTypeKind::Number(NumberKind::ValidatedIntegerNumber(IntegerSignedness::Signed)) =>
-            [domain_value_derives, eq_ord_derives, copy_derive, neg_derive].concat(),
+            [domain_value_derives, eq_ord_hash_derives, copy_derive, neg_derive].concat(),
         DomainTypeKind::Number(NumberKind::IntegerNumber(IntegerSignedness::Unsigned)) => 
-            [domain_value_derives, eq_ord_derives, copy_derive, number_derives].concat(),
+            [domain_value_derives, eq_ord_hash_derives, copy_derive].concat(),
         DomainTypeKind::Number(NumberKind::IntegerNumber(IntegerSignedness::Signed)) =>
-            [domain_value_derives, eq_ord_derives, copy_derive, number_derives, neg_derive].concat(),
+            [domain_value_derives, eq_ord_hash_derives, copy_derive, neg_derive].concat(),
         DomainTypeKind::Number(NumberKind::FloatValue) | DomainTypeKind::Number(NumberKind::ValidatedFloatNumber) =>
-            [domain_value_derives, copy_derive].concat(),
+            [domain_value_derives, float_derives, copy_derive].concat(),
         DomainTypeKind::Number(NumberKind::FloatNumber) =>
-            [domain_value_derives, copy_derive, number_derives].concat(),
+            [domain_value_derives, copy_derive].concat(),
     };
     
     let mut derives = [domain_type_derives, type_specific_derives].concat();
@@ -284,7 +291,7 @@ fn generate_validated_domain_number_impls(info: &TypeInfo) -> TokenStream {
                 } else {
                     Err(::domain_types::errors::DomainAssertionError::new(
                         value,
-                        concat!(stringify!(#name), ' ', #error_msg)
+                        ::std::borrow::Cow::from(concat!(stringify!(#name), ' ', #error_msg))
                     ))
                 }
             }
@@ -302,89 +309,83 @@ fn generate_validated_domain_number_impls(info: &TypeInfo) -> TokenStream {
 fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
     quote! {
-        pub fn overflowing_add_primitive(self, rhs: #inner_type) -> (Self, bool) {
-            let (new_value, is_overflow) = self.0.overflowing_add(rhs);
-            (Self(new_value), is_overflow)
-        }
+        impl #name {
+            pub fn overflowing_add_primitive(self, rhs: #inner_type) -> (Self, bool) {
+                let (new_value, is_overflow) = self.0.overflowing_add(rhs);
+                (Self(new_value), is_overflow)
+            }
 
-        pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
-            self.overflowing_add_primitive(rhs.0);
-        }
+            pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
+                self.overflowing_add_primitive(rhs.0)
+            }
 
-        pub fn saturating_add_primitive(self, rhs: #inner_type) -> Self {
-            Self(self.0.saturating_add(rhs))
-        }
+            pub fn saturating_add_primitive(self, rhs: #inner_type) -> Self {
+                Self(self.0.saturating_add(rhs))
+            }
 
-        pub fn saturating_add(self, rhs: Self) -> Self {
-            self.saturating_add_primitive(rhs.0)
-        }
+            pub fn saturating_add(self, rhs: Self) -> Self {
+                self.saturating_add_primitive(rhs.0)
+            }
 
-        pub fn overflowing_sub_primitive(self, rhs: #inner_type) -> (Self, bool) {
-            let (new_value, is_overflow) = self.0.overflowing_sub(rhs);
-            (Self(new_value, is_overflow))
-        }
+            pub fn overflowing_sub_primitive(self, rhs: #inner_type) -> (Self, bool) {
+                let (new_value, is_overflow) = self.0.overflowing_sub(rhs);
+                (Self(new_value), is_overflow)
+            }
 
-        pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
-            self.overflowing_sub_primitive(rhs.0);
-        }
+            pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
+                self.overflowing_sub_primitive(rhs.0)
+            }
 
-        pub fn saturating_sub_primitive(self, rhs: #inner_type) -> Self {
-            Self(self.0.saturating_sub(rhs))
-        }
+            pub fn saturating_sub_primitive(self, rhs: #inner_type) -> Self {
+                Self(self.0.saturating_sub(rhs))
+            }
 
-        pub fn saturating_sub(self, rhs: Self) -> Self {
-            self.saturating_sub_primitive(rhs.0)
-        }
+            pub fn saturating_sub(self, rhs: Self) -> Self {
+                self.saturating_sub_primitive(rhs.0)
+            }
 
-        pub fn overflowing_mul_primitive(self, rhs: #inner_type) -> (Self, bool) {
-            let (new_value, is_overflow) = self.0.overflowing_mul(rhs);
-            (Self(new_value, is_overflow))
-        }
+            pub fn overflowing_mul_primitive(self, rhs: #inner_type) -> (Self, bool) {
+                let (new_value, is_overflow) = self.0.overflowing_mul(rhs);
+                (Self(new_value), is_overflow)
+            }
 
-        pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
-            self.overflowing_mul_primitive(rhs.0);
-        }
+            pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
+                self.overflowing_mul_primitive(rhs.0)
+            }
 
-        pub fn saturating_mul_primitive(self, rhs: #inner_type) -> Self {
-            Self(self.0.saturating_mul(rhs))
-        }
+            pub fn saturating_mul_primitive(self, rhs: #inner_type) -> Self {
+                Self(self.0.saturating_mul(rhs))
+            }
 
-        pub fn saturating_mul(self, rhs: Self) -> Self {
-            self.saturating_mul_primitive(rhs.0)
-        }
+            pub fn saturating_mul(self, rhs: Self) -> Self {
+                self.saturating_mul_primitive(rhs.0)
+            }
 
-        pub fn overflowing_div_primitive(self, rhs: #inner_type) -> (Self, bool) {
-            let (new_value, is_overflow) = self.0.overflowing_div(rhs);
-            (Self(new_value, is_overflow))
-        }
+            pub fn overflowing_div_primitive(self, rhs: #inner_type) -> (Self, bool) {
+                let (new_value, is_overflow) = self.0.overflowing_div(rhs);
+                (Self(new_value), is_overflow)
+            }
 
-        pub fn overflowing_div(self, rhs: Self) -> (Self, bool) {
-            self.overflowing_div_primitive(rhs.0);
-        }
+            pub fn overflowing_div(self, rhs: Self) -> (Self, bool) {
+                self.overflowing_div_primitive(rhs.0)
+            }
 
-        pub fn saturating_div_primitive(self, rhs: #inner_type) -> Self {
-            Self(self.0.saturating_div(rhs))
-        }
+            pub fn saturating_div_primitive(self, rhs: #inner_type) -> Self {
+                Self(self.0.saturating_div(rhs))
+            }
 
-        pub fn saturating_div(self, rhs: Self) -> Self {
-            self.saturating_div_primitive(rhs.0)
-        }
+            pub fn saturating_div(self, rhs: Self) -> Self {
+                self.saturating_div_primitive(rhs.0)
+            }
 
-        pub fn overflowing_rem_primitive(self, rhs: #inner_type) -> (Self, bool) {
-            let (new_value, is_overflow) = self.0.overflowing_rem(rhs);
-            (Self(new_value, is_overflow))
-        }
+            pub fn overflowing_rem_primitive(self, rhs: #inner_type) -> (Self, bool) {
+                let (new_value, is_overflow) = self.0.overflowing_rem(rhs);
+                (Self(new_value), is_overflow)
+            }
 
-        pub fn overflowing_rem(self, rhs: Self) -> (Self, bool) {
-            self.overflowing_rem_primitive(rhs.0);
-        }
-
-        pub fn saturating_rem_primitive(self, rhs: #inner_type) -> Self {
-            Self(self.0.saturating_rem(rhs))
-        }
-
-        pub fn saturating_rem(self, rhs: Self) -> Self {
-            self.saturating_rem_primitive(rhs.0)
+            pub fn overflowing_rem(self, rhs: Self) -> (Self, bool) {
+                self.overflowing_rem_primitive(rhs.0)
+            }
         }
 
         #[automatically_derived]
@@ -424,15 +425,6 @@ fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
         }
 
         #[automatically_derived]
-        impl std::ops::Rem<#inner_type> for #name {
-            type Output = Self;
-
-            fn rem(self, rhs: #inner_type) -> Self::Output {
-                self.saturating_rem_primitive(rhs)
-            }
-        }
-
-        #[automatically_derived]
         impl std::ops::Add for #name {
             type Output = Self;
 
@@ -464,16 +456,7 @@ fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
             type Output = Self;
 
             fn div(self, rhs: Self) -> Self::Output {
-                self.saturating_mul(rhs)
-            }
-        }
-
-        #[automatically_derived]
-        impl std::ops::Rem for #name {
-            type Output = Self;
-
-            fn rem(self, rhs: Self) -> Self::Output {
-                self.saturating_rem(rhs)
+                self.saturating_div(rhs)
             }
         }
 
@@ -506,13 +489,6 @@ fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
         }
 
         #[automatically_derived]
-        impl std::ops::RemAssign<#inner_type> for #name {
-            fn rem_assign(&mut self, rhs: #inner_type) {
-                self.0 = self.0.saturating_rem(rhs);
-            }
-        }
-
-        #[automatically_derived]
         impl std::ops::AddAssign for #name {
             fn add_assign(&mut self, rhs: Self) {
                 self.0 = self.0.saturating_add(rhs.0);
@@ -540,16 +516,10 @@ fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
             }
         }
 
-        #[automatically_derived]
-        impl std::ops::RemAssign for #name {
-            fn rem_assign(&mut self, rhs: Self) {
-                self.0 = self.0.saturating_rem(rhs.0);
-            }
-        }
     }
 }
 
-fn generate_domain_validated_integer_number_impls(info: &TypeInfo) -> TokenStream {
+fn generate_validated_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
     quote! {
         impl #name {
@@ -563,17 +533,18 @@ fn generate_domain_validated_integer_number_impls(info: &TypeInfo) -> TokenStrea
                     <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(new_value)
                 } else {
                     let cause = ::domain_types::errors::DomainArithmeticOverflowError::new(op_enum, lhs, rhs);
-                    Err(::domain_types::errors::DomainAssertionError::new(new_value, cause.to_string()))
+                    let cause_boxed_str = ::std::borrow::Cow::from(cause.to_string());
+                    Err(::domain_types::errors::DomainAssertionError::new(new_value, cause_boxed_str))
                 }
             }
 
-            pub fn add_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+            pub fn overflowing_add_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
                 let operation = ::domain_types::errors::ArithmeticOperation::Addition;
-                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingAdd::overflowing_add)
+                Self::perform_arithmetic_operation(self.0, rhs, operation, #inner_type::overflowing_add)
             }
 
-            pub fn add(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                self.add_primitive(rhs.0)
+            pub fn overflowing_add(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.overflowing_add_primitive(rhs.0)
             }
 
             pub fn saturating_add_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
@@ -584,13 +555,13 @@ fn generate_domain_validated_integer_number_impls(info: &TypeInfo) -> TokenStrea
                 self.saturating_add_primitive(rhs.0)
             }
 
-            pub fn sub_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+            pub fn overflowing_sub_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
                 let operation = ::domain_types::errors::ArithmeticOperation::Subtraction;
-                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingSub::overflowing_sub)
+                Self::perform_arithmetic_operation(self.0, rhs, operation, #inner_type::overflowing_sub)
             }
 
-            pub fn sub(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                self.sub_primitive(rhs.0)
+            pub fn overflowing_sub(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.overflowing_sub_primitive(rhs.0)
             }
 
             pub fn saturating_sub_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
@@ -601,13 +572,13 @@ fn generate_domain_validated_integer_number_impls(info: &TypeInfo) -> TokenStrea
                 self.saturating_sub_primitive(rhs.0)
             }
 
-            pub fn mul_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+            pub fn overflowing_mul_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
                 let operation = ::domain_types::errors::ArithmeticOperation::Multiplication;
-                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingMul::overflowing_mul)
+                Self::perform_arithmetic_operation(self.0, rhs, operation, #inner_type::overflowing_mul)
             }
 
-            pub fn mul(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                self.mul_primitive(rhs.0)
+            pub fn overflowing_mul(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.overflowing_mul_primitive(rhs.0)
             }
 
             pub fn saturating_mul_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
@@ -618,13 +589,13 @@ fn generate_domain_validated_integer_number_impls(info: &TypeInfo) -> TokenStrea
                 self.saturating_mul_primitive(rhs.0)
             }
 
-            pub fn div_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+            pub fn overflowing_div_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
                 let operation = ::domain_types::errors::ArithmeticOperation::Division;
-                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingDiv::overflowing_div)
+                Self::perform_arithmetic_operation(self.0, rhs, operation, #inner_type::overflowing_div)
             }
 
-            pub fn div(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                self.div_primitive(rhs.0)
+            pub fn overflowing_div(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.overflowing_div_primitive(rhs.0)
             }
 
             pub fn saturating_div_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
@@ -635,32 +606,19 @@ fn generate_domain_validated_integer_number_impls(info: &TypeInfo) -> TokenStrea
                 self.saturating_div_primitive(rhs.0)
             }
 
-            pub fn rem_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+            pub fn overflowing_rem_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
                 let operation = ::domain_types::errors::ArithmeticOperation::Remainder;
-                Self::perform_arithmetic_operation(self.0, rhs, operation, OverflowingRem::overflowing_rem)
+                Self::perform_arithmetic_operation(self.0, rhs, operation, #inner_type::overflowing_rem)
             }
 
-            pub fn rem(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                self.rem_primitive(rhs.0)
-            }
-
-            pub fn saturating_rem_primitive(self, rhs: #inner_type) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.saturating_rem(rhs))
-            }
-
-            pub fn saturating_rem(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                self.saturating_rem_primitive(rhs.0)
+            pub fn overflowing_rem(self, rhs: Self) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
+                self.overflowing_rem_primitive(rhs.0)
             }
         }
-    }
-}
 
-fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
-    let TypeInfo { name, inner_type, .. } = info;
-    quote! {
         #[automatically_derived]
         impl std::ops::Add<#inner_type> for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn add(self, rhs: #inner_type) -> Self::Output {
                 self.saturating_add_primitive(rhs)
@@ -669,7 +627,7 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
 
         #[automatically_derived]
         impl std::ops::Sub<#inner_type> for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn sub(self, rhs: #inner_type) -> Self::Output {
                 self.saturating_sub_primitive(rhs)
@@ -678,7 +636,7 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
 
         #[automatically_derived]
         impl std::ops::Mul<#inner_type> for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn mul(self, rhs: #inner_type) -> Self::Output {
                 self.saturating_mul_primitive(rhs)
@@ -687,7 +645,7 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
 
         #[automatically_derived]
         impl std::ops::Div<#inner_type> for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn div(self, rhs: #inner_type) -> Self::Output {
                 self.saturating_div_primitive(rhs)
@@ -695,17 +653,8 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
         }
 
         #[automatically_derived]
-        impl std::ops::Rem<#inner_type> for #name {
-            type Output = Self;
-
-            fn rem(self, rhs: #inner_type) -> Self::Output {
-                self.saturating_rem_primitive(rhs)
-            }
-        }
-
-        #[automatically_derived]
         impl std::ops::Add for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn add(self, rhs: Self) -> Self::Output {
                 self.saturating_add(rhs)
@@ -714,7 +663,7 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
 
         #[automatically_derived]
         impl std::ops::Sub for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn sub(self, rhs: Self) -> Self::Output {
                 self.saturating_sub(rhs)
@@ -723,7 +672,7 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
 
         #[automatically_derived]
         impl std::ops::Mul for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn mul(self, rhs: Self) -> Self::Output {
                 self.saturating_mul(rhs)
@@ -732,19 +681,10 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
 
         #[automatically_derived]
         impl std::ops::Div for #name {
-            type Output = Self;
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
             fn div(self, rhs: Self) -> Self::Output {
-                self.saturating_mul(rhs)
-            }
-        }
-
-        #[automatically_derived]
-        impl std::ops::Rem for #name {
-            type Output = Self;
-
-            fn rem(self, rhs: Self) -> Self::Output {
-                self.saturating_rem(rhs)
+                self.saturating_div(rhs)
             }
         }
 
@@ -777,13 +717,6 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
         }
 
         #[automatically_derived]
-        impl std::ops::RemAssign<#inner_type> for #name {
-            fn rem_assign(&mut self, rhs: #inner_type) {
-                self.0 = self.0.saturating_rem(rhs);
-            }
-        }
-
-        #[automatically_derived]
         impl std::ops::AddAssign for #name {
             fn add_assign(&mut self, rhs: Self) {
                 self.0 = self.0.saturating_add(rhs.0);
@@ -808,13 +741,6 @@ fn generate_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
         impl std::ops::DivAssign for #name {
             fn div_assign(&mut self, rhs: Self) {
                 self.0 = self.0.saturating_div(rhs.0);
-            }
-        }
-
-        #[automatically_derived]
-        impl std::ops::RemAssign for #name {
-            fn rem_assign(&mut self, rhs: Self) {
-                self.0 = self.0.saturating_rem(rhs.0);
             }
         }
     }
@@ -906,10 +832,12 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                 }
                 NumberKind::IntegerNumber(_) => {
                     let domain_number_impls = generate_domain_number_impls(info);
+                    let domain_integer_number_impls = generate_domain_integer_number_impls(info);
                     quote! {
                         #domain_type_impl
                         #domain_value_impls
                         #domain_number_impls
+                        #domain_integer_number_impls
                         
                         #[automatically_derived]
                         impl ::domain_types::traits::DomainIntegerValue<#inner_type> for #name {}
@@ -920,10 +848,12 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                 }
                 NumberKind::ValidatedIntegerNumber(_) => {
                     let validated_domain_number_impls = generate_validated_domain_number_impls(info);
+                    let validated_domain_integer_number_impls = generate_validated_domain_integer_number_impls(info);
                     quote! {
                         #domain_type_impl
                         #domain_value_impls
                         #validated_domain_number_impls
+                        #validated_domain_integer_number_impls
 
                         #[automatically_derived]
                         impl ::domain_types::traits::DomainIntegerValue<#inner_type> for #name {}
@@ -938,7 +868,7 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                         #domain_type_impl
                         #domain_value_impls
                         #domain_number_impls
-                        
+
                         #[automatically_derived]
                         impl ::domain_types::traits::DomainFloatValue<#inner_type> for #name {}
                         
@@ -952,6 +882,7 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                         #domain_type_impl
                         #domain_value_impls
                         #validated_domain_number_impls
+                        // TODO: write impls for validated floats
 
                         #[automatically_derived]
                         impl ::domain_types::traits::DomainFloatValue<#inner_type> for #name {}

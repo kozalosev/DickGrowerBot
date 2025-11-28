@@ -8,3 +8,12 @@ impl From<u32> for Debt {
         Self(value.into())
     }
 }
+
+#[domain_type(number)]
+struct Payment(i64);
+
+impl From<u32> for Payment {
+    fn from(value: u32) -> Self {
+        Self(value.into())
+    }
+}
