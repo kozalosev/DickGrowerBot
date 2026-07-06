@@ -22,11 +22,11 @@ macro_rules! signed_number {
 
 #[macro_export]
 macro_rules! positive_number {
-    ($name:ident, $inner_type:ty) => {
+    ($name:ident, $inner_type:ident) => {
         #[domain_type(
             number,
             validated(
-                greater_or_equal_to_zero,
+                crate::domain::primitives::validators::$inner_type::greater_or_equal_to_zero,
                 error_message("must be greater or equal to zero")
             )
         )]

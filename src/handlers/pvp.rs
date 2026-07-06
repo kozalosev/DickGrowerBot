@@ -13,7 +13,7 @@ use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackRes
 use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
-use crate::domain::primitives::{Bet, LanguageCode, UserId, Username};
+use crate::domain::primitives::{Bet, LanguageCode, LengthChange, LoanPayout, SignedLengthChange, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, TelegramChatId};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
@@ -84,8 +84,9 @@ impl TryFrom<String> for BattleCallbackData {
     fn try_from(data: String) -> Result<Self, Self::Error> {
         let err = InvalidCallbackDataBuilder(&data);
         let mut parts = data.split(':');
-        let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId)?;
-        let bet = callbacks::parse_part(&mut parts, &err, "bet").map(Bet)?;
+        let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId::new)?;
+        let bet = callbacks::parse_part(&mut parts, &err, "bet")
+            .and_then(|value: i32| Bet::new(value).map_err(|e| err.parsing_err(e)))?;
         let timestamp = callbacks::parse_optional_part(&mut parts, &err)?;
         Ok(Self { initiator, bet, timestamp })
     }
@@ -103,7 +104,8 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
         chat_id: msg.chat.id.into(),
         lang_code,
     };
-    let (text, keyboard) = pvp_impl_start(params, user, cmd.bet()).await?;
+    let bet = Bet::new(cmd.bet().into()).map_err(|e| anyhow!(e))?;
+    let (text, keyboard) = pvp_impl_start(params, user, bet).await?;
 
     let mut answer = reply_html(bot, &msg, text);
     answer.reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard);
@@ -132,7 +134,7 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
 pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
-    let bet = query.query.parse().map(Bet)?;
+    let bet = Bet::new(query.query.parse()?).map_err(|e| anyhow!(e))?;
     let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
@@ -276,7 +278,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
-       p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { 0 }),
+       p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { Bet::literal(0) }),
     );
     let (enough_initiator, enough_acceptor) = (enough_initiator?, enough_acceptor?);
 
@@ -358,18 +360,21 @@ async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInf
     Ok(user)
 }
 
-async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: Bet) -> anyhow::Result<Option<(GrowthResult, u16)>> {
+async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: Bet) -> anyhow::Result<Option<(GrowthResult, LoanPayout)>> {
     let chat_id_kind = p.chat_id.kind();
     let loan = match p.repos.loans.get_active_loan(winner_id, &chat_id_kind).await? {
         Some(loan) => loan,
         None => return Ok(None)
     };
-    let payout = (loan.payout_ratio * award as f32).round() as u16;
-    let payout = payout.min(loan.debt);
-    
+    // the ratio is within [0; 1], so the payout never exceeds the award
+    let payout_value = (loan.payout_ratio.value() * f64::from(award.value())).round() as i64;
+    let payout_value = payout_value.min(loan.debt.value());
+    let payout = LoanPayout::new(payout_value.clamp(0, i32::MAX as i64) as i32)
+        .expect("loan payout is non-negative by construction");
+
     p.repos.loans.pay(winner_id, &chat_id_kind, payout).await?;
-    
-    let withheld = -(payout as i32);
+
+    let withheld = LengthChange::Signed(SignedLengthChange::new(-i64::from(payout.value())));
     let growth_res = p.repos.dicks.grow_no_attempts_check(&chat_id_kind, winner_id, withheld).await?;
     Ok(Some((growth_res, payout)))
 }

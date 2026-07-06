@@ -1,11 +1,8 @@
 use async_trait::async_trait;
-use domain_types::traits::ValidatedDomainNumber;
-use num_traits::real::Real;
-use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeIntent, ConfigurablePerk, DickId, Perk};
 use crate::{config, repo};
-use crate::domain::primitives::{Length, LengthChange, LengthIncrement, LoanPayout, Ratio, SignedLengthChange};
+use crate::domain::primitives::{Length, LengthChange, LoanPayout, Ratio, SignedLengthChange};
 
 pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>> {
     let help_pussies_coef = Ratio::new(config::get_env_value_or_default("HELP_PUSSIES_COEF", 0.0))
@@ -32,13 +29,13 @@ impl Perk for HelpPussiesPerk {
 
     async fn apply(&self, _: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
         if change_intent.current_length >= Length::new(0) {
-            return AdditionalChange(LengthChange::Signed(SignedLengthChange::new(0)))
+            return AdditionalChange::zero()
         }
-        
-        let current_deepness = change_intent.current_length.abs()
-            .to_f64().expect("conversion is always Some");
-        let change = (self.coefficient * current_deepness).round() as i64;
-        AdditionalChange(change)
+
+        let current_deepness = change_intent.current_length.abs() as f64;
+        // the coefficient is a Ratio, but the scaled deepness is not: multiply raw values
+        let change = (self.coefficient.value() * current_deepness).round() as i64;
+        AdditionalChange(LengthChange::Signed(SignedLengthChange::new(change)))
     }
 
     fn enabled(&self) -> bool {
@@ -73,21 +70,24 @@ impl Perk for LoanPayoutPerk {
             .map(|loan| (loan.debt, loan.payout_ratio));
         let (debt, payout_coefficient) = match maybe_loan_components {
             Some(x) => x,
-            None => return AdditionalChange(LengthIncrement::literal(0).into()) // TODO: AdditionalChange::zero() by delegation
+            None => return AdditionalChange::zero()
         };
 
-        let payout = LoanPayout::from(if change_intent.base_increment.value().is_positive() {
-            let base_increment = change_intent.base_increment.value() as f32;
-            let payout = (base_increment * payout_coefficient).round() as u32;
-            payout.min(debt)
+        let base_increment = change_intent.base_increment.value();
+        let payout_value = if base_increment.is_positive() {
+            // the coefficient is a Ratio [0; 1], so the payout never exceeds the base increment
+            let payout = (base_increment as f64 * payout_coefficient.value()).round() as i64;
+            payout.min(debt.value())
         } else {
             0
-        });
+        };
+        let payout = LoanPayout::new(payout_value.clamp(0, i32::MAX as i64) as i32)
+            .expect("loan payout is non-negative by construction");
         match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
-            Ok(()) => AdditionalChange(-i64::from(payout)),
+            Ok(()) => AdditionalChange(LengthChange::Signed(SignedLengthChange::new(-i64::from(payout.value())))),
             Err(e) => {
                 log::error!("couldn't pay {payout} cm for the loan ({dick_id}): {e}");
-                AdditionalChange(LengthIncrement::literal(0).into())
+                AdditionalChange::zero()
             }
         }
     }

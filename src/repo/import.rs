@@ -1,6 +1,6 @@
 use anyhow::Context;
 use sqlx::{Postgres, Transaction};
-use teloxide::types::{ChatId, UserId};
+use teloxide::types::ChatId;
 use crate::domain::objects::ExternalUser;
 use crate::repository;
 
@@ -24,10 +24,10 @@ repository!(Import,
     }
 ,
     async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &[ExternalUser]) -> anyhow::Result<Vec<i64>> {
-        let (uids, lengths): (Vec<i64>, Vec<i32>) = users.iter()
-            .map(|user| (user.uid, user.length))
+        let (uids, lengths): (Vec<i64>, Vec<i64>) = users.iter()
+            .map(|user| (user.uid.value(), user.length.value()))
             .unzip();
-        sqlx::query!("INSERT INTO Imports (chat_id, uid, original_length) SELECT $1, * FROM UNNEST($2::bigint[], $3::int[])",
+        sqlx::query!("INSERT INTO Imports (chat_id, uid, original_length) SELECT $1, * FROM UNNEST($2::bigint[], $3::bigint[])",
                 chat_id, &uids, &lengths)
             .execute(&mut **tx)
             .await

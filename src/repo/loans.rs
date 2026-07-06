@@ -3,21 +3,23 @@ use sqlx::{Postgres, Transaction};
 
 use crate::config;
 use crate::domain::objects::Loan;
-use crate::domain::primitives::{Debt, LoanId, LoanPayout, Ratio, UserId};
+use crate::domain::primitives::{Debt, LengthChange, LoanId, LoanPayout, Ratio, SignedLengthChange, UserId};
 use crate::domain::primitives::chat::InternalChatId;
 use crate::repo::{ensure_only_one_row_updated, ChatIdKind, Chats, Dicks};
 
 struct LoanEntity {
     id: LoanId,
     debt: Debt,
-    payout_ratio: Ratio,
+    // the column is REAL (f32) in the database; converted to Ratio at the boundary
+    payout_ratio: f32,
 }
 
-impl Into<Loan> for LoanEntity {
-    fn into(self) -> Loan {
+impl From<LoanEntity> for Loan {
+    fn from(entity: LoanEntity) -> Self {
         Loan {
-            debt: self.debt,
-            payout_ratio: self.payout_ratio,
+            debt: entity.debt,
+            payout_ratio: Ratio::new(entity.payout_ratio.into())
+                .expect("payout_ratio, fetched from the database, must be a valid ratio"),
         }
     }
 }
@@ -42,24 +44,24 @@ impl Loans {
                     WHERE uid = $1 AND
                     chat_id = (SELECT id FROM Chats WHERE chat_id = $2::bigint OR chat_instance = $2::text)
                     AND repaid_at IS NULL",
-                uid.0 as i64, chat_id.value() as String)
+                uid.value() as i64, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get an active loan for {chat_id} and {uid}"))?
-            .map(Into::into);
+            .map(Loan::from);
         Ok(maybe_loan)
     }
 
     pub async fn borrow(&self, user_id: UserId, chat_id: &ChatIdKind, value: Debt) -> anyhow::Result<()> {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
-        let signed_value: i32 = value.try_into()?;
         let mut tx = self.pool.begin().await?;
 
         match get_active_loan(&mut tx, user_id, chat_internal_id).await? {
-            Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, signed_value, self.payout_ratio).await?,
-            None => create_loan(&mut tx, chat_internal_id, uid, signed_value, self.payout_ratio).await?
+            Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, value, self.payout_ratio).await?,
+            None => create_loan(&mut tx, chat_internal_id, user_id, value, self.payout_ratio).await?
         };
-        Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, user_id, signed_value).await?;
+        let borrowed_length = LengthChange::Signed(SignedLengthChange::new(value.value()));
+        Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, user_id, borrowed_length).await?;
 
         tx.commit().await?;
         Ok(())
@@ -70,7 +72,7 @@ impl Loans {
                         WHERE uid = $1 AND
                         chat_id = (SELECT id FROM Chats WHERE chat_id = $2::bigint OR chat_instance = $2::text)
                         AND repaid_at IS NULL",
-                uid.0 as i64, chat_id.value() as String, value)
+                uid.value() as i64, chat_id.value() as String, value as LoanPayout)
             .execute(&self.pool)
             .await
             .map_err(Into::into)
@@ -84,25 +86,25 @@ async fn get_active_loan(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_i
             "SELECT id, debt, payout_ratio FROM loans
                     WHERE uid = $1 AND chat_id = $2
                     AND repaid_at IS NULL",
-                uid.0 as i64, *chat_internal_id)
+                uid.value() as i64, *chat_internal_id)
         .fetch_optional(&mut **tx)
         .await
         .context(format!("couldn't get an active loan for internal {chat_internal_id} and {uid}"))?;
     Ok(maybe_loan)
 }
 
-async fn create_loan(tx: &mut Transaction<'_, Postgres>, chat_internal_id: i64, uid: i64, value: Debt, payout_ratio: Ratio) -> anyhow::Result<()> {
+async fn create_loan(tx: &mut Transaction<'_, Postgres>, chat_internal_id: InternalChatId, uid: UserId, value: Debt, payout_ratio: Ratio) -> anyhow::Result<()> {
     sqlx::query!("INSERT INTO Loans (chat_id, uid, debt, payout_ratio) VALUES ($1, $2, $3, $4)",
-                chat_internal_id, uid, *value, payout_ratio)
+                *chat_internal_id, uid.value() as i64, *value, payout_ratio.value() as f32)
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)
         .context(format!("couldn't create a loan for {chat_internal_id} and {uid} with value of {value}"))?
 }
 
-async fn refinance_loan(tx: &mut Transaction<'_, Postgres>, id: i64, value: Debt, payout_ratio: Ratio) -> anyhow::Result<()> {
+async fn refinance_loan(tx: &mut Transaction<'_, Postgres>, id: LoanId, value: Debt, payout_ratio: Ratio) -> anyhow::Result<()> {
     sqlx::query!("UPDATE Loans l SET debt = l.debt + $2, payout_ratio = $3 WHERE id = $1",
-                id, *value, payout_ratio)
+                *id, *value, payout_ratio.value() as f32)
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)

@@ -10,7 +10,8 @@ use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Message, UserId};
 use crate::handlers::{HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::{LanguageCode, Username};
+use crate::domain::objects::ExternalUser;
+use crate::domain::primitives::{LanguageCode, Length, UserId as DomainUserId, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
@@ -227,7 +228,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
     let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)
         .await?.into_iter()
         .map(|m| {
-            let uid = m.uid.try_into().expect("couldn't convert uid to u64");
+            let uid = m.uid.value().try_into().expect("couldn't convert uid to u64");
             let short_name = parsed.0.convert_name(m.name.value_ref());
             let member = ChatMember {
                 uid: UserId(uid),
@@ -272,19 +273,19 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
 
     let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
         .await?.into_iter()
-        .filter_map(|u| u.uid.try_into().ok())
+        .filter_map(|u| u.uid.value().try_into().ok())
         .map(UserId)
         .collect();
 
     let (already_present, to_import): (Vec<UserInfo>, Vec<UserInfo>) = existing.into_iter()
         .partition(|u| imported_uids.contains(&u.uid));
 
-    let users: Vec<repo::ExternalUser> = to_import.iter()
-        .map(|u| repo::ExternalUser::new(u.uid, u.length))
+    let users: Vec<ExternalUser> = to_import.iter()
+        .map(|u| ExternalUser {
+            uid: DomainUserId::new(u.uid.0 as i64),
+            length: Length::new(u.length.into()),
+        })
         .collect();
-    if users.len() != to_import.len() {
-        bail!("couldn't convert integers for external users")
-    }
     repos.import.import(chat_id, &users).await?;
 
     Ok(ImportResult {

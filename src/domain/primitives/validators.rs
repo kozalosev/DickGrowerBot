@@ -1,19 +1,29 @@
-pub const fn greater_or_equal_to_zero<T>(value: &T) -> bool
-    where T: Copy + PartialOrd<T> + From<i8>
-{
-    *value >= T::from(0)
+//! Validators must be `const fn` so that the macro-generated `Type::literal(...)`
+//! constructors can evaluate them at compile time. Generic `const fn`s cannot call
+//! trait methods (like `PartialOrd::ge`) on stable Rust, so a concrete function is
+//! stamped per primitive type instead, inside a module named after that type
+//! (the same way `std::i16` coexists with the primitive `i16`). This lets
+//! `positive_number!` build the validator path from its type argument directly:
+//! `validators::$inner_type::greater_or_equal_to_zero`.
+
+macro_rules! ge_zero_validators {
+    ($($ty:ident),+ $(,)?) => {
+        $(
+            pub mod $ty {
+                pub const fn greater_or_equal_to_zero(value: &$ty) -> bool {
+                    *value >= 0
+                }
+            }
+        )+
+    };
 }
+
+ge_zero_validators!(i16, i32, i64);
 
 pub const fn ratio_range_validator(x: &f64) -> bool {
     *x >= 0.0 && *x <= 1.0
 }
 
-pub const fn percentage_range_validator<T>(x: &T) -> bool
-    where T: Copy + PartialOrd<T> + From<i8>
-{
-    let zero = T::from(0);
-    let one_hundred = T::from(100);
-    let value = *x;
-    
-    value >= zero && value <= one_hundred
+pub const fn percentage_range_validator(x: &i32) -> bool {
+    0 <= *x && *x <= 100
 }

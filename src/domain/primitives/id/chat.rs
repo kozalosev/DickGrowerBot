@@ -92,6 +92,12 @@ impl From<ChatId> for ChatIdKind {
     }
 }
 
+impl From<TelegramChatId> for ChatIdKind {
+    fn from(value: TelegramChatId) -> Self {
+        ChatIdKind::ID(value)
+    }
+}
+
 impl From<String> for ChatIdKind {
     fn from(value: String) -> Self {
         ChatIdKind::Instance(TelegramChatInstanceId::new(value))

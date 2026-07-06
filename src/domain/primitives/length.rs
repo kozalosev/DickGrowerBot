@@ -1,10 +1,7 @@
 use std::ops::Add;
-use domain_types::errors::{ArithmeticOperation, DomainArithmeticError, DomainArithmeticOverflowError, DomainAssertionError};
-use domain_types::traits::{DomainValue, ValidatedDomainNumber};
-use num_traits::CheckedAdd;
+use domain_types::errors::{ArithmeticOperation, DomainArithmeticError, DomainArithmeticOverflowError as OverflowError};
 use domain_types_macro::domain_type;
 use crate::{positive_number, signed_number};
-use super::validators::greater_or_equal_to_zero;
 
 signed_number!(Length, i64);
 positive_number!(PositiveLength, i64);
@@ -15,17 +12,11 @@ positive_number!(LengthIncrement, i64);
 positive_number!(Bet, i32);
 positive_number!(LoanPayout, i32);
 
-#[derive(Copy, Clone, derive_more::Display)]
+#[derive(Copy, Clone, Debug, PartialEq, derive_more::Display)]
 #[display("{_0}")]
 pub enum LengthChange {
     Signed(SignedLengthChange),
     Increment(LengthIncrement),
-}
-
-impl LengthChange {
-    pub(crate) fn new(p0: i32) -> LengthChange {
-        todo!()
-    }
 }
 
 impl LengthChange {
@@ -35,16 +26,32 @@ impl LengthChange {
             LengthChange::Increment(value) => value.value()
         }
     }
+
+    pub fn is_zero(self) -> bool {
+        self.value() == 0
+    }
+}
+
+impl From<SignedLengthChange> for LengthChange {
+    fn from(value: SignedLengthChange) -> Self {
+        Self::Signed(value)
+    }
+}
+
+impl From<LengthIncrement> for LengthChange {
+    fn from(value: LengthIncrement) -> Self {
+        Self::Increment(value)
+    }
 }
 
 impl Add<SignedLengthChange> for LengthChange {
-    type Output = Result<LengthChange, DomainArithmeticOverflowError<i64>>;
+    type Output = Result<LengthChange, OverflowError<i64>>;
 
     fn add(self, rhs: SignedLengthChange) -> Self::Output {
         self.value().checked_add(rhs.value())
             .map(SignedLengthChange::new)
             .map(LengthChange::Signed)
-            .ok_or(DomainArithmeticOverflowError::new(ArithmeticOperation::Addition, self.value(), rhs.value()))
+            .ok_or(OverflowError::new(ArithmeticOperation::Addition, self.value(), rhs.value()))
     }
 }
 
@@ -53,30 +60,23 @@ impl Add<LengthIncrement> for LengthChange {
 
     fn add(self, rhs: LengthIncrement) -> Self::Output {
         self.value().checked_add(rhs.value())
-            .ok_or(DomainArithmeticError::Overflow(
-                DomainArithmeticOverflowError::new(ArithmeticOperation::Addition, self.value(), rhs.value())
+            .ok_or_else(|| DomainArithmeticError::Overflow(
+                OverflowError::new(ArithmeticOperation::Addition, self.value(), rhs.value())
             ))
-            .and_then(LengthIncrement::new)
+            .and_then(|sum| LengthIncrement::new(sum).map_err(DomainArithmeticError::AssertionFailed))
             .map(LengthChange::Increment)
     }
 }
 
 impl Bet {
     pub fn as_length_change_for_winner(&self) -> LengthChange {
-        Self::expect_safe_conversion(
-            LengthIncrement::new(self.0.into())
-                .map(LengthChange::Increment)
-        )
+        LengthIncrement::new(self.0.into())
+            .map(LengthChange::Increment)
+            .expect("Bet is non-negative, so the conversion to LengthIncrement is safe")
     }
 
     pub fn as_length_change_for_loser(&self) -> LengthChange {
-        Self::expect_safe_conversion(
-            SignedLengthChange::new(-self.0.into())
-                .map(LengthChange::Signed)
-        )
-    }
-
-    fn expect_safe_conversion(result: Result<LengthChange, DomainAssertionError<i64>>) -> LengthChange {
-        result.expect("LengthChange and Bet have the same verification pattern, so conversions are safe")
+        let value: i64 = self.0.into();
+        LengthChange::Signed(SignedLengthChange::new(-value))
     }
 }

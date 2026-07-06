@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use derive_more::Display;
-use num_traits::Zero;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
@@ -11,11 +10,12 @@ use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
 
 use crate::{check_invoked_by_owner_and_get_answer_params, metrics, repo};
 use crate::config::AppConfig;
-use crate::domain::LanguageCode;
+use crate::domain::objects::Loan;
+use crate::domain::primitives::{Debt, LanguageCode, UserId as DomainUserId};
+use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::handlers::{CallbackButton, FromRefs, HandlerImplResult, HandlerResult, reply_html, try_resolve_chat_id};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
-use crate::repo::{ChatIdPartiality, Loan};
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -47,7 +47,7 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
     let chat_id_kind = chat_id_part.kind();
     let lang_code = LanguageCode::from_user(from);
     
-    let maybe_loan = repos.loans.get_active_loan(from.id, &chat_id_kind).await?;
+    let maybe_loan = repos.loans.get_active_loan(DomainUserId::from(from), &chat_id_kind).await?;
     if let Some(Loan { debt, .. }) = maybe_loan {
         if !config.features.multiple_loans {
             let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt).to_string();
@@ -60,14 +60,14 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
-    let length = repos.dicks.fetch_length(from.id, &chat_id_kind).await?;
+    let length = repos.dicks.fetch_length(DomainUserId::from(from), &chat_id_kind).await?;
     if length >= 0 {
         let err_text = t!("commands.loan.errors.positive_length", locale = &lang_code).to_string();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
-    let debt = length.unsigned_abs() as u16;
-    let payout_percentage = format!("{:.2}%", config.loan_payout_ratio * 100.0);
+    let debt = length.unsigned_abs();
+    let payout_percentage = format!("{:.2}%", config.loan_payout_ratio.value() * 100.0);
 
     let btn_agree = CallbackButton::new(
         t!("commands.loan.confirmation.buttons.agree", locale = &lang_code).to_string(),
@@ -75,7 +75,7 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
             uid: from.id,
             action: LoanCallbackAction::Confirmed {
                 value: debt,
-                payout_ratio: config.loan_payout_ratio
+                payout_ratio: config.loan_payout_ratio.value() as f32
             }
         }
     );
@@ -109,12 +109,14 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
             answer.show_alert.replace(true);
             answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
         }
-        LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == config.loan_payout_ratio => {            
+        LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == config.loan_payout_ratio.value() as f32 => {
             metrics::CMD_LOAN_COUNTER.finished.inc();
             let updated_text = t!("commands.loan.callback.success", locale = &lang_code);
+            // the value comes from our own callback data, where it was serialized from a non-negative i64
+            let debt = Debt::new(value.min(i64::MAX as u64) as i64);
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-                    repos.loans.borrow(data.uid, &chat_id.into(), value).await?;
+                    repos.loans.borrow(data.uid.into(), &chat_id.into(), debt).await?;
                     bot.edit_message_text(chat_id, message_id, updated_text).await?;
                 }
                 EditMessageReqParamsKind::Inline { chat_instance, inline_message_id } => {
@@ -130,7 +132,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                         chat_instance.into()
                     };
 
-                    repos.loans.borrow(data.uid, &chat_id.kind(), value).await?;
+                    repos.loans.borrow(data.uid.into(), &chat_id.kind(), debt).await?;
                     bot.edit_message_text_inline(inline_message_id, updated_text).await?;
                 }
             }
@@ -179,7 +181,7 @@ pub(crate) struct LoanCallbackData {
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub(crate) enum LoanCallbackAction {
     #[display("confirmed:{value}:{payout_ratio}")]
-    Confirmed { value: u16, payout_ratio: f32 },
+    Confirmed { value: u64, payout_ratio: f32 },
     #[display("refused")]
     Refused
 }
@@ -273,11 +275,11 @@ mod test {
         assert_eq!(lcd_refused.to_data_string(), expected_refused);
     }
 
-    fn get_test_params() -> (UserId, u16, f32) {
+    fn get_test_params() -> (UserId, u64, f32) {
         (UserId(123456), 10, 0.1)
     }
 
-    fn get_strings(uid: UserId, value: u16, payout_ratio: f32) -> [String; 2] {[
+    fn get_strings(uid: UserId, value: u64, payout_ratio: f32) -> [String; 2] {[
         format!("loan:{uid}:confirmed:{value}:{payout_ratio}"),
         format!("loan:{uid}:refused"),
     ]}

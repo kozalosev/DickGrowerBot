@@ -1,6 +1,5 @@
 use domain_types_macro::domain_type;
 use crate::positive_number;
-use super::validators::greater_or_equal_to_zero;
 
 positive_number!(Counter, i16);
 
@@ -12,6 +11,7 @@ struct DaysCount(u32);
 
 #[domain_type(
     number,
+    division_result(crate::domain::primitives::Ratio),
     features(not_database_type)
 )]
 struct BattlesCount(u32);

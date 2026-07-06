@@ -1,14 +1,14 @@
 use std::fmt::Debug;
 use anyhow::{anyhow, Context};
 use sqlx::{FromRow, Postgres};
-use teloxide::types::UserId;
+use crate::domain::primitives::{LengthIncrement, UserId};
 use crate::repository;
 
 const PROMOCODE_ACTIVATIONS_PK: &str = "promo_code_activations_pkey";
 
 pub struct ActivationResult {
     pub chats_affected: u64,
-    pub bonus_length: i32,
+    pub bonus_length: LengthIncrement,
 }
 
 #[derive(Debug, strum_macros::Display)]
@@ -55,6 +55,8 @@ repository!(Promo,
         let PromoCodeInfo { found_code, bonus_length } = Self::find_code_length_and_decr_capacity(&mut tx, code)
             .await?
             .ok_or(ActivationError::NoActivationsLeft)?;
+        // the column stays INT4 in the database (promo bonuses are small); the domain type is built at this boundary
+        let bonus = LengthIncrement::new(bonus_length.into())?;
         let chats_affected = Self::grow_dicks(&mut tx, user_id, bonus_length).await?;
         if chats_affected < 1 {
             return Err(ActivationError::NoDicks)
@@ -75,7 +77,7 @@ repository!(Promo,
             })?;
 
         tx.commit().await?;
-        Ok(ActivationResult{ chats_affected, bonus_length })
+        Ok(ActivationResult{ chats_affected, bonus_length: bonus })
     }
 ,
     async fn find_code_length_and_decr_capacity(tx: &mut sqlx::Transaction<'_, Postgres>, code: &str) -> anyhow::Result<Option<PromoCodeInfo>> {
@@ -94,7 +96,7 @@ repository!(Promo,
 ,
     async fn grow_dicks(tx: &mut sqlx::Transaction<'_, Postgres>, user_id: UserId, bonus: i32) -> anyhow::Result<u64> {
         let rows_affected = sqlx::query!("UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $2) WHERE uid = $1",
-                user_id.0 as i64, bonus)
+                user_id.value() as i64, i64::from(bonus))
             .execute(&mut **tx)
             .await
             .context(format!("couldn't grow dicks of {user_id} by {bonus}"))?
@@ -105,7 +107,7 @@ repository!(Promo,
     async fn add_activation(tx: &mut sqlx::Transaction<'_, Postgres>, uid: UserId, code: &str, affected_chats: u64) -> anyhow::Result<()> {
         let affected_chats: i32 = affected_chats.try_into()?;
         sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats) VALUES ($1, $2, $3)",
-                uid.0 as i64, code, affected_chats)
+                uid.value() as i64, code, affected_chats)
             .execute(&mut **tx)
             .await
             .context(format!("couldn't insert a promo code activation for {uid} and {code} with {affected_chats} affected chats"))?;

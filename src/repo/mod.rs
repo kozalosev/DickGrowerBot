@@ -14,7 +14,6 @@ pub(crate) mod test;
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
 use sqlx::postgres::PgQueryResult;
-use teloxide::types::{ChatId, UserId};
 pub use users::*;
 pub use dicks::*;
 pub use chats::*;
@@ -26,7 +25,8 @@ pub use stats::*;
 pub use announcements::*;
 use crate::config;
 use crate::config::DatabaseConfig;
-use crate::domain::primitives::chat::ChatIdKind;
+// re-exported for convenience: repositories (and their callers) traffic in these identifiers
+pub use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 
 #[derive(Clone)]
 pub struct Repositories {

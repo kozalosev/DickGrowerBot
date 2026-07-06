@@ -2,7 +2,6 @@ use std::future::IntoFuture;
 
 use anyhow::{anyhow, Context};
 use chrono::{Datelike, Utc};
-use domain_types::traits::{DomainValue, ValidatedDomainNumber};
 use futures::future::join;
 use futures::TryFutureExt;
 use num_traits::ToPrimitive;
@@ -16,7 +15,7 @@ use teloxide::types::{User as TeloxideUser};
 use crate::{config, metrics, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
-use crate::domain::primitives::{LanguageCode, Username, UserId as UID, Offset, Page, UserId, DaysCount, InvalidPage};
+use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
 use crate::handlers::{HandlerResult, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor};
 
@@ -129,7 +128,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let lang_code = LanguageCode::from_user(from);
-    let offset = Offset::new(page * config.top_limit);
+    let offset = Offset::calculate(page, config.top_limit);
     let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
     let has_more_pages = config.top_limit <= dicks.len() as i16;
@@ -138,7 +137,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
         .enumerate()
         .map(|(i, d)| {
             let escaped_name = Username::new(d.owner_name).escaped();
-            let name = if from.id == <UID as Into<UserId>>::into(d.owner_uid) {
+            let name = if d.owner_uid == from.id {
                 format!("<u>{escaped_name}</u>")
             } else {
                 escaped_name
@@ -187,9 +186,10 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
             .map(str::to_owned)
             .ok_or(InvalidPage::for_value(d, "invalid prefix")))
-        .and_then(|r| r.parse()
+        .and_then(|r| r.parse::<i16>()
             .map_err(|e| InvalidPage::for_value(&r, e)))
-        .and_then(Page::new)
+        .and_then(|value| Page::new(value)
+            .map_err(|e| InvalidPage::for_value(&value.to_string(), e)))
         .map_err(|e| anyhow!(e))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
@@ -225,10 +225,12 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
 pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
     let mut buttons = Vec::new();
     if page > 0 {
-        buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{}", page - 1)))
+        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
+        buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{prev_page}")))
     }
     if has_more_pages {
-        buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{}", page + 1)))
+        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
+        buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
     InlineKeyboardMarkup::new(vec![buttons])
 }

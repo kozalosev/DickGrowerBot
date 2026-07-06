@@ -1,6 +1,5 @@
 use domain_types::traits::DomainValue;
 use domain_types_macro::domain_type;
-use crate::domain::primitives::validators::greater_or_equal_to_zero;
 use crate::{error, positive_number, signed_number};
 
 signed_number!(Offset, i32);
@@ -23,9 +22,9 @@ impl From<u8> for Limit {
 
 impl Offset {
     pub fn calculate(page: Page, limit: Limit) -> Offset {
-        let value = page.value().checked_add(limit.value())
-            .unwrap_or_else(|| page.value().saturating_add(page.value()));
-        Self(value as i32)
+        // both operands are i16, so the product always fits into i32
+        let value = (page.value() as i32) * (limit.value() as i32);
+        Self(value)
     }
 }
 

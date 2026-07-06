@@ -3,16 +3,15 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use async_trait::async_trait;
 use derive_more::Display;
-use domain_types::traits::DomainValue;
 use downcast_rs::{Downcast, impl_downcast};
-use num_traits::{PrimInt, Zero};
+use num_traits::PrimInt;
 use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
 use rand::rngs::OsRng;
 use rust_i18n::t;
 use crate::{config, repo};
 use crate::domain::primitives::chat::ChatIdKind;
-use crate::domain::primitives::{DaysCount, Length, LengthChange, LengthIncrement, Ratio, SignedLengthChange, UserId};
+use crate::domain::primitives::{DaysCount, Length, LengthChange, Ratio, SignedLengthChange, UserId};
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -59,6 +58,12 @@ pub struct ChangeIntent {
 
 #[derive(Copy, Clone)]
 pub struct AdditionalChange(pub LengthChange);
+
+impl AdditionalChange {
+    pub fn zero() -> Self {
+        Self(LengthChange::Signed(SignedLengthChange::new(0)))
+    }
+}
 
 pub struct Increment {
     pub base: LengthChange,
@@ -130,21 +135,16 @@ impl Incrementor {
             Ratio::literal(1.0)
         };
         let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
-        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr as i64) as BaseIncrement).await
+        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into())).await
     }
 
     pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind) -> Increment {
         let dick_id = DickId(user_id, chat_id);
         let base_incr = OsRng.gen_range(self.config.dod_bonus_range.clone());
-        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr as i64) as BaseIncrement).await
+        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into())).await
     }
-    
-    async fn add_additional_incr<T, R>(&self, dick: DickId, base_increment: BaseIncrement) -> Increment
-    where
-        T: PrimInt + std::fmt::Display + Into<i32>,
-        R: PrimInt + std::fmt::Display + From<T> + TryFrom<i64>,
-        <R as TryFrom<i64>>::Error: std::fmt::Display
-    {
+
+    async fn add_additional_incr(&self, dick: DickId, base_increment: BaseIncrement) -> Increment {
         let current_length = match self.dicks.fetch_length(dick.0, &dick.1).await {
             Ok(length) => length,
             Err(e) => {
@@ -152,71 +152,57 @@ impl Incrementor {
                 return base_increment.only()
             }
         };
+        let base = LengthChange::from(base_increment);
         let change_intent = ChangeIntent {
-            base_increment: base_increment.as_length_change(),
+            base_increment: base,
             current_length,
         };
 
-        let mut additional_change = 0;
+        let mut additional_change = SignedLengthChange::new(0);
         let mut by_perks = HashMap::new();
         for perk in self.perks.iter() {
             let AdditionalChange(ac) = perk.apply(&dick, change_intent).await;
-            if !ac.value().is_zero() {  // TODO: generate is_zero() by the macro
-                by_perks.insert(perk.name().to_owned(), ac);
+            if !ac.is_zero() {
+                by_perks.insert(perk.name().to_owned(), SignedLengthChange::new(ac.value()));
             }
-            additional_change += ac
+            // saturating addition: a perk pushing the sum out of i64 bounds clamps it
+            // instead of wrapping; the checked addition below still decides the outcome
+            additional_change += ac.value()
         }
-        
-        let base = <R as From<T>>::from(base_increment.value());
-        let total = change_intent.base_increment.value().checked_add(additional_change)
-            .map(R::try_from)
-            .and_then(Result::ok)
-            .unwrap_or_else(|| {
-                log::error!("overflow on increment calculation for {dick}: base={base}, additional={additional_change}");
+
+        let total = match base + additional_change {
+            Ok(total) => total,
+            Err(e) => {
+                log::error!("overflow on increment calculation for {dick}: {e}");
+                log::info!("The following perks affected the calculation: {by_perks:?}");
+                by_perks.clear();
                 base
-            });
-        
-        if base == total && !additional_change.is_zero() {
-            log::info!("The following perks affected the calculation: {by_perks:?}");
-            by_perks.clear();
-        }
-        
-        let length_changes = by_perks.into_iter()
-            .map(|(key, value)| (key, LengthChange::from(value)))
-            .collect();
-        Increment { base, by_perks: length_changes, total }
+            }
+        };
+
+        Increment { base, by_perks, total }
     }
 }
 
 type BaseIncrement = SignedLengthChange;
 
-impl <T: PrimInt + Into<i64>> BaseIncrement {
-    fn only<R>(self) -> Increment
-        where
-            R: PrimInt + std::fmt::Display + From<T>
-    {
-        let value = <R as From<T>>::from(self.value());
-        Increment {
-            base: value,
+impl Increment {
+    fn of_base(base: LengthChange) -> Self {
+        Self {
+            base,
             by_perks: HashMap::default(),
-            total: value
+            total: base,
         }
     }
 
-    fn as_length_change(self) -> LengthChange {
-        LengthChange::Signed(SignedLengthChange(self.value()))
-    }
-}
-
-impl <T: PrimInt + std::fmt::Display + Into<i64>> Increment {
     pub fn perks_part_of_answer(&self, lang_code: &str) -> String {
-        if self.base != self.total {
+        if self.base.value() != self.total.value() {
             let top_line = t!("titles.perks.top_line", locale = lang_code);
             let perks = self.by_perks.iter()
                 .map(|(perk, value)| {
                     let t_key = format!("titles.perks.{perk}");
                     let name = t!(&t_key, locale = lang_code);
-                    format!("— {name} ({value:+})")
+                    format!("— {name} ({:+})", value.value())
                 })
                 .collect::<Vec<String>>()
                 .join("\n");
@@ -224,6 +210,12 @@ impl <T: PrimInt + std::fmt::Display + Into<i64>> Increment {
         } else {
             String::default()
         }
+    }
+}
+
+impl BaseIncrement {
+    fn only(self) -> Increment {
+        Increment::of_base(LengthChange::from(self))
     }
 }
 

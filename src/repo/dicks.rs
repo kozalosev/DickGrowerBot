@@ -3,7 +3,7 @@ use futures::TryFutureExt;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
 use crate::domain::objects::{Dick, GrowthResult};
-use crate::domain::primitives::{Bet, LengthChange, Limit, Offset, LengthIncrement, UserId, Position, Length};
+use crate::domain::primitives::{Bet, LengthChange, Limit, Offset, UserId, Position, Length};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
 use super::Chats;
 
@@ -29,12 +29,12 @@ impl Dicks {
             "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
                 ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
                 RETURNING length",
-                uid as UserId, internal_chat_id as InternalChatId, increment as Increment)
+                uid as UserId, internal_chat_id as InternalChatId, increment.value() as i64)
             .fetch_one(&self.pool)
             .await
             .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
-        Ok(GrowthResult { new_length, pos_in_top })
+        Ok(GrowthResult { new_length: Length::new(new_length), pos_in_top })
     }
 
     pub async fn fetch_length(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Length> {
@@ -42,11 +42,10 @@ impl Dicks {
                 JOIN Chats c ON d.chat_id = c.id \
                 WHERE uid = $1 AND \
                     c.chat_id = $2::bigint OR c.chat_instance = $2::text",
-                uid.0 as i64, chat_id.value() as String)
+                uid.value() as i64, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .map(Length::new)
-            .map(Option::unwrap_or_default)
+            .map(|maybe_length| maybe_length.map(Length::new).unwrap_or_default())
             .context(format!("couldn't fetch length for {chat_id} and {uid}"))
     }
 
@@ -60,7 +59,7 @@ impl Dicks {
                    WHERE c.chat_id = $2::bigint OR c.chat_instance = $2::text
                ) AS _
                WHERE uid = $1"#,
-                uid.0 as i64, chat_id.value() as String)
+                uid.value() as i64, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
@@ -81,11 +80,11 @@ impl Dicks {
             .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
-    pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: LengthIncrement) -> anyhow::Result<Option<GrowthResult>> {
+    pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: LengthChange) -> anyhow::Result<Option<GrowthResult>> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;
-        let new_length = match Self::grow_no_attempts_check_internal(&mut *tx, internal_chat_id, user_id, bonus.into()).await? {
+        let new_length = match Self::grow_no_attempts_check_internal(&mut *tx, internal_chat_id, user_id, bonus).await? {
             Some(length) => length,
             None => return Ok(None)
         };
@@ -101,7 +100,7 @@ impl Dicks {
                 JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                     AND uid = $2"#,
-                chat_id.value() as String, user_id.0 as i64, length as Bet)
+                chat_id.value() as String, user_id.value() as i64, length as Bet)
             .fetch_optional(&self.pool)
             .map_ok(|opt| opt.unwrap_or(false))
             .await
@@ -133,9 +132,10 @@ impl Dicks {
 
     async fn move_length_for_one_user(tx: &mut Transaction<'_, Postgres>, chat_id_internal: InternalChatId, user_id: UserId, change: LengthChange) -> anyhow::Result<Length> {
         sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
-                    chat_id_internal as InternalChatId, user_id.0 as i64, change as Increment)
+                    chat_id_internal as InternalChatId, user_id.value() as i64, change.value() as i64)
             .fetch_one(&mut **tx)
             .await
+            .map(Length::new)
             .context(format!("couldn't update the length by {change} for {chat_id_internal}, {user_id}"))
     }
 
@@ -151,11 +151,10 @@ impl Dicks {
                     WHERE chat_id = $1
                 ) AS _
                 WHERE uid = $2"#,
-                chat_id_internal as InternalChatId, uid.0 as i64)
+                chat_id_internal as InternalChatId, uid.value() as i64)
             .fetch_one(&self.pool)
             .await
-            .map(Position::new)
-            .map(Some)
+            .map(|pos| Some(Position::new(pos as u64)))
             .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
     }
     
@@ -176,15 +175,16 @@ impl Dicks {
             "UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $3)
                 WHERE chat_id = $1 AND uid = $2
                 RETURNING length",
-                chat_id_internal as InternalChatId, user_id.0 as i64, bonus as Increment)
+                chat_id_internal as InternalChatId, user_id.value() as i64, bonus.value() as i64)
             .fetch_optional(executor)
             .await
+            .map(|maybe_length| maybe_length.map(Length::new))
             .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
     }
 
     async fn insert_to_dod_table(tx: &mut Transaction<'_, Postgres>, chat_id_internal: InternalChatId, user_id: UserId) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
-                chat_id_internal as InternalChatId, user_id.0 as i64)
+                chat_id_internal as InternalChatId, user_id.value() as i64)
             .execute(&mut **tx)
             .await
             .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))?;

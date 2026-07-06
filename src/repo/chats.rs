@@ -62,11 +62,11 @@ repository!(Chats, with_feature_toggles,
 ,
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<InternalChatId> {
         let (id, instance) = match chat_id {
-            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
-            ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id.0), None),
-            ChatIdPartiality::Both(full, ChatIdSource::InlineQuery) => (None, Some(full.instance.clone())),
-            ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.0), None),
-            ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_owned())),
+            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.value()), Some(full.instance.to_string())),
+            ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id.value()), None),
+            ChatIdPartiality::Both(full, ChatIdSource::InlineQuery) => (None, Some(full.instance.to_string())),
+            ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.value()), None),
+            ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_string())),
         };
         let mut tx = self.pool.begin().await?;
         let chats = sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
@@ -83,7 +83,7 @@ repository!(Chats, with_feature_toggles,
             x => bail!("unexpected count of chats ({x}): {chats:?}"),
         }?;
         tx.commit().await?;
-        Ok(internal_id)
+        Ok(InternalChatId::new(internal_id))
     }
 ,
     async fn create_chat(tx: &mut Transaction<'_, Postgres>, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {

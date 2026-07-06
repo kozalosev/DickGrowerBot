@@ -40,7 +40,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
 
 async fn personal_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let lang_code = LanguageCode::from_user(from_refs.0);
-    repos.personal_stats.get(from_refs.0.id).await
+    repos.personal_stats.get(UserId::from(from_refs.0)).await
         .map(|stats| t!("commands.stats.personal", locale = &lang_code,
             chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).to_string())
 }
@@ -52,7 +52,7 @@ pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromR
         .unwrap_or_default();
     let length_stats = t!("commands.stats.length", locale = &lang_code,
         length = length, pos = position);
-    let pvp_stats = repos.pvp_stats.get_stats(&from_refs.1.kind(), from_refs.0.id).await
+    let pvp_stats = repos.pvp_stats.get_stats(&from_refs.1.kind(), UserId::from(from_refs.0)).await
         .map(|stats| t!("commands.stats.pvp", locale = &lang_code,
             win_rate = stats.win_rate_formatted(), win_streak = stats.win_streak_max,
             battles = stats.battles_total, wins = stats.battles_won,
