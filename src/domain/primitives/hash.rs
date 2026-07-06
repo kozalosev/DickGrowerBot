@@ -16,4 +16,5 @@ impl TextHash {
     Debug, Copy, Clone,
     derive_more::Constructor, derive_more::From
 )]
-pub struct AccessHash(i64);
+// kept for completeness of the decoded inline_message_id data, even though nothing reads it yet
+pub struct AccessHash(#[allow(dead_code)] i64);

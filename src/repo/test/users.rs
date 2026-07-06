@@ -1,9 +1,8 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::objects::User;
 use crate::domain::primitives::{LengthChange, Ratio, SignedLengthChange, UserId};
-use crate::domain::primitives::chat::TelegramChatId;
+use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
-use crate::repo::{ChatIdKind, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID, USER_ID};
 use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
 
@@ -71,7 +70,7 @@ macro_rules! base_checks {
             .expect("couldn't fetch Some(User)")
             .expect("no active member");
         assert_eq!(user.uid, UID);
-        assert_eq!(user.name.value_ref(), NAME);
+        assert_eq!(user.name.value(), NAME);
 
         // check inactive member is not found
         sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
@@ -168,13 +167,13 @@ fn count(v: &[UserId], uid: i64) -> usize {
 
 fn check_user_with_name(user: &User, name: &str) {
     assert_eq!(user.uid, UID);
-    assert_eq!(user.name.value_ref(), name);
+    assert_eq!(user.name.value(), name);
 }
 
 fn check_member_with_name(members: &[User], name: &str) {
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].uid, UID);
-    assert_eq!(members[0].name.value_ref(), name);
+    assert_eq!(members[0].name.value(), name);
 }
 
 async fn create_member(db: &Pool<Postgres>) {

@@ -26,7 +26,7 @@ macro_rules! positive_number {
         #[domain_type(
             number,
             validated(
-                crate::domain::primitives::validators::$inner_type::greater_or_equal_to_zero,
+                $crate::domain::primitives::validators::$inner_type::greater_or_equal_to_zero,
                 error_message("must be greater or equal to zero")
             )
         )]

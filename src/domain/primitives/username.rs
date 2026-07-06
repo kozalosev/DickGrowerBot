@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use unicode_general_category::GeneralCategory::Format;
 use unicode_general_category::get_general_category;
+use domain_types::errors::EmptyStringValue;
 use domain_types_macro::domain_type;
 
 const LTR_MARK: char = '\u{200E}';
@@ -12,16 +13,8 @@ const LTR_MARK: char = '\u{200E}';
 pub struct Username(String);
 
 impl Username {
-    pub fn value_ref(&self) -> &str {
-        &self.0
-    }
-    
-    pub fn value_clone(&self) -> String {
-        self.0.clone()
-    }
-
     pub fn escaped(&self) -> String {
-        let safe_name: String = self.value_ref().chars()
+        let safe_name: String = self.value().chars()
             .filter(|c| get_general_category(*c) != Format)
             .collect();
         let ltr_name = format!("{LTR_MARK}{safe_name}{LTR_MARK}");
@@ -36,11 +29,6 @@ impl Username {
         }
     }
 }
-
-// TODO: move to the library code
-
-#[derive(Debug, derive_more::Error, derive_more::Display)]
-pub struct EmptyStringValue;
 
 impl From<&str> for Username {
     fn from(value: &str) -> Self {
@@ -65,8 +53,6 @@ impl Display for Username {
         write!(f, "{}", self.value_with_at_sign())
     }
 }
-
-// TODO: ..end
 
 #[cfg(test)]
 mod test {

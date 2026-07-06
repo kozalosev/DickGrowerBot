@@ -1,8 +1,8 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{LengthChange, Limit, Offset, SignedLengthChange};
 use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality};
 use crate::repo;
-use crate::repo::{ChatIdFull, ChatIdKind, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID, start_postgres, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
 

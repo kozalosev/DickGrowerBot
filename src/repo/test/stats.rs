@@ -1,7 +1,6 @@
 use crate::domain::primitives::{LengthChange, SignedLengthChange};
-use crate::domain::primitives::chat::TelegramChatId;
+use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
-use crate::repo::{ChatIdKind, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID, start_postgres, USER_ID};
 use crate::repo::test::dicks::create_user;
 

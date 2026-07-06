@@ -1,7 +1,7 @@
 use crate::domain::objects::WinRateAware;
 use crate::domain::primitives::{Bet, UserId};
+use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::repo;
-use crate::repo::ChatIdPartiality;
 use crate::repo::test::dicks::{create_dick, create_user, create_user_and_dick_2};
 use crate::repo::test::{start_postgres, CHAT_ID_KIND, UID, USER_ID};
 

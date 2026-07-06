@@ -8,7 +8,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
-use teloxide::types::{User as TeloxideUser, UserId as TeloxideUserId};
+use teloxide::types::User as TeloxideUser;
 use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackResult, HandlerResult};
 use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};

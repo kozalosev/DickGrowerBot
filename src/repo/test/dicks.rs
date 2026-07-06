@@ -2,8 +2,8 @@ use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use crate::config::FeatureToggles;
 use crate::domain::primitives::{Bet, Length, LengthChange, Limit, Offset, Position, SignedLengthChange, UserId};
+use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
-use crate::repo::{ChatIdKind, ChatIdPartiality};
 use crate::repo::test::{CHAT_ID_KIND, get_chat_id_and_dicks, NAME, start_postgres, UID, USER_ID};
 
 fn increment_of(value: i64) -> LengthChange {

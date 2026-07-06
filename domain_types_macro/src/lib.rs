@@ -33,7 +33,6 @@ enum NumberKind {
 
 #[derive(PartialEq, Eq)]
 enum DomainTypeKind {
-    Value,
     Number(NumberKind),
     String,
 }
@@ -50,7 +49,6 @@ struct TypeInfo<'a> {
     inner_type: Type,
     variant: DomainTypeKind,
     args: DomainTypeAttr,
-    input: ItemStruct,
 }
 
 struct DomainTypeAttr {
@@ -167,7 +165,6 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
 
     let info = TypeInfo {
         name, inner_type, args, variant,
-        input: input.clone()
     };
     let derives = generate_derives(&info);
     let impls = generate_impls(&info);
@@ -214,9 +211,7 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         quote! { ::derive_more::Neg },
     ];
     
-    let type_specific_derives = match &info.variant { 
-        DomainTypeKind::Value =>
-            Vec::default(),
+    let type_specific_derives = match &info.variant {
         DomainTypeKind::String =>
             [domain_value_derives, eq_ord_hash_derives].concat(),
         // Validated types never derive Neg: it would construct the negated value directly,
@@ -1211,6 +1206,5 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                 #domain_string_impls
             }
         }
-        _ => domain_type_impl
     }
 }

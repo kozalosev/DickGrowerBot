@@ -1,4 +1,3 @@
-use domain_types::traits::DomainValue;
 use domain_types_macro::domain_type;
 use crate::{error, positive_number, signed_number};
 

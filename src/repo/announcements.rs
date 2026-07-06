@@ -52,7 +52,6 @@ impl Announcements {
                     chat_id_kind.value() as String, lang_code.to_supported_language() as SupportedLanguage)
             .fetch_optional(&self.pool)
             .await
-            .map(|opt| opt.map(Into::into))
             .context(format!("couldn't get the announcement for {chat_id_kind}, {lang_code:?}"))
     }
 
@@ -71,7 +70,7 @@ impl Announcements {
 
     async fn increment_times_shown(&self, chat_id: InternalChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET times_shown = times_shown + 1 WHERE chat_id = $1 AND language::text = $2",
-                *chat_id, lang_code.as_str())
+                *chat_id, lang_code.value())
             .execute(&self.pool)
             .await
             .map_err(Into::into)

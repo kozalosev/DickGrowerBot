@@ -25,8 +25,8 @@ pub use stats::*;
 pub use announcements::*;
 use crate::config;
 use crate::config::DatabaseConfig;
-// re-exported for convenience: repositories (and their callers) traffic in these identifiers
-pub use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
+// re-exported for convenience: repositories (and their callers) traffic in this identifier
+pub use crate::domain::primitives::chat::ChatIdKind;
 
 #[derive(Clone)]
 pub struct Repositories {
@@ -56,24 +56,6 @@ impl Repositories {
         }
     }
 }
-
-#[derive(sqlx::Type)]
-#[sqlx(type_name = "chat_id_type")]
-#[sqlx(rename_all = "lowercase")]
-enum ChatIdType {
-    ID,
-    Inst,
-}
-
-impl From<&ChatIdKind> for ChatIdType {
-    fn from(value: &ChatIdKind) -> Self {
-        match value {
-            ChatIdKind::ID(_) => ChatIdType::ID,
-            ChatIdKind::Instance(_) => ChatIdType::Inst,
-        }
-    }
-}
-
 
 pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Pool<Postgres>, anyhow::Error> {
     let pool = sqlx::postgres::PgPoolOptions::new()

@@ -17,6 +17,10 @@ pub struct DomainParseError {
     error: Box<dyn std::error::Error + Send + Sync + 'static>,
 }
 
+/// An error for string domain types whose values must not be empty.
+#[derive(Debug, derive_more::Error, derive_more::Display)]
+pub struct EmptyStringValue;
+
 #[derive(Debug, derive_more::Display, derive_more::Error, derive_more::Constructor)]
 #[display("DomainArithmeticOverflowError while {} for values {} and {}", operation, op1, op2)]
 pub struct DomainArithmeticOverflowError<N: Num> {

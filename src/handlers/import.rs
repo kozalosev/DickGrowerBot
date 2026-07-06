@@ -229,10 +229,10 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .await?.into_iter()
         .map(|m| {
             let uid = m.uid.value().try_into().expect("couldn't convert uid to u64");
-            let short_name = parsed.0.convert_name(m.name.value_ref());
+            let short_name = parsed.0.convert_name(m.name.value());
             let member = ChatMember {
                 uid: UserId(uid),
-                full_name: m.name.value_clone()
+                full_name: m.name.value().to_owned()
             };
             (short_name, member)
         })
@@ -259,7 +259,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .partition(|u| member_names.contains(u.name.as_ref()));
     let existing: Vec<UserInfo> = existing.into_iter()
         .map(|u| {
-            let member = &members[u.name.value_ref()];
+            let member = &members[u.name.value()];
             UserInfo {
                 uid: member.uid,
                 name: Username::new(member.full_name.clone()),
@@ -319,7 +319,7 @@ mod tests {
     fn original_bot_kind_try_from() {
         let check = |variant: &str, kind| {
             let second_variant = variant.strip_prefix('@').expect("no '@' prefix");
-            let valid_variants = [variant, &second_variant];
+            let valid_variants = [variant, second_variant];
             assert!(valid_variants.into_iter()
                 .all(|v| OriginalBotKind::try_from(v)
                     .is_ok_and(|k| k == kind)));

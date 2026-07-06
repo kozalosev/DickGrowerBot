@@ -30,10 +30,6 @@ impl LanguageCode {
         Self::from_maybe_string(maybe_code)
     }
 
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
     pub fn to_supported_language(&self) -> SupportedLanguage {
         let code = self.to_ascii_lowercase();
         if code.len() < 2 {
