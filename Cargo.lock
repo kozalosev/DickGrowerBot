@@ -751,9 +751,10 @@ version = "0.1.0"
 dependencies = [
  "derive_more 2.0.1",
  "domain_types",
+ "num-traits",
  "proc-macro2",
  "quote",
- "sqlx",
+ "serde",
  "syn 2.0.101",
 ]
 

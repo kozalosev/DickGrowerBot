@@ -1,3 +1,6 @@
+[workspace]
+members = ["domain_types", "domain_types_macro"]
+
 [package]
 name = "dick-grower-bot"
 version = "0.1.0"
