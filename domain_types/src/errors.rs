@@ -34,3 +34,10 @@ pub enum ArithmeticOperation {
     Division,
     Remainder
 }
+
+#[derive(Debug, derive_more::Display, derive_more::Error)]
+#[display("{_0}")]
+pub enum DomainArithmeticError<N: Num + Display> {
+    Overflow(DomainArithmeticOverflowError<N>),
+    AssertionFailed(DomainAssertionError<N>),
+}

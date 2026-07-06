@@ -11,13 +11,15 @@ pub trait DomainType<T>:
 where T: 
     Clone +
     Debug + Display
-{}
+{
+    fn new(value: T) -> Self;
+}
 
 /// Base domain numeric type (ID or number value)
 pub trait DomainValue<T>: DomainType<T> +
     Default +
-    PartialEq +
-    PartialOrd +
+    PartialEq + PartialEq<T> +
+    PartialOrd + PartialOrd<T> +
     Deref<Target=T>
 where T: Num +
     Clone + Default +

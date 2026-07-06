@@ -11,3 +11,25 @@ macro_rules! error {
         }
     };
 }
+
+#[macro_export]
+macro_rules! signed_number {
+    ($name:ident, $inner_type:ty) => {
+        #[domain_type(number)]
+        struct $name($inner_type);
+    };
+}
+
+#[macro_export]
+macro_rules! positive_number {
+    ($name:ident, $inner_type:ty) => {
+        #[domain_type(
+            number,
+            validated(
+                greater_or_equal_to_zero,
+                error_message("must be greater or equal to zero")
+            )
+        )]
+        struct $name($inner_type);
+    }
+}

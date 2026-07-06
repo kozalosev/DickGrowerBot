@@ -6,8 +6,8 @@ use teloxide::prelude::Message;
 use crate::handlers::{FromRefs, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
-use crate::domain::LanguageCode;
-use crate::repo::WinRateAware;
+use crate::domain::primitives::{LanguageCode, UserId};
+use crate::domain::objects::WinRateAware;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -47,7 +47,7 @@ async fn personal_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>
 
 pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, features: BattlesFeatureToggles) -> anyhow::Result<String> {
     let lang_code = LanguageCode::from_user(from_refs.0);
-    let (length, position) = repos.dicks.fetch_dick(from_refs.0.id, &from_refs.1.kind()).await?
+    let (length, position) = repos.dicks.fetch_dick(UserId::from(from_refs.0), &from_refs.1.kind()).await?
         .map(|dick| (dick.length, dick.position.unwrap_or_default()))
         .unwrap_or_default();
     let length_stats = t!("commands.stats.length", locale = &lang_code,

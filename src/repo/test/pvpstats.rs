@@ -1,8 +1,9 @@
 use teloxide::prelude::{ChatId, UserId};
+use crate::domain::objects::WinRateAware;
 use crate::repo;
-use crate::repo::{ChatIdKind, ChatIdPartiality, WinRateAware};
+use crate::repo::{ChatIdKind, ChatIdPartiality};
 use crate::repo::test::dicks::{create_dick, create_user, create_user_and_dick_2};
-use crate::repo::test::{CHAT_ID, start_postgres, UID};
+use crate::repo::test::{start_postgres, CHAT_ID, UID};
 
 #[tokio::test]
 async fn test_all() {

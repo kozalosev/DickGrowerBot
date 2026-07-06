@@ -1,10 +1,14 @@
 use teloxide::types::ChatId;
+use domain_types_macro::domain_type;
 use crate::*;
 
 id! {
     InternalChatId,
     TelegramChatId
 }
+
+#[domain_type]
+struct TelegramChatInstanceId(String);
 
 impl From<ChatId> for TelegramChatId {
     fn from(chat_id: ChatId) -> Self {
@@ -26,15 +30,21 @@ pub enum ChatIdPartiality {
     Specific(ChatIdKind)
 }
 
+impl From<TelegramChatId> for ChatIdPartiality {
+    fn from(value: TelegramChatId) -> Self {
+        Self::Specific(ChatIdKind::ID(value))
+    }
+}
+
 impl From<ChatId> for ChatIdPartiality {
     fn from(value: ChatId) -> Self {
-        Self::Specific(ChatIdKind::ID(value))
+        Self::from(TelegramChatId::from(value))
     }
 }
 
 impl From<String> for ChatIdPartiality {
     fn from(value: String) -> Self {
-        Self::Specific(ChatIdKind::Instance(value))
+        Self::Specific(ChatIdKind::Instance(TelegramChatInstanceId::new(value)))
     }
 }
 
@@ -59,8 +69,8 @@ impl ChatIdPartiality {
 #[derive(Debug, Clone, derive_more::Display)]
 #[display("ChatIdFull({id}, {instance})")]
 pub struct ChatIdFull {
-    pub id: ChatId,
-    pub instance: String,
+    pub id: TelegramChatId,
+    pub instance: TelegramChatInstanceId,
 }
 
 impl ChatIdFull {
@@ -72,19 +82,19 @@ impl ChatIdFull {
 
 #[derive(Debug, derive_more::Display, Clone, Eq, PartialEq, Hash)]
 pub enum ChatIdKind {
-    ID(ChatId),
-    Instance(String)
+    ID(TelegramChatId),
+    Instance(TelegramChatInstanceId)
 }
 
 impl From<ChatId> for ChatIdKind {
     fn from(value: ChatId) -> Self {
-        ChatIdKind::ID(value)
+        ChatIdKind::ID(TelegramChatId::from(value))
     }
 }
 
 impl From<String> for ChatIdKind {
     fn from(value: String) -> Self {
-        ChatIdKind::Instance(value)
+        ChatIdKind::Instance(TelegramChatInstanceId::new(value))
     }
 }
 
@@ -92,7 +102,7 @@ impl ChatIdKind {
     pub fn value(&self) -> String {
         match self {
             ChatIdKind::ID(id) => id.0.to_string(),
-            ChatIdKind::Instance(instance) => instance.to_owned(),
+            ChatIdKind::Instance(instance) => instance.to_string(),
         }
     }
 }

@@ -1,9 +1,8 @@
 use std::fmt::Formatter;
 use anyhow::{bail, Context};
 use sqlx::{Postgres, Transaction};
-use teloxide::types::ChatId;
-use crate::domain::primitives::InternalChatId;
-use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ensure_only_one_row_updated};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId};
+use crate::repo::ensure_only_one_row_updated;
 use crate::repository;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -28,9 +27,16 @@ impl TryInto<ChatIdPartiality> for Chat {
 
     fn try_into(self) -> Result<ChatIdPartiality, Self::Error> {
         match (self.chat_id, self.chat_instance) {
-            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(ChatIdFull { id: ChatId(id), instance }, ChatIdSource::Database)),
-            (Some(id), None) => Ok(ChatIdPartiality::Specific(ChatIdKind::ID(ChatId(id)))),
-            (None, Some(instance)) => Ok(ChatIdPartiality::Specific(ChatIdKind::Instance(instance))),
+            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(
+                ChatIdFull { id: TelegramChatId::new(id), instance: TelegramChatInstanceId::new(instance) },
+                ChatIdSource::Database
+            )),
+            (Some(id), None) => Ok(ChatIdPartiality::Specific(
+                ChatIdKind::ID(TelegramChatId::new(id))
+            )),
+            (None, Some(instance)) => Ok(ChatIdPartiality::Specific(
+                ChatIdKind::Instance(TelegramChatInstanceId::new(instance))
+            )),
             (None, None) => Err(NoChatIdError(self.internal_id))
         }
     }
@@ -46,10 +52,11 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't get the information about the chat with id = {chat_id}"))
     }
 ,
-    pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<i64, SearchError<ChatIdKind>> {
+    pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<InternalChatId, SearchError<ChatIdKind>> {
         self.get_chat(chat_id.clone()).await
             .map_err(SearchError::Internal)?
             .map(|chat| chat.internal_id)
+            .map(InternalChatId::new)
             .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,

@@ -1,11 +1,15 @@
 use async_trait::async_trait;
+use domain_types::traits::ValidatedDomainNumber;
+use num_traits::real::Real;
 use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeIntent, ConfigurablePerk, DickId, Perk};
 use crate::{config, repo};
+use crate::domain::primitives::{Length, LengthChange, LengthIncrement, LoanPayout, Ratio, SignedLengthChange};
 
 pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>> {
-    let help_pussies_coef = config::get_env_value_or_default("HELP_PUSSIES_COEF", 0.0);
+    let help_pussies_coef = Ratio::new(config::get_env_value_or_default("HELP_PUSSIES_COEF", 0.0))
+        .unwrap_or(Ratio::literal(0.0));
     let loans = repo::Loans::new(pool.clone(), cfg);
     
     vec![
@@ -17,7 +21,7 @@ pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>>
 }
 
 pub struct HelpPussiesPerk {
-    coefficient: f64
+    coefficient: Ratio
 }
 
 #[async_trait]
@@ -27,8 +31,8 @@ impl Perk for HelpPussiesPerk {
     }
 
     async fn apply(&self, _: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
-        if change_intent.current_length >= 0 {
-            return AdditionalChange(0)
+        if change_intent.current_length >= Length::new(0) {
+            return AdditionalChange(LengthChange::Signed(SignedLengthChange::new(0)))
         }
         
         let current_deepness = change_intent.current_length.abs()
@@ -38,12 +42,12 @@ impl Perk for HelpPussiesPerk {
     }
 
     fn enabled(&self) -> bool {
-        self.coefficient > 0.0
+        self.coefficient > Ratio::literal(0.0)
     }
 }
 
 impl ConfigurablePerk for HelpPussiesPerk {
-    type Config = f64;
+    type Config = Ratio;
 
     fn get_config(&self) -> Self::Config {
         self.coefficient
@@ -69,21 +73,21 @@ impl Perk for LoanPayoutPerk {
             .map(|loan| (loan.debt, loan.payout_ratio));
         let (debt, payout_coefficient) = match maybe_loan_components {
             Some(x) => x,
-            None => return AdditionalChange(0)
+            None => return AdditionalChange(LengthIncrement::literal(0).into()) // TODO: AdditionalChange::zero() by delegation
         };
 
-        let payout = if change_intent.base_increment.is_positive() {
-            let base_increment = change_intent.base_increment as f32;
+        let payout = LoanPayout::from(if change_intent.base_increment.value().is_positive() {
+            let base_increment = change_intent.base_increment.value() as f32;
             let payout = (base_increment * payout_coefficient).round() as u32;
             payout.min(debt)
         } else {
             0
-        };
+        });
         match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
             Ok(()) => AdditionalChange(-i64::from(payout)),
             Err(e) => {
                 log::error!("couldn't pay {payout} cm for the loan ({dick_id}): {e}");
-                AdditionalChange(0)
+                AdditionalChange(LengthIncrement::literal(0).into())
             }
         }
     }
@@ -94,21 +98,21 @@ mod test {
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk};
     use crate::handlers::utils::{ChangeIntent, DickId, Perk};
     use crate::{config, repo};
-    use crate::domain::primitives::{Debt, LengthChange, Ratio};
+    use crate::domain::primitives::{Debt, Length, LengthChange, LengthIncrement, Ratio, SignedLengthChange};
     use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
 
     #[tokio::test]
     async fn test_help_pussies() {
         {
-            let invalid_perk = HelpPussiesPerk { coefficient: 0.0 };
+            let invalid_perk = HelpPussiesPerk { coefficient: Ratio::literal(0.0) };
             assert!(!invalid_perk.enabled())
         }
         
-        let perk = HelpPussiesPerk { coefficient: 0.5 };
+        let perk = HelpPussiesPerk { coefficient: Ratio::literal(0.5) };
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
-        let change_intent_positive_length = ChangeIntent { current_length: 1, base_increment: 1 };
-        let change_intent_negative_length_positive_increment = ChangeIntent { current_length: -1, base_increment: 1 };
-        let change_intent_negative_length_negative_increment = ChangeIntent { current_length: -1, base_increment: -1 };
+        let change_intent_positive_length = ChangeIntent { current_length: Length::new(1), base_increment: LengthIncrement::literal(1).into() };
+        let change_intent_negative_length_positive_increment = ChangeIntent { current_length: Length::new(-1), base_increment: LengthIncrement::literal(1).into() };
+        let change_intent_negative_length_negative_increment = ChangeIntent { current_length: Length::new(-1), base_increment: SignedLengthChange::new(-1).into() };
         
         assert!(perk.enabled());
         assert_eq!(perk.apply(&dick_id, change_intent_positive_length).await.0, 0);
@@ -133,15 +137,15 @@ mod test {
                 .await.expect("couldn't create a user");
             
             let dicks = repo::Dicks::new(db, Default::default());
-            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::new(0))
+            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::Signed(SignedLengthChange::new(0)))
                 .await.expect("couldn't create a dick");
         }
 
         let perk = LoanPayoutPerk { loans: loans.clone() };
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
-        let change_intent_positive_increment = ChangeIntent { current_length: 1, base_increment: 10 };
-        let change_intent_positive_increment_small = ChangeIntent { current_length: 1, base_increment: 2 };
-        let change_intent_negative_increment = ChangeIntent { current_length: 1, base_increment: -1 };
+        let change_intent_positive_increment = ChangeIntent { current_length: Length::new(1), base_increment: LengthIncrement::literal(10).into() };
+        let change_intent_positive_increment_small = ChangeIntent { current_length: Length::new(1), base_increment: LengthIncrement::literal(2).into() };
+        let change_intent_negative_increment = ChangeIntent { current_length: Length::new(1), base_increment: SignedLengthChange::new(-1).into() };
 
         assert!(perk.enabled());
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, 0);

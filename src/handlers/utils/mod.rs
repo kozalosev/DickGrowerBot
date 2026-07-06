@@ -2,7 +2,6 @@ pub mod callbacks;
 pub mod locks;
 mod tghack;
 mod incrementor;
-mod macros;
 
 pub use tghack::*;
 pub use incrementor::*;
@@ -54,7 +53,8 @@ mod tests {
     #[test]
     fn get_time_till_next_day_string() {
         let expected = "<b>1</b>h <b>49</b>m.";
-        let actual = date::get_time_till_next_day_string(&LanguageCode::of("en"));
+        let lang_code = LanguageCode::of("en");
+        let actual = date::get_time_till_next_day_string(&lang_code);
         let actual = &actual[actual.len()-expected.len()..];
         assert_eq!(expected, actual)
     }

@@ -1,6 +1,7 @@
 #[derive(
     Debug, Clone,
     derive_more::Constructor, derive_more::From,
+    PartialEq, Eq,
     sqlx::FromRow, sqlx::Type
 )]
 pub struct TextHash(Vec<u8>);

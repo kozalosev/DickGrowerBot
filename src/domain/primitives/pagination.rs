@@ -1,28 +1,11 @@
 use domain_types::traits::DomainValue;
 use domain_types_macro::domain_type;
 use crate::domain::primitives::validators::greater_or_equal_to_zero;
-use crate::error;
+use crate::{error, positive_number, signed_number};
 
-#[domain_type(number)]
-struct Offset(i32);
-
-#[domain_type(
-    number,
-    validated(
-        greater_or_equal_to_zero,
-        error_message("must be greater or equal to zero")
-    )
-)]
-struct Limit(i16);
-
-#[domain_type(
-    number,
-    validated(
-        greater_or_equal_to_zero,
-        error_message("must be greater or equal to zero")
-    )
-)]
-struct Page(i16);
+signed_number!(Offset, i32);
+positive_number!(Limit, i16);
+positive_number!(Page, i16);
 
 error!(InvalidPage);
 
@@ -65,13 +48,13 @@ mod test {
     #[test]
     fn page_arithmetic() {
         let p0 = Page::first();
-        let p1 = p0 + 1;
-        let p00 = p1 - 1;
-        let p5 = p1 * 5;
+        let p1 = (p0 + 1).unwrap();
+        let p00 = (p1 - 1).unwrap();
+        let p5 = (p1 * 5).unwrap();
 
-        assert_eq!(p0, 0);
-        assert_eq!(p1, 1);
-        assert_eq!(p00, 0);
-        assert_eq!(p5, 5);
+        assert_eq!(p0, Page::literal(0));
+        assert_eq!(p1, Page::literal(1));
+        assert_eq!(p00, Page::literal(0));
+        assert_eq!(p5, Page::literal(5));
     }
 }

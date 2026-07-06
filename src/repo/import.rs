@@ -1,22 +1,8 @@
 use anyhow::Context;
 use sqlx::{Postgres, Transaction};
 use teloxide::types::{ChatId, UserId};
+use crate::domain::objects::ExternalUser;
 use crate::repository;
-
-#[derive(Eq, PartialEq, Debug, sqlx::FromRow)]
-pub struct ExternalUser {
-    pub uid: i64,
-    pub length: i32
-}
-
-impl ExternalUser {
-    pub fn new(uid: UserId, length: u32) -> Self {
-        Self {
-            uid: uid.0 as i64,
-            length: length as i32
-        }
-    }
-}
 
 repository!(Import,
     pub async fn get_imported_users(&self, chat_id: ChatId) -> anyhow::Result<Vec<ExternalUser>> {

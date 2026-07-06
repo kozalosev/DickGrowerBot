@@ -22,7 +22,7 @@ repository!(Users,
                 JOIN Dicks d USING (uid)
                 JOIN Chats c ON d.chat_id = c.id
                 WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text",
-                chat_id.value() as String)
+                chat_id)
             .fetch_all(&self.pool)
             .await
             .context(format!("couldn't get users of the chat with id = {chat_id}"))
@@ -36,13 +36,14 @@ repository!(Users,
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                     AND updated_at > current_timestamp - interval '1 week'
                 ORDER BY random() LIMIT 1",
-                chat_id.value() as String)
+                chat_id)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
     pub async fn get_random_active_poor_member(&self, chat_id: &ChatIdKind, rich_exclusion_ratio: Ratio) -> anyhow::Result<Option<User>> {
+        let wealth_borderline = (Ratio::literal(1.0) - rich_exclusion_ratio)?;
         sqlx::query_as!(User,
             "WITH ranked_users AS (
                 SELECT u.uid, name, u.created_at, PERCENT_RANK() OVER (ORDER BY length) AS percentile_rank
@@ -56,7 +57,7 @@ repository!(Users,
             FROM ranked_users
             WHERE percentile_rank <= $2
             ORDER BY random() LIMIT 1",
-                chat_id.value() as String, 1.0 - rich_exclusion_ratio.to_value())
+                chat_id, wealth_borderline)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a random active poor user of the chat with id = {chat_id}"))
@@ -87,15 +88,14 @@ repository!(Users,
             WHERE cumulative_weight >= random_value.rand_value
             ORDER BY cumulative_weight
             LIMIT 1;  -- Select the first user whose cumulative weight exceeds the random value",
-                chat_id.value() as String)
+                chat_id)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
     pub async fn get(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
-        sqlx::query_as!(User, "SELECT uid, name, created_at FROM Users WHERE uid = $1",
-                user_id.0 as i64)
+        sqlx::query_as!(User, "SELECT uid, name, created_at FROM Users WHERE uid = $1", user_id)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a user with id = {user_id}"))

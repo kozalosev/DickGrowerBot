@@ -11,12 +11,12 @@
       {
         "ordinal": 1,
         "name": "max_length",
-        "type_info": "Int4"
+        "type_info": "Int8"
       },
       {
         "ordinal": 2,
         "name": "total_length",
-        "type_info": "Int8"
+        "type_info": "Numeric"
       }
     ],
     "parameters": {

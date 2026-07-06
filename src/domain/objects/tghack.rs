@@ -1,12 +1,12 @@
 use teloxide::types::MessageId;
 use crate::domain::primitives::{AccessHash, DatacenterId};
-use crate::domain::primitives::chat::InternalChatId;
+use crate::domain::primitives::chat::TelegramChatId;
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct InlineMessageIdInfo {
     pub dc_id: DatacenterId,
-    pub chat_id: InternalChatId,
+    pub chat_id: TelegramChatId,
     pub message_id: MessageId,
     pub access_hash: AccessHash,
 }
@@ -20,7 +20,7 @@ impl InlineMessageIdInfo {
     ) -> Self {
         Self {
             dc_id: DatacenterId::new(dc_id),
-            chat_id: InternalChatId::new(chat_id),
+            chat_id: TelegramChatId::new(chat_id),
             message_id: MessageId(message_id),
             access_hash: AccessHash::new(access_hash),
         }

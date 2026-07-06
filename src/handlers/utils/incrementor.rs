@@ -12,7 +12,7 @@ use rand::rngs::OsRng;
 use rust_i18n::t;
 use crate::{config, repo};
 use crate::domain::primitives::chat::ChatIdKind;
-use crate::domain::primitives::{Ratio, UserId};
+use crate::domain::primitives::{DaysCount, Length, LengthChange, LengthIncrement, Ratio, SignedLengthChange, UserId};
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -25,7 +25,7 @@ pub struct Incrementor {
 pub struct Config {
     growth_range: RangeInclusive<i16>,
     grow_shrink_ratio: Ratio,
-    newcomers_grace_days: u32,
+    newcomers_grace_days: DaysCount,
     dod_bonus_range: RangeInclusive<u8>,
 }
 
@@ -53,21 +53,18 @@ pub struct DickId(pub(crate) UserId, pub(crate) ChatIdKind);
 
 #[derive(Copy, Clone)]
 pub struct ChangeIntent {
-    pub current_length: i64,
-    pub base_increment: i64,
+    pub current_length: Length,
+    pub base_increment: LengthChange,
 }
 
 #[derive(Copy, Clone)]
-pub struct AdditionalChange(pub i64);
+pub struct AdditionalChange(pub LengthChange);
 
-pub struct Increment<T: PrimInt + std::fmt::Display> {
-    pub base: T,
-    pub by_perks: HashMap<String, i64>,
-    pub total: T,
+pub struct Increment {
+    pub base: LengthChange,
+    pub by_perks: HashMap<String, SignedLengthChange>,
+    pub total: LengthChange,
 }
-
-pub type SignedIncrement = Increment<i32>;
-pub type UnsignedIncrement = Increment<u16>;
 
 impl Config {
     pub fn growth_range_min(&self) -> i16 {
@@ -99,7 +96,7 @@ impl Incrementor {
             config: Config {
                 growth_range: growth_range_min..=growth_range_max,
                 grow_shrink_ratio: config::get_env_value_or_default("GROW_SHRINK_RATIO", Ratio::literal(0.5)),
-                newcomers_grace_days: config::get_env_value_or_default("NEWCOMERS_GRACE_DAYS", 7),
+                newcomers_grace_days: config::get_env_value_or_default("NEWCOMERS_GRACE_DAYS", DaysCount::new(7)),
                 dod_bonus_range: 1..=dod_max_bonus,
             },
             perks,
@@ -125,7 +122,7 @@ impl Incrementor {
             .collect();
     }
 
-    pub async fn growth_increment(&self, user_id: UserId, chat_id: ChatIdKind, days_since_registration: u32) -> SignedIncrement {
+    pub async fn growth_increment(&self, user_id: UserId, chat_id: ChatIdKind, days_since_registration: DaysCount) -> Increment {
         let dick_id = DickId(user_id, chat_id);
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
             self.config.grow_shrink_ratio
@@ -133,16 +130,16 @@ impl Incrementor {
             Ratio::literal(1.0)
         };
         let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
-        self.add_additional_incr(dick_id, BaseIncrement(base_incr)).await
+        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr as i64) as BaseIncrement).await
     }
 
-    pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind) -> UnsignedIncrement {
+    pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind) -> Increment {
         let dick_id = DickId(user_id, chat_id);
         let base_incr = OsRng.gen_range(self.config.dod_bonus_range.clone());
-        self.add_additional_incr(dick_id, BaseIncrement(base_incr)).await
+        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr as i64) as BaseIncrement).await
     }
     
-    async fn add_additional_incr<T, R>(&self, dick: DickId, base_increment: BaseIncrement<T>) -> Increment<R>
+    async fn add_additional_incr<T, R>(&self, dick: DickId, base_increment: BaseIncrement) -> Increment
     where
         T: PrimInt + std::fmt::Display + Into<i32>,
         R: PrimInt + std::fmt::Display + From<T> + TryFrom<i64>,
@@ -156,22 +153,22 @@ impl Incrementor {
             }
         };
         let change_intent = ChangeIntent {
-            base_increment: base_increment.i64(),
-            current_length: current_length as i64,
+            base_increment: base_increment.as_length_change(),
+            current_length,
         };
 
         let mut additional_change = 0;
         let mut by_perks = HashMap::new();
         for perk in self.perks.iter() {
             let AdditionalChange(ac) = perk.apply(&dick, change_intent).await;
-            if !ac.is_zero() {
+            if !ac.value().is_zero() {  // TODO: generate is_zero() by the macro
                 by_perks.insert(perk.name().to_owned(), ac);
             }
             additional_change += ac
         }
         
-        let base = <R as From<T>>::from(base_increment.0);
-        let total = change_intent.base_increment.checked_add(additional_change)
+        let base = <R as From<T>>::from(base_increment.value());
+        let total = change_intent.base_increment.value().checked_add(additional_change)
             .map(R::try_from)
             .and_then(Result::ok)
             .unwrap_or_else(|| {
@@ -184,19 +181,21 @@ impl Incrementor {
             by_perks.clear();
         }
         
-        Increment { base, by_perks, total }
+        let length_changes = by_perks.into_iter()
+            .map(|(key, value)| (key, LengthChange::from(value)))
+            .collect();
+        Increment { base, by_perks: length_changes, total }
     }
 }
 
-#[derive(Copy, Clone)]
-struct BaseIncrement<T: PrimInt + Copy + Into<i32>>(T);
+type BaseIncrement = SignedLengthChange;
 
-impl <T: PrimInt + Into<i32>> BaseIncrement<T> {
-    fn only<R>(self) -> Increment<R>
+impl <T: PrimInt + Into<i64>> BaseIncrement {
+    fn only<R>(self) -> Increment
         where
             R: PrimInt + std::fmt::Display + From<T>
     {
-        let value = <R as From<T>>::from(self.0);
+        let value = <R as From<T>>::from(self.value());
         Increment {
             base: value,
             by_perks: HashMap::default(),
@@ -204,12 +203,12 @@ impl <T: PrimInt + Into<i32>> BaseIncrement<T> {
         }
     }
 
-    fn i64(self) -> i64 {
-        self.0.into() as i64
+    fn as_length_change(self) -> LengthChange {
+        LengthChange::Signed(SignedLengthChange(self.value()))
     }
 }
 
-impl <T: PrimInt + std::fmt::Display + Into<i32>> Increment<T> {    
+impl <T: PrimInt + std::fmt::Display + Into<i64>> Increment {
     pub fn perks_part_of_answer(&self, lang_code: &str) -> String {
         if self.base != self.total {
             let top_line = t!("titles.perks.top_line", locale = lang_code);
@@ -287,7 +286,7 @@ mod test_incrementor {
 
     use async_trait::async_trait;
     use futures::future::join_all;
-    use crate::domain::primitives::Ratio;
+    use crate::domain::primitives::{DaysCount, LengthChange, Ratio, SignedLengthChange};
     use crate::handlers::utils::{AdditionalChange, ChangeIntent, Config, DickId, Incrementor, Perk};
     use crate::repo;
     use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
@@ -300,7 +299,7 @@ mod test_incrementor {
             config: Config {
                 growth_range: -1..=1,
                 grow_shrink_ratio: Ratio::literal(0.5),
-                newcomers_grace_days: 1,
+                newcomers_grace_days: DaysCount::new(1),
                 dod_bonus_range: 1..=2,
             },
             dicks,
@@ -315,7 +314,7 @@ mod test_incrementor {
 
     async fn test_growth_increment_base(incr: &Incrementor) {
         let lazy_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, 1));
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1)));
         for fut in lazy_vals {
             let val = fut.await;
             assert_eq!(val.base, val.total);
@@ -325,7 +324,7 @@ mod test_incrementor {
         }
 
         let lazy_positive_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, 0));
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0)));
         for fut in lazy_positive_vals {
             let val = fut.await;
             assert_eq!(val.base, val.total);
@@ -363,7 +362,7 @@ mod test_incrementor {
         }
 
         async fn apply(&self, _: &DickId, _: ChangeIntent) -> AdditionalChange {
-            AdditionalChange(self.value as i64)
+            AdditionalChange(LengthChange::Signed(SignedLengthChange::new(self.value as i64)))
         }
 
         fn enabled(&self) -> bool {
@@ -378,7 +377,7 @@ mod test_incrementor {
         incr.set_perks(vec![perk_plus2.clone(), perk_minus1.clone()]);
 
         let growth_lazy_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, 1));
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1)));
         let dod_lazy_vals = (0..100)
             .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND));
 

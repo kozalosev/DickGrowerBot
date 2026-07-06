@@ -11,6 +11,7 @@ mod kw {
     syn::custom_keyword!(error_message);
     syn::custom_keyword!(features);
     syn::custom_keyword!(not_database_type);
+    syn::custom_keyword!(no_auto_display);
 }
 
 #[derive(PartialEq, Eq)]
@@ -54,6 +55,7 @@ struct TypeInfo<'a> {
 struct DomainTypeAttr {
     number: bool,
     not_database_type: bool,
+    no_auto_display: bool,
     validator: Option<syn::Expr>,
     error_msg: Option<syn::LitStr>,
 }
@@ -64,6 +66,7 @@ impl Parse for DomainTypeAttr {
         let mut validator = None;
         let mut error_msg = None;
         let mut not_database_type = false;
+        let mut no_auto_display = false;
 
         while !input.is_empty() {
             let lookahead = input.lookahead1();
@@ -96,6 +99,9 @@ impl Parse for DomainTypeAttr {
                 if content.parse::<Option<kw::not_database_type>>()?.is_some() {
                     not_database_type = true;
                 }
+                if content.parse::<Option<kw::no_auto_display>>()?.is_some() {
+                    no_auto_display = true;
+                }
             }
             else {
                 return Err(lookahead.error());
@@ -110,6 +116,7 @@ impl Parse for DomainTypeAttr {
         Ok(Self {
             number,
             not_database_type,
+            no_auto_display,
             validator,
             error_msg,
         })
@@ -171,7 +178,7 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
     let domain_type_derives = vec![
         quote! { Clone },
         quote! { Debug },
-        quote! { ::derive_more::Display },
+        quote! { ::serde::Serialize },
     ];
     let domain_value_derives = vec![
         quote! { Default },
@@ -219,17 +226,17 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         DomainTypeKind::Number(NumberKind::IntegerNumber(IntegerSignedness::Signed)) =>
             [domain_value_derives, eq_ord_hash_derives, copy_derive, neg_derive].concat(),
         DomainTypeKind::Number(NumberKind::FloatValue) | DomainTypeKind::Number(NumberKind::ValidatedFloatNumber) =>
-            [domain_value_derives, float_derives, copy_derive].concat(),
-        DomainTypeKind::Number(NumberKind::FloatNumber) =>
             [domain_value_derives, copy_derive].concat(),
+        DomainTypeKind::Number(NumberKind::FloatNumber) =>
+            [domain_value_derives, float_derives, copy_derive].concat(),
     };
     
     let mut derives = [domain_type_derives, type_specific_derives].concat();
-    if info.args.validator.is_none() {
-        derives.push(quote! { ::derive_more::Constructor });
-    }
     if !info.args.not_database_type {
         derives.push(quote! { ::sqlx::Type })
+    }
+    if !info.args.no_auto_display {
+        derives.push(quote! { ::derive_more::Display })
     }
     
     derives
@@ -237,7 +244,7 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
 
 fn generate_domain_value_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
-    quote! {        
+    quote! {
         #[automatically_derived]
         impl std::ops::Deref for #name {
             type Target = #inner_type;
@@ -263,6 +270,20 @@ fn generate_domain_value_impls(info: &TypeInfo) -> TokenStream {
                     .map(Self)
                     .map_err(Box::new)
                     .map_err(|err| ::domain_types::errors::DomainParseError::new(s.to_owned(), stringify!(#name), err))
+            }
+        }
+
+        #[automatically_derived]
+        impl ::std::cmp::PartialEq<#inner_type> for #name {
+            fn eq(&self, other: &#inner_type) -> bool {
+                <Self as DomainValue<#inner_type>>::value(self) == *other
+            }
+        }
+
+        #[automatically_derived]
+        impl ::std::cmp::PartialOrd<#inner_type> for #name {
+            fn partial_cmp(&self, other: &#inner_type) -> Option<::std::cmp::Ordering> {
+                <Self as DomainValue<#inner_type>>::value(self).partial_cmp(other)
             }
         }
     }
@@ -361,29 +382,29 @@ fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
                 self.saturating_mul_primitive(rhs.0)
             }
 
-            pub fn overflowing_div_primitive(self, rhs: #inner_type) -> (Self, bool) {
+            pub fn overflowing_div_primitive<F: ::num_traits::Float, D: ::domain_types::traits::DomainFloatNumber<F>>(self, rhs: #inner_type) -> (D, bool) {
                 let (new_value, is_overflow) = self.0.overflowing_div(rhs);
-                (Self(new_value), is_overflow)
+                (D::new(new_value), is_overflow)
             }
 
-            pub fn overflowing_div(self, rhs: Self) -> (Self, bool) {
+            pub fn overflowing_div<F: ::num_traits::Float, D: ::domain_types::traits::DomainFloatNumber<F>>(self, rhs: Self) -> (D, bool) {
                 self.overflowing_div_primitive(rhs.0)
             }
 
-            pub fn saturating_div_primitive(self, rhs: #inner_type) -> Self {
-                Self(self.0.saturating_div(rhs))
+            pub fn saturating_div_primitive<F: ::num_traits::Float, D: ::domain_types::traits::DomainFloatNumber<F>>(self, rhs: #inner_type) -> D {
+                D::new(self.0.saturating_div(rhs))
             }
 
-            pub fn saturating_div(self, rhs: Self) -> Self {
+            pub fn saturating_div<F: ::num_traits::Float, D: ::domain_types::traits::DomainFloatNumber<F>>(self, rhs: Self) -> D {
                 self.saturating_div_primitive(rhs.0)
             }
 
-            pub fn overflowing_rem_primitive(self, rhs: #inner_type) -> (Self, bool) {
+            pub fn overflowing_rem_primitive<F: ::num_traits::Float, D: ::domain_types::traits::DomainFloatNumber<F>>(self, rhs: #inner_type) -> (D, bool) {
                 let (new_value, is_overflow) = self.0.overflowing_rem(rhs);
-                (Self(new_value), is_overflow)
+                (D::new(new_value), is_overflow)
             }
 
-            pub fn overflowing_rem(self, rhs: Self) -> (Self, bool) {
+            pub fn overflowing_rem<F: ::num_traits::Float, D: ::domain_types::traits::DomainFloatNumber<F>>(self, rhs: Self) -> (D, bool) {
                 self.overflowing_rem_primitive(rhs.0)
             }
         }
@@ -687,60 +708,99 @@ fn generate_validated_domain_integer_number_impls(info: &TypeInfo) -> TokenStrea
                 self.saturating_div(rhs)
             }
         }
+    }
+}
 
+fn generate_validated_domain_float_number_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    quote! {
         #[automatically_derived]
-        impl std::ops::AddAssign<#inner_type> for #name {
-            fn add_assign(&mut self, rhs: #inner_type) {
-                self.0 = self.0.saturating_add(rhs);
+        impl std::ops::Add<#inner_type> for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn add(self, rhs: #inner_type) -> Self::Output {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0 + rhs)
             }
         }
 
         #[automatically_derived]
-        impl std::ops::SubAssign<#inner_type> for #name {
-            fn sub_assign(&mut self, rhs: #inner_type) {
-                self.0 = self.0.saturating_sub(rhs);
+        impl std::ops::Sub<#inner_type> for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn sub(self, rhs: #inner_type) -> Self::Output {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0 - rhs)
             }
         }
 
         #[automatically_derived]
-        impl std::ops::MulAssign<#inner_type> for #name {
-            fn mul_assign(&mut self, rhs: #inner_type) {
-                self.0 = self.0.saturating_mul(rhs);
+        impl std::ops::Mul<#inner_type> for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn mul(self, rhs: #inner_type) -> Self::Output {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0 * rhs)
             }
         }
 
         #[automatically_derived]
-        impl std::ops::DivAssign<#inner_type> for #name {
-            fn div_assign(&mut self, rhs: #inner_type) {
-                self.0 = self.0.saturating_div(rhs);
+        impl std::ops::Div<#inner_type> for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn div(self, rhs: #inner_type) -> Self::Output {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0 / rhs)
             }
         }
 
         #[automatically_derived]
-        impl std::ops::AddAssign for #name {
-            fn add_assign(&mut self, rhs: Self) {
-                self.0 = self.0.saturating_add(rhs.0);
+        impl std::ops::Rem<#inner_type> for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn rem(self, rhs: #inner_type) -> Self::Output {
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0 % rhs)
             }
         }
 
         #[automatically_derived]
-        impl std::ops::SubAssign for #name {
-            fn sub_assign(&mut self, rhs: Self) {
-                self.0 = self.0.saturating_sub(rhs.0);
+        impl std::ops::Add for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn add(self, rhs: Self) -> Self::Output {
+                self + rhs.0
             }
         }
 
         #[automatically_derived]
-        impl std::ops::MulAssign for #name {
-            fn mul_assign(&mut self, rhs: Self) {
-                self.0 = self.0.saturating_mul(rhs.0);
+        impl std::ops::Sub for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn sub(self, rhs: Self) -> Self::Output {
+                self - rhs.0
             }
         }
 
         #[automatically_derived]
-        impl std::ops::DivAssign for #name {
-            fn div_assign(&mut self, rhs: Self) {
-                self.0 = self.0.saturating_div(rhs.0);
+        impl std::ops::Mul for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn mul(self, rhs: Self) -> Self::Output {
+                self * rhs.0
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Div for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn div(self, rhs: Self) -> Self::Output {
+                self / rhs.0
+            }
+        }
+
+        #[automatically_derived]
+        impl std::ops::Rem for #name {
+            type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+
+            fn rem(self, rhs: Self) -> Self::Output {
+                self % rhs.0
             }
         }
     }
@@ -749,6 +809,12 @@ fn generate_validated_domain_integer_number_impls(info: &TypeInfo) -> TokenStrea
 fn generate_domain_string_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, .. } = info;
     quote! {
+        impl #name {
+            pub fn of(value: impl ToString) -> Self {
+                Self::new(value.to_string())
+            }
+        }
+
         impl AsRef<String> for #name {
             fn as_ref(&self) -> &String {
                 &self.0
@@ -774,6 +840,9 @@ fn generate_domain_string_impls(info: &TypeInfo) -> TokenStream {
 }
 
 fn determine_inner_type_kind(ty: &Type) -> InnerTypeKind {
+    if let Type::Group(group) = ty {
+        return determine_inner_type_kind(&group.elem);
+    }
     if let Type::Path(type_path) = ty {
         let signed_integer_types = ["i8", "i16", "i32", "i64"]
             .map(|ty| (ty, InnerTypeKind::Integer(IntegerSignedness::Signed)));
@@ -806,7 +875,11 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
     let domain_type_impl = quote! {
         #[automatically_derived]
-        impl ::domain_types::traits::DomainType<#inner_type> for #name {}
+        impl ::domain_types::traits::DomainType<#inner_type> for #name {
+            fn new(value: #inner_type) -> Self {
+                Self(value)
+            }
+        }
     };
     match &info.variant {
         DomainTypeKind::Number(kind) => {
@@ -878,11 +951,12 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                 }
                 NumberKind::ValidatedFloatNumber => {
                     let validated_domain_number_impls = generate_validated_domain_number_impls(info);
+                    let validated_domain_float_number_impls = generate_validated_domain_float_number_impls(info);
                     quote! {
                         #domain_type_impl
                         #domain_value_impls
                         #validated_domain_number_impls
-                        // TODO: write impls for validated floats
+                        #validated_domain_float_number_impls
 
                         #[automatically_derived]
                         impl ::domain_types::traits::DomainFloatValue<#inner_type> for #name {}

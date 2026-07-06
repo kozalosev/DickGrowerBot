@@ -11,6 +11,7 @@ use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Me
 use crate::handlers::{HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
 use crate::domain::LanguageCode;
+use crate::domain::primitives::{LanguageCode, PromoCode};
 use crate::repo::ActivationError;
 
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
@@ -101,7 +102,7 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult
     Ok(())
 }
 
-pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, promo_code: &str) -> anyhow::Result<String> {
+pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, promo_code: &PromoCode) -> anyhow::Result<String> {
     let lang_code = LanguageCode::from_user(user);
     let answer = match promo_repo.activate(user.id, promo_code).await {
         Ok(res) => {

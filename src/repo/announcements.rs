@@ -4,7 +4,8 @@ use sqlx::{Pool, Postgres};
 use crate::repo::{ensure_only_one_row_updated, ChatIdKind};
 use crate::config;
 use crate::domain::objects::Announcement;
-use crate::domain::primitives::{InternalChatId, LanguageCode, SupportedLanguage};
+use crate::domain::primitives::{Counter, LanguageCode, TextHash};
+use crate::domain::primitives::chat::InternalChatId;
 
 #[derive(Clone, Constructor)]
 pub struct Announcements {
@@ -24,8 +25,8 @@ impl Announcements {
 
     async fn check_conditions(&self, chat_id_kind: &ChatIdKind, announcement: &config::Announcement, lang_code: &LanguageCode) -> anyhow::Result<bool> {
         let res = match self.get(chat_id_kind, lang_code).await? {
-            _ if self.announcements.max_shows == 0 => false,
-            Some(entity) if entity.hash[..] != announcement.hash[..] => {
+            _ if self.announcements.max_shows == Counter::literal(0) => false,
+            Some(entity) if entity.hash != *announcement.hash => {
                 self.update(entity.chat_id, lang_code, &announcement.hash).await?;
                 true
             }
@@ -55,7 +56,7 @@ impl Announcements {
             .context(format!("couldn't get the announcement for {chat_id_kind}, {lang_code:?}"))
     }
 
-    async fn create(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode, hash: &[u8]) -> anyhow::Result<()> {
+    async fn create(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
         sqlx::query!(
             "INSERT INTO Announcements (chat_id, language, hash, times_shown) VALUES (
                 (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text),
@@ -78,7 +79,7 @@ impl Announcements {
             .context(format!("couldn't increment shown times for {chat_id:?}, {lang_code:?}"))
     }
 
-    async fn update(&self, chat_id: InternalChatId, lang_code: &LanguageCode, hash: &[u8]) -> anyhow::Result<()> {
+    async fn update(&self, chat_id: InternalChatId, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET hash = $3, times_shown = 1 WHERE chat_id = $1 AND language = $2",
                 chat_id.0, lang_code.to_supported_language() as SupportedLanguage, hash)
             .execute(&self.pool)

@@ -12,5 +12,5 @@ pub_use_modules!(
     numbers,
     length,
     hash,
-    position,
-    pagination);
+    pagination,
+    promo);

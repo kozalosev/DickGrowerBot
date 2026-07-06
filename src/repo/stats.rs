@@ -1,7 +1,7 @@
 use anyhow::Context;
 use num_traits::ToPrimitive;
 use sqlx::FromRow;
-use teloxide::types::UserId;
+use crate::domain::primitives::UserId;
 use crate::repository;
 
 #[derive(FromRow)]
@@ -34,7 +34,7 @@ repository!(PersonalStatsRepo,
                           max(length) AS max_length,
                           sum(length) AS total_length
                    FROM Dicks WHERE uid = $1"#,
-                user_id.0 as i64)   
+                *user_id)   
             .fetch_one(&self.pool)
             .await
             .map(PersonalStats::from)

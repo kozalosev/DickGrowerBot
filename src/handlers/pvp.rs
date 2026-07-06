@@ -7,15 +7,18 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup, User, UserId};
-use crate::handlers::{CallbackResult, HandlerResult, reply_html, send_error_callback_answer, utils};
+use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{User as TeloxideUser, UserId as TeloxideUserId};
+use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackResult, HandlerResult};
 use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
-use crate::domain::{LanguageCode, Username};
+use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
+use crate::domain::primitives::{Bet, LanguageCode, UserId, Username};
+use crate::domain::primitives::chat::{ChatIdPartiality, TelegramChatId};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
-use crate::repo::{BattleStats, ChatIdPartiality, GrowthResult, Repositories, WinRateAware};
+use crate::repo::Repositories;
 
 // let's calculate time offsets from 22.06.2024
 const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
@@ -54,14 +57,14 @@ impl BattleCommands {
 #[display("{initiator}:{bet}:{timestamp}")]
 pub(crate) struct BattleCallbackData {
     initiator: UserId,
-    bet: u16,
+    bet: Bet,
 
     // used to prevent repeated clicks on the same button
     timestamp: NewLayoutValue<i64>
 }
 
 impl BattleCallbackData {
-    fn new(initiator: UserId, bet: u16) -> Self {
+    fn new(initiator: UserId, bet: Bet) -> Self {
         Self {
             initiator, bet,
             timestamp: new_short_timestamp()
@@ -82,7 +85,7 @@ impl TryFrom<String> for BattleCallbackData {
         let err = InvalidCallbackDataBuilder(&data);
         let mut parts = data.split(':');
         let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId)?;
-        let bet: u16 = callbacks::parse_part(&mut parts, &err, "bet")?;
+        let bet = callbacks::parse_part(&mut parts, &err, "bet").map(Bet)?;
         let timestamp = callbacks::parse_optional_part(&mut parts, &err)?;
         Ok(Self { initiator, bet, timestamp })
     }
@@ -129,10 +132,10 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
 pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
-    let bet: u16 = query.query.parse()?;
+    let bet = query.query.parse().map(Bet)?;
     let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
-    let res = build_inline_keyboard_article_result(query.from.id, &lang_code, &name, bet);
+    let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
     let mut answer = bot.answer_inline_query(&query.id, vec![res.clone()])
         .is_personal(true);
@@ -143,7 +146,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     Ok(())
 }
 
-pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: &Username, bet: u16) -> InlineQueryResult {
+pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: &Username, bet: Bet) -> InlineQueryResult {
     log::debug!("Starting a PvP for {uid} (bet = {bet})...");
 
     let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
@@ -172,6 +175,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
                               mut battle_locker: LockCallbackServiceFacade) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat().id)
+        .map(TelegramChatId::from)
         .or_else(|| config.features.chats_merging
             .then_some(query.inline_message_id.as_ref())
             .flatten()
@@ -179,7 +183,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
                 .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
                 .ok()
             )
-            .map(|info| ChatId(info.chat_id))
+            .map(|info| info.chat_id)
         )
         .map(ChatIdPartiality::from)
         .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));
@@ -219,25 +223,25 @@ pub(crate) struct UserInfo {
     name: Username,
 }
 
-impl From<&User> for UserInfo {
-    fn from(value: &User) -> Self {
+impl From<&TeloxideUser> for UserInfo {
+    fn from(value: &TeloxideUser) -> Self {
         Self {
-            uid: value.id,
+            uid: value.id.into(),
             name: utils::get_full_name(value)
         }
     }
 }
 
-impl From<User> for UserInfo {
-    fn from(value: User) -> Self {
+impl From<TeloxideUser> for UserInfo {
+    fn from(value: TeloxideUser) -> Self {
         (&value).into()
     }
 }
 
-impl From<repo::User> for UserInfo {
-    fn from(value: repo::User) -> Self {
+impl From<User> for UserInfo {
+    fn from(value: User) -> Self {
         Self {
-            uid: UserId(value.uid as u64),
+            uid: value.uid,
             name: value.name
         }
     }
@@ -250,7 +254,7 @@ impl Into<UserId> for UserInfo {
     }
 }
 
-pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u16) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: Bet) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     log::debug!("Starting a PvP for {} in the chat with id = {} (bet = {bet}, enough = {enough})...", initiator.uid, p.chat_id);
 
@@ -268,7 +272,7 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: u1
     Ok(data)
 }
 
-async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: u16) -> anyhow::Result<CallbackResult> {
+async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: Bet) -> anyhow::Result<CallbackResult> {
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
@@ -354,7 +358,7 @@ async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInf
     Ok(user)
 }
 
-async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: u16) -> anyhow::Result<Option<(GrowthResult, u16)>> {
+async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: Bet) -> anyhow::Result<Option<(GrowthResult, u16)>> {
     let chat_id_kind = p.chat_id.kind();
     let loan = match p.repos.loans.get_active_loan(winner_id, &chat_id_kind).await? {
         Some(loan) => loan,

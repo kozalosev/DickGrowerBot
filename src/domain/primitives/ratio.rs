@@ -1,3 +1,4 @@
+use domain_types::traits::{DomainValue, ValidatedDomainNumber};
 use domain_types_macro::domain_type;
 use crate::domain::primitives::validators::{ratio_range_validator, percentage_range_validator};
 
@@ -28,5 +29,11 @@ impl Ratio {
         };
         Percentage::new(value)
             .expect("a correct ratio must be convertible to percentage")
+    }
+}
+
+impl From<Ratio> for Percentage {
+    fn from(ratio: Ratio) -> Self {
+        ratio.percentage()
     }
 }
