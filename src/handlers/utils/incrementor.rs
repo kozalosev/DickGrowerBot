@@ -310,9 +310,9 @@ mod test_incrementor {
         for fut in lazy_vals {
             let val = fut.await;
             assert_eq!(val.base, val.total);
-            assert_ne!(val.base, 0);
-            assert!(val.base >= -1);
-            assert!(val.base <= 1);
+            assert_ne!(val.base.value(), 0);
+            assert!(val.base.value() >= -1);
+            assert!(val.base.value() <= 1);
         }
 
         let lazy_positive_vals = (0..100)
@@ -320,7 +320,7 @@ mod test_incrementor {
         for fut in lazy_positive_vals {
             let val = fut.await;
             assert_eq!(val.base, val.total);
-            assert!(val.base > 0);
+            assert!(val.base.value() > 0);
         }
     }
 
@@ -329,17 +329,17 @@ mod test_incrementor {
             .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND));
         let val = join_all(val).await;
         assert!(val.iter().all(|n| { n.base == n.total }));
-        assert!(val.iter().all(|n| { n.base == 1 || n.base == 2 }))
+        assert!(val.iter().all(|n| { n.base.value() == 1 || n.base.value() == 2 }))
     }
 
     #[derive(Clone)]
     struct AddPerk {
-        value: i32,
+        value: i64,
         name: String,
     }
 
     impl AddPerk {
-        fn boxed(value: i32) -> Box<Self> {
+        fn boxed(value: i64) -> Box<Self> {
             Box::new(Self {
                 value,
                 name: format!("add-perk-{value}")
@@ -354,7 +354,7 @@ mod test_incrementor {
         }
 
         async fn apply(&self, _: &DickId, _: ChangeIntent) -> AdditionalChange {
-            AdditionalChange(LengthChange::Signed(SignedLengthChange::new(self.value as i64)))
+            AdditionalChange(LengthChange::Signed(SignedLengthChange::new(self.value)))
         }
 
         fn enabled(&self) -> bool {
@@ -375,7 +375,7 @@ mod test_incrementor {
 
         macro_rules! assertions {
             ($val:ident) => {
-                assert_eq!($val.total - $val.base, 1);
+                assert_eq!($val.total.value() - $val.base.value(), 1);
                 assert_eq!($val.by_perks[perk_plus2.name()], 2);
                 assert_eq!($val.by_perks[perk_minus1.name()], -1);
             };
@@ -390,9 +390,10 @@ mod test_incrementor {
     
     async fn test_perk_with_overflow(incr: &Incrementor) {
         let mut incr = incr.clone();
-        let perk_add_max_int = AddPerk::boxed(i32::MAX);
+        // lengths are i64 now, so only an i64 overflow triggers the fallback
+        let perk_add_max_int = AddPerk::boxed(i64::MAX);
         incr.set_perks(vec![perk_add_max_int.clone()]);
-        
+
         let increment = incr.dod_increment(USER_ID, CHAT_ID_KIND).await;
         assert_eq!(increment.base, increment.total);
         assert!(increment.by_perks.is_empty());

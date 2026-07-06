@@ -115,9 +115,9 @@ mod test {
         let change_intent_negative_length_negative_increment = ChangeIntent { current_length: Length::new(-1), base_increment: SignedLengthChange::new(-1).into() };
         
         assert!(perk.enabled());
-        assert_eq!(perk.apply(&dick_id, change_intent_positive_length).await.0, 0);
-        assert_eq!(perk.apply(&dick_id, change_intent_negative_length_positive_increment).await.0, 1);
-        assert_eq!(perk.apply(&dick_id, change_intent_negative_length_negative_increment).await.0, 1);
+        assert_eq!(perk.apply(&dick_id, change_intent_positive_length).await.0.value(), 0);
+        assert_eq!(perk.apply(&dick_id, change_intent_negative_length_positive_increment).await.0.value(), 1);
+        assert_eq!(perk.apply(&dick_id, change_intent_negative_length_negative_increment).await.0.value(), 1);
     }
 
     #[tokio::test]
@@ -148,20 +148,20 @@ mod test {
         let change_intent_negative_increment = ChangeIntent { current_length: Length::new(1), base_increment: SignedLengthChange::new(-1).into() };
 
         assert!(perk.enabled());
-        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, 0);
+        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0.value(), 0);
 
         loans.borrow(USER_ID, &CHAT_ID_KIND, Debt::new(10))
             .await.expect("couldn't create a loan");
 
-        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, -1);
+        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0.value(), -1);
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")
             .debt;
         assert_eq!(debt, Debt::new(9));
 
-        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment_small).await.0, 0);
-        assert_eq!(perk.apply(&dick_id, change_intent_negative_increment).await.0, 0);
+        assert_eq!(perk.apply(&dick_id, change_intent_positive_increment_small).await.0.value(), 0);
+        assert_eq!(perk.apply(&dick_id, change_intent_negative_increment).await.0.value(), 0);
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")

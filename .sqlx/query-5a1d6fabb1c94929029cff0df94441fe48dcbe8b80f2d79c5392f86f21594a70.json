@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Chats",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "5a1d6fabb1c94929029cff0df94441fe48dcbe8b80f2d79c5392f86f21594a70"
+}

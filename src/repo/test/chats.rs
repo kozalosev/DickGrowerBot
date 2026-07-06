@@ -1,8 +1,9 @@
 use sqlx::{Pool, Postgres};
-use teloxide::types::{ChatId, UserId};
+use crate::domain::primitives::{LengthChange, Limit, Offset, SignedLengthChange};
+use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
 use crate::repo;
-use crate::repo::{ChatIdFull, ChatIdPartiality};
-use crate::repo::test::{CHAT_ID, start_postgres, UID};
+use crate::repo::{ChatIdFull, ChatIdKind, ChatIdPartiality};
+use crate::repo::test::{CHAT_ID, start_postgres, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
 
 #[tokio::test]
@@ -16,8 +17,8 @@ async fn upsert_chat() {
 
     let chats = repo::Chats::new(db.clone(), Default::default());
     let chat_id_full = ChatIdFull {
-        id: ChatId(CHAT_ID),
-        instance: "instance".to_owned(),
+        id: TelegramChatId::new(CHAT_ID),
+        instance: TelegramChatInstanceId::of("instance"),
     };
 
     old_chat_id_new_instance(&chats, chat_id_full.clone()).await;
@@ -51,7 +52,7 @@ async fn old_chat_id_new_instance(chats: &repo::Chats, full: ChatIdFull) {
 
 async fn old_instance_new_chat_id(chats: &repo::Chats, full: ChatIdFull) {
     let (id, inst) = (full.id, full.instance.clone());
-    chats.upsert_chat(&ChatIdPartiality::Specific(inst.clone().into()))
+    chats.upsert_chat(&ChatIdPartiality::Specific(ChatIdKind::Instance(inst.clone())))
         .await.expect("couldn't create a chat");
 
     chats.upsert_chat(&full.to_partiality(Default::default()))
@@ -65,7 +66,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
 
     let (id, inst) = (full.id, full.instance.clone());
     let ids = sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, NULL), (NULL, $2) RETURNING id",
-            id.0, &inst)
+            id.value(), inst.value())
         .fetch_all(db)
         .await.expect("couldn't create chats");
     assert_eq!(ids.len(), 2);
@@ -75,23 +76,23 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
         .await.expect("couldn't create dicks");
 
     let chat_id = full.to_partiality(Default::default());
-    dicks.create_or_grow(UserId(UID as u64), &chat_id, 0)
+    dicks.create_or_grow(USER_ID, &chat_id, LengthChange::Signed(SignedLengthChange::new(0)))
         .await
         .expect("couldn't create a dick");
 
     check_chat(chats, id, inst).await;
 
     let chat_id_kind = chat_id.kind();
-    let dick = dicks.get_top(&chat_id_kind, 0, 1)
+    let dick = dicks.get_top(&chat_id_kind, Offset::new(0), Limit::literal(1))
         .await.expect("couldn't fetch the dick");
     assert_eq!(dick.len(), 1);
     assert_eq!(dick[0].length, 3);
 }
 
-async fn check_chat(chats: &repo::Chats, chat_id: ChatId, inst: String) {
+async fn check_chat(chats: &repo::Chats, chat_id: TelegramChatId, inst: TelegramChatInstanceId) {
     let chat = chats.get_chat(chat_id.into())
         .await.expect("couldn't fetch the chat");
     assert!(chat.is_some());
-    assert_eq!(chat.as_ref().unwrap().chat_id.unwrap(), chat_id.0);
-    assert_eq!(chat.unwrap().chat_instance.unwrap(), inst);
+    assert_eq!(chat.as_ref().unwrap().chat_id.unwrap(), chat_id.value());
+    assert_eq!(chat.unwrap().chat_instance.as_deref().unwrap(), inst.value());
 }
