@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeIntent, ConfigurablePerk, DickId, Perk};
 use crate::{config, repo};
-use crate::domain::primitives::{Length, LengthChange, LoanPayout, Ratio, SignedLengthChange};
+use crate::domain::primitives::{Length, LengthChange, LoanPayout, Ratio};
 
 pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>> {
     let help_pussies_coef = Ratio::new(config::get_env_value_or_default("HELP_PUSSIES_COEF", 0.0))
@@ -35,7 +35,7 @@ impl Perk for HelpPussiesPerk {
         let current_deepness = change_intent.current_length.abs() as f64;
         // the coefficient is a Ratio, but the scaled deepness is not: multiply raw values
         let change = (self.coefficient.value() * current_deepness).round() as i64;
-        AdditionalChange(LengthChange::Signed(SignedLengthChange::new(change)))
+        AdditionalChange(LengthChange::signed(change))
     }
 
     fn enabled(&self) -> bool {
@@ -84,7 +84,7 @@ impl Perk for LoanPayoutPerk {
         let payout = LoanPayout::new(payout_value.clamp(0, i32::MAX as i64) as i32)
             .expect("loan payout is non-negative by construction");
         match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
-            Ok(()) => AdditionalChange(LengthChange::Signed(SignedLengthChange::new(-i64::from(payout.value())))),
+            Ok(()) => AdditionalChange(LengthChange::signed(-i64::from(payout.value()))),
             Err(e) => {
                 log::error!("couldn't pay {payout} cm for the loan ({dick_id}): {e}");
                 AdditionalChange::zero()
@@ -137,7 +137,7 @@ mod test {
                 .await.expect("couldn't create a user");
             
             let dicks = repo::Dicks::new(db, Default::default());
-            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::Signed(SignedLengthChange::new(0)))
+            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(0))
                 .await.expect("couldn't create a dick");
         }
 

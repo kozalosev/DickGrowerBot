@@ -3,7 +3,7 @@ use sqlx::{Postgres, Transaction};
 
 use crate::config;
 use crate::domain::objects::Loan;
-use crate::domain::primitives::{Debt, LengthChange, LoanId, LoanPayout, Ratio, SignedLengthChange, UserId};
+use crate::domain::primitives::{Debt, LengthChange, LoanId, LoanPayout, Ratio, UserId};
 use crate::domain::primitives::chat::InternalChatId;
 use crate::repo::{ensure_only_one_row_updated, ChatIdKind, Chats, Dicks};
 
@@ -40,10 +40,10 @@ impl Loans {
 
     pub async fn get_active_loan(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Loan>> {
         let maybe_loan = sqlx::query_as!(LoanEntity,
-            "SELECT id, debt, payout_ratio FROM loans
+            r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio FROM loans
                     WHERE uid = $1 AND
                     chat_id = (SELECT id FROM Chats WHERE chat_id = $2::bigint OR chat_instance = $2::text)
-                    AND repaid_at IS NULL",
+                    AND repaid_at IS NULL"#,
                 uid.value() as i64, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
@@ -60,7 +60,7 @@ impl Loans {
             Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, value, self.payout_ratio).await?,
             None => create_loan(&mut tx, chat_internal_id, user_id, value, self.payout_ratio).await?
         };
-        let borrowed_length = LengthChange::Signed(SignedLengthChange::new(value.value()));
+        let borrowed_length = LengthChange::signed(value.value());
         Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, user_id, borrowed_length).await?;
 
         tx.commit().await?;
@@ -83,9 +83,9 @@ impl Loans {
 
 async fn get_active_loan(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_internal_id: InternalChatId) -> anyhow::Result<Option<LoanEntity>> {
     let maybe_loan = sqlx::query_as!(LoanEntity,
-            "SELECT id, debt, payout_ratio FROM loans
+            r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio FROM loans
                     WHERE uid = $1 AND chat_id = $2
-                    AND repaid_at IS NULL",
+                    AND repaid_at IS NULL"#,
                 uid.value() as i64, *chat_internal_id)
         .fetch_optional(&mut **tx)
         .await

@@ -1,11 +1,11 @@
-use crate::domain::primitives::{LengthChange, SignedLengthChange};
+use crate::domain::primitives::LengthChange;
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
 use crate::repo::test::{CHAT_ID, start_postgres, USER_ID};
 use crate::repo::test::dicks::create_user;
 
 fn increment_of(value: i64) -> LengthChange {
-    LengthChange::Signed(SignedLengthChange::new(value))
+    LengthChange::signed(value)
 }
 
 #[tokio::test]

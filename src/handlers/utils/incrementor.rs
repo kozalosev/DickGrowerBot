@@ -47,7 +47,7 @@ pub trait ConfigurablePerk: Perk {
 }
 
 #[derive(Display, Clone, Hash, PartialEq)]
-#[display("(user_id={_0}, chat_id={_1}")]
+#[display("(user_id={_0}, chat_id={_1})")]
 pub struct DickId(pub(crate) UserId, pub(crate) ChatIdKind);
 
 #[derive(Copy, Clone)]
@@ -61,7 +61,7 @@ pub struct AdditionalChange(pub LengthChange);
 
 impl AdditionalChange {
     pub fn zero() -> Self {
-        Self(LengthChange::Signed(SignedLengthChange::new(0)))
+        Self(LengthChange::signed(0))
     }
 }
 
@@ -278,7 +278,7 @@ mod test_incrementor {
 
     use async_trait::async_trait;
     use futures::future::join_all;
-    use crate::domain::primitives::{DaysCount, LengthChange, Ratio, SignedLengthChange};
+    use crate::domain::primitives::{DaysCount, LengthChange, Ratio};
     use crate::handlers::utils::{AdditionalChange, ChangeIntent, Config, DickId, Incrementor, Perk};
     use crate::repo;
     use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
@@ -354,7 +354,7 @@ mod test_incrementor {
         }
 
         async fn apply(&self, _: &DickId, _: ChangeIntent) -> AdditionalChange {
-            AdditionalChange(LengthChange::Signed(SignedLengthChange::new(self.value)))
+            AdditionalChange(LengthChange::signed(self.value))
         }
 
         fn enabled(&self) -> bool {

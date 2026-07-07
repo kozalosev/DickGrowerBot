@@ -13,7 +13,7 @@ use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackRes
 use crate::{metrics, reply_html, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
-use crate::domain::primitives::{Bet, LanguageCode, LengthChange, LoanPayout, SignedLengthChange, UserId, Username};
+use crate::domain::primitives::{Bet, LanguageCode, LengthChange, LoanPayout, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, TelegramChatId};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
@@ -374,7 +374,7 @@ async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: Bet)
 
     p.repos.loans.pay(winner_id, &chat_id_kind, payout).await?;
 
-    let withheld = LengthChange::Signed(SignedLengthChange::new(-i64::from(payout.value())));
+    let withheld = LengthChange::signed(-i64::from(payout.value()));
     let growth_res = p.repos.dicks.grow_no_attempts_check(&chat_id_kind, winner_id, withheld).await?;
     Ok(Some((growth_res, payout)))
 }

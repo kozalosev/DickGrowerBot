@@ -46,9 +46,9 @@ impl Announcements {
 
     async fn get(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode) -> anyhow::Result<Option<Announcement>> {
         sqlx::query_as!(Announcement,
-            "SELECT chat_id, hash, times_shown FROM Announcements
+            r#"SELECT chat_id AS "chat_id: InternalChatId", hash, times_shown AS "times_shown: Counter" FROM Announcements
                 WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text)
-                AND language = $2",
+                AND language = $2"#,
                     chat_id_kind.value() as String, lang_code.to_supported_language() as SupportedLanguage)
             .fetch_optional(&self.pool)
             .await

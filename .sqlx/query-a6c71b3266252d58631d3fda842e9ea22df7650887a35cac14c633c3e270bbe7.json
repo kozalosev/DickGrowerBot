@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, debt, payout_ratio FROM loans\n                    WHERE uid = $1 AND chat_id = $2\n                    AND repaid_at IS NULL",
+  "query": "SELECT id AS \"id: LoanId\", debt AS \"debt: Debt\", payout_ratio FROM loans\n                    WHERE uid = $1 AND chat_id = $2\n                    AND repaid_at IS NULL",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "id: LoanId",
         "type_info": "Int8"
       },
       {
         "ordinal": 1,
-        "name": "debt",
+        "name": "debt: Debt",
         "type_info": "Int8"
       },
       {
@@ -31,5 +31,5 @@
       false
     ]
   },
-  "hash": "5b8ae956e33ffb777434d47740a84aaa8c16531a2b79b3a4d67784bb70e8c697"
+  "hash": "a6c71b3266252d58631d3fda842e9ea22df7650887a35cac14c633c3e270bbe7"
 }

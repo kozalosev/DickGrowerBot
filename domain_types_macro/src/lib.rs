@@ -103,11 +103,21 @@ impl Parse for DomainTypeAttr {
                 let content;
                 syn::parenthesized!(content in input);
 
-                if content.parse::<Option<kw::not_database_type>>()?.is_some() {
-                    not_database_type = true;
-                }
-                if content.parse::<Option<kw::no_auto_display>>()?.is_some() {
-                    no_auto_display = true;
+                // Parse a comma-separated list of feature flags in any order
+                while !content.is_empty() {
+                    let feature_lookahead = content.lookahead1();
+                    if feature_lookahead.peek(kw::not_database_type) {
+                        content.parse::<kw::not_database_type>()?;
+                        not_database_type = true;
+                    } else if feature_lookahead.peek(kw::no_auto_display) {
+                        content.parse::<kw::no_auto_display>()?;
+                        no_auto_display = true;
+                    } else {
+                        return Err(feature_lookahead.error());
+                    }
+                    if !content.is_empty() {
+                        content.parse::<syn::Token![,]>()?;
+                    }
                 }
             }
             else {
@@ -418,6 +428,8 @@ fn generate_domain_integer_number_impls(info: &TypeInfo) -> TokenStream {
                 self.saturating_div_primitive(rhs.0)
             }
 
+            // No `saturating_rem`: std doesn't provide one either (remainder can only
+            // overflow on `MIN % -1`, which `overflowing_rem` reports explicitly).
             pub fn overflowing_rem_primitive(self, rhs: #inner_type) -> (Self, bool) {
                 let (new_value, is_overflow) = self.0.overflowing_rem(rhs);
                 (Self(new_value), is_overflow)
@@ -928,6 +940,8 @@ fn generate_validated_domain_float_number_impls(info: &TypeInfo) -> TokenStream 
 /// For integer domain numbers annotated with `division_result(SomeFloatDomainType)`:
 /// the `/` operator performs a float division and produces the specified float domain type
 /// (or a `Result` of it, if that type is validated — see the `DivisionResult` trait).
+// TODO: `self.0 as f64` loses precision for 64-bit integers above 2^53;
+//       consider rejecting `division_result` on i64/u64 domain types at macro-expansion time.
 fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, args, .. } = info;
     let Some(result_type) = &args.division_result else {
@@ -969,6 +983,8 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
             }
         }
     } else {
+        // TODO: unvalidated targets accept `inf`/`NaN` from a division by zero silently;
+        //       only validated float types (whose range validators reject them) catch that case.
         quote! {
             #[automatically_derived]
             impl ::domain_types::traits::DivisionResult for #name {
@@ -1085,15 +1101,10 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
             }
         }
 
-        // Required by sqlx's query_as! macro to map columns to domain-typed fields.
-        // Note: for validated types this bypasses the validator — the database is a trusted source.
-        #[automatically_derived]
-        impl ::std::convert::From<#inner_type> for #name {
-            fn from(value: #inner_type) -> Self {
-                Self(value)
-            }
-        }
-
+        // Note: there is deliberately no `From<#inner_type> for #name` — it would allow
+        // constructing validated types while bypassing the validator. Database decoding
+        // goes through sqlx's `Type` derive (`#[sqlx(transparent)]`) with per-column
+        // type overrides (`SELECT col AS "col: DomainType"`) in the queries instead.
         #[automatically_derived]
         impl ::std::convert::From<#name> for #inner_type {
             fn from(value: #name) -> Self {

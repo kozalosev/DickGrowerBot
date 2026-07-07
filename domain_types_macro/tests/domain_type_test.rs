@@ -47,6 +47,26 @@ struct Meters(i64);
 #[domain_type(features(not_database_type))]
 struct Login(String);
 
+// Both feature flags combined, in either order, must parse.
+// `no_auto_display` types must provide Display manually (DomainType requires it).
+#[domain_type(features(not_database_type, no_auto_display))]
+struct Opaque(i64);
+
+#[domain_type(features(no_auto_display, not_database_type))]
+struct OpaqueReversed(i64);
+
+impl std::fmt::Display for Opaque {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "opaque[{}]", self.0)
+    }
+}
+
+impl std::fmt::Display for OpaqueReversed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "opaque[{}]", self.0)
+    }
+}
+
 mod value_basics {
     use super::*;
 
@@ -203,6 +223,19 @@ mod division_result {
     fn division_produces_unvalidated_float_domain_type() {
         let speed: Speed = Meters::new(10) / Meters::new(4);
         assert_eq!(speed, 2.5);
+    }
+}
+
+mod combined_features {
+    use super::*;
+
+    #[test]
+    fn no_auto_display_types_use_the_manual_impl() {
+        // The real assertion is that the structs above compile at all (the feature list
+        // parses with a comma, in both orders); the manual Display is a bonus check.
+        assert_eq!(Opaque::new(1).value(), 1);
+        assert_eq!(Opaque::new(1).to_string(), "opaque[1]");
+        assert_eq!(OpaqueReversed::new(2).value(), 2);
     }
 }
 

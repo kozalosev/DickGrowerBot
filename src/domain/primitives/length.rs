@@ -1,5 +1,5 @@
 use std::ops::Add;
-use domain_types::errors::{ArithmeticOperation, DomainArithmeticError, DomainArithmeticOverflowError as OverflowError};
+use domain_types::errors::{ArithmeticOperation, DomainArithmeticOverflowError as OverflowError};
 use domain_types_macro::domain_type;
 use crate::{positive_number, signed_number};
 
@@ -20,6 +20,11 @@ pub enum LengthChange {
 }
 
 impl LengthChange {
+    /// Shorthand for `LengthChange::Signed(SignedLengthChange::new(value))`.
+    pub fn signed(value: i64) -> Self {
+        Self::Signed(SignedLengthChange::new(value))
+    }
+
     pub fn value(self) -> i64 {
         match self {
             LengthChange::Signed(value) => value.value(),
@@ -55,19 +60,6 @@ impl Add<SignedLengthChange> for LengthChange {
     }
 }
 
-impl Add<LengthIncrement> for LengthChange {
-    type Output = Result<LengthChange, DomainArithmeticError<i64>>;
-
-    fn add(self, rhs: LengthIncrement) -> Self::Output {
-        self.value().checked_add(rhs.value())
-            .ok_or_else(|| DomainArithmeticError::Overflow(
-                OverflowError::new(ArithmeticOperation::Addition, self.value(), rhs.value())
-            ))
-            .and_then(|sum| LengthIncrement::new(sum).map_err(DomainArithmeticError::AssertionFailed))
-            .map(LengthChange::Increment)
-    }
-}
-
 impl Bet {
     pub fn as_length_change_for_winner(&self) -> LengthChange {
         LengthIncrement::new(self.0.into())
@@ -77,6 +69,6 @@ impl Bet {
 
     pub fn as_length_change_for_loser(&self) -> LengthChange {
         let value: i64 = self.0.into();
-        LengthChange::Signed(SignedLengthChange::new(-value))
+        LengthChange::signed(-value)
     }
 }

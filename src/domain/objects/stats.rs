@@ -54,7 +54,12 @@ fn win_rate_percentage(battles_won: BattlesCount, battles_total: BattlesCount) -
     if battles_total.is_zero() {
         return Percentage::literal(0)
     }
-    let ratio = (battles_won / battles_total)
-        .expect("battles_won <= battles_total, so the ratio is always within [0; 1]");
-    ratio.percentage()
+    match battles_won / battles_total {
+        Ok(ratio) => ratio.percentage(),
+        Err(e) => {
+            // battles_won > battles_total can only mean corrupted stats; don't crash the handler
+            log::error!("invalid win rate ({battles_won}/{battles_total}): {e}");
+            Percentage::literal(100)
+        }
+    }
 }

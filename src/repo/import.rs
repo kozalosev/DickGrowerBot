@@ -2,12 +2,13 @@ use anyhow::Context;
 use sqlx::{Postgres, Transaction};
 use teloxide::types::ChatId;
 use crate::domain::objects::ExternalUser;
+use crate::domain::primitives::{Length, UserId};
 use crate::repository;
 
 repository!(Import,
     pub async fn get_imported_users(&self, chat_id: ChatId) -> anyhow::Result<Vec<ExternalUser>> {
         sqlx::query_as!(ExternalUser,
-                "SELECT uid, original_length AS length FROM Imports WHERE chat_id = $1",
+                r#"SELECT uid AS "uid: UserId", original_length AS "length: Length" FROM Imports WHERE chat_id = $1"#,
                 chat_id.0 as i64)
             .fetch_all(&self.pool)
             .await

@@ -131,7 +131,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
     let offset = Offset::calculate(page, config.top_limit);
     let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
-    let has_more_pages = config.top_limit <= dicks.len() as i16;
+    let has_more_pages = (dicks.len() as i16) > config.top_limit.value();
     let lines = dicks.into_iter()
         .take(config.top_limit.value() as usize)
         .enumerate()

@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uid, original_length AS length FROM Imports WHERE chat_id = $1",
+  "query": "SELECT uid AS \"uid: UserId\", original_length AS \"length: Length\" FROM Imports WHERE chat_id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "uid",
+        "name": "uid: UserId",
         "type_info": "Int8"
       },
       {
         "ordinal": 1,
-        "name": "length",
+        "name": "length: Length",
         "type_info": "Int8"
       }
     ],
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "cd3bda80351c98ed8bd744d5edaa54900fdb5e0278259c927598336f84781cb4"
+  "hash": "731969783ceb6ec06668857f4fd7533051397cd402be16c879bd41ed8a3fde8e"
 }

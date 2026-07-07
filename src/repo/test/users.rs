@@ -1,6 +1,6 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::objects::User;
-use crate::domain::primitives::{LengthChange, Ratio, SignedLengthChange, UserId};
+use crate::domain::primitives::{LengthChange, Ratio, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
 use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID, USER_ID};
@@ -185,6 +185,6 @@ async fn create_member(db: &Pool<Postgres>) {
 
     users.create_or_update(uid, NAME)
         .await.expect("couldn't create a user");
-    dicks.create_or_grow(uid, &chat_id.into(), LengthChange::Signed(SignedLengthChange::new(0)))
+    dicks.create_or_grow(uid, &chat_id.into(), LengthChange::signed(0))
         .await.expect("couldn't create a dick");
 }
