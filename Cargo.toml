@@ -15,9 +15,7 @@ tokio = { version =  "1.42.0", default-features = false, features = ["rt-multi-t
 axum = "0.7.9"
 axum-prometheus = "0.8.0"
 metrics = "0.24.6"
-metrics-macro = { path = "metrics_macro" }
 prometheus = "0.13.4"
-linkme = "0.3.31"
 # Logging and envs
 log = "0.4.22"
 pretty_env_logger = "0.5.0"
@@ -53,6 +51,3 @@ downcast-rs = "2.0.1"
 
 [dev-dependencies]
 testcontainers = "0.23.1"
-
-[workspace]
-members = ["metrics_macro"]

@@ -79,8 +79,9 @@ pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
     PROMO_CODE_FORMAT_REGEXP.is_match(&query)
 }
 
-#[metrics::inline_handler("promo")]
 pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
+    metrics::INLINE_COUNTER.invoked();
+
     let lang_code = LanguageCode::from_user(&query.from);
     let promo_code = query.query;
     let button_text = t!("commands.promo.inline.switch_button", locale = &lang_code, code = promo_code);
