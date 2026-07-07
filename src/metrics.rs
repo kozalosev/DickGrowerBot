@@ -1,20 +1,30 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
 use axum::routing::get;
 use axum_prometheus::PrometheusMetricLayer;
+use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
+
+/// Declare, register and increment a counter for a handler function.
+/// See the documentation in the `metrics-macro` crate for the details.
+pub use metrics_macro::{command_handler, inline_chosen_handler, inline_handler};
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
 static REGISTRY: Lazy<prometheus::Registry> = Lazy::new(prometheus::Registry::new);
 
+/// Descriptors of the counters declared by the [`handler`] attribute macro all over the codebase.
+/// The linker collects them into this slice; [`init`] registers all of them at startup.
+#[distributed_slice]
+pub static COUNTERS: [CounterDesc];
+
+/// Counter families created on demand from [`CounterDesc`]riptors, deduplicated by the metric
+/// name: several call sites may declare (and increment) different series of the same family.
+static DECLARED_FAMILIES: Lazy<Mutex<HashMap<&'static str, Family>>> = Lazy::new(Default::default);
+
 // Export special preconstructed counters for Teloxide's handlers.
-pub static INLINE_COUNTER: Lazy<ComplexCommandCounters> = Lazy::new(||
-    ComplexCommandCounters::new("inline_usage_total", "count of inline queries processed by the bot", ["query", "chosen"]));
 pub static CMD_START_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_start_usage_total", "count of /start invocations"));
-pub static CMD_HELP_COUNTER: Lazy<Counter> = Lazy::new(||
-    Counter::new("command_help_usage_total", "count of /help invocations"));
-pub static CMD_PRIVACY_COUNTER: Lazy<Counter> = Lazy::new(||
-    Counter::new("command_privacy_usage_total", "count of /privacy invocations"));
 pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_grow_usage_total", "count of /grow invocations"));
 pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
@@ -28,7 +38,7 @@ pub static CMD_PVP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
 pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(||
-    ComplexCommandCounters::new("command_import_usage_total", "count of /import invocations and successes", ["invoked", "finished"]));
+    ComplexCommandCounters::new("command_import_usage_total", "count of /import invocations and successes"));
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 
@@ -50,13 +60,14 @@ pub fn init() -> axum::Router {
         .layer(prometheus_layer)
 }
 
-/// The counters are registered on the first dereference of their `Lazy` statics, so all of them
-/// must be forced here to make even never incremented counters appear in the `/metrics` output.
+/// The counters are registered on the first dereference of their `Lazy` statics (or, for those
+/// declared by the [`handler`] attribute macro, on the first increment), so all of them must be
+/// forced here to make even never incremented counters appear in the `/metrics` output.
 fn force_registration() {
-    Lazy::force(&INLINE_COUNTER);
+    for desc in COUNTERS {
+        desc.counter();
+    }
     Lazy::force(&CMD_START_COUNTER);
-    Lazy::force(&CMD_HELP_COUNTER);
-    Lazy::force(&CMD_PRIVACY_COUNTER);
     Lazy::force(&CMD_GROW_COUNTER);
     Lazy::force(&CMD_TOP_COUNTER);
     Lazy::force(&CMD_LOAN_COUNTER);
@@ -67,6 +78,46 @@ fn force_registration() {
     Lazy::force(&CMD_PROMO);
 }
 
+/// Increments the counter described by a [`CounterDesc`], creating and registering its metric
+/// family if this is the first use. Invoked by the code the [`handler`] attribute macro generates.
+pub fn inc(desc: &CounterDesc) {
+    desc.counter().inc()
+}
+
+/// A description of a counter declared by the [`handler`] attribute macro: the metric family
+/// (name, help, label names) plus the label values identifying one series within that family.
+pub struct CounterDesc {
+    pub name: &'static str,
+    pub help: &'static str,
+    pub label_names: &'static [&'static str],
+    pub label_values: &'static [&'static str],
+}
+
+impl CounterDesc {
+    /// Returns the counter for this descriptor, creating and registering the family on first use.
+    fn counter(&self) -> Counter {
+        let mut families = DECLARED_FAMILIES.lock().expect("the declared families map is poisoned");
+        let family = families.entry(self.name).or_insert_with(|| {
+            if self.label_names.is_empty() {
+                Family::Plain(Counter::new(self.name, self.help))
+            } else {
+                Family::Labeled(CounterVec::new(self.name, self.help, self.label_names))
+            }
+        });
+        match family {
+            Family::Plain(counter) => counter.clone(),
+            Family::Labeled(vec) => vec.counter(self.label_values),
+        }
+    }
+}
+
+/// A registered metric family a [`CounterDesc`] resolves into.
+enum Family {
+    Plain(Counter),
+    Labeled(CounterVec),
+}
+
+#[derive(Clone)]
 pub struct Counter(IntCounter);
 pub struct CounterVec(IntCounterVec);
 
@@ -119,11 +170,11 @@ impl CounterVec {
 }
 
 impl ComplexCommandCounters {
-    fn new(name: &str, help: &str, [invoked, finished]: [&str; 2]) -> Self {
+    fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["state"]);
         Self {
-            invoked: vec.counter(&[invoked]),
-            finished: vec.counter(&[finished]),
+            invoked: vec.counter(&["invoked"]),
+            finished: vec.counter(&["finished"]),
         }
     }
 
@@ -167,5 +218,53 @@ impl DeepLinkedCommandsCounters {
             invoked_by_deeplink: vec.counter(&["invoked_by_deeplink"]),
             finished: vec.counter(&["finished"]),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn declared_counters_are_registered_and_incremented() {
+        static PLAIN: CounterDesc = CounterDesc {
+            name: "test_plain_total",
+            help: "a counter without labels",
+            label_names: &[],
+            label_values: &[],
+        };
+        static LABELED: CounterDesc = CounterDesc {
+            name: "test_labeled_total",
+            help: "a counter with a label",
+            label_names: &["mode"],
+            label_values: &["chat"],
+        };
+
+        inc(&PLAIN);
+        inc(&LABELED);
+        inc(&LABELED);
+
+        let families = REGISTRY.gather();
+
+        let plain = families.iter().find(|f| f.get_name() == PLAIN.name)
+            .expect("the plain counter must be registered");
+        assert_eq!(plain.get_metric()[0].get_counter().get_value() as u64, 1);
+
+        let labeled = families.iter().find(|f| f.get_name() == LABELED.name)
+            .expect("the labeled counter must be registered");
+        let metric = &labeled.get_metric()[0];
+        assert_eq!(metric.get_counter().get_value() as u64, 2);
+        assert_eq!(metric.get_label()[0].get_name(), "mode");
+        assert_eq!(metric.get_label()[0].get_value(), "chat");
+    }
+
+    /// Ensures the linker actually collects the descriptors declared by the `handler` attribute
+    /// macro all over the codebase — the whole approach hinges on this distributed slice.
+    #[test]
+    fn handler_attribute_populates_the_distributed_slice() {
+        let names: Vec<&str> = COUNTERS.iter().map(|desc| desc.name).collect();
+        assert!(names.contains(&"command_help_usage_total"), "got: {names:?}");
+        assert!(names.contains(&"command_privacy_usage_total"), "got: {names:?}");
+        assert!(names.contains(&"inline_usage_total"), "got: {names:?}");
     }
 }

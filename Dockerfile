@@ -16,6 +16,7 @@ RUN adduser \
     "${USER}"
 
 COPY src/ src/
+COPY metrics_macro/ metrics_macro/
 COPY locales/ locales/
 COPY migrations/ migrations/
 COPY .sqlx/ .sqlx/

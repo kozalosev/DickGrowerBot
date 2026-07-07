@@ -128,9 +128,8 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
     }
 ]));
 
+#[metrics::inline_handler("inline")]
 pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
-    metrics::INLINE_COUNTER.invoked();
-
     let name = utils::get_full_name(&query.from);
     repos.users.create_or_update(query.from.id, &name).await?;
 
@@ -168,11 +167,10 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     Ok(())
 }
 
+#[metrics::inline_chosen_handler("inline")]
 pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                                    repos: Repositories, config: AppConfig,
                                    incr: Incrementor) -> HandlerResult {
-    metrics::INLINE_COUNTER.finished();
-
     if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
         return Ok(())
     }

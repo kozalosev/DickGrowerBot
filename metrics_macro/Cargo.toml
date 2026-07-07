@@ -1,0 +1,12 @@
+[package]
+name = "metrics-macro"
+version = "0.1.0"
+edition = "2021"
+license-file = "../LICENSE"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }

@@ -126,9 +126,8 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
     maybe_bet.is_ok()
 }
 
+#[metrics::inline_handler("inline")]
 pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
-    metrics::INLINE_COUNTER.invoked();
-
     let bet: u16 = query.query.parse()?;
     let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
@@ -158,8 +157,8 @@ pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &Lang
         .into()
 }
 
+#[metrics::inline_chosen_handler("inline")]
 pub async fn inline_chosen_handler() -> HandlerResult {
-    metrics::INLINE_COUNTER.finished();
     Ok(())
 }
 
