@@ -22,7 +22,7 @@ pub mod date {
     use chrono::{DateTime, Duration, Timelike, Utc};
     use rust_i18n::t;
 
-    pub fn get_time_till_next_day_string(lang_code: &str) -> Cow<str> {
+    pub fn get_time_till_next_day_string(lang_code: &str) -> Cow<'_, str> {
         let now = if cfg!(test) {
             DateTime::parse_from_rfc3339("2023-10-21T22:10:57+00:00")
                 .expect("invalid datetime string")

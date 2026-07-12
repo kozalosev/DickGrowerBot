@@ -132,7 +132,8 @@ mod test {
                 .await.expect("couldn't create a user");
             
             let dicks = repo::Dicks::new(db, Default::default());
-            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), 0)
+            // the length must be negative to be eligible for a loan
+            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), -10)
                 .await.expect("couldn't create a dick");
         }
 
@@ -145,8 +146,9 @@ mod test {
         assert!(perk.enabled());
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, 0);
 
-        loans.borrow(USER_ID, &CHAT_ID_KIND, 10)
+        let borrow_result = loans.borrow(USER_ID, &CHAT_ID_KIND, 10)
             .await.expect("couldn't create a loan");
+        assert_eq!(borrow_result, repo::BorrowResult::Granted);
 
         assert_eq!(perk.apply(&dick_id, change_intent_positive_increment).await.0, -1);
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)

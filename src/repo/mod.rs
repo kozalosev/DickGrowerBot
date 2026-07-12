@@ -141,23 +141,6 @@ impl ChatIdKind {
     }
 }
 
-#[derive(sqlx::Type)]
-#[sqlx(type_name = "chat_id_type")]
-#[sqlx(rename_all = "lowercase")]
-enum ChatIdType {
-    ID,
-    Inst,
-}
-
-impl From<&ChatIdKind> for ChatIdType {
-    fn from(value: &ChatIdKind) -> Self {
-        match value {
-            ChatIdKind::ID(_) => ChatIdType::ID,
-            ChatIdKind::Instance(_) => ChatIdType::Inst,
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct ChatIdInternal(i64);
