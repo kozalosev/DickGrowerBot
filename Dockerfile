@@ -1,8 +1,13 @@
-FROM rust:1.96-alpine3.21 AS builder
+FROM rust:1.96-alpine3.21 AS chef
 WORKDIR /build
-
 RUN apk update && apk add --no-cache musl-dev
+RUN cargo install cargo-chef --locked
 
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
 # Create an unprivileged user
 ENV USER=appuser
 ENV UID=10001
@@ -15,6 +20,14 @@ RUN adduser \
     --uid "${UID}" \
     "${USER}"
 
+ENV RUSTFLAGS='-C target-feature=-crt-static'
+
+# Builds only the dependency graph, cached as its own layer as long as the
+# manifests copied into `planner` above don't change — invalidated far less
+# often than the actual source below.
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
 COPY src/ src/
 COPY domain_types/ domain_types/
 COPY domain_types_macro/ domain_types_macro/
@@ -22,8 +35,6 @@ COPY locales/ locales/
 COPY migrations/ migrations/
 COPY .sqlx/ .sqlx/
 COPY Cargo.* ./
-
-ENV RUSTFLAGS='-C target-feature=-crt-static'
 RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 
 FROM alpine:3.21
