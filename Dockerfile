@@ -1,4 +1,4 @@
-FROM rust:1.83-alpine3.21 as builder
+FROM rust:1.96-alpine3.21 AS builder
 WORKDIR /build
 
 RUN apk update && apk add --no-cache musl-dev
@@ -16,6 +16,8 @@ RUN adduser \
     "${USER}"
 
 COPY src/ src/
+COPY domain_types/ domain_types/
+COPY domain_types_macro/ domain_types_macro/
 COPY locales/ locales/
 COPY migrations/ migrations/
 COPY .sqlx/ .sqlx/
