@@ -14,6 +14,8 @@ use crate::domain::{LanguageCode, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
+const MAX_MEMBERS_FOR_IMPORT: usize = 10;
+
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?)(\.{3})? — (?<length>\d+) см.")
         .expect("TOP_LINE_REGEXP is invalid")
@@ -64,6 +66,7 @@ struct ParseResult(OriginalBotKind, String);
 enum BeforeImportCheckErrors {
     NotAdmin,
     NotReply,
+    TooManyMembers,
     Other(anyhow::Error)
 }
 
@@ -109,7 +112,7 @@ impl Display for InvalidLines {
 pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories) -> HandlerResult {
     metrics::CMD_IMPORT.invoked();
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
-    let answer = match check_and_parse_message(&bot, &msg).await {
+    let answer = match check_and_parse_message(&bot, &msg, &repos).await {
         Ok(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {
                 Ok(r) => {
@@ -181,7 +184,7 @@ pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositorie
     Ok(())
 }
 
-async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult, BeforeImportCheckErrors> {
+async fn check_and_parse_message(bot: &Bot, msg: &Message, repos: &repo::Repositories) -> Result<ParseResult, BeforeImportCheckErrors> {
     let admin_ids = bot.get_chat_administrators(msg.chat.id)
         .await?
         .into_iter()
@@ -192,6 +195,12 @@ async fn check_and_parse_message(bot: &Bot, msg: &Message) -> Result<ParseResult
     let invoked_by_admin = admin_ids.into_iter().any(|id| id == from_id);
     if !invoked_by_admin {
         return Err(BeforeImportCheckErrors::NotAdmin)
+    }
+
+    let chat_id_kind = msg.chat.id.into();
+    let members_count = repos.users.get_chat_members(&chat_id_kind).await?.len();
+    if members_count > MAX_MEMBERS_FOR_IMPORT {
+        return Err(BeforeImportCheckErrors::TooManyMembers)
     }
 
     let result = msg.reply_to_message()

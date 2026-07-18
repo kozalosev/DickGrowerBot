@@ -77,6 +77,7 @@ commands:
     errors:
       not_admin: "此命令仅供管理员使用！"
       not_reply: "你必须回复由 %{origin_bots} 发送的非转发消息"
+      too_many_members: "仅允许在成员不超过 10 人的聊天中导入：竞品机器人的排行榜只显示前 10 名，在此导入对其他人不公平。"
       invalid_lines:
         template: "无法解析此消息 🤔\n以下行无效：\n%{invalid_lines}"
         line: "➖ <b>%{line}</b>"
