@@ -25,8 +25,7 @@ pub use stats::*;
 pub use announcements::*;
 use crate::config;
 use crate::config::DatabaseConfig;
-// re-exported for convenience: repositories (and their callers) traffic in this identifier
-pub use crate::domain::primitives::chat::ChatIdKind;
+use crate::domain::primitives::chat::ChatIdKind;
 
 #[derive(Clone)]
 pub struct Repositories {

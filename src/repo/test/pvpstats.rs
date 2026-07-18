@@ -20,7 +20,7 @@ async fn test_all() {
     let uid_1 = USER_ID;
     // create user and dick #2
     create_user_and_dick_2(&db, &ChatIdPartiality::Specific(chat_id.clone()), "User-2").await;
-    let uid_2 = UserId::new(UID + 1);
+    let uid_2 = UserId::literal(UID + 1);
 
     // get stats when no rows
     let stats = pvp_stats.get_stats(&chat_id, uid_1).await
@@ -41,7 +41,6 @@ async fn test_all() {
     assert_eq!(stats.winner.acquired_length, bet_length);
     assert_eq!(stats.winner.lost_length, 0);
     assert_eq!(stats.winner.win_rate_percentage(), 100);
-    assert_eq!(stats.winner.win_rate_formatted(), "100%");
     assert_eq!(stats.loser.win_rate_percentage, 0);
     assert_eq!(stats.loser.prev_win_streak, 0);
 
@@ -55,7 +54,6 @@ async fn test_all() {
     assert_eq!(stats.winner.acquired_length, bet_length);
     assert_eq!(stats.winner.lost_length, bet_length);
     assert_eq!(stats.winner.win_rate_percentage(), 50);
-    assert_eq!(stats.winner.win_rate_formatted(), "50%");
     assert_eq!(stats.loser.win_rate_percentage, 50);
     assert_eq!(stats.loser.prev_win_streak, 1);
 
@@ -66,7 +64,7 @@ async fn test_all() {
         .expect("couldn't fetch stats");
     assert_eq!(stats.battles_total, 3);
     assert_eq!(stats.battles_won, 1);
-    assert_eq!(stats.win_rate_formatted(), "33%");
+    assert_eq!(stats.win_rate_percentage(), 33);
     assert_eq!(stats.acquired_length, bet_length);
     assert_eq!(stats.lost_length, bet_length * 2);
 }

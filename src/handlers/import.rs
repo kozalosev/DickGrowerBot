@@ -228,10 +228,9 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
     let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)
         .await?.into_iter()
         .map(|m| {
-            let uid = m.uid.value().try_into().expect("couldn't convert uid to u64");
             let short_name = parsed.0.convert_name(m.name.value());
             let member = ChatMember {
-                uid: UserId(uid),
+                uid: m.uid.into(),
                 full_name: m.name.value().to_owned()
             };
             (short_name, member)
@@ -273,18 +272,14 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
 
     let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
         .await?.into_iter()
-        .filter_map(|u| u.uid.value().try_into().ok())
-        .map(UserId)
+        .map(|u| u.uid.into())
         .collect();
 
     let (already_present, to_import): (Vec<UserInfo>, Vec<UserInfo>) = existing.into_iter()
         .partition(|u| imported_uids.contains(&u.uid));
 
     let users: Vec<ExternalUser> = to_import.iter()
-        .map(|u| ExternalUser {
-            uid: DomainUserId::new(u.uid.0 as i64),
-            length: Length::new(u.length.into()),
-        })
+        .map(|u| ExternalUser::new(DomainUserId::from(u.uid), Length::new(u.length.into())))
         .collect();
     repos.import.import(chat_id, &users).await?;
 

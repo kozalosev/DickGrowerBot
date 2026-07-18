@@ -71,6 +71,14 @@ pub struct Increment {
     pub total: LengthChange,
 }
 
+type BaseIncrement = SignedLengthChange;
+
+impl BaseIncrement {
+    fn only(self) -> Increment {
+        Increment::of_base(LengthChange::from(self))
+    }
+}
+
 impl Config {
     pub fn growth_range_min(&self) -> i16 {
         self.growth_range.clone()
@@ -170,21 +178,18 @@ impl Incrementor {
             additional_change += ac.value()
         }
 
-        let total = match base + additional_change {
-            Ok(total) => total,
-            Err(e) => {
-                log::error!("overflow on increment calculation for {dick}: {e}");
-                log::info!("The following perks affected the calculation: {by_perks:?}");
-                by_perks.clear();
-                base
-            }
-        };
+        let total = (base + additional_change)
+            .inspect_err(|e| log::error!("overflow on increment calculation for {dick}: {e}"))
+            .unwrap_or(base);
+
+        if base == total && !additional_change.is_zero() {
+            log::info!("The following perks affected the calculation: {by_perks:?}");
+            by_perks.clear();
+        }
 
         Increment { base, by_perks, total }
     }
 }
-
-type BaseIncrement = SignedLengthChange;
 
 impl Increment {
     fn of_base(base: LengthChange) -> Self {
@@ -202,7 +207,7 @@ impl Increment {
                 .map(|(perk, value)| {
                     let t_key = format!("titles.perks.{perk}");
                     let name = t!(&t_key, locale = lang_code);
-                    format!("— {name} ({:+})", value.value())
+                    format!("— {name} ({value:+})")
                 })
                 .collect::<Vec<String>>()
                 .join("\n");
@@ -210,12 +215,6 @@ impl Increment {
         } else {
             String::default()
         }
-    }
-}
-
-impl BaseIncrement {
-    fn only(self) -> Increment {
-        Increment::of_base(LengthChange::from(self))
     }
 }
 

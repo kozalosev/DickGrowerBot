@@ -24,25 +24,25 @@ repository!(Import,
         Ok(())
     }
 ,
-    async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &[ExternalUser]) -> anyhow::Result<Vec<i64>> {
-        let (uids, lengths): (Vec<i64>, Vec<i64>) = users.iter()
-            .map(|user| (user.uid.value(), user.length.value()))
+    async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &[ExternalUser]) -> anyhow::Result<Vec<UserId>> {
+        let (uids, lengths): (Vec<UserId>, Vec<Length>) = users.iter()
+            .map(|user| (user.uid, user.length))
             .unzip();
         sqlx::query!("INSERT INTO Imports (chat_id, uid, original_length) SELECT $1, * FROM UNNEST($2::bigint[], $3::bigint[])",
-                chat_id, &uids, &lengths)
+                chat_id, &uids as &[UserId], &lengths as &[Length])
             .execute(&mut **tx)
             .await
             .context(format!("couldn't insert into imports table with chat_id = {chat_id} and users = {users:?}"))?;
         Ok(uids)
     }
 ,
-    async fn update_dicks(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uids: Vec<i64>) -> anyhow::Result<()> {
+    async fn update_dicks(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uids: Vec<UserId>) -> anyhow::Result<()> {
         sqlx::query!("WITH original AS (SELECT c.id as chat_id, uid, original_length
                         FROM Imports JOIN Chats c USING (chat_id)
                         WHERE chat_id = $1 AND uid = ANY($2))
                             UPDATE Dicks d SET length = (length + original_length), bonus_attempts = (bonus_attempts + 1)
                             FROM original o WHERE d.chat_id = o.chat_id AND d.uid = o.uid",
-                chat_id, &uids)
+                chat_id, &uids as &[UserId])
             .execute(&mut **tx)
             .await
             .context(format!("couldn't update dicks while importing in the chat with id = {chat_id}: {uids:?}"))?;

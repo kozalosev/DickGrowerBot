@@ -13,6 +13,13 @@ macro_rules! ge_zero_validators {
                 pub const fn greater_or_equal_to_zero(value: &$ty) -> bool {
                     *value >= 0
                 }
+
+                // Not every type has a current consumer (only `i64`, via `positive_id!`);
+                // kept alongside its sibling instead of hand-duplicating the module per type.
+                #[allow(dead_code)]
+                pub const fn positive(value: &$ty) -> bool {
+                    *value > 0
+                }
             }
         )+
     };
@@ -26,4 +33,8 @@ pub const fn ratio_range_validator(x: &f64) -> bool {
 
 pub const fn percentage_range_validator(x: &i32) -> bool {
     0 <= *x && *x <= 100
+}
+
+pub const fn percentage_range_validator_f64(x: &f64) -> bool {
+    *x >= 0.0 && *x <= 100.0
 }

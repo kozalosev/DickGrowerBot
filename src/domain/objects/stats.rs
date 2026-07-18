@@ -23,10 +23,6 @@ pub struct BattleStats {
 
 pub trait WinRateAware {
     fn win_rate_percentage(&self) -> Percentage;
-
-    fn win_rate_formatted(&self) -> String {
-        format!("{}%", self.win_rate_percentage())
-    }
 }
 
 impl WinRateAware for UserStats {
@@ -55,7 +51,7 @@ fn win_rate_percentage(battles_won: BattlesCount, battles_total: BattlesCount) -
         return Percentage::literal(0)
     }
     match battles_won / battles_total {
-        Ok(ratio) => ratio.percentage(),
+        Ok(ratio) => Percentage::from(ratio),
         Err(e) => {
             // battles_won > battles_total can only mean corrupted stats; don't crash the handler
             log::error!("invalid win rate ({battles_won}/{battles_total}): {e}");

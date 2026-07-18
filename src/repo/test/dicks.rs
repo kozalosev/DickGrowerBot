@@ -132,7 +132,7 @@ async fn test_pvp() {
     }
     {
         create_user_and_dick_2(&db, chat_id_part, Default::default()).await;
-        let uid2 = UserId::new(UID + 1);
+        let uid2 = UserId::literal(UID + 1);
         let (gr1, gr2) = dicks.move_length(chat_id_part, uid, uid2, Bet::literal(1))
             .await.expect("couldn't move the length");
 
@@ -160,7 +160,7 @@ pub async fn create_another_user_and_dick(db: &Pool<Postgres>, chat_id: &ChatIdP
 
     let users = repo::Users::new(db.clone());
     let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let uid2 = UserId::new(UID + n - 1);
+    let uid2 = UserId::literal(UID + n - 1);
     users.create_or_update(uid2, name)
         .await.unwrap_or_else(|_| panic!("couldn't create a user #{n}"));
     dicks.create_or_grow(uid2, chat_id, increment_of(increment))

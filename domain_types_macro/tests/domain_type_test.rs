@@ -11,6 +11,10 @@ const fn ge_zero(value: &i32) -> bool {
     *value >= 0
 }
 
+const fn ge_zero_i64(value: &i64) -> bool {
+    *value >= 0
+}
+
 const fn ratio_range(value: &f64) -> bool {
     *value >= 0.0 && *value <= 1.0
 }
@@ -40,6 +44,14 @@ struct Ratio(f64);
 
 #[domain_type(number, division_result(Ratio), features(not_database_type))]
 struct Wins(i64);
+
+// A validated ID/value type: no `number`, so no arithmetic surface is generated,
+// unlike `Positive` above.
+#[domain_type(
+    validated(ge_zero_i64, error_message("must be greater or equal to zero")),
+    features(not_database_type)
+)]
+struct PositiveId(i64);
 
 #[domain_type(number, division_result(Speed), features(not_database_type))]
 struct Meters(i64);
@@ -76,13 +88,13 @@ mod value_basics {
         assert_eq!(*id, 42);
         assert_eq!(id.to_string(), "42");
         assert_eq!(id, 42i64);
-        assert!(id > 41i64);
+        assert!(id > 41);
     }
 
     #[test]
     fn from_str() {
         let id = Id::from_str("17").unwrap();
-        assert_eq!(id, 17i64);
+        assert_eq!(id, 17);
         assert!(Id::from_str("not a number").is_err());
     }
 
@@ -172,6 +184,53 @@ mod validated_integer_arithmetic {
         // The saturating flavor clamps to a still-valid value
         assert_eq!(max.saturating_add_primitive(1).unwrap(), i32::MAX);
     }
+
+    #[test]
+    fn from_str_validates() {
+        assert!(Positive::from_str("5").is_ok());
+        assert!(Positive::from_str("-1").is_err());
+        assert!(Positive::from_str("not a number").is_err());
+    }
+}
+
+mod validated_value_types {
+    use super::*;
+
+    #[test]
+    fn constructor_validates() {
+        assert!(PositiveId::new(5).is_ok());
+        assert!(PositiveId::new(0).is_ok());
+        assert!(PositiveId::new(-1).is_err());
+    }
+
+    #[test]
+    fn literal_works_in_const_context() {
+        const ID: PositiveId = PositiveId::literal(7);
+        assert_eq!(ID, 7);
+    }
+
+    #[test]
+    fn eq_ord_hash_usable_without_arithmetic() {
+        use std::collections::HashSet;
+
+        let a = PositiveId::literal(1);
+        let b = PositiveId::literal(2);
+        assert!(a < b);
+        assert_ne!(a, b);
+
+        let mut set = HashSet::new();
+        set.insert(a);
+        set.insert(PositiveId::literal(1));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn from_str_validates() {
+        let id = PositiveId::from_str("42").unwrap();
+        assert_eq!(id, 42);
+        assert!(PositiveId::from_str("-1").is_err());
+        assert!(PositiveId::from_str("not a number").is_err());
+    }
 }
 
 mod float_types {
@@ -185,8 +244,15 @@ mod float_types {
 
         let half = Ratio::literal(0.5);
         assert_eq!((half + 0.25).unwrap(), 0.75);
-        assert!((half + half).unwrap() == 1.0);
+        assert_eq!((half + half).unwrap(), 1.0);
         assert!((half + 0.75).is_err());
+    }
+
+    #[test]
+    fn from_str_validates() {
+        assert!(Ratio::from_str("0.5").is_ok());
+        assert!(Ratio::from_str("1.5").is_err());
+        assert!(Ratio::from_str("not a number").is_err());
     }
 
     #[test]

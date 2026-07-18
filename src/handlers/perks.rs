@@ -33,8 +33,7 @@ impl Perk for HelpPussiesPerk {
         }
 
         let current_deepness = change_intent.current_length.abs() as f64;
-        // the coefficient is a Ratio, but the scaled deepness is not: multiply raw values
-        let change = (self.coefficient.value() * current_deepness).round() as i64;
+        let change = self.coefficient.scale(current_deepness).round() as i64;
         AdditionalChange(LengthChange::signed(change))
     }
 
@@ -76,13 +75,18 @@ impl Perk for LoanPayoutPerk {
         let base_increment = change_intent.base_increment.value();
         let payout_value = if base_increment.is_positive() {
             // the coefficient is a Ratio [0; 1], so the payout never exceeds the base increment
-            let payout = (base_increment as f64 * payout_coefficient.value()).round() as i64;
+            let payout = payout_coefficient.scale(base_increment as f64).round() as i64;
             payout.min(debt.value())
         } else {
             0
         };
-        let payout = LoanPayout::new(payout_value.clamp(0, i32::MAX as i64) as i32)
-            .expect("loan payout is non-negative by construction");
+        let payout = i32::try_from(payout_value)
+            .map_err(anyhow::Error::from)
+            .and_then(|v| LoanPayout::new(v).map_err(anyhow::Error::from))
+            .unwrap_or_else(|e| {
+                log::error!("loan payout ({payout_value}) for ({dick_id}) is invalid: {e}");
+                LoanPayout::literal(0)
+            });
         match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
             Ok(()) => AdditionalChange(LengthChange::signed(-i64::from(payout.value()))),
             Err(e) => {

@@ -49,7 +49,7 @@ repository!(BattleStatsRepo, with_(chats)_(Chats),
     pub async fn get_stats(&self, chat_id_kind: &ChatIdKind, user_id: UserId) -> anyhow::Result<UserStats> {
         sqlx::query_as!(UserStatsEntity, "SELECT battles_total, battles_won, win_streak_max, win_streak_current, acquired_length, lost_length FROM Battle_Stats \
                 WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text) AND uid = $2",
-            chat_id_kind.value() as String, user_id.value() as i64)
+            chat_id_kind.value() as String, user_id as UserId)
         .fetch_optional(&self.pool)
         .await
         .map(Option::unwrap_or_default)
@@ -66,7 +66,7 @@ async fn update_winner(tx: &mut Transaction<'_, Postgres>, chat_id: InternalChat
                     win_streak_current = Battle_Stats.win_streak_current + 1, \
                     acquired_length = Battle_Stats.acquired_length + $3 \
                 RETURNING battles_total, battles_won, win_streak_max, win_streak_current, acquired_length, lost_length",
-            uid.value() as i64, *chat_id, bet as Bet)
+            uid as UserId, chat_id as InternalChatId, bet as Bet)
         .fetch_one(&mut **tx)
         .await
         .map(WinnerStats::from)
@@ -74,8 +74,7 @@ async fn update_winner(tx: &mut Transaction<'_, Postgres>, chat_id: InternalChat
 }
 
 async fn update_loser(tx: &mut Transaction<'_, Postgres>, chat_id: InternalChatId, uid: UserId, bet: Bet) -> anyhow::Result<LoserStats> {
-    let uid = uid.value();
-    let prev_win_streak = sqlx::query_scalar!("SELECT win_streak_current FROM Battle_Stats WHERE chat_id = $1 AND uid = $2", *chat_id, uid)
+    let prev_win_streak = sqlx::query_scalar!("SELECT win_streak_current FROM Battle_Stats WHERE chat_id = $1 AND uid = $2", chat_id as InternalChatId, uid as UserId)
         .fetch_optional(&mut **tx)
         .await
         .context(format!("couldn't fetch the win streak of the loser: {chat_id}, {uid}"))?
@@ -88,7 +87,7 @@ async fn update_loser(tx: &mut Transaction<'_, Postgres>, chat_id: InternalChatI
                     win_streak_current = 0, \
                     lost_length = Battle_Stats.lost_length + $3 \
                 RETURNING battles_total, battles_won",
-            uid, *chat_id, bet as Bet)
+            uid as UserId, chat_id as InternalChatId, bet as Bet)
         .fetch_one(&mut **tx)
         .await
         .context(format!("couldn't update the stats of the loser: {chat_id}, {uid}, {bet}"))?;

@@ -60,7 +60,7 @@ impl Announcements {
             "INSERT INTO Announcements (chat_id, language, hash, times_shown) VALUES (
                 (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text),
                 $2, $3, 1)",
-                    chat_id_kind.value() as String, lang_code.to_supported_language() as SupportedLanguage, hash.value())
+                    chat_id_kind.value() as String, lang_code.to_supported_language() as SupportedLanguage, hash as &TextHash)
             .execute(&self.pool)
             .await
             .map_err(Into::into)
@@ -70,7 +70,7 @@ impl Announcements {
 
     async fn increment_times_shown(&self, chat_id: InternalChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET times_shown = times_shown + 1 WHERE chat_id = $1 AND language::text = $2",
-                *chat_id, lang_code.value())
+                chat_id as InternalChatId, lang_code as &LanguageCode)
             .execute(&self.pool)
             .await
             .map_err(Into::into)
@@ -80,7 +80,7 @@ impl Announcements {
 
     async fn update(&self, chat_id: InternalChatId, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET hash = $3, times_shown = 1 WHERE chat_id = $1 AND language = $2",
-                *chat_id, lang_code.to_supported_language() as SupportedLanguage, hash.value())
+                chat_id as InternalChatId, lang_code.to_supported_language() as SupportedLanguage, hash as &TextHash)
             .execute(&self.pool)
             .await
             .map_err(Into::into)

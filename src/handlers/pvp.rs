@@ -84,7 +84,8 @@ impl TryFrom<String> for BattleCallbackData {
     fn try_from(data: String) -> Result<Self, Self::Error> {
         let err = InvalidCallbackDataBuilder(&data);
         let mut parts = data.split(':');
-        let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId::new)?;
+        let initiator = callbacks::parse_part(&mut parts, &err, "uid")
+            .and_then(|value: i64| UserId::new(value).map_err(|e| err.parsing_err(e)))?;
         let bet = callbacks::parse_part(&mut parts, &err, "bet")
             .and_then(|value: i32| Bet::new(value).map_err(|e| err.parsing_err(e)))?;
         let timestamp = callbacks::parse_optional_part(&mut parts, &err)?;
@@ -134,7 +135,8 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
 pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
-    let bet = Bet::new(query.query.parse()?).map_err(|e| anyhow!(e))?;
+    let bet = Bet::new(query.query.parse()?)
+        .map_err(|e| anyhow!(e))?;
     let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
@@ -296,7 +298,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
             .filter(|_| p.features.show_stats)
             .map(|BattleStats { winner: winner_stats, loser: loser_stats }| {
                 let mut stats_str = t!("commands.pvp.results.stats.text", locale = &p.lang_code,
-                    winner_win_rate = winner_stats.win_rate_formatted(), loser_win_rate = loser_stats.win_rate_formatted(),
+                    winner_win_rate = winner_stats.win_rate_percentage(), loser_win_rate = loser_stats.win_rate_percentage(),
                     winner_win_streak = winner_stats.win_streak_current, winner_win_streak_max = winner_stats.win_streak_max,
                 ).to_string();
                 if loser_stats.prev_win_streak > 1 {

@@ -42,7 +42,7 @@ impl Dicks {
                 JOIN Chats c ON d.chat_id = c.id \
                 WHERE uid = $1 AND \
                     c.chat_id = $2::bigint OR c.chat_instance = $2::text",
-                uid.value() as i64, chat_id.value() as String)
+                uid as UserId, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
             .map(|maybe_length| maybe_length.map(Length::new).unwrap_or_default())
@@ -59,7 +59,7 @@ impl Dicks {
                    WHERE c.chat_id = $2::bigint OR c.chat_instance = $2::text
                ) AS _
                WHERE uid = $1"#,
-                uid.value() as i64, chat_id.value() as String)
+                uid as UserId, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
@@ -100,7 +100,7 @@ impl Dicks {
                 JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                     AND uid = $2"#,
-                chat_id.value() as String, user_id.value() as i64, length as Bet)
+                chat_id.value() as String, user_id as UserId, length as Bet)
             .fetch_optional(&self.pool)
             .map_ok(|opt| opt.unwrap_or(false))
             .await
@@ -132,7 +132,7 @@ impl Dicks {
 
     async fn move_length_for_one_user(tx: &mut Transaction<'_, Postgres>, chat_id_internal: InternalChatId, user_id: UserId, change: LengthChange) -> anyhow::Result<Length> {
         sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
-                    chat_id_internal as InternalChatId, user_id.value() as i64, change.value() as i64)
+                    chat_id_internal as InternalChatId, user_id as UserId, change.value() as i64)
             .fetch_one(&mut **tx)
             .await
             .map(Length::new)
@@ -151,7 +151,7 @@ impl Dicks {
                     WHERE chat_id = $1
                 ) AS _
                 WHERE uid = $2"#,
-                chat_id_internal as InternalChatId, uid.value() as i64)
+                chat_id_internal as InternalChatId, uid as UserId)
             .fetch_one(&self.pool)
             .await
             .map(|pos| Some(Position::new(pos as u64)))
@@ -175,7 +175,7 @@ impl Dicks {
             "UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $3)
                 WHERE chat_id = $1 AND uid = $2
                 RETURNING length",
-                chat_id_internal as InternalChatId, user_id.value() as i64, bonus.value() as i64)
+                chat_id_internal as InternalChatId, user_id as UserId, bonus.value() as i64)
             .fetch_optional(executor)
             .await
             .map(|maybe_length| maybe_length.map(Length::new))
@@ -184,7 +184,7 @@ impl Dicks {
 
     async fn insert_to_dod_table(tx: &mut Transaction<'_, Postgres>, chat_id_internal: InternalChatId, user_id: UserId) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
-                chat_id_internal as InternalChatId, user_id.value() as i64)
+                chat_id_internal as InternalChatId, user_id as UserId)
             .execute(&mut **tx)
             .await
             .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))?;

@@ -54,7 +54,7 @@ pub(crate) async fn chat_stats_impl(repos: &repo::Repositories, from_refs: FromR
         length = length, pos = position);
     let pvp_stats = repos.pvp_stats.get_stats(&from_refs.1.kind(), UserId::from(from_refs.0)).await
         .map(|stats| t!("commands.stats.pvp", locale = &lang_code,
-            win_rate = stats.win_rate_formatted(), win_streak = stats.win_streak_max,
+            win_rate = stats.win_rate_percentage(), win_streak = stats.win_streak_max,
             battles = stats.battles_total, wins = stats.battles_won,
             acquired = stats.acquired_length, lost = stats.lost_length))
         .map(|s| if features.show_stats_notice {

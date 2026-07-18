@@ -96,7 +96,7 @@ repository!(Promo,
 ,
     async fn grow_dicks(tx: &mut sqlx::Transaction<'_, Postgres>, user_id: UserId, bonus: i32) -> anyhow::Result<u64> {
         let rows_affected = sqlx::query!("UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $2) WHERE uid = $1",
-                user_id.value() as i64, i64::from(bonus))
+                user_id as UserId, i64::from(bonus))
             .execute(&mut **tx)
             .await
             .context(format!("couldn't grow dicks of {user_id} by {bonus}"))?
@@ -107,7 +107,7 @@ repository!(Promo,
     async fn add_activation(tx: &mut sqlx::Transaction<'_, Postgres>, uid: UserId, code: &str, affected_chats: u64) -> anyhow::Result<()> {
         let affected_chats: i32 = affected_chats.try_into()?;
         sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats) VALUES ($1, $2, $3)",
-                uid.value() as i64, code, affected_chats)
+                uid as UserId, code, affected_chats)
             .execute(&mut **tx)
             .await
             .context(format!("couldn't insert a promo code activation for {uid} and {code} with {affected_chats} affected chats"))?;

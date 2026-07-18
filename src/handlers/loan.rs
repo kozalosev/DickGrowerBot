@@ -11,7 +11,7 @@ use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
 use crate::{check_invoked_by_owner_and_get_answer_params, metrics, repo};
 use crate::config::AppConfig;
 use crate::domain::objects::Loan;
-use crate::domain::primitives::{Debt, LanguageCode, UserId as DomainUserId};
+use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, UserId as DomainUserId};
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::handlers::{CallbackButton, FromRefs, HandlerImplResult, HandlerResult, reply_html, try_resolve_chat_id};
 use crate::handlers::utils::callbacks;
@@ -67,7 +67,7 @@ pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_
     }
 
     let debt = length.unsigned_abs();
-    let payout_percentage = format!("{:.2}%", config.loan_payout_ratio.value() * 100.0);
+    let payout_percentage = FloatPercentage::from(config.loan_payout_ratio).to_string();
 
     let btn_agree = CallbackButton::new(
         t!("commands.loan.confirmation.buttons.agree", locale = &lang_code).to_string(),

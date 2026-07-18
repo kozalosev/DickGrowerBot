@@ -29,7 +29,7 @@ pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = 67890;
 pub const NAME: &str = "test";
 
-pub const USER_ID: UserId = UserId::new(UID);
+pub const USER_ID: UserId = UserId::literal(UID);
 pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
 
 pub async fn start_postgres() -> (ContainerAsync<GenericImage>, Pool<Postgres>) {

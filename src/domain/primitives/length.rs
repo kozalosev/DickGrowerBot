@@ -5,12 +5,23 @@ use crate::{positive_number, signed_number};
 
 signed_number!(Length, i64);
 positive_number!(PositiveLength, i64);
-
-signed_number!(SignedLengthChange, i64);
 positive_number!(LengthIncrement, i64);
 
 positive_number!(Bet, i32);
 positive_number!(LoanPayout, i32);
+
+#[domain_type(number, features(no_auto_display))]
+struct SignedLengthChange(i64);
+
+impl std::fmt::Display for SignedLengthChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.sign_plus() && self.0 >= 0 {
+            write!(f, "+{}", self.0)
+        } else {
+            write!(f, "{}", self.0)
+        }
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, derive_more::Display)]
 #[display("{_0}")]

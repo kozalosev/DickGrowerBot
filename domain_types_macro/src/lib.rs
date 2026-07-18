@@ -25,6 +25,7 @@ enum IntegerSignedness {
 enum NumberKind {
     IntegerValue(IntegerSignedness),
     IntegerNumber(IntegerSignedness),
+    ValidatedIntegerValue(IntegerSignedness),
     ValidatedIntegerNumber(IntegerSignedness),
     FloatValue,
     FloatNumber,
@@ -157,6 +158,7 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
 
     let variant = match determine_inner_type_kind(&inner_type) {
         InnerTypeKind::Integer(signedness) if args.number && args.validator.is_some() => DomainTypeKind::Number(NumberKind::ValidatedIntegerNumber(signedness)),
+        InnerTypeKind::Integer(signedness) if args.validator.is_some() => DomainTypeKind::Number(NumberKind::ValidatedIntegerValue(signedness)),
         InnerTypeKind::Integer(signedness) if args.number => DomainTypeKind::Number(NumberKind::IntegerNumber(signedness)),
         InnerTypeKind::Integer(signedness) => DomainTypeKind::Number(NumberKind::IntegerValue(signedness)),
         InnerTypeKind::Float if args.number && args.validator.is_some() => DomainTypeKind::Number(NumberKind::ValidatedFloatNumber),
@@ -227,6 +229,7 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         // Validated types never derive Neg: it would construct the negated value directly,
         // bypassing the validator (e.g. -Page(1) would produce an invalid Page(-1)).
         DomainTypeKind::Number(NumberKind::IntegerValue(IntegerSignedness::Unsigned)) |
+        DomainTypeKind::Number(NumberKind::ValidatedIntegerValue(_)) |
         DomainTypeKind::Number(NumberKind::ValidatedIntegerNumber(_)) =>
             [domain_value_derives, eq_ord_hash_derives, copy_derive].concat(),
         DomainTypeKind::Number(NumberKind::IntegerValue(IntegerSignedness::Signed)) =>
@@ -256,7 +259,45 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
 }
 
 fn generate_domain_value_impls(info: &TypeInfo) -> TokenStream {
-    let TypeInfo { name, inner_type, .. } = info;
+    let TypeInfo { name, inner_type, variant, .. } = info;
+    // Validated kinds must route through the fallible constructor instead of `Self(value)`
+    // directly, or FromStr would silently bypass the validator.
+    let is_validated = matches!(variant,
+        DomainTypeKind::Number(NumberKind::ValidatedIntegerNumber(_)) |
+        DomainTypeKind::Number(NumberKind::ValidatedIntegerValue(_)) |
+        DomainTypeKind::Number(NumberKind::ValidatedFloatNumber)
+    );
+    let from_str_impl = if is_validated {
+        quote! {
+            #[automatically_derived]
+            impl ::std::str::FromStr for #name {
+                type Err = ::domain_types::errors::DomainParseError;
+
+                fn from_str(s: &str) -> Result<Self, Self::Err> {
+                    #inner_type::from_str(s)
+                        .map_err(Box::new)
+                        .map_err(|err| ::domain_types::errors::DomainParseError::new(s.to_owned(), stringify!(#name), err))
+                        .and_then(|value| Self::new(value)
+                            .map_err(Box::new)
+                            .map_err(|err| ::domain_types::errors::DomainParseError::new(s.to_owned(), stringify!(#name), err)))
+                }
+            }
+        }
+    } else {
+        quote! {
+            #[automatically_derived]
+            impl ::std::str::FromStr for #name {
+                type Err = ::domain_types::errors::DomainParseError;
+
+                fn from_str(s: &str) -> Result<Self, Self::Err> {
+                    #inner_type::from_str(s)
+                        .map(Self)
+                        .map_err(Box::new)
+                        .map_err(|err| ::domain_types::errors::DomainParseError::new(s.to_owned(), stringify!(#name), err))
+                }
+            }
+        }
+    };
     quote! {
         impl #name {
             pub const fn value(&self) -> #inner_type {
@@ -283,18 +324,8 @@ fn generate_domain_value_impls(info: &TypeInfo) -> TokenStream {
                 self.0
             }
         }
-        
-        #[automatically_derived]
-        impl ::std::str::FromStr for #name {
-            type Err = ::domain_types::errors::DomainParseError;
-        
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                #inner_type::from_str(s)
-                    .map(Self)
-                    .map_err(Box::new)
-                    .map_err(|err| ::domain_types::errors::DomainParseError::new(s.to_owned(), stringify!(#name), err))
-            }
-        }
+
+        #from_str_impl
 
         #[automatically_derived]
         impl ::std::cmp::PartialEq<#inner_type> for #name {
@@ -1073,6 +1104,7 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
     // Validated types get their own inherent `new` returning a Result instead
     // (generated along with the other validated impls); it shadows the infallible trait method.
     let inherent_constructor = match &info.variant {
+        DomainTypeKind::Number(NumberKind::ValidatedIntegerValue(_)) |
         DomainTypeKind::Number(NumberKind::ValidatedIntegerNumber(_)) |
         DomainTypeKind::Number(NumberKind::ValidatedFloatNumber) =>
             TokenStream::new(),
@@ -1121,6 +1153,17 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                         #domain_type_impl
                         #domain_value_impls
                         
+                        #[automatically_derived]
+                        impl ::domain_types::traits::DomainIntegerValue<#inner_type> for #name {}
+                    }
+                }
+                NumberKind::ValidatedIntegerValue(_) => {
+                    let validated_domain_number_impls = generate_validated_domain_number_impls(info);
+                    quote! {
+                        #domain_type_impl
+                        #domain_value_impls
+                        #validated_domain_number_impls
+
                         #[automatically_derived]
                         impl ::domain_types::traits::DomainIntegerValue<#inner_type> for #name {}
                     }
