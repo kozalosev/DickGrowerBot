@@ -10,6 +10,7 @@ use crate::domain::SupportedLanguage::{EN, RU};
 pub struct AppConfig {
     pub features: FeatureToggles,
     pub top_limit: u16,
+    pub inactivity_days: u16,
     pub loan_payout_ratio: f32,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
     pub pvp_default_bet: u16,
@@ -26,6 +27,7 @@ pub struct DatabaseConfig {
 impl AppConfig {
     pub fn from_env() -> Self {
         let top_limit = get_env_value_or_default("TOP_LIMIT", 10);
+        let inactivity_days = get_env_value_or_default("INACTIVITY_DAYS", 7);
         let loan_payout_ratio = get_env_value_or_default("LOAN_PAYOUT_COEF", 0.0);
         let dod_selection_mode = get_optional_env_value("DOD_SELECTION_MODE");
         let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
@@ -54,6 +56,7 @@ impl AppConfig {
                 }
             },
             top_limit,
+            inactivity_days,
             loan_payout_ratio,
             dod_rich_exclusion_ratio,
             pvp_default_bet,
