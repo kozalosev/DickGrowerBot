@@ -121,4 +121,5 @@ titles:
     loan-payout: "micro-loaner"
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
+  group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"
   feature_disabled: "This feature is currently temporarily disabled."

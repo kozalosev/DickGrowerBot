@@ -147,6 +147,7 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
 pub mod checks {
     use rust_i18n::t;
     use teloxide::Bot;
+    use teloxide::dispatching::UpdateHandler;
     use teloxide::types::Message;
     use crate::domain::LanguageCode;
     use super::{HandlerResult, reply_html};
@@ -165,6 +166,26 @@ pub mod checks {
     pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         let answer = t!("errors.not_group_chat", locale = &lang_code);
+        reply_html(bot, &msg, answer).await?;
+        Ok(())
+    }
+
+    pub fn is_group_account(msg: Message) -> bool {
+        // Anonymous group admins and channel senders post *on behalf of a chat*,
+        // which Telegram signals via `sender_chat`. Such accounts must not play,
+        // otherwise they occupy a separate leaderboard position (issues #99, #109).
+        msg.sender_chat.is_some()
+    }
+
+    /// A sub-branch that rejects messages sent on behalf of a chat (see
+    /// [`is_group_account`]) before they reach a command's endpoint.
+    pub fn reject_group_accounts() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
+        teloxide::dptree::filter(is_group_account).endpoint(handle_group_account)
+    }
+
+    async fn handle_group_account(bot: Bot, msg: Message) -> HandlerResult {
+        let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+        let answer = t!("errors.group_account", locale = &lang_code);
         reply_html(bot, &msg, answer).await?;
         Ok(())
     }
