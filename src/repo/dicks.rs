@@ -7,6 +7,30 @@ use crate::domain::primitives::{Bet, LengthChange, Limit, Offset, UserId, Positi
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
 use super::Chats;
 
+/// The database projection of a [`Dick`]. `position` is a `ROW_NUMBER()` (a plain `int8`),
+/// so it's decoded as `i64` here and converted to the `Position` domain type at this boundary
+/// (`Position` wraps a `u64` and isn't a database type).
+#[derive(sqlx::FromRow)]
+struct DickEntity {
+    length: Length,
+    owner_uid: UserId,
+    owner_name: String,
+    grown_at: chrono::DateTime<chrono::Utc>,
+    position: Option<i64>,
+}
+
+impl From<DickEntity> for Dick {
+    fn from(entity: DickEntity) -> Self {
+        Self {
+            length: entity.length,
+            owner_uid: entity.owner_uid,
+            owner_name: entity.owner_name,
+            grown_at: entity.grown_at,
+            position: entity.position.map(|pos| Position::new(pos as u64)),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Dicks {
     pool: Pool<Postgres>,
@@ -41,7 +65,7 @@ impl Dicks {
         sqlx::query_scalar!("SELECT d.length FROM Dicks d \
                 JOIN Chats c ON d.chat_id = c.id \
                 WHERE uid = $1 AND \
-                    c.chat_id = $2::bigint OR c.chat_instance = $2::text",
+                    (c.chat_id = $2::bigint OR c.chat_instance = $2::text)",
                 uid as UserId, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
@@ -50,7 +74,7 @@ impl Dicks {
     }
 
     pub async fn fetch_dick(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Dick>> {
-        sqlx::query_as!(Dick,
+        sqlx::query_as!(DickEntity,
             r#"SELECT length AS "length: Length", uid AS "owner_uid: UserId", name as owner_name, updated_at as grown_at, position FROM (
                  SELECT uid, name, d.length as length, updated_at, ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
                    FROM Dicks d
@@ -62,11 +86,12 @@ impl Dicks {
                 uid as UserId, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
+            .map(|maybe_dick| maybe_dick.map(Dick::from))
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
     pub async fn get_top(&self, chat_id: &ChatIdKind, offset: Offset, limit: Limit) -> anyhow::Result<Vec<Dick>> {
-        sqlx::query_as!(Dick,
+        sqlx::query_as!(DickEntity,
             r#"SELECT length AS "length: Length", uid AS "owner_uid: UserId", name as owner_name, updated_at as grown_at,
                     ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
                 FROM dicks d
@@ -77,6 +102,7 @@ impl Dicks {
                 chat_id.value() as String, offset as Offset, limit as Limit)
             .fetch_all(&self.pool)
             .await
+            .map(|dicks| dicks.into_iter().map(Dick::from).collect())
             .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
