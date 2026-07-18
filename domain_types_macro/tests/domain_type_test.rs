@@ -53,6 +53,13 @@ struct Wins(i64);
 )]
 struct PositiveId(i64);
 
+// Same idea, over a float: a validated value type with no arithmetic surface.
+#[domain_type(
+    validated(ratio_range, error_message("must be between 0 and 1")),
+    features(not_database_type)
+)]
+struct RatioValue(f64);
+
 #[domain_type(number, division_result(Speed), features(not_database_type))]
 struct Meters(i64);
 
@@ -230,6 +237,22 @@ mod validated_value_types {
         assert_eq!(id, 42);
         assert!(PositiveId::from_str("-1").is_err());
         assert!(PositiveId::from_str("not a number").is_err());
+    }
+
+    // A validated float without `number`: proves `validated` alone (no `number`) validates
+    // for float inner types too, not just integers.
+    #[test]
+    fn float_constructor_validates() {
+        assert!(RatioValue::new(0.5).is_ok());
+        assert!(RatioValue::new(1.5).is_err());
+        assert!(RatioValue::new(-0.1).is_err());
+    }
+
+    #[test]
+    fn float_from_str_validates() {
+        assert!(RatioValue::from_str("0.5").is_ok());
+        assert!(RatioValue::from_str("1.5").is_err());
+        assert!(RatioValue::from_str("not a number").is_err());
     }
 }
 
