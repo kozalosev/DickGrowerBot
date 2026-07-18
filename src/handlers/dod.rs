@@ -50,7 +50,7 @@ pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repos
     };
     let answer = match winner {
         Some(winner) => {
-            let increment = incr.dod_increment(from.id, chat_id.kind()).await;
+            let increment = incr.dod_increment(UserId(winner.uid as u64), chat_id.kind()).await;
             let dod_result = repos.dicks.set_dod_winner(chat_id, UserId(winner.uid as u64), increment.total).await;
             let main_part = match dod_result {
                 Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
