@@ -1,0 +1,58 @@
+use domain_types_macro::domain_type;
+use crate::{error, positive_number, signed_number};
+
+signed_number!(Offset, i32);
+positive_number!(Limit, i16);
+positive_number!(Page, i16);
+
+error!(InvalidPage);
+
+impl From<u16> for Offset {
+    fn from(value: u16) -> Self {
+        Self(value as i32)
+    }
+}
+
+impl From<u8> for Limit {
+    fn from(value: u8) -> Self {
+        Self(value as i16)
+    }
+}
+
+impl Offset {
+    pub fn calculate(page: Page, limit: Limit) -> Offset {
+        // both operands are i16, so the product always fits into i32
+        let value = (page.value() as i32) * (limit.value() as i32);
+        Self(value)
+    }
+}
+
+impl Page {
+    pub fn first() -> Self {
+        Self(0)
+    }
+}
+
+impl InvalidPage {
+    pub fn for_value(value: &str, msg: impl ToString) -> Self {
+        Self(format!("{}: {value}", msg.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Page;
+
+    #[test]
+    fn page_arithmetic() {
+        let p0 = Page::first();
+        let p1 = (p0 + 1).unwrap();
+        let p00 = (p1 - 1).unwrap();
+        let p5 = (p1 * 5).unwrap();
+
+        assert_eq!(p0, Page::literal(0));
+        assert_eq!(p1, Page::literal(1));
+        assert_eq!(p00, Page::literal(0));
+        assert_eq!(p5, Page::literal(5));
+    }
+}

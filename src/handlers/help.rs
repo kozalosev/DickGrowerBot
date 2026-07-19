@@ -1,7 +1,7 @@
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
-use crate::domain::LanguageCode;
+use crate::domain::primitives::LanguageCode;
 use crate::handlers::{HandlerResult, reply_html};
 use crate::help::HelpContainer;
 use crate::{metrics, reply_html};

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Users(uid, name) VALUES ($1, $2)\n                ON CONFLICT (uid) DO UPDATE SET name = $2\n                RETURNING uid AS \"uid: UserId\", name AS \"name: Username\", created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid: UserId",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name: Username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e2ae327b2b77596a344761a4184c68c4c619da298b8aaa59910ce4ed29e12736"
+}
