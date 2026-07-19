@@ -72,11 +72,18 @@ repository!(Users,
             .context(format!("couldn't get a random active poor user of the chat with id = {chat_id}"))
     }
 ,
+    // Weighted-random selection where a member's weight is a sigmoid over the z-score of their
+    // length: the weight adapts to the actual spread of lengths in the chat instead of a fixed
+    // scale, so a poorer member is favored while everyone keeps a realistic chance (see #60).
+    // When every length is equal (STDDEV_POP = 0), the z-score is coalesced to 0, which yields
+    // an equal weight of 0.5 for all the members.
     pub async fn get_random_active_member_with_poor_in_priority(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             "WITH user_weights AS (
                 SELECT u.uid, u.name, u.created_at, d.length,
-                       1.0 / (1.0 + EXP(d.length / 6.0)) AS weight  -- Sigmoid-like transformation
+                       1.0 / (1.0 + EXP(COALESCE(
+                           (d.length - AVG(d.length) OVER ()) / NULLIF(STDDEV_POP(d.length) OVER (), 0),
+                           0))) AS weight
                 FROM Users u
                   JOIN Dicks d USING (uid)
                   JOIN Chats c ON d.chat_id = c.id
