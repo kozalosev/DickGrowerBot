@@ -16,6 +16,7 @@ commands:
     title: "最大的丁丁排行榜："
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> 厘米"
     ending: "<i>[+] 表示一个牛子怪今天还没有增长他的丁丁。</i>"
+    ending_inactive: "<i>[~] 表示一个牛子怪超过 %{days} 天没有增长他的丁丁了。</i>"
     empty: "还没有人加入游戏 :("
   dod:
     description: "选举今日丁丁"
