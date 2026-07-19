@@ -94,7 +94,7 @@ impl Loans {
     }
 }
 
-async fn fetch_length_locked(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_internal_id: InternalChatId) -> anyhow::Result<Option<i32>> {
+async fn fetch_length_locked(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_internal_id: InternalChatId) -> anyhow::Result<Option<i64>> {
     sqlx::query_scalar!("SELECT length FROM Dicks WHERE chat_id = $1 AND uid = $2 FOR UPDATE",
             chat_internal_id as InternalChatId, uid as UserId)
         .fetch_optional(&mut **tx)
