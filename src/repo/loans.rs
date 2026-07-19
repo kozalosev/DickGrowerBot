@@ -24,6 +24,12 @@ impl From<LoanEntity> for Loan {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum BorrowResult {
+    Granted,
+    NotEligible,
+}
+
 #[derive(Clone)]
 pub struct Loans {
     pool: sqlx::Pool<Postgres>,
@@ -52,9 +58,16 @@ impl Loans {
         Ok(maybe_loan)
     }
 
-    pub async fn borrow(&self, user_id: UserId, chat_id: &ChatIdKind, value: Debt) -> anyhow::Result<()> {
+    pub async fn borrow(&self, user_id: UserId, chat_id: &ChatIdKind, value: Debt) -> anyhow::Result<BorrowResult> {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
         let mut tx = self.pool.begin().await?;
+
+        // re-check the eligibility at the moment of the borrowing itself, locking the row
+        // to serialize concurrent attempts (e.g. several stale confirmation buttons)
+        let length = fetch_length_locked(&mut tx, user_id, chat_internal_id).await?;
+        if length.map(|len| len >= 0).unwrap_or(true) {
+            return Ok(BorrowResult::NotEligible)
+        }
 
         match get_active_loan(&mut tx, user_id, chat_internal_id).await? {
             Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, value, self.payout_ratio).await?,
@@ -64,7 +77,7 @@ impl Loans {
         Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, user_id, borrowed_length).await?;
 
         tx.commit().await?;
-        Ok(())
+        Ok(BorrowResult::Granted)
     }
 
     pub async fn pay(&self, uid: UserId, chat_id: &ChatIdKind, value: LoanPayout) -> anyhow::Result<()> {
@@ -79,6 +92,14 @@ impl Loans {
             .and_then(ensure_only_one_row_updated)
             .context(format!("couldn't pay for a loan: {chat_id}, {uid}, {value}"))
     }
+}
+
+async fn fetch_length_locked(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_internal_id: InternalChatId) -> anyhow::Result<Option<i64>> {
+    sqlx::query_scalar!("SELECT length FROM Dicks WHERE chat_id = $1 AND uid = $2 FOR UPDATE",
+            chat_internal_id as InternalChatId, uid as UserId)
+        .fetch_optional(&mut **tx)
+        .await
+        .context(format!("couldn't fetch and lock the length for internal {chat_internal_id} and {uid}"))
 }
 
 async fn get_active_loan(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_internal_id: InternalChatId) -> anyhow::Result<Option<LoanEntity>> {

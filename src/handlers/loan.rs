@@ -110,13 +110,12 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
             answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
         }
         LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == config.loan_payout_ratio.value() as f32 => {
-            metrics::CMD_LOAN_COUNTER.finished.inc();
-            let updated_text = t!("commands.loan.callback.success", locale = &lang_code);
             // the value comes from our own callback data, where it was serialized from a non-negative i64
             let debt = Debt::new(value.min(i64::MAX as u64) as i64);
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-                    repos.loans.borrow(data.uid.into(), &chat_id.into(), debt).await?;
+                    let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.into(), debt).await?;
+                    let updated_text = borrow_result_to_text(borrow_result, &lang_code);
                     bot.edit_message_text(chat_id, message_id, updated_text).await?;
                 }
                 EditMessageReqParamsKind::Inline { chat_instance, inline_message_id } => {
@@ -132,7 +131,8 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                         chat_instance.into()
                     };
 
-                    repos.loans.borrow(data.uid.into(), &chat_id.kind(), debt).await?;
+                    let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.kind(), debt).await?;
+                    let updated_text = borrow_result_to_text(borrow_result, &lang_code);
                     bot.edit_message_text_inline(inline_message_id, updated_text).await?;
                 }
             }
@@ -168,6 +168,17 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
 
     answer.await?;
     Ok(())
+}
+
+fn borrow_result_to_text(borrow_result: repo::BorrowResult, lang_code: &LanguageCode) -> String {
+    match borrow_result {
+        repo::BorrowResult::Granted => {
+            metrics::CMD_LOAN_COUNTER.finished.inc();
+            t!("commands.loan.callback.success", locale = lang_code).to_string()
+        }
+        // the user might have got a positive length between the loan application and the button click
+        repo::BorrowResult::NotEligible => t!("commands.loan.errors.positive_length", locale = lang_code).to_string()
+    }
 }
 
 #[derive(Display)]
