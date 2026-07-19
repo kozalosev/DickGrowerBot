@@ -11,11 +11,12 @@ mod announcements;
 use std::str::FromStr;
 use reqwest::Url;
 use sqlx::{Pool, Postgres};
-use teloxide::types::{ChatId, UserId};
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use crate::config::DatabaseConfig;
+use crate::domain::primitives::UserId;
+use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::ChatIdKind;
 
@@ -28,8 +29,8 @@ pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = 67890;
 pub const NAME: &str = "test";
 
-pub const USER_ID: UserId = UserId(UID as u64);
-pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(ChatId(CHAT_ID));
+pub const USER_ID: UserId = UserId::literal(UID);
+pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
 
 pub async fn start_postgres() -> (ContainerAsync<GenericImage>, Pool<Postgres>) {
     let postgres_container = GenericImage::new("postgres", "latest")
@@ -61,6 +62,6 @@ pub async fn start_postgres() -> (ContainerAsync<GenericImage>, Pool<Postgres>) 
 #[inline]
 pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
     let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+    let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
     (chat_id, dicks)
 }

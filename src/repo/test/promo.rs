@@ -1,7 +1,7 @@
-use teloxide::types::UserId;
+use crate::domain::primitives::Length;
 use crate::repo;
 use crate::repo::PromoCodeParams;
-use crate::repo::test::{start_postgres, UID};
+use crate::repo::test::{start_postgres, USER_ID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user};
 
 const PROMO_CODE: &str = "test10";
@@ -21,13 +21,13 @@ async fn activate() {
 
     create_user(&db).await;
     create_dick(&db).await;
-    let res = promo.activate(UserId(UID as u64), PROMO_CODE_UPPERCASE)
+    let res = promo.activate(USER_ID, PROMO_CODE_UPPERCASE)
         .await.expect("couldn't activate the promo code");
     assert_eq!(res.chats_affected, 1);
-    assert_eq!(res.bonus_length, PROMO_BONUS as i32);
+    assert_eq!(res.bonus_length, i64::from(PROMO_BONUS));
 
-    check_dick(&db, PROMO_BONUS).await;
+    check_dick(&db, Length::new(PROMO_BONUS.into())).await;
 
-    let res = promo.activate(UserId(UID as u64), PROMO_CODE).await;
+    let res = promo.activate(USER_ID, PROMO_CODE).await;
     assert!(res.is_err());
 }
