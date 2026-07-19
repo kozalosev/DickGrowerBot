@@ -1,7 +1,8 @@
-use teloxide::types::{ChatId, UserId};
+use teloxide::types::ChatId;
+use crate::domain::objects::ExternalUser;
+use crate::domain::primitives::Length;
 use crate::repo;
-use crate::repo::ExternalUser;
-use crate::repo::test::{CHAT_ID, start_postgres, UID};
+use crate::repo::test::{CHAT_ID, start_postgres, USER_ID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user};
 
 #[tokio::test]
@@ -17,8 +18,8 @@ async fn test_all() {
         .await.expect("couldn't fetch the empty list");
     assert_eq!(u.len(), 0);
 
-    let length = 5;
-    let users = vec![ExternalUser::new(UserId(UID as u64), length)];
+    let length = Length::new(5);
+    let users = vec![ExternalUser::new(USER_ID, length)];
     import.import(chat_id, &users)
         .await.expect("couldn't import users");
 

@@ -1,4 +1,3 @@
-pub mod page;
 pub mod callbacks;
 pub mod locks;
 mod tghack;
@@ -8,7 +7,7 @@ pub use tghack::*;
 pub use incrementor::*;
 
 use teloxide::types::User;
-use crate::domain::Username;
+use crate::domain::primitives::Username;
 
 pub fn get_full_name(user: &User) -> Username {
     let name = user.last_name.as_ref()
@@ -21,8 +20,9 @@ pub mod date {
     use std::borrow::Cow;
     use chrono::{DateTime, Duration, Timelike, Utc};
     use rust_i18n::t;
+    use crate::domain::primitives::LanguageCode;
 
-    pub fn get_time_till_next_day_string(lang_code: &str) -> Cow<'_, str> {
+    pub fn get_time_till_next_day_string(lang_code: &LanguageCode) -> Cow<'_, str> {
         let now = if cfg!(test) {
             DateTime::parse_from_rfc3339("2023-10-21T22:10:57+00:00")
                 .expect("invalid datetime string")
@@ -47,12 +47,14 @@ pub mod date {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::primitives::LanguageCode;
     use super::*;
 
     #[test]
     fn get_time_till_next_day_string() {
         let expected = "<b>1</b>h <b>49</b>m.";
-        let actual = date::get_time_till_next_day_string("en");
+        let lang_code = LanguageCode::of("en");
+        let actual = date::get_time_till_next_day_string(&lang_code);
         let actual = &actual[actual.len()-expected.len()..];
         assert_eq!(expected, actual)
     }

@@ -1,8 +1,8 @@
 use std::fmt::Formatter;
 use anyhow::{bail, Context};
 use sqlx::{Postgres, Transaction};
-use teloxide::types::ChatId;
-use super::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ensure_only_one_row_updated};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId};
+use crate::repo::ensure_only_one_row_updated;
 use crate::repository;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -27,9 +27,16 @@ impl TryInto<ChatIdPartiality> for Chat {
 
     fn try_into(self) -> Result<ChatIdPartiality, Self::Error> {
         match (self.chat_id, self.chat_instance) {
-            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(ChatIdFull { id: ChatId(id), instance }, ChatIdSource::Database)),
-            (Some(id), None) => Ok(ChatIdPartiality::Specific(ChatIdKind::ID(ChatId(id)))),
-            (None, Some(instance)) => Ok(ChatIdPartiality::Specific(ChatIdKind::Instance(instance))),
+            (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(
+                ChatIdFull { id: TelegramChatId::new(id), instance: TelegramChatInstanceId::new(instance) },
+                ChatIdSource::Database
+            )),
+            (Some(id), None) => Ok(ChatIdPartiality::Specific(
+                ChatIdKind::ID(TelegramChatId::new(id))
+            )),
+            (None, Some(instance)) => Ok(ChatIdPartiality::Specific(
+                ChatIdKind::Instance(TelegramChatInstanceId::new(instance))
+            )),
             (None, None) => Err(NoChatIdError(self.internal_id))
         }
     }
@@ -45,20 +52,21 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't get the information about the chat with id = {chat_id}"))
     }
 ,
-    pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<i64, SearchError<ChatIdKind>> {
+    pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<InternalChatId, SearchError<ChatIdKind>> {
         self.get_chat(chat_id.clone()).await
             .map_err(SearchError::Internal)?
             .map(|chat| chat.internal_id)
+            .map(InternalChatId::new)
             .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,
-    pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<i64> {
+    pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<InternalChatId> {
         let (id, instance) = match chat_id {
-            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.0), Some(full.instance.to_owned())),
-            ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id.0), None),
-            ChatIdPartiality::Both(full, ChatIdSource::InlineQuery) => (None, Some(full.instance.clone())),
-            ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.0), None),
-            ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_owned())),
+            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.value()), Some(full.instance.to_string())),
+            ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id.value()), None),
+            ChatIdPartiality::Both(full, ChatIdSource::InlineQuery) => (None, Some(full.instance.to_string())),
+            ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.value()), None),
+            ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_string())),
         };
         let mut tx = self.pool.begin().await?;
         let chats = sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
@@ -75,7 +83,7 @@ repository!(Chats, with_feature_toggles,
             x => bail!("unexpected count of chats ({x}): {chats:?}"),
         }?;
         tx.commit().await?;
-        Ok(internal_id)
+        Ok(InternalChatId::new(internal_id))
     }
 ,
     async fn create_chat(tx: &mut Transaction<'_, Postgres>, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {

@@ -5,7 +5,7 @@ use teloxide::macros::BotCommands;
 use teloxide::types::Message;
 use crate::handlers::{HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::{LanguageCode, Username};
+use crate::domain::primitives::{LanguageCode, PromoCode, Username};
 use crate::help::HelpContainer;
 
 #[derive(BotCommands, Clone)]
@@ -41,10 +41,10 @@ pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
     Ok(())
 }
 
-fn decode_promo_code(promo_code_base64: &str) -> anyhow::Result<String> {
+fn decode_promo_code(promo_code_base64: &str) -> anyhow::Result<PromoCode> {
     let bytes = URL_SAFE_NO_PAD.decode(promo_code_base64)?;
     let promo_code = String::from_utf8(bytes)?;
-    Ok(promo_code)
+    Ok(PromoCode::new(promo_code))
 }
 
 #[cfg(test)]
@@ -52,7 +52,6 @@ mod tests {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
-    // TODO: implement a separate domain type for promo codes
     #[test]
     fn test_encode_decode_promo_code() {
         let code = "TEST_CODE";

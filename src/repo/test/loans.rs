@@ -1,21 +1,21 @@
 use sqlx::{Pool, Postgres};
-use teloxide::prelude::{ChatId, UserId};
 use crate::{config, repo};
-use crate::repo::{BorrowResult, ChatIdKind};
+use crate::domain::primitives::{Debt, LoanPayout, Ratio, UserId};
+use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
-use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID};
+use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID, USER_ID, CHAT_ID_KIND};
 
 #[tokio::test]
 async fn test_all() {
     let (_container, db) = start_postgres().await;
-    let payout_ratio = 0.1;
+    let payout_ratio = Ratio::literal(0.1);
 
     create_user(&db).await;
     create_dick(&db).await; // to create a chat
 
-    let user_id = UserId(UID as u64);
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let value: u16 = 10;
+    let user_id = USER_ID;
+    let chat_id = CHAT_ID_KIND;
+    let value = Debt::new(10);
 
     let loans = repo::Loans::new(db.clone(), &config::AppConfig {
         loan_payout_ratio: payout_ratio,
@@ -34,9 +34,9 @@ async fn test_all() {
         .await.expect("couldn't fetch active loans after the rejected application");
     assert!(no_loan.is_none());
 
-    set_length(&db, UID, CHAT_ID, -(value as i32)).await;
+    set_length(&db, UID, CHAT_ID, -(value.value() as i32)).await;
 
-    let debt = 2 * value;
+    let debt = Debt::new(value.value() * 2);
     let borrow_result = loans.borrow(user_id, &chat_id, debt)
         .await.expect("couldn't apply for a loan");
     assert_eq!(borrow_result, BorrowResult::Granted);
@@ -45,38 +45,39 @@ async fn test_all() {
         .await.expect("couldn't fetch active loans again")
         .expect("the loan must be present");
     assert_eq!(loan.debt, debt);
-    assert_eq!(loan.payout_ratio, payout_ratio);
+    // the ratio is stored as REAL (f32) in the database, so compare at f32 precision
+    assert_eq!(loan.payout_ratio.value() as f32, payout_ratio.value() as f32);
 
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let length_after_borrowing = dicks.fetch_length(user_id, &chat_id)
         .await.expect("couldn't fetch a length after borrowing");
-    assert_eq!(length_after_borrowing, value as i32);
+    assert_eq!(length_after_borrowing, value.value());
 
-    let half_of_debt = value;
-    loans.pay(user_id, &chat_id, half_of_debt)
+    let half_payment = LoanPayout::literal(value.value() as i32);
+    loans.pay(user_id, &chat_id, half_payment)
         .await.expect("couldn't pay the loan");
 
     let left_to_pay = loans.get_active_loan(user_id, &chat_id)
         .await.expect("couldn't fetch how much is left to pay")
         .expect("the loan, which I left to pay, must be present")
         .debt;
-    assert_eq!(left_to_pay, half_of_debt);
+    assert_eq!(left_to_pay, i64::from(half_payment.value()));
 
     // the length is positive, so refinancing must be rejected as well
     // (this is the fix for the over-loaning exploit: stale confirmation buttons
     // must not grant a loan when the length is not negative anymore)
-    let borrow_result = loans.borrow(user_id, &chat_id, half_of_debt)
+    let borrow_result = loans.borrow(user_id, &chat_id, value)
         .await.expect("couldn't apply for a loan with a positive length");
     assert_eq!(borrow_result, BorrowResult::NotEligible);
     let untouched_debt = loans.get_active_loan(user_id, &chat_id)
         .await.expect("couldn't fetch active loans after the rejected refinancing")
         .expect("the loan must be still present")
         .debt;
-    assert_eq!(untouched_debt, half_of_debt);
+    assert_eq!(untouched_debt, value);
 
-    set_length(&db, UID, CHAT_ID, -(half_of_debt as i32)).await;
+    set_length(&db, UID, CHAT_ID, -(value.value() as i32)).await;
 
-    let borrow_result = loans.borrow(user_id, &chat_id, half_of_debt)
+    let borrow_result = loans.borrow(user_id, &chat_id, value)
         .await.expect("couldn't increase the total sum of the loan");
     assert_eq!(borrow_result, BorrowResult::Granted);
 
@@ -93,17 +94,17 @@ async fn test_borrow_without_dick() {
     create_user(&db).await;
     create_dick(&db).await; // to create a chat
 
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let user_id_without_dick = UserId((UID + 1) as u64);
+    let chat_id = CHAT_ID_KIND;
+    let user_id_without_dick = UserId::literal(UID + 1);
     repo::Users::new(db.clone())
         .create_or_update(user_id_without_dick, &format!("{NAME} 2"))
         .await.expect("couldn't create a user");
 
     let loans = repo::Loans::new(db.clone(), &config::AppConfig {
-        loan_payout_ratio: 0.1,
+        loan_payout_ratio: Ratio::literal(0.1),
         ..Default::default()
     });
-    let borrow_result = loans.borrow(user_id_without_dick, &chat_id, 10)
+    let borrow_result = loans.borrow(user_id_without_dick, &chat_id, Debt::new(10))
         .await.expect("couldn't apply for a loan without a dick");
     assert_eq!(borrow_result, BorrowResult::NotEligible);
 }

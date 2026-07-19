@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::str::FromStr;
 use anyhow::anyhow;
-use crate::domain::Ratio;
+use crate::domain::primitives::Ratio;
 
 pub(super) fn get_env_mandatory_value<T, E>(key: &str) -> anyhow::Result<T>
 where
