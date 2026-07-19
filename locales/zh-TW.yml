@@ -16,6 +16,7 @@ commands:
     title: "最大的老二排行榜："
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> 公分"
     ending: "<i>[+] 表示一個成長者今天還沒有增長他的老二。</i>"
+    ending_inactive: "<i>[~] 表示一個成長者超過 %{days} 天沒有增長他的老二了。</i>"
     empty: "還沒有人加入遊戲 :("
   dod:
     description: "選出今日老二"
@@ -77,6 +78,7 @@ commands:
     errors:
       not_admin: "此命令僅供管理員使用！"
       not_reply: "你必須回覆由 %{origin_bots} 發送的非轉發訊息"
+      too_many_members: "僅允許在成員不超過 10 人的聊天中導入：競品機器人的排行榜只顯示前 10 名，在此導入對其他人不公平。"
       invalid_lines:
         template: "無法解析此訊息 🤔\n以下行無效：\n%{invalid_lines}"
         line: "➖ <b>%{line}</b>"
@@ -121,4 +123,5 @@ titles:
     loan-payout: "貸款人"
 errors:
   not_group_chat: "此機器人僅在群聊中執行任務！"
+  group_account: "不能以群組或頻道的身份遊玩——請關閉匿名模式後重試！"
   feature_disabled: "此功能當前暫時禁用。"
