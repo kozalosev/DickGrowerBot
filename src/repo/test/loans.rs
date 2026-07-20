@@ -34,7 +34,7 @@ async fn test_all() {
         .await.expect("couldn't fetch active loans after the rejected application");
     assert!(no_loan.is_none());
 
-    set_length(&db, UID, CHAT_ID, -(value.value() as i32)).await;
+    set_length(&db, UID, CHAT_ID, -value.value()).await;
 
     let debt = Debt::new(value.value() * 2);
     let borrow_result = loans.borrow(user_id, &chat_id, debt)
@@ -75,7 +75,7 @@ async fn test_all() {
         .debt;
     assert_eq!(untouched_debt, value);
 
-    set_length(&db, UID, CHAT_ID, -(value.value() as i32)).await;
+    set_length(&db, UID, CHAT_ID, -value.value()).await;
 
     let borrow_result = loans.borrow(user_id, &chat_id, value)
         .await.expect("couldn't increase the total sum of the loan");
@@ -109,7 +109,7 @@ async fn test_borrow_without_dick() {
     assert_eq!(borrow_result, BorrowResult::NotEligible);
 }
 
-async fn set_length(db: &Pool<Postgres>, uid: i64, chat_id: i64, length: i32) {
+async fn set_length(db: &Pool<Postgres>, uid: i64, chat_id: i64, length: i64) {
     // bonus_attempts = 1 bypasses the "already grown today" trigger (it decrements to 0 after)
     sqlx::query!("UPDATE Dicks SET length = $3, bonus_attempts = 1 WHERE uid = $1 AND chat_id = (SELECT id FROM Chats WHERE chat_id = $2)",
             uid, chat_id, length)
