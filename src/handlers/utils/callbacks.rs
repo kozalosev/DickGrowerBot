@@ -6,8 +6,8 @@ use teloxide::payloads::AnswerCallbackQuery;
 use teloxide::prelude::ChatId;
 use teloxide::requests::{JsonRequest, Requester};
 use teloxide::types::{CallbackQuery, MessageId, UserId};
-use crate::domain::LanguageCode;
-use crate::repo::ChatIdKind;
+use crate::domain::primitives::chat::ChatIdKind;
+use crate::domain::primitives::LanguageCode;
 
 #[derive(Debug, Display, Error)]
 pub enum InvalidCallbackData {

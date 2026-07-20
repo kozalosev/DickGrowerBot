@@ -1,7 +1,13 @@
-mod username;
-mod ratio;
-mod langcode;
+pub mod primitives;
+pub mod objects;
 
-pub use username::*;
-pub use ratio::*;
-pub use langcode::*;
+#[macro_export]
+macro_rules! pub_use_modules {
+    ($name:ident) => {
+        mod $name;
+        pub use $name::*;
+    };
+    ($($name:ident),+) => {
+        $(pub_use_modules!($name);)+
+    }
+}
