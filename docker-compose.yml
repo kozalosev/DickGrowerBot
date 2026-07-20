@@ -38,6 +38,9 @@ services:
       - ANNOUNCEMENT_MAX_SHOWS
       - ANNOUNCEMENT_EN
       - ANNOUNCEMENT_RU
+      - ANNOUNCEMENT_IT
+      - ANNOUNCEMENT_FA
+      - ANNOUNCEMENT_ZH
     expose:
       - 8080
     networks:

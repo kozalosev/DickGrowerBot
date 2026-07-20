@@ -1,0 +1,16 @@
+La fonte di verità più autorevole, attuale e completa su quali informazioni il bot raccoglie e memorizza sono le <a href="https://github.com/kozalosev/DickGrowerBot/tree/main/migrations">migrazioni del database</a>, pubblicate, come il resto del codice sorgente, su GitHub.
+
+Tuttavia, diamo un'occhiata più da vicino alle parti più importanti in breve:
+1️⃣ Il bot deve memorizzare gli ID e i nomi dei suoi utenti per poter mostrare la classifica e i risultati delle battaglie PvP;
+2️⃣ La data di creazione dell'account di un utente è necessaria per fornire un bonus di benvenuto, cioè un periodo di grazia di crescita positiva senza rimpicciolimenti.
+3️⃣ Gli ID dei gruppi sono usati per permettere agli utenti di avere peni diversi in gruppi diversi, e per supportare il funzionamento del bot in entrambe le modalità: tramite comandi e modalità inline.
+4️⃣ Ovviamente, è necessario memorizzare le lunghezze, le date delle ultime crescite e le informazioni sui prestiti (somma, date di erogazione e rimborso, tasso di pagamento) per ogni gruppo.
+5️⃣ Raccogliamo statistiche delle battaglie vinte/perse e dei centimetri acquisiti/persi come tabella accumulata, senza un registro completo di tutte le battaglie.
+6️⃣ Il registro completo viene raccolto per:
+    ➖ i vincitori del concorso «Pene del Giorno» (a scopo statistico, e per determinare se un vincitore è già stato scelto oggi o meno; tuttavia, questo potrebbe essere ottimizzato in futuro);
+    ➖ le importazioni di dati da altri bot (per indagare su eventuali problemi e prevenire doppie importazioni quando un comando viene invocato più volte);
+    ➖ le attivazioni dei codici promozionali (a scopo statistico e investigativo).
+7️⃣ Nessuno dei dati sopra descritti viene fornito a organizzazioni terze, ad eccezione di:
+    ➖ l'azienda di hosting russa <a href="https://timeweb.cloud">TimeWeb</a>, che fornisce l'infrastruttura cloud per eseguire il codice delle applicazioni;
+    ➖ l'azienda di hosting francese <a href="https://www.scaleway.com/en/">Scaleway</a>, che fornisce archiviazione compatibile S3 per memorizzare i backup del database;
+    ➖ l'azienda internazionale <a href="https://grafana.com">Grafana Labs</a>, nella cui infrastruttura cloud sono memorizzati metriche e log.

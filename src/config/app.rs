@@ -3,7 +3,7 @@ use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
 use crate::domain::primitives::{Bet, DaysCount, Limit, Ratio};
-use crate::domain::primitives::SupportedLanguage::{EN, RU};
+use crate::domain::primitives::SupportedLanguage::{EN, RU, IT, FA, ZH};
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Default))]
@@ -42,6 +42,9 @@ impl AppConfig {
         let announcement_max_shows = get_optional_env_value("ANNOUNCEMENT_MAX_SHOWS");
         let announcement_en = get_optional_env_value("ANNOUNCEMENT_EN");
         let announcement_ru = get_optional_env_value("ANNOUNCEMENT_RU");
+        let announcement_it = get_optional_env_value("ANNOUNCEMENT_IT");
+        let announcement_fa = get_optional_env_value("ANNOUNCEMENT_FA");
+        let announcement_zh = get_optional_env_value("ANNOUNCEMENT_ZH");
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -65,6 +68,9 @@ impl AppConfig {
                 announcements: [
                     (EN, announcement_en),
                     (RU, announcement_ru),
+                    (IT, announcement_it),
+                    (FA, announcement_fa),
+                    (ZH, announcement_zh),
                 ].map(|(lc, text)| (lc, Announcement::new(text)))
                     .into_iter()
                     .filter_map(|(lc, mb_ann)| mb_ann.map(|ann| (lc, ann)))

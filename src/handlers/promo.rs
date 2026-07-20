@@ -16,7 +16,7 @@ use crate::repo::ActivationError;
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
 
 static PROMO_CODE_FORMAT_REGEXP: Lazy<regex::Regex> = Lazy::new(||
-    regex::Regex::new("^[a-zA-Z0-9_\\-]{4,16}$")
+    regex::Regex::new("^[a-zA-Zа-яА-ЯёЁ0-9_\\-]{4,16}$")
         .expect("promo code format regular expression must be valid")
 );
 
@@ -146,6 +146,8 @@ mod test {
     fn test_regex() {
         assert!(PROMO_CODE_FORMAT_REGEXP.is_match("TESTPROMO"));
         assert!(PROMO_CODE_FORMAT_REGEXP.is_match("test-11_1"));
+        assert!(PROMO_CODE_FORMAT_REGEXP.is_match("промо-код"));
+        assert!(PROMO_CODE_FORMAT_REGEXP.is_match("тест1234"));
 
         assert!(!PROMO_CODE_FORMAT_REGEXP.is_match("T34"));
         assert!(!PROMO_CODE_FORMAT_REGEXP.is_match("PROMO!"));
