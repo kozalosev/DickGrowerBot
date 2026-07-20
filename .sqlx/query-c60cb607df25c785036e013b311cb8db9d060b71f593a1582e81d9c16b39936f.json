@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uid AS \"uid: UserId\", name AS \"name: Username\", created_at FROM Users",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid: UserId",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name: Username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c60cb607df25c785036e013b311cb8db9d060b71f593a1582e81d9c16b39936f"
+}

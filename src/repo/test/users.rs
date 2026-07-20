@@ -1,9 +1,9 @@
 use sqlx::{Pool, Postgres};
-use teloxide::types::{ChatId, UserId};
-use crate::domain::Ratio;
+use crate::domain::objects::User;
+use crate::domain::primitives::{LengthChange, Ratio, UserId};
+use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
-use crate::repo::{ChatIdKind, ChatIdPartiality};
-use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID};
+use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID, USER_ID};
 use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
 
 #[tokio::test]
@@ -15,7 +15,7 @@ async fn create_or_update() {
         .expect("couldn't fetch the empty list of members");
     assert_eq!(members.len(), 0);
 
-    let u = users.create_or_update(UserId(UID as u64), NAME).await
+    let u = users.create_or_update(USER_ID, NAME).await
         .expect("creation failed");
     check_user_with_name(&u, NAME);
 
@@ -25,7 +25,7 @@ async fn create_or_update() {
 
     const NEW_NAME: &str = "foo_bar";
 
-    let u = users.create_or_update(UserId(UID as u64), NEW_NAME).await
+    let u = users.create_or_update(USER_ID, NEW_NAME).await
         .expect("creation failed");
     check_user_with_name(&u, NEW_NAME);
 
@@ -39,7 +39,7 @@ async fn get_chat_members() {
     let (_container, db) = start_postgres().await;
     let users = repo::Users::new(db.clone());
 
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+    let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
     let members = users.get_chat_members(&chat_id)
         .await.expect("couldn't fetch the empty list of chat members");
     assert_eq!(members.len(), 0);
@@ -58,7 +58,7 @@ macro_rules! base_checks {
     ($db:ident, $method:ident, $($args:tt),*) => {
         let users = repo::Users::new($db.clone());
 
-        let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
+        let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
         let user = users.$method(&chat_id$(,$args)*)
             .await.expect("couldn't fetch None");
         assert!(user.is_none());
@@ -70,7 +70,7 @@ macro_rules! base_checks {
             .expect("couldn't fetch Some(User)")
             .expect("no active member");
         assert_eq!(user.uid, UID);
-        assert_eq!(user.name.value_ref(), NAME);
+        assert_eq!(user.name.value(), NAME);
 
         // check inactive member is not found
         sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
@@ -105,7 +105,7 @@ async fn get_random_active_poor_member() {
 
     // create middle-class and rich users and ensure they will never be selected as a winner
     let (users, chat_id) = prepare_for_additional_tests(&db).await;
-    
+
     for attempt in 1..=10 {
         let user = users.get_random_active_poor_member(&chat_id.kind(), ratio)
             .await
@@ -115,76 +115,81 @@ async fn get_random_active_poor_member() {
     }
 }
 
-#[ignore]   // See #60; also, the test is failed too often.
 #[tokio::test]
 async fn get_random_active_member_with_poor_in_priority() {
     let (_container, db) = start_postgres().await;
     base_checks!(db, get_random_active_member_with_poor_in_priority);
 
-    // create middle-class and rich users and ensure the chance they win is the lower, the longer their dicks are
-    let (users, chat_id) = prepare_for_additional_tests(&db).await;
-    // test the users with negative length as well
-    create_another_user_and_dick(&db, &chat_id, 4, "User-0", -10).await;
-    
-    let mut results = Vec::with_capacity(20);
-    for attempt in 1..=100 {
+    // Create members with well-separated lengths (a negative one included) and check that the
+    // poorer a member is, the more often they are chosen — without ever collapsing the selection
+    // onto the very poorest 2-3 members, which was the bug reported in #60.
+    // Together with the base member (UID, length 0) the lengths are -20, 0, 20, 40.
+    let users = repo::Users::new(db.clone());
+    let chat_id: ChatIdPartiality = TelegramChatId::new(CHAT_ID).into();
+    create_another_user_and_dick(&db, &chat_id, 2, "User-A", -20).await; // UID+1, the poorest
+    create_another_user_and_dick(&db, &chat_id, 3, "User-B", 20).await;  // UID+2
+    create_another_user_and_dick(&db, &chat_id, 4, "User-C", 40).await;  // UID+3, the richest
+
+    const ATTEMPTS: usize = 1000;
+    let mut results = Vec::with_capacity(ATTEMPTS);
+    for attempt in 1..=ATTEMPTS {
         let user = users.get_random_active_member_with_poor_in_priority(&chat_id.kind())
             .await
             .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
             .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));
         results.push(user.uid);
     }
-    let user_0_wins = count(&results, UID+3);
-    let user_1_wins = count(&results, UID);
-    let user_2_wins = count(&results, UID+1);
-    let user_3_wins = count(&results, UID+2);
+    let poorest_wins = count(&results, UID+1);  // length -20
+    let base_wins = count(&results, UID);       // length   0
+    let middle_wins = count(&results, UID+2);   // length  20
+    let richest_wins = count(&results, UID+3);  // length  40
 
-    println!("=== DoD wins using smart mode ===");
-    println!("User #0: {user_0_wins}");
-    println!("User #1: {user_1_wins}");
-    println!("User #2: {user_2_wins}");
-    println!("User #3: {user_3_wins}");
+    println!("=== DoD wins using the WEIGHTS mode ===");
+    println!("Poorest (len -20): {poorest_wins}");
+    println!("Base    (len   0): {base_wins}");
+    println!("Middle  (len  20): {middle_wins}");
+    println!("Richest (len  40): {richest_wins}");
 
-    assert!(user_0_wins > user_1_wins);
-    assert!(user_1_wins > user_2_wins);
-    assert!(user_2_wins > user_3_wins);
-    assert!(user_3_wins > 0);
+    assert!(poorest_wins > base_wins, "the poorest member must win more often than the base one");
+    assert!(base_wins > middle_wins, "the base member must win more often than the middle one");
+    assert!(middle_wins > richest_wins, "the middle member must win more often than the richest one");
+    assert!(richest_wins > 0, "even the richest member must be chosen occasionally");
 }
 
 async fn prepare_for_additional_tests(db: &Pool<Postgres>) -> (repo::Users, ChatIdPartiality) {
     let users = repo::Users::new(db.clone());
-    let chat_id = ChatId(CHAT_ID).into();
+    let chat_id = TelegramChatId::new(CHAT_ID).into();
     create_user_and_dick_2(db, &chat_id, "User-2").await;
     create_another_user_and_dick(db, &chat_id, 3, "User-3", 10).await;
     (users, chat_id)
 }
 
-fn count(v: &[i64], uid: i64) -> usize {
+fn count(v: &[UserId], uid: i64) -> usize {
     v.iter()
         .filter(|u| **u == uid)
         .count()
 }
 
-fn check_user_with_name(user: &repo::User, name: &str) {
+fn check_user_with_name(user: &User, name: &str) {
     assert_eq!(user.uid, UID);
-    assert_eq!(user.name.value_ref(), name);
+    assert_eq!(user.name.value(), name);
 }
 
-fn check_member_with_name(members: &[repo::User], name: &str) {
+fn check_member_with_name(members: &[User], name: &str) {
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].uid, UID);
-    assert_eq!(members[0].name.value_ref(), name);
+    assert_eq!(members[0].name.value(), name);
 }
 
 async fn create_member(db: &Pool<Postgres>) {
     let users = repo::Users::new(db.clone());
     let dicks = repo::Dicks::new(db.clone(), Default::default());
 
-    let chat_id = ChatIdKind::ID(ChatId(CHAT_ID));
-    let uid = UserId(UID as u64);
+    let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
+    let uid = USER_ID;
 
     users.create_or_update(uid, NAME)
         .await.expect("couldn't create a user");
-    dicks.create_or_grow(uid, &chat_id.into(), 0)
+    dicks.create_or_grow(uid, &chat_id.into(), LengthChange::signed(0))
         .await.expect("couldn't create a dick");
 }

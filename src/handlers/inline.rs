@@ -13,13 +13,13 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::domain::{LanguageCode, Username};
+use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
-use crate::handlers::utils::page::Page;
 use crate::metrics;
-use crate::repo::{ChatIdFull, NoChatIdError, ChatIdSource, Repositories};
+use crate::repo::{NoChatIdError, Repositories};
 
 #[derive(Debug, strum_macros::Display, EnumIter, EnumString)]
 #[strum(serialize_all = "snake_case")]
@@ -123,7 +123,7 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
     ExternalVariant {
         result_id: "pvp",
         builder: |query, lang_code, app_config, name| {
-            pvp::build_inline_keyboard_article_result(query.from.id, lang_code, name, app_config.pvp_default_bet)
+            pvp::build_inline_keyboard_article_result(DomainUserId::from(&query.from), lang_code, name, app_config.pvp_default_bet)
         }
     }
 ]));
@@ -132,7 +132,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
-    repos.users.create_or_update(query.from.id, &name).await?;
+    repos.users.create_or_update(DomainUserId::from(&query.from), &name).await?;
 
     let uid = query.from.id.0;
     let lang_code = LanguageCode::from_user(&query.from);
@@ -218,8 +218,8 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
             .then(|| utils::resolve_inline_message_id(inline_msg_id))
             .map(|res| match res {
                 Ok(info) => ChatIdFull {
-                    id: ChatId(info.chat_id),
-                    instance: query.chat_instance.clone(),
+                    id: info.chat_id,
+                    instance: TelegramChatInstanceId::new(query.chat_instance.clone()),
                 }.to_partiality(ChatIdSource::InlineQuery),
                 Err(err) => {
                     log::error!("callback_handler couldn't resolve an inline_message_id: {err}");
@@ -285,11 +285,11 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
 }
 
 #[allow(clippy::ptr_arg)]
-pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<ChatId> {
+pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<TelegramChatId> {
     utils::resolve_inline_message_id(msg_id)
         .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
         .ok()
-        .map(|info| ChatId(info.chat_id))
+        .map(|info| info.chat_id)
 }
 
 // TODO: move to mod.rs and use in message handlers too

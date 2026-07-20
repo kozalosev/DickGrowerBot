@@ -10,7 +10,7 @@ use teloxide::prelude::{Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, User};
 use crate::handlers::{HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::LanguageCode;
+use crate::domain::primitives::{LanguageCode, PromoCode, UserId};
 use crate::repo::ActivationError;
 
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
@@ -49,8 +49,8 @@ pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialo
         }
         PromoCommands::Promo(code) => {
             dialogue.exit().await?;
-            
-            promo_activation_impl(repos.promo, user, &code).await?
+
+            promo_activation_impl(repos.promo, user, &PromoCode::new(code)).await?
         },
     };
     reply_html!(bot, msg, answer);
@@ -64,7 +64,7 @@ pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCode
             dialogue.exit().await?;
             
             let user = msg.from.as_ref().ok_or("no from user")?;
-            promo_activation_impl(repos.promo, user, code).await?
+            promo_activation_impl(repos.promo, user, &PromoCode::of(code)).await?
         },
         None => {
             let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
@@ -101,9 +101,9 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult
     Ok(())
 }
 
-pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, promo_code: &str) -> anyhow::Result<String> {
+pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, promo_code: &PromoCode) -> anyhow::Result<String> {
     let lang_code = LanguageCode::from_user(user);
-    let answer = match promo_repo.activate(user.id, promo_code).await {
+    let answer = match promo_repo.activate(UserId::from(user), promo_code).await {
         Ok(res) => {
             metrics::CMD_PROMO.finished.inc();
             let suffix = if res.chats_affected > 1 {
