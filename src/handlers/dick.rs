@@ -4,19 +4,20 @@ use anyhow::{anyhow, Context};
 use chrono::{Datelike, Utc};
 use futures::future::join;
 use futures::TryFutureExt;
+use num_traits::ToPrimitive;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup, User, UserId};
-
-use page::{InvalidPage, Page};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{User as TeloxideUser};
 
 use crate::{config, metrics, repo};
-use crate::domain::{LanguageCode, Username};
+use crate::domain::objects::GrowthResult;
+use crate::domain::primitives::chat::ChatIdPartiality;
+use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
 use crate::handlers::{HandlerResult, reply_html, utils};
-use crate::handlers::utils::{callbacks, Incrementor, page};
-use crate::repo::{ChatIdPartiality, UID};
+use crate::handlers::utils::{callbacks, Incrementor};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
@@ -56,24 +57,28 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
     Ok(())
 }
 
-pub struct FromRefs<'a>(pub &'a User, pub &'a ChatIdPartiality);
+pub struct FromRefs<'a>(pub &'a TeloxideUser, pub &'a ChatIdPartiality);
 
 pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
+    let uid = UserId::from(from);
     let name = utils::get_full_name(from);
-    let user = repos.users.create_or_update(from.id, &name).await?;
-    let days_since_registration = (Utc::now() - user.created_at).num_days() as u32;
-    let increment = incr.growth_increment(from.id, chat_id.kind(), days_since_registration).await;
-    let grow_result = repos.dicks.create_or_grow(from.id, chat_id, increment.total).await;
+    let user = repos.users.create_or_update(uid, &name).await?;
+    let days_since_registration = Utc::now() - user.created_at;
+    let days_since_registration = days_since_registration.num_days().to_u32()
+        .map(DaysCount::new)
+        .ok_or_else(|| anyhow!("days since registration are too much: {days_since_registration}"))?;
+    let increment = incr.growth_increment(uid, chat_id.kind(), days_since_registration).await;
+    let grow_result = repos.dicks.create_or_grow(uid, chat_id, increment.total).await;
     let lang_code = LanguageCode::from_user(from);
 
     let main_part = match grow_result {
-        Ok(repo::GrowthResult { new_length, pos_in_top }) => {
-            let event_key = if increment.total.is_negative() { "shrunk" } else { "grown" };
+        Ok(GrowthResult { new_length, pos_in_top }) => {
+            let event_key = if increment.total.value().is_negative() { "shrunk" } else { "grown" };
             let event_template = format!("commands.grow.direction.{event_key}");
             let event = t!(&event_template, locale = &lang_code);
             let answer = t!("commands.grow.result", locale = &lang_code,
-                event = event, incr = increment.total.abs(), length = new_length);
+                event = event, incr = increment.total.value().abs(), length = new_length);
             let perks_part = increment.perks_part_of_answer(&lang_code);
             if let Some(pos) = pos_in_top {
                 let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
@@ -123,23 +128,22 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
                              page: Page) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let lang_code = LanguageCode::from_user(from);
-    let top_limit = config.top_limit as u32;
-    let offset = page * top_limit;
-    let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
+    let offset = Offset::calculate(page, config.top_limit);
+    let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
-    let has_more_pages = dicks.len() as u32 > top_limit;
+    let has_more_pages = (dicks.len() as i16) > config.top_limit.value();
     let lines = dicks.into_iter()
-        .take(config.top_limit as usize)
+        .take(config.top_limit.value() as usize)
         .enumerate()
         .map(|(i, d)| {
             let escaped_name = Username::new(d.owner_name).escaped();
-            let name = if from.id == <UID as Into<UserId>>::into(d.owner_uid) {
+            let name = if d.owner_uid == from.id {
                 format!("<u>{escaped_name}</u>")
             } else {
                 escaped_name
             };
             let can_grow = Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
-            let pos = d.position.unwrap_or((i+1) as i64);
+            let pos = d.position.map(|p| p.value() as i64).unwrap_or((i+1) as i64);
             let mut line = t!("commands.top.line", locale = &lang_code,
                 n = pos, name = name, length = d.length).to_string();
             if can_grow {
@@ -182,9 +186,10 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
             .map(str::to_owned)
             .ok_or(InvalidPage::for_value(d, "invalid prefix")))
-        .and_then(|r| r.parse()
+        .and_then(|r| r.parse::<i16>()
             .map_err(|e| InvalidPage::for_value(&r, e)))
-        .map(Page)
+        .and_then(|value| Page::new(value)
+            .map_err(|e| InvalidPage::for_value(&value.to_string(), e)))
         .map_err(|e| anyhow!(e))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
@@ -220,10 +225,12 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
 pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
     let mut buttons = Vec::new();
     if page > 0 {
-        buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{}", page - 1)))
+        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
+        buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{prev_page}")))
     }
     if has_more_pages {
-        buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{}", page + 1)))
+        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
+        buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
     InlineKeyboardMarkup::new(vec![buttons])
 }

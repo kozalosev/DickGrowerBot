@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT length AS \"length: Length\", uid AS \"owner_uid: UserId\", name as owner_name, updated_at as grown_at,\n                    ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position\n                FROM dicks d\n                JOIN users using (uid)\n                JOIN chats c ON c.id = d.chat_id\n                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text\n                OFFSET $2 LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "length: Length",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_uid: UserId",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "grown_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "position",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f59889fa0b01625a230042833823e75924207d2a94880ef9484406c8b498dc85"
+}

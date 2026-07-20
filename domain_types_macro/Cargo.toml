@@ -1,0 +1,22 @@
+[package]
+name = "domain_types_macro"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0.101", features = ["full"] }
+quote = "1.0.40"
+proc-macro2 = "1.0.95"
+
+# The generated code references `::domain_types`, `::derive_more`, `::serde`, `::num_traits`
+# (and `::sqlx` unless `features(not_database_type)`) — those are resolved in the CONSUMER
+# crate, so they are only dev-dependencies here (for the integration tests).
+
+[dev-dependencies]
+domain_types = { version = "0.1.0", path = "../domain_types" }
+derive_more = { version = "2.0.1", features = ["display", "from", "constructor", "error", "from_str", "add", "mul", "not", "add_assign", "mul_assign"] }
+serde = { version = "1.0.217", features = ["derive"] }
+num-traits = "0.2.19"

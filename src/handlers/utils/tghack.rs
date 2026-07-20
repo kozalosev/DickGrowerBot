@@ -3,15 +3,7 @@ use anyhow::anyhow;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use byteorder::{LittleEndian, ReadBytesExt};
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct InlineMessageIdInfo {
-    pub dc_id: i32,
-    pub chat_id: i64,
-    pub message_id: i32,
-    pub access_hash: i64,
-}
+use crate::domain::objects::InlineMessageIdInfo;
 
 impl TryFrom<&str> for InlineMessageIdInfo {
     type Error = InvalidIDFormat;
@@ -104,12 +96,12 @@ impl IDFormatKind {
                 cursor.read_i64::<LittleEndian>()?,
             )
         };
-        Ok(InlineMessageIdInfo {
+        Ok(InlineMessageIdInfo::from_primitive_values(
             dc_id,
-            chat_id: fix_chat_id(chat_id),
+            fix_chat_id(chat_id),
             message_id,
             access_hash,
-        })
+        ))
     }
 }
 

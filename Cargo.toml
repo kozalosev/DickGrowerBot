@@ -1,3 +1,6 @@
+[workspace]
+members = ["domain_types", "domain_types_macro"]
+
 [package]
 name = "dick-grower-bot"
 version = "0.1.0"
@@ -20,7 +23,7 @@ log = "0.4.22"
 pretty_env_logger = "0.5.0"
 dotenvy = "0.15.7"
 # Database and SQL
-sqlx = { version = "0.8.3", features = [ "runtime-tokio", "postgres", "chrono", "tls-rustls" ] }
+sqlx = { version = "0.8.3", features = [ "runtime-tokio", "postgres", "chrono", "tls-rustls", "macros" ] }
 # HTTP client with caching
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls", "json"] }
 # Serialization / deserialization
@@ -30,7 +33,7 @@ tinytemplate = "1.2.1"
 # Derive macros
 strum = "0.27.1"
 strum_macros = "0.27.1"
-derive_more = { version = "2.0.1", features = ["display", "from", "constructor", "error", "from_str"] }
+derive_more = { version = "2.0.1", features = ["display", "from", "constructor", "error", "from_str", "add", "mul", "not", "add_assign", "mul_assign"] }
 anyhow = { version = "1.0.95", features = ["backtrace"] }
 # Other basic stuff
 regex = "1.11.1"
@@ -47,6 +50,10 @@ futures = "0.3.31"
 async-trait = "0.1.84"
 num-traits = "0.2.19"
 downcast-rs = "2.0.1"
+macro_rules_attribute = "0.2.0"
+# Local subcrates
+domain_types = { version = "0.1.0", path = "domain_types" }
+domain_types_macro = { version = "0.1.0", path = "domain_types_macro" }
 
 [dev-dependencies]
 testcontainers = "0.23.1"

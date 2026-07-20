@@ -1,8 +1,8 @@
 use rust_i18n::t;
 use serde::Serialize;
 use tinytemplate::TinyTemplate;
-use crate::domain::SupportedLanguage::{EN, RU};
-use crate::domain::{LanguageCode, Username};
+use crate::domain::primitives::{LanguageCode, Percentage, Username};
+use crate::domain::primitives::SupportedLanguage::{EN, RU};
 
 static EN_HELP: &str = include_str!("en.html");
 static RU_HELP: &str = include_str!("ru.html");
@@ -29,16 +29,16 @@ impl HelpContainer {
 
 #[derive(Serialize, Clone)]
 pub struct Context {
-    pub bot_name: String,
+    pub bot_name: Username,
     pub grow_min: String,
     pub grow_max: String,
     pub other_bots: String,
-    pub admin_channel_ru: String,
-    pub admin_channel_en: String,
-    pub admin_chat_ru: String,
-    pub admin_chat_en: String,
+    pub admin_channel_ru: Username,
+    pub admin_channel_en: Username,
+    pub admin_chat_ru: Username,
+    pub admin_chat_en: Username,
     pub git_repo: String,
-    pub help_pussies_percentage: f64
+    pub help_pussies_percentage: Percentage,
 }
 
 pub fn render_help_messages(context: Context) -> Result<HelpContainer, tinytemplate::error::Error> {

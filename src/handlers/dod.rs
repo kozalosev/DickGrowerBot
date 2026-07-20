@@ -4,10 +4,11 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
-use teloxide::types::{LinkPreviewOptions, Message, UserId};
+use teloxide::types::{LinkPreviewOptions, Message};
 use crate::{config, metrics, repo};
 use crate::config::DickOfDaySelectionMode;
-use crate::domain::LanguageCode;
+use crate::domain::objects::GrowthResult;
+use crate::domain::primitives::LanguageCode;
 use crate::handlers::{FromRefs, HandlerResult, reply_html, utils};
 use crate::handlers::utils::Incrementor;
 
@@ -50,10 +51,10 @@ pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repos
     };
     let answer = match winner {
         Some(winner) => {
-            let increment = incr.dod_increment(UserId(winner.uid as u64), chat_id.kind()).await;
-            let dod_result = repos.dicks.set_dod_winner(chat_id, UserId(winner.uid as u64), increment.total).await;
+            let increment = incr.dod_increment(winner.uid, chat_id.kind()).await;
+            let dod_result = repos.dicks.set_dod_winner(chat_id, winner.uid, increment.total).await;
             let main_part = match dod_result {
-                Ok(Some(repo::GrowthResult{ new_length, pos_in_top })) => {
+                Ok(Some(GrowthResult { new_length, pos_in_top })) => {
                     let answer = t!("commands.dod.result", locale = &lang_code,
                         uid = winner.uid, name = winner.name.escaped(), growth = increment.total, length = new_length);
                     let perks_part = increment.perks_part_of_answer(&lang_code);
