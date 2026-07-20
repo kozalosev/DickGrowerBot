@@ -17,7 +17,6 @@ rust-i18n = "3.1.2"
 tokio = { version =  "1.42.0", default-features = false, features = ["rt-multi-thread", "macros"] }
 axum = "0.7.9"
 axum-prometheus = "0.8.0"
-metrics = "0.24.6"
 prometheus = "0.13.4"
 # Logging and envs
 log = "0.4.22"

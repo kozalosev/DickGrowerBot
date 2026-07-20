@@ -693,7 +693,6 @@ dependencies = [
  "futures",
  "log",
  "macro_rules_attribute",
- "metrics",
  "num-traits",
  "once_cell",
  "pretty_env_logger",
