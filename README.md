@@ -37,6 +37,19 @@ Technical stuff
 * _\[optional]_ Docker (it makes the configuration a lot easier);
 * _\[for webhook mode]_ a frontal proxy server with TLS support ([nginx-proxy](https://github.com/nginx-proxy/nginx-proxy), for example).
 
+### How to build the application?
+
+`cargo build`/`cargo check` type-check SQL queries at compile time via `sqlx`. Unless
+you're relying on the offline query cache (see below), this means your local database
+schema must already match `migrations/` — `sqlx::migrate!` only applies migrations
+automatically when the bot itself starts, not at build time. If a build fails with
+confusing SQL-query type-mismatch errors after pulling or adding a migration, apply
+pending migrations first (requires `sqlx-cli`, `cargo install sqlx-cli`):
+
+```shell
+cargo sqlx migrate run
+```
+
 ### How to rebuild .sqlx queries?
 _(to build the application without a running RDBMS)_
 

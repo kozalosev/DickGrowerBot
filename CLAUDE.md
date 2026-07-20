@@ -22,6 +22,10 @@ cargo test test_name_substring
 # Run tests for one workspace crate only
 cargo test -p domain_types
 
+# Apply pending migrations to DATABASE_URL (required before `cargo build`/`cargo check`
+# if the DB is behind — see note below)
+cargo sqlx migrate run
+
 # Regenerate sqlx offline query cache
 cargo sqlx prepare -- --tests
 
@@ -36,7 +40,13 @@ DATABASE_URL=postgres://...
 TELOXIDE_TOKEN=...
 ```
 
-Migrations run automatically on startup via `sqlx::migrate!`.
+Migrations run automatically on startup via `sqlx::migrate!` — but that's only at
+runtime. `sqlx::query!`/`query_as!` macros type-check against the live schema at
+`DATABASE_URL` when compiling (no `.sqlx/` cache, or it's stale), so **`cargo build`
+and `cargo check` will fail with confusing type-mismatch errors if your local DB
+hasn't had the latest migrations applied yet.** Run `cargo sqlx migrate run` first
+whenever a build fails right after pulling migration changes. Requires `sqlx-cli`
+(`cargo install sqlx-cli`).
 
 ## Architecture
 
@@ -57,7 +67,7 @@ handlers/    — teloxide update handlers and business logic
 repo/        — sqlx repository impls; DB access only
 help/        — help-message rendering (tinytemplate)
 locales/     — rust-i18n translation files (YAML)
-migrations/  — 21 SQL migration files, auto-applied on startup
+migrations/  — SQL migration files, auto-applied on startup (see DB Migrations below)
 ```
 
 ### Key frameworks
@@ -89,4 +99,13 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## DB Migrations
 
-Migration files live in `migrations/` (21 files, numbered sequentially). They are applied automatically at startup — no manual step needed in development.
+Migration files live in `migrations/`, numbered sequentially. They are applied
+automatically at *startup* (`sqlx::migrate!`) — no manual step needed to run the bot.
+
+However, `cargo build`/`cargo check` compile-time-check queries against the live
+`DATABASE_URL` schema (unless relying on the offline `.sqlx/` cache), so after adding
+or pulling a new migration, apply it manually before building:
+
+```bash
+cargo sqlx migrate run
+```
