@@ -122,4 +122,5 @@ titles:
     loan-payout: "小贷人员"
 errors:
   not_group_chat: "此机器人仅在群聊中执行任务！"
+  group_account: "不能以群组或频道的身份游玩——请关闭匿名模式后重试！"
   feature_disabled: "此功能当前暂时禁用。"
