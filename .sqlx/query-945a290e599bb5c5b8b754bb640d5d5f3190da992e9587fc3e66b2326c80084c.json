@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT battles_total, battles_won FROM Battle_Stats WHERE uid = $1 AND chat_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "battles_total",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "battles_won",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "945a290e599bb5c5b8b754bb640d5d5f3190da992e9587fc3e66b2326c80084c"
+}

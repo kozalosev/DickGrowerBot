@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Announcements WHERE chat_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8ca978a1f9b4b793403b6d1abe1b7a195b2f3d97b44c6c4835e4f2f436332dd7"
+}

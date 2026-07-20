@@ -187,7 +187,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
                 .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
                 .ok()
             )
-            .map(|info| info.chat_id)
+            .and_then(|info| info.chat_id)
         )
         .map(ChatIdPartiality::from)
         .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));

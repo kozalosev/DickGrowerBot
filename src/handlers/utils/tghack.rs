@@ -105,14 +105,21 @@ impl IDFormatKind {
     }
 }
 
-fn fix_chat_id(number: i64) -> i64 {
-    if number.is_negative() {
-        // Calculate the chat_id by adding -100 * 10^x to the number
-        let power = (number.abs() as f64).log10().floor() as i64 + 1;
-        -100 * 10i64.pow(power as u32) + number
-    } else {
-        number
+/// Bot-API supergroup/channel ids are always `<= -1_000_000_000_000` (the `-100…` form).
+/// A legacy/basic group's inline id doesn't encode the chat at all — it decodes to some
+/// unrelated positive number (e.g. the inline sender's user id) or a small negative number
+/// that isn't a valid group id either. Only trust the decoded value when it's genuinely
+/// in the supergroup/channel range; otherwise the caller must fall back to `chat_instance`.
+const MIN_SUPERGROUP_CHAT_ID: i64 = -1_000_000_000_000;
+
+fn fix_chat_id(number: i64) -> Option<i64> {
+    if !number.is_negative() {
+        return None;
     }
+    // Calculate the chat_id by adding -100 * 10^x to the number
+    let power = (number.abs() as f64).log10().floor() as i64 + 1;
+    let fixed = -100 * 10i64.pow(power as u32) + number;
+    (fixed <= MIN_SUPERGROUP_CHAT_ID).then_some(fixed)
 }
 
 #[cfg(test)]
@@ -121,7 +128,8 @@ mod tests {
 
     #[test]
     fn test_fix_chat_id() {
-        assert_eq!(fix_chat_id(-1100294568), -1001100294568);
-        assert_eq!(fix_chat_id(68761694), 68761694);
+        assert_eq!(fix_chat_id(-1100294568), Some(-1001100294568));
+        assert_eq!(fix_chat_id(68761694), None);
+        assert_eq!(fix_chat_id(-599075523), None);
     }
 }

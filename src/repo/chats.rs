@@ -52,6 +52,22 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't get the information about the chat with id = {chat_id}"))
     }
 ,
+    /// Tells whether a chat is *anchored*: its row holds both the real `chat_id` and the
+    /// `chat_instance`, so inline invocations (keyed by `chat_instance`) resolve to the very
+    /// same row as command invocations (keyed by `chat_id`).
+    ///
+    /// Only meaningful for legacy (basic) groups: their `inline_message_id` doesn't encode the
+    /// chat, so the pairing can't be recovered later and has to be captured up front by a tap
+    /// on an in-chat button (see the `setup` callback).
+    pub async fn is_anchored(&self, chat_id: &TelegramChatId) -> anyhow::Result<bool> {
+        sqlx::query_scalar!(r#"SELECT EXISTS(SELECT 1 FROM Chats
+                WHERE chat_id = $1 AND chat_instance IS NOT NULL) AS "exists!""#,
+                chat_id.value())
+            .fetch_one(&self.pool)
+            .await
+            .context(format!("couldn't check whether the chat with id = {chat_id} is anchored"))
+    }
+,
     pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<InternalChatId, SearchError<ChatIdKind>> {
         self.get_chat(chat_id.clone()).await
             .map_err(SearchError::Internal)?
@@ -86,6 +102,55 @@ repository!(Chats, with_feature_toggles,
         Ok(InternalChatId::new(internal_id))
     }
 ,
+    /// Repoints a chat's row from its old (basic group) id to the new supergroup one after
+    /// Telegram migrated the group.
+    ///
+    /// The row keeps its internal id, so everything referencing the chat — dicks, loans, battle
+    /// stats, announcements — follows along untouched; only the external id changes.
+    pub async fn migrate_chat_id(&self, old: &TelegramChatId, new: &TelegramChatId) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let old_internal_id = sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", old.value())
+            .fetch_optional(&mut *tx)
+            .await
+            .context(format!("couldn't look up the chat to migrate from id = {old}"))?;
+        let old_internal_id = match old_internal_id {
+            Some(id) => id,
+            // the bot has never been used in the group before the migration — nothing to move
+            None => return Ok(())
+        };
+        let new_internal_id = sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", new.value())
+            .fetch_optional(&mut *tx)
+            .await
+            .context(format!("couldn't look up the chat to migrate to id = {new}"))?;
+
+        match new_internal_id {
+            // Telegram assigns a brand-new id to the supergroup, so this is the only case that
+            // normally happens; both updates of a migration converge on it (the second one finds
+            // no row for `old` anymore and returns early above).
+            None => {
+                sqlx::query!("UPDATE Chats SET chat_id = $2 WHERE id = $1", old_internal_id, new.value())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(Into::into)
+                    .and_then(ensure_only_one_row_updated)
+                    .context(format!("couldn't migrate the chat with id = {old_internal_id} from {old} to {new}"))?;
+                log::info!("migrated the chat with id = {old_internal_id} from {old} to {new}");
+            }
+            Some(id) if id == old_internal_id => {
+                log::debug!("the chat with id = {old_internal_id} has already been migrated to {new}")
+            }
+            // Two rows for what is one and the same chat. Folding them together would mean moving
+            // dicks, loans and stats across rows, some of which sit behind triggers that forbid
+            // updates outright — too destructive to attempt blindly for a case Telegram shouldn't
+            // produce. Left for manual resolution instead.
+            Some(id) => log::error!("couldn't migrate the chat from {old} to {new}: \
+                the target id is already taken by the chat with id = {id} (the old one has id = {old_internal_id}); \
+                the two rows have to be merged manually")
+        };
+        tx.commit().await?;
+        Ok(())
+    }
+,
     async fn create_chat(tx: &mut Transaction<'_, Postgres>, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
         log::info!("creating a chat with chat_id = {chat_id:?} and chat_instance = {chat_instance:?}");
         sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
@@ -105,12 +170,98 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't update the chat with id = {internal_id} to chat_id = {chat_id:?}, chat_instance = {chat_instance:?}))"))
     }
 ,
+    /// Carries everything that references the chat being merged away over to the surviving row.
+    ///
+    /// `Loans` and `Announcements` reference `Chats(id)` without `ON DELETE`, so leaving their
+    /// rows behind doesn't just orphan them — it makes the whole merge fail on a foreign key
+    /// violation. `Battle_Stats` cascades instead, which silently throws the statistics away.
+    ///
+    /// `Dick_of_Day` is deliberately left alone: it sits behind a trigger that forbids updates
+    /// outright, and re-inserting rewrites `created_at`, which would corrupt the history. It has
+    /// no foreign key, so its rows are merely orphaned rather than blocking anything.
+    async fn move_dependent_rows(tx: &mut Transaction<'_, Postgres>, main_id: i64, deleted_id: i64) -> anyhow::Result<()> {
+        // nothing constrains (uid, chat_id) here, so the loans can just be repointed
+        let loans = sqlx::query!("UPDATE Loans SET chat_id = $1 WHERE chat_id = $2", main_id, deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move loans from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+
+        // (uid, chat_id) is a primary key, so a user present in both chats needs their counters folded
+        let battle_stats = sqlx::query!(
+            "INSERT INTO Battle_Stats (uid, chat_id, battles_total, battles_won, win_streak_current, win_streak_max, acquired_length, lost_length)
+                    SELECT uid, $1, battles_total, battles_won, win_streak_current, win_streak_max, acquired_length, lost_length
+                        FROM Battle_Stats WHERE chat_id = $2
+                    ON CONFLICT (uid, chat_id) DO UPDATE SET
+                        battles_total = Battle_Stats.battles_total + EXCLUDED.battles_total,
+                        battles_won = Battle_Stats.battles_won + EXCLUDED.battles_won,
+                        win_streak_max = GREATEST(Battle_Stats.win_streak_max, EXCLUDED.win_streak_max),
+                        acquired_length = Battle_Stats.acquired_length + EXCLUDED.acquired_length,
+                        lost_length = Battle_Stats.lost_length + EXCLUDED.lost_length",
+                main_id, deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move battle stats from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Battle_Stats WHERE chat_id = $1", deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete battle stats of the chat with id = {deleted_id}"))?;
+
+        // keyed by (chat_id, language); the shown counters add up when both chats saw the same one
+        let announcements = sqlx::query!(
+            "INSERT INTO Announcements (chat_id, language, hash, times_shown)
+                    SELECT $1, language, hash, times_shown FROM Announcements WHERE chat_id = $2
+                    ON CONFLICT (chat_id, language) DO UPDATE SET
+                        times_shown = Announcements.times_shown + EXCLUDED.times_shown",
+                main_id, deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move announcements from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Announcements WHERE chat_id = $1", deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete announcements of the chat with id = {deleted_id}"))?;
+
+        // keyed by (chat_id, uid); an import already done in the main chat wins, so that a merge
+        // can't be used to import a second time
+        let imports = sqlx::query!(
+            "INSERT INTO Imports (chat_id, uid, original_length)
+                    SELECT $1, uid, original_length FROM Imports WHERE chat_id = $2
+                    ON CONFLICT (chat_id, uid) DO NOTHING",
+                main_id, deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move imports from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Imports WHERE chat_id = $1", deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete imports of the chat with id = {deleted_id}"))?;
+
+        log::info!("moved rows from the chat with id = {deleted_id} to {main_id}: \
+            loans: {loans}, battle stats: {battle_stats}, announcements: {announcements}, imports: {imports}");
+        Ok(())
+    }
+,
     async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<i64> {
         let state = merge_chat_objects(&chats)?;
+        // Moving the dicks over rather than summing into the surviving rows: a user who only ever
+        // played through inline mode has no row in the surviving chat at all, and updating in
+        // place would skip them, leaving their length to be deleted below.
+        //
+        // `bonus_attempts` is incremented on both paths because the trigger on Dicks decrements it
+        // once per write; the increment merely cancels that out. It has to be spelled out again in
+        // the conflict branch: the BEFORE INSERT trigger runs before the conflict is detected, so
+        // by then `EXCLUDED` already carries the decremented value.
         let updated_dicks = sqlx::query!(
-            "WITH sum_dicks AS (SELECT uid, sum(length) as length FROM Dicks WHERE chat_id IN ($1, $2) GROUP BY uid)
-                    UPDATE Dicks d SET length = sum_dicks.length, bonus_attempts = (bonus_attempts + 1)
-                    FROM sum_dicks WHERE chat_id = $1 AND d.uid = sum_dicks.uid",
+            "INSERT INTO Dicks (uid, chat_id, length, bonus_attempts, updated_at)
+                    SELECT uid, $1, length, bonus_attempts + 1, updated_at FROM Dicks WHERE chat_id = $2
+                    ON CONFLICT (chat_id, uid) DO UPDATE SET
+                        length = Dicks.length + EXCLUDED.length,
+                        bonus_attempts = Dicks.bonus_attempts + EXCLUDED.bonus_attempts + 1,
+                        updated_at = GREATEST(Dicks.updated_at, EXCLUDED.updated_at)",
                 state.main.internal_id, state.deleted.0)
             .execute(&mut **tx)
             .await
@@ -122,6 +273,7 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't delete dicks from the old chat with id = {}", state.deleted.0))?
             .rows_affected();
         log::info!("merging chats: {chats:?}, updated dicks: {updated_dicks}, deleted: {deleted_dicks}");
+        Self::move_dependent_rows(tx, state.main.internal_id, state.deleted.0).await?;
 
         sqlx::query!("DELETE FROM Chats WHERE id = $1 AND chat_instance = $2",
                 state.deleted.0, state.deleted.1)

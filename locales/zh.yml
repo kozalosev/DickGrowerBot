@@ -121,6 +121,10 @@ titles:
     top_line: "以下特权影响了结果"
     help-pussies: "深洞"
     loan-payout: "小贷人员"
+setup:
+  text: "本群使用旧版群组格式，因此通过内联模式调用我时，我无法识别它。\n\n请<b>点击一次</b>下方按钮以在此激活我——之后一切将正常运作。"
+  button: "激活"
+  activated: "完成！机器人已在本群激活。玩得开心！🍆"
 errors:
   not_group_chat: "此机器人仅在群聊中执行任务！"
   group_account: "不能以群组或频道的身份游玩——请关闭匿名模式后重试！"

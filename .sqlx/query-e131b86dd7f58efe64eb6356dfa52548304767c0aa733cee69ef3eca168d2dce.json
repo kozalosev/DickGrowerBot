@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Imports (chat_id, uid, original_length)\n                    SELECT $1, uid, original_length FROM Imports WHERE chat_id = $2\n                    ON CONFLICT (chat_id, uid) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e131b86dd7f58efe64eb6356dfa52548304767c0aa733cee69ef3eca168d2dce"
+}

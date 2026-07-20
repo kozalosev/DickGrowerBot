@@ -121,6 +121,10 @@ titles:
     top_line: "The following perks affected the result"
     help-pussies: "deep hole"
     loan-payout: "micro-loaner"
+setup:
+  text: "This group uses the old format, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual."
+  button: "Activate"
+  activated: "Done! The bot is now activated in this group. Have fun! 🍆"
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Dicks (uid, chat_id, length, bonus_attempts) VALUES ($1, $2, 1, 2), ($1, $3, 2, 3), ($4, $3, 7, 4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4bd56363a6886b539c027aaaff45ef889d1b048761625d62db6192aa4664520"
+}
