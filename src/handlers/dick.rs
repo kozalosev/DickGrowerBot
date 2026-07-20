@@ -132,6 +132,7 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
     let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
     let has_more_pages = (dicks.len() as i16) > config.top_limit.value();
+    let mut any_inactive = false;
     let lines = dicks.into_iter()
         .take(config.top_limit.value() as usize)
         .enumerate()
@@ -142,11 +143,16 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
             } else {
                 escaped_name
             };
-            let can_grow = Utc::now().num_days_from_ce() > d.grown_at.num_days_from_ce();
+            let now = Utc::now();
+            let inactive = (now - d.grown_at).num_days() > config.inactivity_days.value() as i64;
+            let can_grow = now.num_days_from_ce() > d.grown_at.num_days_from_ce();
             let pos = d.position.map(|p| p.value() as i64).unwrap_or((i+1) as i64);
             let mut line = t!("commands.top.line", locale = &lang_code,
                 n = pos, name = name, length = d.length).to_string();
-            if can_grow {
+            if inactive {
+                any_inactive = true;
+                line.push_str(" [~]")
+            } else if can_grow {
                 line.push_str(" [+]")
             };
             line
@@ -158,7 +164,12 @@ pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppCon
     } else {
         let title = t!("commands.top.title", locale = &lang_code);
         let ending = t!("commands.top.ending", locale = &lang_code);
-        let text = format!("{}\n\n{}\n\n{}", title, lines.join("\n"), ending);
+        let inactive_hint = if any_inactive {
+            format!("\n{}", t!("commands.top.ending_inactive", locale = &lang_code, days = config.inactivity_days))
+        } else {
+            String::new()
+        };
+        let text = format!("{}\n\n{}\n\n{}{}", title, lines.join("\n"), ending, inactive_hint);
         if has_more_pages {
             Top::with_more_pages(text)
         } else {

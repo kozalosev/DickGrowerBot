@@ -16,6 +16,7 @@ commands:
     title: "Top of the biggest dicks:"
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"
     ending: "<i>[+] means a grower hasn't grown his dick today yet.</i>"
+    ending_inactive: "<i>[~] means a grower hasn't grown his dick for more than %{days} days.</i>"
     empty: "No one is in the game yet :("
   dod:
     description: "Elect the Dick of a Day"
