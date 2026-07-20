@@ -4,7 +4,18 @@ use teloxide::types::User;
 use domain_types_macro::domain_type;
 
 static DEFAULT: Lazy<LanguageCode> = Lazy::new(|| LanguageCode("en".to_string()));
-static RU_SPEAKING_LOCALES: [&str; 3] = ["ru", "uk", "be"];
+static LOCALE_TO_LANGUAGE: [(&str, SupportedLanguage); 10] = [
+    ("ru", SupportedLanguage::RU),
+    ("uk", SupportedLanguage::RU),
+    ("be", SupportedLanguage::RU),
+    ("ky", SupportedLanguage::RU),
+    ("kk", SupportedLanguage::RU),
+    ("ka", SupportedLanguage::RU),
+    ("hy", SupportedLanguage::RU),
+    ("it", SupportedLanguage::IT),
+    ("fa", SupportedLanguage::FA),
+    ("zh", SupportedLanguage::ZH),
+];
 
 #[domain_type]
 struct LanguageCode(String);
@@ -16,6 +27,9 @@ struct LanguageCode(String);
 pub enum SupportedLanguage {
     EN,
     RU,
+    IT,
+    FA,
+    ZH,
 }
 
 impl LanguageCode {
@@ -33,12 +47,12 @@ impl LanguageCode {
     pub fn to_supported_language(&self) -> SupportedLanguage {
         let code = self.to_ascii_lowercase();
         if code.len() < 2 {
-            SupportedLanguage::EN
-        } else if RU_SPEAKING_LOCALES.contains(&&code[..2]) {
-            SupportedLanguage::RU
-        } else {
-            SupportedLanguage::EN
+            return SupportedLanguage::EN
         }
+        LOCALE_TO_LANGUAGE.iter()
+            .find(|(locale, _)| *locale == &code[..2])
+            .map(|(_, lang)| *lang)
+            .unwrap_or(SupportedLanguage::EN)
     }
 
     fn get_language_code_or_log_if_missing(user: &User) -> Option<&String> {
@@ -72,19 +86,32 @@ impl From<Option<&User>> for LanguageCode {
 #[cfg(test)]
 mod test_from_maybe_string {
     use crate::domain::primitives::LanguageCode;
-    use crate::domain::primitives::SupportedLanguage::{EN, RU};
+    use crate::domain::primitives::SupportedLanguage::{EN, RU, IT, FA, ZH};
 
     #[test]
     fn success() {
         let ru = [
             "RU", "ru", "Ru", "rU", "ru-RU", "RU-ru", "rU-Ru", "Ru-rU",
-            "BE", "be", "Be", "bE", "be-BY", "BE-by", "bE-By", "Be-bY"
+            "BE", "be", "Be", "bE", "be-BY", "BE-by", "bE-By", "Be-bY",
+            "KY", "ky", "Ky", "kY", "ky-KG", "KY-kg",
+            "KK", "kk", "Kk", "kK", "kk-KZ", "KK-kz",
+            "KA", "ka", "Ka", "kA", "ka-GE", "KA-ge",
+            "HY", "hy", "Hy", "hY", "hy-AM", "HY-am"
         ].map(|code| (code, RU));
+        let it = [
+            "IT", "it", "It", "iT", "it-IT", "IT-it"
+        ].map(|code| (code, IT));
+        let fa = [
+            "FA", "fa", "Fa", "fA", "fa-IR", "FA-ir"
+        ].map(|code| (code, FA));
+        let zh = [
+            "ZH", "zh", "Zh", "zH", "zh-CN", "ZH-cn", "zh-TW", "ZH-tw"
+        ].map(|code| (code, ZH));
         let en = [
             "EN", "en", "En", "eN", "en-US", "EN-us", "eN-Us", "En-uS",
             "c", "C", "POSIX"
         ].map(|code| (code, EN));
-        let cases = ru.into_iter().chain(en);
+        let cases = ru.into_iter().chain(it).chain(fa).chain(zh).chain(en);
 
         for (case, expected) in cases {
             let value = case.to_string();
