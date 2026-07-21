@@ -125,8 +125,24 @@ pub fn get_params_for_message_edit(q: &CallbackQuery) -> Result<EditMessageReqPa
         .ok_or("no message")
 }
 
+/// Edits the text of the message a callback query is attached to, transparently handling both
+/// regular chat messages and inline messages.
+pub async fn edit_message_text(bot: &Bot, params: EditMessageReqParamsKind, text: impl Into<String>) -> Result<(), teloxide::RequestError> {
+    let text = text.into();
+    match params {
+        EditMessageReqParamsKind::Chat(chat_id, message_id) => {
+            bot.edit_message_text(chat_id, message_id, text).await?;
+        }
+        EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
+            bot.edit_message_text_inline(inline_message_id, text).await?;
+        }
+    }
+    Ok(())
+}
+
 pub enum CallbackAnswerParams {
-    Answer { answer: JsonRequest<AnswerCallbackQuery>, lang_code: LanguageCode },
+    // boxed to keep the enum small: the request is far larger than the `AnotherUser` variant
+    Answer(Box<JsonRequest<AnswerCallbackQuery>>),
     AnotherUser,
 }
 
@@ -139,7 +155,7 @@ pub async fn prepare_callback_answer_params(bot: &Bot, query: &CallbackQuery, us
         answer.await?;
         CallbackAnswerParams::AnotherUser
     } else {
-        CallbackAnswerParams::Answer{ answer, lang_code }
+        CallbackAnswerParams::Answer(Box::new(answer))
     };
     Ok(res)
 }
@@ -174,8 +190,33 @@ where
 macro_rules! check_invoked_by_owner_and_get_answer_params {
     ($bot:ident, $query:ident, $user_id:expr) => {
         match $crate::handlers::utils::callbacks::prepare_callback_answer_params(&$bot, &$query, $user_id).await? {
-            $crate::handlers::utils::callbacks::CallbackAnswerParams::Answer { answer, lang_code } => (answer, lang_code),
+            $crate::handlers::utils::callbacks::CallbackAnswerParams::Answer(answer) => *answer,
             $crate::handlers::utils::callbacks::CallbackAnswerParams::AnotherUser => return Ok(()),
         }
+    }
+}
+
+/// Builds a minimal [`CallbackQuery`] carrying the given callback `data`, for tests that only
+/// need to exercise callback-data parsing.
+#[cfg(test)]
+pub(crate) fn build_callback_query(data: String) -> CallbackQuery {
+    use teloxide::types::{CallbackQueryId, User};
+    CallbackQuery {
+        id: CallbackQueryId(String::new()),
+        from: User {
+            id: UserId(0),
+            is_bot: false,
+            first_name: String::new(),
+            last_name: None,
+            username: None,
+            language_code: None,
+            is_premium: false,
+            added_to_attachment_menu: false,
+        },
+        message: None,
+        inline_message_id: None,
+        chat_instance: String::new(),
+        data: Some(data),
+        game_short_name: None,
     }
 }

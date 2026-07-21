@@ -61,6 +61,12 @@ impl CachedEnvToggles {
         })
     }
 
+    /// Forces a command's toggle to a fixed value regardless of the environment.
+    pub fn set_override(&self, key: &str, enabled: bool) {
+        self.map.write().expect(CACHED_ENV_TOGGLES_POISONED_MSG)
+            .insert(key.to_owned(), enabled);
+    }
+
     fn enabled_in_env(key: &str) -> bool {
         std::env::var_os(format!("DISABLE_CMD_{}", key.to_uppercase())).is_none()
     }

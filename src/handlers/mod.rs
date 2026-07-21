@@ -6,6 +6,7 @@ mod dod;
 mod import;
 mod promo;
 mod inline;
+pub mod language;
 pub mod utils;
 pub mod pvp;
 pub mod perks;
@@ -29,6 +30,7 @@ pub use dod::*;
 pub use import::*;
 pub use inline::*;
 pub use promo::*;
+pub use language::LanguageCommands;
 pub use loan::LoanCommands;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
@@ -163,8 +165,7 @@ pub mod checks {
         !is_group_chat(msg)
     }
 
-    pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
-        let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+    pub async fn handle_not_group_chat(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
         let answer = t!("errors.not_group_chat", locale = &lang_code);
         reply_html(bot, &msg, answer).await?;
         Ok(())
@@ -183,8 +184,7 @@ pub mod checks {
         teloxide::dptree::filter(is_group_account).endpoint(handle_group_account)
     }
 
-    async fn handle_group_account(bot: Bot, msg: Message) -> HandlerResult {
-        let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+    async fn handle_group_account(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
         let answer = t!("errors.group_account", locale = &lang_code);
         reply_html(bot, &msg, answer).await?;
         Ok(())

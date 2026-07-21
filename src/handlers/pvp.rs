@@ -93,11 +93,10 @@ impl TryFrom<String> for BattleCallbackData {
 }
 
 pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
-                         repos: Repositories, config: AppConfig) -> HandlerResult {
+                         repos: Repositories, config: AppConfig, lang_code: LanguageCode) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let user = msg.from.as_ref().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
-    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     let params = BattleParams {
         repos,
         features: config.features.pvp,
@@ -113,10 +112,9 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     Ok(())
 }
 
-pub async fn cmd_handler_no_args(bot: Bot, msg: Message) -> HandlerResult {
+pub async fn cmd_handler_no_args(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
-    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
     Ok(())
 }
@@ -131,12 +129,11 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
     maybe_bet.is_ok()
 }
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
+pub async fn inline_handler(bot: Bot, query: InlineQuery, lang_code: LanguageCode) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let bet = Bet::new(query.query.parse()?)
         .map_err(|e| anyhow!(e))?;
-    let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
@@ -175,7 +172,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig,
-                              mut battle_locker: LockCallbackServiceFacade) -> HandlerResult {
+                              mut battle_locker: LockCallbackServiceFacade, lang_code: LanguageCode) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat().id)
         .map(TelegramChatId::from)
@@ -203,7 +200,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     let params = BattleParams {
         repos,
         features: config.features.pvp,
-        lang_code: LanguageCode::from_user(&query.from),
+        lang_code,
         chat_id: chat_id.clone(),
     };
     let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;

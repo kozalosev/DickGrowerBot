@@ -55,17 +55,18 @@ impl InlineResult {
 }
 
 impl InlineCommand {
-    async fn execute(&self, repos: &Repositories, config: AppConfig, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<InlineResult> {
+    async fn execute(&self, repos: &Repositories, config: AppConfig, incr: Incrementor,
+                     from_refs: FromRefs<'_>, lang_code: LanguageCode) -> anyhow::Result<InlineResult> {
         match self {
             InlineCommand::Grow => {
                 metrics::CMD_GROW_COUNTER.inline.inc();
-                dick::grow_impl(repos, incr, from_refs)
+                dick::grow_impl(repos, incr, from_refs, lang_code)
                     .await
                     .map(InlineResult::text)
             },
             InlineCommand::Top => {
                 metrics::CMD_TOP_COUNTER.inline.inc();
-                dick::top_impl(repos, &config, from_refs, Page::first())
+                dick::top_impl(repos, &config, from_refs, lang_code, Page::first())
                     .await
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
@@ -76,19 +77,19 @@ impl InlineCommand {
             },
             InlineCommand::DickOfDay => {
                 metrics::CMD_DOD_COUNTER.inline.inc();
-                dod::dick_of_day_impl(config, repos, incr, from_refs)
+                dod::dick_of_day_impl(config, repos, incr, from_refs, lang_code)
                     .await
                     .map(InlineResult::text)
             },
             InlineCommand::Loan => {
                 metrics::CMD_LOAN_COUNTER.invoked.inline.inc();
-                loan::loan_impl(repos, from_refs, config)
+                loan::loan_impl(repos, from_refs, config, lang_code)
                     .await
                     .map(InlineResult::from)
             },
             InlineCommand::Stats => {
                 metrics::CMD_STATS.inline.inc();
-                stats::chat_stats_impl(repos, from_refs, config.features.pvp)
+                stats::chat_stats_impl(repos, from_refs, config.features.pvp, lang_code)
                     .await
                     .map(InlineResult::text)
             },
@@ -128,14 +129,14 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
     }
 ]));
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
+pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig,
+                            lang_code: LanguageCode) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
     repos.users.create_or_update(DomainUserId::from(&query.from), &name).await?;
 
     let uid = query.from.id.0;
-    let lang_code = LanguageCode::from_user(&query.from);
     let btn_label = t!("inline.results.button", locale = &lang_code);
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
         .map(|cmd| cmd.to_string())
@@ -170,7 +171,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
 
 pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                                    repos: Repositories, config: AppConfig,
-                                   incr: Incrementor) -> HandlerResult {
+                                   incr: Incrementor, lang_code: LanguageCode) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
 
     if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
@@ -191,7 +192,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                 .context(format!("couldn't parse inline command '{}'", result.result_id))?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
@@ -209,8 +210,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig,
-                              incr: Incrementor) -> HandlerResult {
-    let lang_code = LanguageCode::from_user(&query.from);
+                              incr: Incrementor, lang_code: LanguageCode) -> HandlerResult {
     let mut answer = bot.answer_callback_query(query.id.clone());
 
     if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {
@@ -232,7 +232,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
         let parse_res = parse_callback_data(data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
             let mut edit = bot.edit_message_text_inline(inline_msg_id, &inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);

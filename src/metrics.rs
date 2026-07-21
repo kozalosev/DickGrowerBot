@@ -31,6 +31,8 @@ pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_import_usage_total", "count of /import invocations and successes", ["invoked", "finished"]));
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
+pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
+    UserServiceCounters::new("user_service_get_total", "count of user-service get() resolutions, split by whether they were served from cache or sent over gRPC"));
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -65,6 +67,7 @@ fn force_registration() {
     Lazy::force(&CMD_STATS);
     Lazy::force(&CMD_IMPORT);
     Lazy::force(&CMD_PROMO);
+    Lazy::force(&USER_SERVICE);
 }
 
 pub struct Counter(IntCounter);
@@ -86,6 +89,10 @@ pub struct DeepLinkedCommandsCounters {
     pub invoked_by_command: Counter,
     pub invoked_by_deeplink: Counter,
     pub finished: Counter,
+}
+pub struct UserServiceCounters {
+    cache: Counter,
+    sent: Counter,
 }
 
 impl Counter {
@@ -167,5 +174,25 @@ impl DeepLinkedCommandsCounters {
             invoked_by_deeplink: vec.counter(&["invoked_by_deeplink"]),
             finished: vec.counter(&["finished"]),
         }
+    }
+}
+
+impl UserServiceCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        Self {
+            cache: vec.counter(&["cache"]),
+            sent: vec.counter(&["sent"]),
+        }
+    }
+
+    /// A `get()` resolution served from the local TTL cache.
+    pub fn cache_hit(&self) {
+        self.cache.inc()
+    }
+
+    /// A `get()` resolution that hit the network (an actual gRPC request).
+    pub fn request_sent(&self) {
+        self.sent.inc()
     }
 }

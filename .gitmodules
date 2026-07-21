@@ -1,0 +1,3 @@
+[submodule "user-service-proto"]
+	path = user-service-proto
+	url = https://github.com/Kozalo-Blog/user-service-proto.git

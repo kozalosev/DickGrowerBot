@@ -19,9 +19,8 @@ pub enum PrivacyCommands {
     Privacy,
 }
 
-pub async fn privacy_cmd_handler(bot: Bot, msg: Message) -> HandlerResult {
+pub async fn privacy_cmd_handler(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
     metrics::CMD_PRIVACY_COUNTER.inc();
-    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     let policy = match lang_code.to_supported_language() {
         RU => RU_POLICY,
         EN => EN_POLICY,

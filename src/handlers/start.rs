@@ -15,8 +15,7 @@ pub enum StartCommands {
 }
 
 pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
-                               help: HelpContainer, repos: repo::Repositories) -> HandlerResult {
-    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+                               help: HelpContainer, repos: repo::Repositories, lang_code: LanguageCode) -> HandlerResult {
     let answer = if msg.from.as_ref().is_none() {
         log::warn!("The /start command was invoked without a FROM field for message: {:?}", msg);
         help.get_help_message(lang_code).to_owned()
@@ -28,7 +27,7 @@ pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
                 let encoded_promo_code = promo_code.strip_prefix(PROMO_START_PARAM_PREFIX)
                     .expect("promo start param prefix must be present here");
                 let promo_code = decode_promo_code(encoded_promo_code)?;
-                promo_activation_impl(repos.promo, user, &promo_code).await?
+                promo_activation_impl(repos.promo, user, &promo_code, lang_code).await?
             }
             StartCommands::Start(_) => {
                 metrics::CMD_START_COUNTER.inc();

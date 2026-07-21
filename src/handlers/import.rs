@@ -110,9 +110,9 @@ impl Display for InvalidLines {
     }
 }
 
-pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories) -> HandlerResult {
+pub async fn import_cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories,
+                                lang_code: LanguageCode) -> HandlerResult {
     metrics::CMD_IMPORT.invoked();
-    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     let answer = match check_and_parse_message(&bot, &msg, &repos).await {
         Ok(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {

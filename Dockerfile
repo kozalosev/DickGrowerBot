@@ -1,6 +1,8 @@
 FROM rust:1.96-alpine3.21 AS chef
 WORKDIR /build
-RUN apk update && apk add --no-cache musl-dev
+# `protoc` and `protobuf-dev` are required by the build script to generate the
+# user-service gRPC client from the vendored proto contract.
+RUN apk update && apk add --no-cache musl-dev protoc protobuf-dev
 RUN cargo install cargo-chef --locked
 
 FROM chef AS planner
@@ -34,6 +36,8 @@ COPY domain_types_macro/ domain_types_macro/
 COPY locales/ locales/
 COPY migrations/ migrations/
 COPY .sqlx/ .sqlx/
+COPY build.rs ./
+COPY user-service-proto/ user-service-proto/
 COPY Cargo.* ./
 RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 
@@ -82,6 +86,9 @@ ARG ANNOUNCEMENT_RU
 ARG ANNOUNCEMENT_IT
 ARG ANNOUNCEMENT_FA
 ARG ANNOUNCEMENT_ZH
+ARG GRPC_ADDR_USER_SERVICE
+ARG USER_CACHE_TIME_SECS
+ARG USER_SERVICE_TIMEOUT_SECS
 ENTRYPOINT [ "/usr/local/bin/dickGrowerBot" ]
 
 LABEL org.opencontainers.image.source=https://github.com/kozalosev/DickGrowerBot

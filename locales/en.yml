@@ -1,6 +1,14 @@
 commands:
   help:
     description: "I'll help you, my friend"
+  language:
+    description: "Change the interface language"
+    prompt: "Choose your language:"
+    success: "Done! Your language preference is saved and will apply to all of Kozalo's bots."
+    not_registered: "You aren't registered in the shared account service yet. Register via @LocPlaceBot first — then your language will sync across all of Kozalo's bots."
+    errors:
+      unavailable: "This feature is currently unavailable."
+      unsupported: "Sorry, this language isn't supported. Try one of: 🇬🇧 en, 🇷🇺 ru, 🇮🇹 it, 🇮🇷 fa, 🇨🇳 zh."
   privacy:
     description: "Privacy Policy detailing what data we store"
   grow:

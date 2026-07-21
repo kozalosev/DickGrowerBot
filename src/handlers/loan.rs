@@ -25,14 +25,15 @@ pub enum LoanCommands {
     Borrow,
 }
 
-pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, config: AppConfig) -> HandlerResult {
+pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, config: AppConfig,
+                         lang_code: LanguageCode) -> HandlerResult {
     metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
 
-    let result = loan_impl(&repos, from_refs, config).await?;
+    let result = loan_impl(&repos, from_refs, config, lang_code).await?;
     let markup = result.keyboard().map(ReplyMarkup::InlineKeyboard);
 
     let mut request = reply_html(bot, &msg, result.text());
@@ -42,17 +43,17 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, conf
     Ok(())
 }
 
-pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, config: AppConfig) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
+pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, config: AppConfig,
+                              lang_code: LanguageCode) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
     let (from, chat_id_part) = (from_refs.0, from_refs.1);
     let chat_id_kind = chat_id_part.kind();
-    let lang_code = LanguageCode::from_user(from);
-    
+
     let maybe_loan = repos.loans.get_active_loan(DomainUserId::from(from), &chat_id_kind).await?;
-    if let Some(Loan { debt, .. }) = maybe_loan {
-        if !config.features.multiple_loans {
-            let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt).to_string();
-            return Ok(HandlerImplResult::OnlyText(left_to_pay))
-        }
+    if let Some(Loan { debt, .. }) = maybe_loan
+        && !config.features.multiple_loans
+    {
+        let left_to_pay = t!("commands.loan.debt", locale = &lang_code, debt = debt).to_string();
+        return Ok(HandlerImplResult::OnlyText(left_to_pay))
     }
 
     if config.loan_payout_ratio <= 0.0 || config.loan_payout_ratio >= 1.0 {
@@ -99,9 +100,9 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 pub async fn callback_handler(bot: Bot, query: CallbackQuery,
-                              repos: repo::Repositories, config: AppConfig) -> HandlerResult {
+                              repos: repo::Repositories, config: AppConfig, lang_code: LanguageCode) -> HandlerResult {
     let data = LoanCallbackData::parse(&query)?;
-    let (mut answer, lang_code) = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
     
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
     match data.action {
@@ -139,14 +140,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
         }
         LoanCallbackAction::Confirmed { .. } => {
             let updated_text = t!("commands.loan.callback.payout_ratio_changed", locale = &lang_code);
-            match edit_msg_params {
-                EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-                    bot.edit_message_text(chat_id, message_id, updated_text).await?;
-                }
-                EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-                    bot.edit_message_text_inline(inline_message_id, updated_text).await?;
-                }
-            }
+            callbacks::edit_message_text(&bot, edit_msg_params, updated_text).await?;
         }
         LoanCallbackAction::Refused => {
             let updated_text = t!("commands.loan.callback.refused", locale = &lang_code);
@@ -235,9 +229,9 @@ impl TryFrom<String> for LoanCallbackData {
 
 #[cfg(test)]
 mod test {
-    use teloxide::types::{CallbackQuery, CallbackQueryId, User, UserId};
+    use teloxide::types::UserId;
     use crate::handlers::loan::{LoanCallbackAction, LoanCallbackData};
-    use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
+    use crate::handlers::utils::callbacks::{build_callback_query, CallbackDataWithPrefix};
 
     #[test]
     fn test_parse() {
@@ -294,25 +288,4 @@ mod test {
         format!("loan:{uid}:confirmed:{value}:{payout_ratio}"),
         format!("loan:{uid}:refused"),
     ]}
-
-    fn build_callback_query(data: String) -> CallbackQuery {
-        CallbackQuery {
-            id: CallbackQueryId("".to_string()),
-            from: User {
-                id: UserId(0),
-                is_bot: false,
-                first_name: "".to_string(),
-                last_name: None,
-                username: None,
-                language_code: None,
-                is_premium: false,
-                added_to_attachment_menu: false,
-            },
-            message: None,
-            inline_message_id: None,
-            chat_instance: "".to_string(),
-            data: Some(data),   // here we insert a value
-            game_short_name: None,
-        }
-    }
 }

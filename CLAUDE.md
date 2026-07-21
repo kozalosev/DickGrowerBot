@@ -40,6 +40,24 @@ DATABASE_URL=postgres://...
 TELOXIDE_TOKEN=...
 ```
 
+### Optional: user-service integration
+
+The bot can integrate with the [user-service](https://github.com/Kozalo-Blog/user-service)
+microservice (gRPC) to read/update a user's preferred language across all of Kozalo's bots:
+
+```
+GRPC_ADDR_USER_SERVICE=host:port   # unset => integration disabled, /language hidden
+USER_CACHE_TIME_SECS=360           # optional cache TTL for fetched users
+```
+
+The proto contract is vendored as the `user-service-proto` git submodule and compiled by
+`build.rs` (via `tonic-prost-build`), so **`protoc` must be installed** and the submodule
+checked out to build:
+
+```bash
+git submodule update --init
+```
+
 Migrations run automatically on startup via `sqlx::migrate!` — but that's only at
 runtime. `sqlx::query!`/`query_as!` macros type-check against the live schema at
 `DATABASE_URL` when compiling (no `.sqlx/` cache, or it's stale), so **`cargo build`
