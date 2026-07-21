@@ -13,8 +13,12 @@ pub enum HelpCommands {
     Help,
 }
 
-pub async fn help_cmd_handler(bot: Bot, msg: Message, container: HelpContainer,
-                              lang_code: LanguageCode) -> HandlerResult {
+pub async fn help_cmd_handler(
+    bot: Bot,
+    msg: Message,
+    container: HelpContainer,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::CMD_HELP_COUNTER.inc();
     let help = container.get_help_message(lang_code);
     reply_html!(bot, msg, help);

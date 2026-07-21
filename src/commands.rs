@@ -51,7 +51,13 @@ pub async fn set_my_commands(bot: &Bot, lang_code: &str, toggles: &CachedEnvTogg
         .unwrap_or(Ok(()))
 }
 
-async fn set_commands(bot: &Bot, commands: Vec<Vec<BotCommand>>, scope: BotCommandScope, lang_code: &str, toggles: &CachedEnvToggles) -> Result<(), RequestError> {
+async fn set_commands(
+    bot: &Bot,
+    commands: Vec<Vec<BotCommand>>,
+    scope: BotCommandScope,
+    lang_code: &str,
+    toggles: &CachedEnvToggles,
+) -> Result<(), RequestError> {
     let commands: Vec<BotCommand> = commands
         .concat()
         .into_iter()

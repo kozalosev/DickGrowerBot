@@ -127,7 +127,11 @@ pub fn get_params_for_message_edit(q: &CallbackQuery) -> Result<EditMessageReqPa
 
 /// Edits the text of the message a callback query is attached to, transparently handling both
 /// regular chat messages and inline messages.
-pub async fn edit_message_text(bot: &Bot, params: EditMessageReqParamsKind, text: impl Into<String>) -> Result<(), teloxide::RequestError> {
+pub async fn edit_message_text(
+    bot: &Bot,
+    params: EditMessageReqParamsKind,
+    text: impl Into<String>,
+) -> Result<(), teloxide::RequestError> {
     let text = text.into();
     match params {
         EditMessageReqParamsKind::Chat(chat_id, message_id) => {
@@ -146,7 +150,11 @@ pub enum CallbackAnswerParams {
     AnotherUser,
 }
 
-pub async fn prepare_callback_answer_params(bot: &Bot, query: &CallbackQuery, user_id: UserId) -> Result<CallbackAnswerParams, teloxide::RequestError> {
+pub async fn prepare_callback_answer_params(
+    bot: &Bot,
+    query: &CallbackQuery,
+    user_id: UserId,
+) -> Result<CallbackAnswerParams, teloxide::RequestError> {
     let lang_code = LanguageCode::from_user(&query.from);
     let mut answer = bot.answer_callback_query(query.id.clone());
     let res = if query.from.id != user_id {
@@ -161,7 +169,11 @@ pub async fn prepare_callback_answer_params(bot: &Bot, query: &CallbackQuery, us
 }
 
 /// Utility method to make easier to implement the CallbackDataWithPrefix::parse() method.
-pub fn parse_part<VT, PDT>(parts: &mut Split<char>, err_builder: &InvalidCallbackDataBuilder<VT>, part_name: &str) -> Result<PDT, InvalidCallbackData>
+pub fn parse_part<VT, PDT>(
+    parts: &mut Split<char>,
+    err_builder: &InvalidCallbackDataBuilder<VT>,
+    part_name: &str,
+) -> Result<PDT, InvalidCallbackData>
 where
     VT: ToString,
     PDT: FromStr,
@@ -172,7 +184,10 @@ where
         .and_then(|uid| uid.parse().map_err(|e| err_builder.parsing_err(e)))
 }
 
-pub fn parse_optional_part<VT, PDT>(parts: &mut Split<char>, err_builder: &InvalidCallbackDataBuilder<VT>) -> Result<NewLayoutValue<PDT>, InvalidCallbackData>
+pub fn parse_optional_part<VT, PDT>(
+    parts: &mut Split<char>,
+    err_builder: &InvalidCallbackDataBuilder<VT>,
+) -> Result<NewLayoutValue<PDT>, InvalidCallbackData>
 where
     VT: ToString,
     PDT: FromStr,

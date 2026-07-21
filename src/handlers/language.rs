@@ -28,8 +28,13 @@ impl LanguageCommands {
     }
 }
 
-pub async fn cmd_handler(bot: Bot, msg: Message, cmd: LanguageCommands,
-                         user_service: UserService<UserServiceClientGrpc>, lang_code: LanguageCode) -> HandlerResult {
+pub async fn cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cmd: LanguageCommands,
+    user_service: UserService<UserServiceClientGrpc>,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
 
     let client = match &user_service {
@@ -61,8 +66,12 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     LanguageCallbackData::check_prefix(query)
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery,
-                              user_service: UserService<UserServiceClientGrpc>, lang_code: LanguageCode) -> HandlerResult {
+pub async fn callback_handler(
+    bot: Bot,
+    query: CallbackQuery,
+    user_service: UserService<UserServiceClientGrpc>,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let data = LanguageCallbackData::parse(&query)?;
     let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
@@ -77,8 +86,12 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
     Ok(())
 }
 
-async fn apply_language(client: &impl UserServiceClient, uid: UserId, lang: SupportedLanguage,
-                        current_lang: &LanguageCode) -> anyhow::Result<String> {
+async fn apply_language(
+    client: &impl UserServiceClient,
+    uid: UserId,
+    lang: SupportedLanguage,
+    current_lang: &LanguageCode,
+) -> anyhow::Result<String> {
     let text = match client.get(uid).await? {
         Some(_) => {
             let code = lang.to_string();

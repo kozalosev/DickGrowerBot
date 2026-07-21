@@ -55,8 +55,14 @@ impl InlineResult {
 }
 
 impl InlineCommand {
-    async fn execute(&self, repos: &Repositories, config: AppConfig, incr: Incrementor,
-                     from_refs: FromRefs<'_>, lang_code: LanguageCode) -> anyhow::Result<InlineResult> {
+    async fn execute(
+        &self,
+        repos: &Repositories,
+        config: AppConfig,
+        incr: Incrementor,
+        from_refs: FromRefs<'_>,
+        lang_code: LanguageCode,
+    ) -> anyhow::Result<InlineResult> {
         match self {
             InlineCommand::Grow => {
                 metrics::CMD_GROW_COUNTER.inline.inc();
@@ -129,8 +135,13 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
     }
 ]));
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig,
-                            lang_code: LanguageCode) -> HandlerResult {
+pub async fn inline_handler(
+    bot: Bot,
+    query: InlineQuery,
+    repos: Repositories,
+    app_config: AppConfig,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
@@ -169,9 +180,14 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     Ok(())
 }
 
-pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
-                                   repos: Repositories, config: AppConfig,
-                                   incr: Incrementor, lang_code: LanguageCode) -> HandlerResult {
+pub async fn inline_chosen_handler(
+    bot: Bot,
+    result: ChosenInlineResult,
+    repos: Repositories,
+    config: AppConfig,
+    incr: Incrementor,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
 
     if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
@@ -208,9 +224,14 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
     Ok(())
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery,
-                              repos: Repositories, config: AppConfig,
-                              incr: Incrementor, lang_code: LanguageCode) -> HandlerResult {
+pub async fn callback_handler(
+    bot: Bot,
+    query: CallbackQuery,
+    repos: Repositories,
+    config: AppConfig,
+    incr: Incrementor,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let mut answer = bot.answer_callback_query(query.id.clone());
 
     if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {

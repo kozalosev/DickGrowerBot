@@ -22,9 +22,14 @@ pub enum DickOfDayCommands {
     Dod,
 }
 
-pub async fn dod_cmd_handler(bot: Bot, msg: Message,
-                             cfg: config::AppConfig, repos: repo::Repositories, incr: Incrementor,
-                             lang_code: LanguageCode) -> HandlerResult {
+pub async fn dod_cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cfg: config::AppConfig,
+    repos: repo::Repositories,
+    incr: Incrementor,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::CMD_DOD_COUNTER.chat.inc();
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
@@ -36,8 +41,13 @@ pub async fn dod_cmd_handler(bot: Bot, msg: Message,
     Ok(())
 }
 
-pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repositories, incr: Incrementor,
-                                     from_refs: FromRefs<'_>, lang_code: LanguageCode) -> anyhow::Result<String> {
+pub(crate) async fn dick_of_day_impl(
+    cfg: config::AppConfig,
+    repos: &repo::Repositories,
+    incr: Incrementor,
+    from_refs: FromRefs<'_>,
+    lang_code: LanguageCode,
+) -> anyhow::Result<String> {
     let chat_id = from_refs.1;
     let winner = match cfg.features.dod_selection_mode {
         DickOfDaySelectionMode::WEIGHTS => {

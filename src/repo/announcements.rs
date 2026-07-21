@@ -23,7 +23,12 @@ impl Announcements {
         Ok(maybe_announcement)
     }
 
-    async fn check_conditions(&self, chat_id_kind: &ChatIdKind, announcement: &config::Announcement, lang_code: &LanguageCode) -> anyhow::Result<bool> {
+    async fn check_conditions(
+        &self,
+        chat_id_kind: &ChatIdKind,
+        announcement: &config::Announcement,
+        lang_code: &LanguageCode,
+    ) -> anyhow::Result<bool> {
         let res = match self.get(chat_id_kind, lang_code).await? {
             _ if self.announcements.max_shows == Counter::literal(0) => false,
             Some(entity) if entity.hash != *announcement.hash => {

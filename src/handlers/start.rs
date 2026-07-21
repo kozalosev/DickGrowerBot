@@ -14,8 +14,14 @@ pub enum StartCommands {
     Start(String),
 }
 
-pub async fn start_cmd_handler(bot: Bot, msg: Message, cmd: StartCommands,
-                               help: HelpContainer, repos: repo::Repositories, lang_code: LanguageCode) -> HandlerResult {
+pub async fn start_cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cmd: StartCommands,
+    help: HelpContainer,
+    repos: repo::Repositories,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let answer = if msg.from.as_ref().is_none() {
         log::warn!("The /start command was invoked without a FROM field for message: {:?}", msg);
         help.get_help_message(lang_code).to_owned()

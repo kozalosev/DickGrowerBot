@@ -36,8 +36,14 @@ pub enum PromoCommandState {
 
 pub type PromoCodeDialogue = Dialogue<PromoCommandState, InMemStorage<PromoCommandState>>;
 
-pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialogue: PromoCodeDialogue,
-                               repos: repo::Repositories, lang_code: LanguageCode) -> HandlerResult {
+pub async fn promo_cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cmd: PromoCommands,
+    dialogue: PromoCodeDialogue,
+    repos: repo::Repositories,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::CMD_PROMO.invoked_by_command.inc();
     let user = msg.from.as_ref().ok_or("no from user")?;
     let answer = match cmd {
@@ -56,8 +62,13 @@ pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialo
     Ok(())
 }
 
-pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCodeDialogue,
-                                     repos: repo::Repositories, lang_code: LanguageCode) -> HandlerResult {
+pub async fn promo_requested_handler(
+    bot: Bot,
+    msg: Message,
+    dialogue: PromoCodeDialogue,
+    repos: repo::Repositories,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let answer = match msg.text() {
         Some(code) => {
             dialogue.exit().await?;
@@ -98,8 +109,12 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, lang_code: Langu
     Ok(())
 }
 
-pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User,
-                                          promo_code: &PromoCode, lang_code: LanguageCode) -> anyhow::Result<String> {
+pub(crate) async fn promo_activation_impl(
+    promo_repo: repo::Promo,
+    user: &User,
+    promo_code: &PromoCode,
+    lang_code: LanguageCode,
+) -> anyhow::Result<String> {
     let answer = match promo_repo.activate(UserId::from(user), promo_code).await {
         Ok(res) => {
             metrics::CMD_PROMO.finished.inc();

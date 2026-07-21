@@ -31,9 +31,15 @@ pub enum DickCommands {
     Top,
 }
 
-pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
-                              repos: repo::Repositories, incr: Incrementor,
-                              config: config::AppConfig, lang_code: LanguageCode) -> HandlerResult {
+pub async fn dick_cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cmd: DickCommands,
+    repos: repo::Repositories,
+    incr: Incrementor,
+    config: config::AppConfig,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
@@ -59,8 +65,12 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
 
 pub struct FromRefs<'a>(pub &'a TeloxideUser, pub &'a ChatIdPartiality);
 
-pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor,
-                              from_refs: FromRefs<'_>, lang_code: LanguageCode) -> anyhow::Result<String> {
+pub(crate) async fn grow_impl(
+    repos: &repo::Repositories,
+    incr: Incrementor,
+    from_refs: FromRefs<'_>,
+    lang_code: LanguageCode,
+) -> anyhow::Result<String> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let uid = UserId::from(from);
     let name = utils::get_full_name(from);
@@ -124,8 +134,13 @@ impl Top {
     }
 }
 
-pub(crate) async fn top_impl(repos: &repo::Repositories, config: &config::AppConfig, from_refs: FromRefs<'_>,
-                             lang_code: LanguageCode, page: Page) -> anyhow::Result<Top> {
+pub(crate) async fn top_impl(
+    repos: &repo::Repositories,
+    config: &config::AppConfig,
+    from_refs: FromRefs<'_>,
+    lang_code: LanguageCode,
+    page: Page,
+) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let offset = Offset::calculate(page, config.top_limit);
     let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
@@ -184,9 +199,13 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
         .is_some()
 }
 
-pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
-                                   config: config::AppConfig, repos: repo::Repositories,
-                                   lang_code: LanguageCode) -> HandlerResult {
+pub async fn page_callback_handler(
+    bot: Bot,
+    q: CallbackQuery,
+    config: config::AppConfig,
+    repos: repo::Repositories,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
         return answer_callback_feature_disabled(bot, &q, edit_msg_req_params, lang_code).await
@@ -246,9 +265,12 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
     InlineKeyboardMarkup::new(vec![buttons])
 }
 
-async fn answer_callback_feature_disabled(bot: Bot, q: &CallbackQuery,
-                                          edit_msg_req_params: callbacks::EditMessageReqParamsKind,
-                                          lang_code: LanguageCode) -> HandlerResult {
+async fn answer_callback_feature_disabled(
+    bot: Bot,
+    q: &CallbackQuery,
+    edit_msg_req_params: callbacks::EditMessageReqParamsKind,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let mut answer = bot.answer_callback_query(q.id.clone());
     answer.show_alert.replace(true);
     answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());

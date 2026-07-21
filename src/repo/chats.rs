@@ -86,7 +86,11 @@ repository!(Chats, with_feature_toggles,
         Ok(InternalChatId::new(internal_id))
     }
 ,
-    async fn create_chat(tx: &mut Transaction<'_, Postgres>, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
+    async fn create_chat(
+        tx: &mut Transaction<'_, Postgres>,
+        chat_id: Option<i64>,
+        chat_instance: Option<String>,
+    ) -> anyhow::Result<i64> {
         log::info!("creating a chat with chat_id = {chat_id:?} and chat_instance = {chat_instance:?}");
         sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
                 chat_id, chat_instance)
@@ -95,7 +99,12 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't create a chat with chat_id = {chat_id:?} or chat_instance = {chat_instance:?}"))
     }
 ,
-    async fn update_chat(tx: &mut Transaction<'_, Postgres>, internal_id: i64, chat_id: Option<i64>, chat_instance: Option<String>) -> anyhow::Result<i64> {
+    async fn update_chat(
+        tx: &mut Transaction<'_, Postgres>,
+        internal_id: i64,
+        chat_id: Option<i64>,
+        chat_instance: Option<String>,
+    ) -> anyhow::Result<i64> {
         log::debug!("updating the chat with id = {internal_id}, chat_id = {chat_id:?}, and chat_instance = {chat_instance:?}");
         sqlx::query!("UPDATE Chats SET chat_id = coalesce($2, chat_id), chat_instance = coalesce($3, chat_instance) WHERE id = $1",
                 internal_id, chat_id, chat_instance)

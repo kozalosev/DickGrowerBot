@@ -205,7 +205,10 @@ pub async fn resolve_language<C: UserServiceClient>(update: Update, svc: UserSer
     resolve_language_for(update.from(), &svc).await
 }
 
-pub(crate) async fn resolve_language_for<C: UserServiceClient>(user: Option<&teloxide::types::User>, svc: &UserService<C>) -> LanguageCode {
+pub(crate) async fn resolve_language_for<C: UserServiceClient>(
+    user: Option<&teloxide::types::User>,
+    svc: &UserService<C>,
+) -> LanguageCode {
     if let UserService::Connected(client) = svc
         && let Some(user) = user
     {

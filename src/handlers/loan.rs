@@ -25,8 +25,13 @@ pub enum LoanCommands {
     Borrow,
 }
 
-pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, config: AppConfig,
-                         lang_code: LanguageCode) -> HandlerResult {
+pub async fn cmd_handler(
+    bot: Bot,
+    msg: Message,
+    repos: repo::Repositories,
+    config: AppConfig,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
@@ -43,8 +48,12 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, conf
     Ok(())
 }
 
-pub(crate) async fn loan_impl(repos: &repo::Repositories, from_refs: FromRefs<'_>, config: AppConfig,
-                              lang_code: LanguageCode) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
+pub(crate) async fn loan_impl(
+    repos: &repo::Repositories,
+    from_refs: FromRefs<'_>,
+    config: AppConfig,
+    lang_code: LanguageCode,
+) -> anyhow::Result<HandlerImplResult<LoanCallbackData>> {
     let (from, chat_id_part) = (from_refs.0, from_refs.1);
     let chat_id_kind = chat_id_part.kind();
 
@@ -99,8 +108,13 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     LoanCallbackData::check_prefix(query)
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery,
-                              repos: repo::Repositories, config: AppConfig, lang_code: LanguageCode) -> HandlerResult {
+pub async fn callback_handler(
+    bot: Bot,
+    query: CallbackQuery,
+    repos: repo::Repositories,
+    config: AppConfig,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let data = LoanCallbackData::parse(&query)?;
     let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
     
