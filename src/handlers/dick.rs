@@ -214,7 +214,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             edit_message_text_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_req.reply_markup.replace(keyboard);
             join(
-                bot.answer_callback_query(&q.id).into_future(),
+                bot.answer_callback_query(q.id.clone()).into_future(),
                 edit_message_text_req.into_future().map_ok(|_| ())
             ).await
         },
@@ -223,7 +223,7 @@ pub async fn page_callback_handler(bot: Bot, q: CallbackQuery,
             edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
             edit_message_text_inline_req.reply_markup.replace(keyboard);
             join(
-                bot.answer_callback_query(&q.id).into_future(),
+                bot.answer_callback_query(q.id.clone()).into_future(),
                 edit_message_text_inline_req.into_future().map_ok(|_| ())
             ).await
         }
@@ -249,7 +249,7 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
 async fn answer_callback_feature_disabled(bot: Bot, q: &CallbackQuery, edit_msg_req_params: callbacks::EditMessageReqParamsKind) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&q.from);
 
-    let mut answer = bot.answer_callback_query(&q.id);
+    let mut answer = bot.answer_callback_query(q.id.clone());
     answer.show_alert.replace(true);
     answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
     answer.await?;

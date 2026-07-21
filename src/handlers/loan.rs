@@ -235,7 +235,7 @@ impl TryFrom<String> for LoanCallbackData {
 
 #[cfg(test)]
 mod test {
-    use teloxide::types::{CallbackQuery, User, UserId};
+    use teloxide::types::{CallbackQuery, CallbackQueryId, User, UserId};
     use crate::handlers::loan::{LoanCallbackAction, LoanCallbackData};
     use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
@@ -297,7 +297,7 @@ mod test {
 
     fn build_callback_query(data: String) -> CallbackQuery {
         CallbackQuery {
-            id: "".to_string(),
+            id: CallbackQueryId("".to_string()),
             from: User {
                 id: UserId(0),
                 is_bot: false,

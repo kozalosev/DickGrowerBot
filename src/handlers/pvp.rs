@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context};
 use futures::join;
-use rand::Rng;
-use rand::rngs::OsRng;
+use rand::RngExt;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
@@ -141,7 +140,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
-    let mut answer = bot.answer_inline_query(&query.id, vec![res.clone()])
+    let mut answer = bot.answer_inline_query(query.id.clone(), vec![res.clone()])
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
@@ -344,7 +343,7 @@ async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo,
 }
 
 fn choose_winner<T>(initiator: T, acceptor: T) -> (T, T) {
-    if OsRng.gen_bool(0.5) {
+    if rand::rng().random_bool(0.5) {
         (acceptor, initiator)
     } else {
         (initiator, acceptor)

@@ -159,7 +159,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
         results.push(builder(&query, &lang_code, &app_config, &name))
     }
 
-    let mut answer = bot.answer_inline_query(&query.id, results.clone())
+    let mut answer = bot.answer_inline_query(query.id.clone(), results.clone())
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
@@ -211,7 +211,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
                               repos: Repositories, config: AppConfig,
                               incr: Incrementor) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&query.from);
-    let mut answer = bot.answer_callback_query(&query.id);
+    let mut answer = bot.answer_callback_query(query.id.clone());
 
     if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {
         let chat_id = config.features.chats_merging

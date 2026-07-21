@@ -132,7 +132,7 @@ pub enum CallbackAnswerParams {
 
 pub async fn prepare_callback_answer_params(bot: &Bot, query: &CallbackQuery, user_id: UserId) -> Result<CallbackAnswerParams, teloxide::RequestError> {
     let lang_code = LanguageCode::from_user(&query.from);
-    let mut answer = bot.answer_callback_query(&query.id);
+    let mut answer = bot.answer_callback_query(query.id.clone());
     let res = if query.from.id != user_id {
         answer.show_alert.replace(true);
         answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code).to_string());

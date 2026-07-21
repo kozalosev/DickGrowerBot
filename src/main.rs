@@ -67,8 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = Bot::from_env();
     bot.delete_webhook().await?;
 
-    let set_my_commands_requests = _rust_i18n_available_locales()
-        .into_iter()
+    let locales = _rust_i18n_available_locales();
+    let set_my_commands_requests = locales
+        .iter()
         .map(|locale| commands::set_my_commands(&bot, locale, &app_config.command_toggles));
     join_all(set_my_commands_requests)
         .await
