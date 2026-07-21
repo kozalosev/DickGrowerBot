@@ -70,13 +70,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let set_my_commands_requests = _rust_i18n_available_locales()
         .into_iter()
         .map(|locale| commands::set_my_commands(&bot, locale, &app_config.command_toggles));
-    let set_my_commands_failed = join_all(set_my_commands_requests)
+    join_all(set_my_commands_requests)
         .await
         .into_iter()
-        .any(|res| res.is_err());
-    if set_my_commands_failed {
-        Err("couldn't set the bot's commands")?
-    }
+        .collect::<Result<(), _>>()
+        .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
     let me = bot.get_me().await?;
     let repos = repo::Repositories::new(&db_conn, &app_config);
@@ -122,10 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let srv = tokio::spawn(async move {
                 let tcp_listener = tokio::net::TcpListener::bind(addr)
                     .await
-                    .map_err(|err| {
-                        stop_token.stop();
-                        err
-                    })?;
+                    .inspect_err(|_| stop_token.stop())?;
                 let app = axum::Router::new()
                     .merge(metrics_router)
                     .merge(bot_router);

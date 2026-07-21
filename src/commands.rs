@@ -10,6 +10,13 @@ use crate::handlers::pvp::BattleCommands;
 use crate::handlers::stats::StatsCommands;
 
 pub async fn set_my_commands(bot: &Bot, lang_code: &str, toggles: &CachedEnvToggles) -> Result<(), RequestError> {
+    // Telegram only accepts two-letter ISO 639-1 language codes for setMyCommands.
+    // Regional variants (e.g. "zh-TW") are rejected, so skip them here — they still
+    // apply to all other localized messages, just not the command menu.
+    if lang_code.contains('-') {
+        log::info!("Skipping command registration for regional locale variant {lang_code}");
+        return Ok(());
+    }
     let personal_commands = vec![
         HelpCommands::bot_commands(),
         PrivacyCommands::bot_commands(),

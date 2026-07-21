@@ -1,10 +1,5 @@
 commands:
-  help:
-    description: "有什麼問題嗎"
-  privacy:
-    description: "儲存資料說明詳見隱私權政策，"
   grow:
-    description: "讓你的老二變大！"
     result: "你的老二已經<b>%{incr} 公分</b> %{event}，現在長度為<b>%{length} 公分</b>。"
     direction:
       grown: "增長了"
@@ -12,20 +7,17 @@ commands:
     position: "你在排行榜上的位置是<b>%{pos}</b>。"
     tomorrow: "你今天已經玩過你的老二了。"
   top:
-    description: "取得聊天中最大的老二"
     title: "最大的老二排行榜："
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> 公分"
     ending: "<i>[+] 表示一個成長者今天還沒有增長他的老二。</i>"
     ending_inactive: "<i>[~] 表示一個成長者超過 %{days} 天沒有增長他的老二了。</i>"
     empty: "還沒有人加入遊戲 :("
   dod:
-    description: "選出今日老二"
     result: "今日老二是<b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>！\n\n他的老二增長了<b>%{growth} 公分</b>，現在長度為<b>%{length}</b> 公分。"
     position: "他在排行榜上的位置是<b>%{pos}</b>。"
     already_chosen: "今日老二已經被選出來了！是<b>%{name}</b>。"
     no_candidates: "沒有候選人可以選舉。在這個聊天中還沒有人加入遊戲 😢"
   pvp:
-    description: "PK！"
     results:
       start: "<b>%{name}</b> 向聊天發起了一個<b>%{bet} 公分</b>的挑戰！"
       finish: "勝利者是<b>%{winner_name}</b>！他的老二現在長度為<b>%{winner_length} 公分</b>。失敗者的老二長度為<b>%{loser_length}</b>。\n賭注是<b>%{bet} 公分</b>。"
@@ -45,13 +37,11 @@ commands:
       same_person: "你不能和自己PK！"
       battle_already_in_progress: "已經在對戰了！結果稍後就會更新……"
   stats:
-    description: "統計"
     length: "長度: <b>%{length}</b>\n在排行榜上的位置: <b>%{pos}</b>"
     pvp: "勝率: <b>%{win_rate}</b>。\n戰鬥次數: <b>%{battles}</b>。\n勝利次數: <b>%{wins}</b>。\n最大連勝: <b>%{win_streak}</b>。\n獲得長度: <b>%{acquired} 公分</b>。\n失去長度: <b>%{lost} 公分</b>。"
     notice: "統計收集從2024年7月2日開始。"
     personal: "<i>你的個人統計:</i>\n— 你參與的遊戲聊天數量: <b>%{chats}</b>。\n— 最大長度: <b>%{max_length}</b>。\n— 所有聊天中的老二總長度: <b>%{total_length}</b>。"
   loan:
-    description: "負數？申請貸款！"
     debt: "還需償還 <b>%{debt} 公分</b>"
     confirmation:
       text: "你的長度將重設為零，但每次增長將減少 <b>%{payout_percentage}</b>，直到償還所有 <b>%{debt} 公分</b>。"
@@ -65,7 +55,6 @@ commands:
     errors:
       positive_length: "抱歉，兄弟，這個提案只針對那些有非常非常深渴望的女孩。我不能讓你的大兄弟變得更長 :("
   import:
-    description: "從其他機器人導入老二"
     result:
       titles:
         imported: "以下使用者已被導入："
@@ -83,7 +72,6 @@ commands:
         template: "無法解析此訊息 🤔\n以下行無效：\n%{invalid_lines}"
         line: "➖ <b>%{line}</b>"
   promo:
-    description: "啟用神秘代碼"
     request: "輸入神秘代碼："
     success:
       template: "你已成功啟用此神秘代碼！%{ending}"
