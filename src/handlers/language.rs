@@ -44,10 +44,10 @@ pub async fn cmd_handler(
     let arg = cmd.into_arg();
 
     if msg.chat.is_private() {
-        metrics::CMD_LANGUAGE.personal();
+        metrics::CMD_LANGUAGE.personal().invoked();
         handle_personal_language(bot, msg, from_id, &arg, language_service, &lang_code).await
     } else {
-        metrics::CMD_LANGUAGE.chat();
+        metrics::CMD_LANGUAGE.chat().invoked();
         handle_chat_language(bot, msg, from_id, &arg, language_service, &lang_code).await
     }
 }
@@ -158,6 +158,7 @@ async fn apply_user_language<C: UserServiceClient>(
         Some(_) => {
             let code = lang.to_string();
             ls.set_user_language(uid, &code).await?;
+            metrics::CMD_LANGUAGE.personal().finished();
             t!("commands.language.success", locale = &code).to_string()
         }
         None => t!("commands.language.not_registered", locale = current_lang).to_string(),
@@ -172,6 +173,7 @@ async fn apply_chat_language<C: UserServiceClient>(
     current_lang: &LanguageCode,
 ) -> anyhow::Result<String> {
     ls.set_chat_language(chat_id, selection).await?;
+    metrics::CMD_LANGUAGE.chat().finished();
     let text = match selection {
         Some(lang) => t!("commands.language.chat.success", locale = &lang.to_string()),
         None => t!("commands.language.chat.reset", locale = current_lang),

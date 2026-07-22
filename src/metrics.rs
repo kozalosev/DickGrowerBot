@@ -34,9 +34,11 @@ pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
 pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
     UserServiceCounters::new("user_service_get_total", "count of user-service get() resolutions, split by whether they were served from cache or sent over gRPC"));
 pub static CMD_LANGUAGE: Lazy<LanguageCommandCounters> = Lazy::new(||
-    LanguageCommandCounters::new("command_language_usage_total", "count of /language invocations, split by whether they targeted the personal or the chat-wide language"));
+    LanguageCommandCounters::new("command_language_usage_total", "count of /language usage, by scope (personal/chat) and state (invoked when the command is used, finished when a language is actually changed)"));
 pub static CHAT_LANGUAGE: Lazy<ChatLanguageCounters> = Lazy::new(||
     ChatLanguageCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
+pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
+    SpokenLanguageCounter::new("used_language_total", "count of updates by the sender's Telegram (client) language_code, region suffix kept — an anonymous proxy for the languages the audience speaks"));
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -74,6 +76,7 @@ fn force_registration() {
     Lazy::force(&USER_SERVICE);
     Lazy::force(&CMD_LANGUAGE);
     Lazy::force(&CHAT_LANGUAGE);
+    Lazy::force(&USED_LANGUAGE);
 }
 
 pub struct Counter(IntCounter);
@@ -101,8 +104,12 @@ pub struct UserServiceCounters {
     sent: Counter,
 }
 pub struct LanguageCommandCounters {
-    personal: Counter,
-    chat: Counter,
+    personal: CommandProgress,
+    chat: CommandProgress,
+}
+pub struct CommandProgress {
+    invoked: Counter,
+    finished: Counter,
 }
 pub struct ChatLanguageCounters {
     cache: Counter,
@@ -213,21 +220,35 @@ impl UserServiceCounters {
 
 impl LanguageCommandCounters {
     fn new(name: &str, help: &str) -> Self {
-        let vec = CounterVec::new(name, help, &["scope"]);
+        let vec = CounterVec::new(name, help, &["scope", "state"]);
+        let progress = |scope: &str| CommandProgress {
+            invoked: vec.counter(&[scope, "invoked"]),
+            finished: vec.counter(&[scope, "finished"]),
+        };
         Self {
-            personal: vec.counter(&["personal"]),
-            chat: vec.counter(&["chat"]),
+            personal: progress("personal"),
+            chat: progress("chat"),
         }
     }
 
-    /// A `/language` invocation that targeted the caller's personal language (a private chat).
-    pub fn personal(&self) {
-        self.personal.inc()
+    /// Counters for the personal `/language` (a private chat).
+    pub fn personal(&self) -> &CommandProgress {
+        &self.personal
     }
 
-    /// A `/language` invocation that targeted the chat-wide language (a group chat).
-    pub fn chat(&self) {
-        self.chat.inc()
+    /// Counters for the chat-wide `/language` (a group chat).
+    pub fn chat(&self) -> &CommandProgress {
+        &self.chat
+    }
+}
+
+impl CommandProgress {
+    pub fn invoked(&self) {
+        self.invoked.inc()
+    }
+
+    pub fn finished(&self) {
+        self.finished.inc()
     }
 }
 
@@ -248,5 +269,50 @@ impl ChatLanguageCounters {
     /// A chat-language resolution that hit the database.
     pub fn db_query(&self) {
         self.db.inc()
+    }
+}
+
+/// Counts updates by the sender's Telegram `language_code` (see [`language_label`]).
+pub struct SpokenLanguageCounter(CounterVec);
+
+impl SpokenLanguageCounter {
+    fn new(name: &str, help: &str) -> Self {
+        Self(CounterVec::new(name, help, &["language"]))
+    }
+
+    /// Records one interaction from a person whose Telegram `language_code` is `code`
+    /// (absent or unrecognized => `unknown`). Carries no user id — anonymous.
+    pub fn record(&self, code: Option<&str>) {
+        self.0.counter(&[&language_label(code)]).inc()
+    }
+}
+
+/// The sender's Telegram `language_code`, kept whole (region suffix included) and lowercased
+/// (`"zh-TW"` → `"zh-tw"`, `"EN-us"` → `"en-us"`); anything absent or not shaped like a language
+/// tag becomes `"unknown"` (keeps the metric's label cardinality bounded).
+fn language_label(code: Option<&str>) -> String {
+    code.map(|c| c.trim().to_ascii_lowercase())
+        .filter(|c| (2..=12).contains(&c.len())
+            && c.starts_with(|ch: char| ch.is_ascii_lowercase())
+            && c.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::language_label;
+
+    #[test]
+    fn language_label_normalization() {
+        assert_eq!(language_label(Some("ru")), "ru");
+        assert_eq!(language_label(Some("zh-TW")), "zh-tw");
+        assert_eq!(language_label(Some("EN-us")), "en-us");
+        assert_eq!(language_label(Some("pt-BR")), "pt-br");
+        assert_eq!(language_label(Some("es-419")), "es-419");
+        assert_eq!(language_label(Some("  ")), "unknown");
+        assert_eq!(language_label(Some("")), "unknown");
+        assert_eq!(language_label(Some("x")), "unknown");
+        assert_eq!(language_label(Some("123")), "unknown");
+        assert_eq!(language_label(None), "unknown");
     }
 }

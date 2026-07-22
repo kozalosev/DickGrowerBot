@@ -190,6 +190,11 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// everyone and short-circuits the user-service call; otherwise we fall back to the per-user
     /// resolution ([`resolve_language_for`]).
     pub(crate) async fn resolve(&self, update: &Update) -> LanguageCode {
+        // Anonymously record the sender's Telegram (client) language — our best proxy for the
+        // languages the audience actually speaks, independent of any chat/personal override below.
+        if let Some(user) = update.from() {
+            metrics::USED_LANGUAGE.record(user.language_code.as_deref());
+        }
         if let Some(chat) = update.chat()
             && !chat.is_private() && !chat.is_channel()
             && let Some(lang) = self.chat_language(&chat.id.into()).await
