@@ -44,6 +44,7 @@ services:
       - GRPC_ADDR_USER_SERVICE
       - USER_CACHE_TIME_SECS
       - USER_SERVICE_TIMEOUT_SECS
+      - CHAT_LANGUAGE_CACHE_TIME_SECS
     expose:
       - 8080
     networks:

@@ -1,6 +1,8 @@
 use std::fmt::Formatter;
+use std::str::FromStr;
 use anyhow::{bail, Context};
 use sqlx::{Postgres, Transaction};
+use crate::domain::primitives::SupportedLanguage;
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId};
 use crate::repo::ensure_only_one_row_updated;
 use crate::repository;
@@ -58,6 +60,40 @@ repository!(Chats, with_feature_toggles,
             .map(|chat| chat.internal_id)
             .map(InternalChatId::new)
             .ok_or(SearchError::NotFound(chat_id.clone()))
+    }
+,
+    pub async fn get_chat_language(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<SupportedLanguage>> {
+        sqlx::query_scalar!(
+                "SELECT settings->>'language' FROM Chats
+                    WHERE chat_id = $1::bigint OR chat_instance = $1::text",
+                chat_id.value() as String)
+            .fetch_optional(&self.pool)
+            .await
+            .context(format!("couldn't get the language of the chat with id = {chat_id}"))?
+            .flatten()
+            .and_then(|code| SupportedLanguage::from_str(&code)
+                .map_err(|_| log::warn!("unknown chat language {code:?} stored for {chat_id}"))
+                .ok())
+            .map(Ok)
+            .transpose()
+    }
+,
+    pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        match lang {
+            Some(lang) => sqlx::query!(
+                    "UPDATE Chats SET settings = jsonb_set(settings, '{language}', to_jsonb($2::text)) WHERE id = $1",
+                    internal_id as InternalChatId, lang as SupportedLanguage)
+                .execute(&self.pool)
+                .await
+                .context(format!("couldn't set the language of the chat {chat_id} to {lang}"))?,
+            None => sqlx::query!("UPDATE Chats SET settings = settings - 'language' WHERE id = $1",
+                    internal_id as InternalChatId)
+                .execute(&self.pool)
+                .await
+                .context(format!("couldn't clear the language of the chat {chat_id}"))?,
+        };
+        Ok(())
     }
 ,
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<InternalChatId> {

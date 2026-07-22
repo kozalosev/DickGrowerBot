@@ -1,10 +1,43 @@
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{LengthChange, Limit, Offset};
+use crate::domain::primitives::{LengthChange, Limit, Offset, SupportedLanguage};
 use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality};
 use crate::repo;
 use crate::repo::test::{CHAT_ID, start_postgres, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
+
+#[tokio::test]
+async fn chat_language_roundtrip() {
+    let (_container, db) = start_postgres().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let partiality = ChatIdPartiality::Specific(ChatIdKind::ID(TelegramChatId::new(CHAT_ID)));
+    let kind = partiality.kind();
+
+    // No setting yet.
+    let lang = chats.get_chat_language(&kind)
+        .await.expect("couldn't read the language");
+    assert_eq!(lang, None);
+
+    // Set, then overwrite.
+    chats.set_chat_language(&partiality, Some(SupportedLanguage::RU))
+        .await.expect("couldn't set the language");
+    let lang = chats.get_chat_language(&kind)
+        .await.expect("couldn't read the language");
+    assert_eq!(lang, Some(SupportedLanguage::RU));
+
+    chats.set_chat_language(&partiality, Some(SupportedLanguage::ZH))
+        .await.expect("couldn't overwrite the language");
+    let lang = chats.get_chat_language(&kind)
+        .await.expect("couldn't read the language");
+    assert_eq!(lang, Some(SupportedLanguage::ZH));
+
+    // Reset back to per-user resolution.
+    chats.set_chat_language(&partiality, None)
+        .await.expect("couldn't clear the language");
+    let lang = chats.get_chat_language(&kind)
+        .await.expect("couldn't read the language");
+    assert_eq!(lang, None);
+}
 
 #[tokio::test]
 async fn upsert_chat() {

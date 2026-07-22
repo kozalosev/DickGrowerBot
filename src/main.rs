@@ -20,7 +20,7 @@ use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoComm
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
-use crate::users::{resolve_language, UserService, UserServiceClientGrpc};
+use crate::users::LanguageService;
 
 i18n!(fallback = "en");    // load localizations with default parameters
 
@@ -35,14 +35,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_config = config::DatabaseConfig::from_env()?;
     let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
-    let user_service = users::init_user_service(&integrations_config).await;
+    let repos = repo::Repositories::new(&db_conn, &app_config);
+    let language_service = users::init_language_service(&integrations_config, repos.chats.clone()).await;
 
     let handler = dptree::entry()
-        .map_async(|upd: Update, svc: UserService<UserServiceClientGrpc>| resolve_language(upd, svc))
+        .map_async(|upd: Update, ls: LanguageService| async move { ls.resolve(&upd).await })
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
-        .branch(Update::filter_message().filter_command::<LanguageCommands>().filter(checks::is_not_group_chat).endpoint(handlers::language::cmd_handler))
+        .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::cmd_handler))
         .branch(Update::filter_message().filter_command::<DickCommands>().filter(checks::is_group_chat).branch(checks::reject_group_accounts()).endpoint(handlers::dick_cmd_handler))
         .branch(Update::filter_message().filter_command::<DickOfDayCommands>().filter(checks::is_group_chat).branch(checks::reject_group_accounts()).endpoint(handlers::dod_cmd_handler))
         .branch(Update::filter_message().filter_command::<BattleCommands>().filter(checks::is_group_chat).branch(checks::reject_group_accounts()).endpoint(handlers::pvp::cmd_handler))
@@ -70,16 +71,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = Bot::from_env();
     bot.delete_webhook().await?;
 
-    // When the user-service is unavailable, the /language command can't do anything useful,
-    // so hide it from the Bot API command menu (it still degrades gracefully if typed).
-    if user_service.disabled() {
-        app_config.command_toggles.set_override("language", false);
-    }
-
+    // The personal /language relies on the user-service; when it's unavailable, hide /language from
+    // the private-chat menu. The chat-wide /language (groups, admins-only) stays available regardless.
+    let command_toggles = commands::CommandToggles {
+        env: app_config.command_toggles.clone(),
+        personal_language_enabled: language_service.user_service_enabled(),
+    };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
         .iter()
-        .map(|locale| commands::set_my_commands(&bot, locale, &app_config.command_toggles));
+        .map(|locale| commands::set_my_commands(&bot, locale, &command_toggles));
     join_all(set_my_commands_requests)
         .await
         .into_iter()
@@ -87,7 +88,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
     let me = bot.get_me().await?;
-    let repos = repo::Repositories::new(&db_conn, &app_config);
     let perks = handlers::perks::all(&db_conn, &app_config);
     let incrementor = handlers::utils::Incrementor::from_env(&repos.dicks, perks);
     let help_context = config::build_context_for_help_messages(me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app_config,
         help_container,
         battle_locker,
-        user_service,
+        language_service,
         InMemStorage::<PromoCommandState>::new()
     ];
 

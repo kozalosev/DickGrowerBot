@@ -6,9 +6,12 @@ const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
 const ENV_GRPC_ADDR_USER_SERVICE: &str = "GRPC_ADDR_USER_SERVICE";
 const ENV_USER_CACHE_TIME_SECS: &str = "USER_CACHE_TIME_SECS";
 const ENV_USER_SERVICE_TIMEOUT_SECS: &str = "USER_SERVICE_TIMEOUT_SECS";
+const ENV_CHAT_LANGUAGE_CACHE_TIME_SECS: &str = "CHAT_LANGUAGE_CACHE_TIME_SECS";
 
 const DEFAULT_USER_CACHE_TIME_SECS: u64 = 360;
 const DEFAULT_USER_SERVICE_TIMEOUT_SECS: u64 = 5;
+// We own this data (it lives in our own DB), so a rather aggressive TTL is fine.
+const DEFAULT_CHAT_LANGUAGE_CACHE_TIME_SECS: u64 = 3600;
 
 /// Configuration for connections to external services.
 #[derive(Clone)]
@@ -17,6 +20,9 @@ pub struct IntegrationsConfig {
     /// `Some` only when [`ENV_GRPC_ADDR_USER_SERVICE`] is configured; otherwise the whole
     /// user-service integration is disabled.
     pub user_service: Option<UserServiceConfig>,
+    /// TTL of the per-chat language cache. Independent of the user-service — the chat-wide
+    /// language works even when that integration is disabled.
+    pub chat_language_cache_time_secs: u64,
 }
 
 #[derive(Clone)]
@@ -33,6 +39,8 @@ impl IntegrationsConfig {
         Ok(Self {
             webhook_url: read_webhook_url()?,
             user_service: read_user_service_config(),
+            chat_language_cache_time_secs: get_env_value_or_default(
+                ENV_CHAT_LANGUAGE_CACHE_TIME_SECS, DEFAULT_CHAT_LANGUAGE_CACHE_TIME_SECS),
         })
     }
 }

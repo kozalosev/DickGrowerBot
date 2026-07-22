@@ -9,7 +9,22 @@ use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportComma
 use crate::handlers::pvp::BattleCommands;
 use crate::handlers::stats::StatsCommands;
 
-pub async fn set_my_commands(bot: &Bot, lang_code: &str, toggles: &CachedEnvToggles) -> Result<(), RequestError> {
+/// Everything that decides which commands land in the Bot API menu, assembled in `main`. It bundles
+/// the per-command env gate ([`CachedEnvToggles`]) with the runtime-derived switches that depend on
+/// state only known at startup (e.g. whether an optional integration is available).
+pub struct CommandToggles {
+    /// The `DISABLE_CMD_*` env gate, applied per command.
+    pub env: CachedEnvToggles,
+    /// Whether the personal `/language` command is advertised in private chats — it needs the
+    /// user-service, so it's hidden when that integration is disabled.
+    pub personal_language_enabled: bool,
+}
+
+pub async fn set_my_commands(
+    bot: &Bot,
+    lang_code: &str,
+    toggles: &CommandToggles,
+) -> Result<(), RequestError> {
     // Telegram only accepts two-letter ISO 639-1 language codes for setMyCommands.
     // Regional variants (e.g. "zh-TW") are rejected, so skip them here — they still
     // apply to all other localized messages, just not the command menu.
@@ -22,7 +37,7 @@ pub async fn set_my_commands(bot: &Bot, lang_code: &str, toggles: &CachedEnvTogg
         PrivacyCommands::bot_commands(),
         PromoCommands::bot_commands(),
         StatsCommands::bot_commands(),
-        LanguageCommands::bot_commands(),
+        if toggles.personal_language_enabled { LanguageCommands::bot_commands() } else { Vec::new() },
     ];
     let group_commands = vec![
         HelpCommands::bot_commands(),
@@ -32,14 +47,16 @@ pub async fn set_my_commands(bot: &Bot, lang_code: &str, toggles: &CachedEnvTogg
         LoanCommands::bot_commands(),
         StatsCommands::bot_commands(),
     ];
+    // The chat-wide /language is admin-only, so it lives in the admin scope, not the group scope.
     let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),
+        LanguageCommands::bot_commands(),
     ]].concat();
 
     let requests = vec![
-        set_commands(bot, personal_commands, BotCommandScope::AllPrivateChats, lang_code, toggles),
-        set_commands(bot, group_commands, BotCommandScope::AllGroupChats, lang_code, toggles),
-        set_commands(bot, admin_commands, BotCommandScope::AllChatAdministrators, lang_code, toggles),
+        set_commands(bot, personal_commands, BotCommandScope::AllPrivateChats, lang_code, &toggles.env),
+        set_commands(bot, group_commands, BotCommandScope::AllGroupChats, lang_code, &toggles.env),
+        set_commands(bot, admin_commands, BotCommandScope::AllChatAdministrators, lang_code, &toggles.env),
     ];
     join_all(requests)
         .await

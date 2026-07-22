@@ -11,8 +11,10 @@ use generated::user_service_client::UserServiceClient as GrpcClient;
 use generated::update_user_request::Target;
 use generated::{GetUserRequest, UpdateUserRequest, User};
 use crate::config::IntegrationsConfig;
-use crate::domain::primitives::LanguageCode;
+use crate::domain::primitives::{LanguageCode, SupportedLanguage};
+use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::metrics;
+use crate::repo::Chats;
 
 pub mod generated {
     tonic::include_proto!("user_service");
@@ -41,10 +43,6 @@ pub enum UserService<T: UserServiceClient> {
 impl<T: UserServiceClient> UserService<T> {
     pub fn enabled(&self) -> bool {
         matches!(self, Self::Connected(_))
-    }
-
-    pub fn disabled(&self) -> bool {
-        !self.enabled()
     }
 }
 
@@ -166,10 +164,104 @@ impl UserServiceClient for UserServiceClientGrpc {
     }
 }
 
-/// Connects to the user-service if it's configured, spawning a background task to keep its cache
-/// tidy. Returns [`UserService::Disabled`] when it's not configured or unreachable, so the bot
-/// keeps working (falling back to Telegram-provided languages).
-pub async fn init_user_service(config: &IntegrationsConfig) -> UserService<UserServiceClientGrpc> {
+#[derive(Clone)]
+struct CachedLang {
+    lang: Option<SupportedLanguage>,
+    at: tokio::time::Instant,
+}
+
+/// The single language-resolution service injected into the dispatcher. It owns both sources of
+/// truth: the per-user preference in the user-service (gRPC, cross-bot) and the per-chat override
+/// stored in our own `Chats` table (with a small TTL cache).
+#[derive(Clone)]
+pub struct LanguageService<C: UserServiceClient = UserServiceClientGrpc> {
+    users: UserService<C>,
+    chats: Chats,
+    chat_cache: Arc<Mutex<HashMap<ChatIdKind, CachedLang>>>,
+    chat_ttl: Duration,
+}
+
+impl<C: UserServiceClient> LanguageService<C> {
+    pub(crate) fn user_service_enabled(&self) -> bool {
+        self.users.enabled()
+    }
+
+    /// Resolves the effective language for an update: a group's stored language (when set) wins for
+    /// everyone and short-circuits the user-service call; otherwise we fall back to the per-user
+    /// resolution ([`resolve_language_for`]).
+    pub(crate) async fn resolve(&self, update: &Update) -> LanguageCode {
+        if let Some(chat) = update.chat()
+            && !chat.is_private() && !chat.is_channel()
+            && let Some(lang) = self.chat_language(&chat.id.into()).await
+        {
+            return LanguageCode::new(lang.to_string());
+        }
+        resolve_language_for(update.from(), &self.users).await
+    }
+
+    /// Sets (or clears, with `None`) the chat-wide language and refreshes the local cache so this
+    /// instance is immediately consistent.
+    pub(crate) async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
+        self.chats.set_chat_language(chat_id, lang).await?;
+        self.chat_cache().insert(chat_id.kind(), CachedLang { lang, at: tokio::time::Instant::now() });
+        Ok(())
+    }
+
+    /// Fetches a user from the user-service, or `Ok(None)` when the integration is disabled.
+    pub(crate) async fn user(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
+        match &self.users {
+            UserService::Connected(client) => client.get(uid).await,
+            UserService::Disabled => Ok(None),
+        }
+    }
+
+    /// Updates a user's personal language in the user-service.
+    pub(crate) async fn set_user_language(&self, uid: UserId, code: &str) -> Result<(), tonic::Status> {
+        match &self.users {
+            UserService::Connected(client) => client.set_language(uid, code).await,
+            UserService::Disabled => Err(tonic::Status::unavailable("user-service is disabled")),
+        }
+    }
+
+    fn chat_cache(&self) -> MutexGuard<'_, HashMap<ChatIdKind, CachedLang>> {
+        self.chat_cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Read-through TTL cache over [`Chats::get_chat_language`]. Only [`Self::resolve`] uses it.
+    async fn chat_language(&self, chat_id: &ChatIdKind) -> Option<SupportedLanguage> {
+        let now = tokio::time::Instant::now();
+        if let Some(cached) = self.chat_cache().get(chat_id)
+            .filter(|cached| now.duration_since(cached.at) <= self.chat_ttl)
+        {
+            metrics::CHAT_LANGUAGE.cache_hit();
+            return cached.lang;
+        }
+
+        metrics::CHAT_LANGUAGE.db_query();
+        let lang = self.chats.get_chat_language(chat_id).await
+            .unwrap_or_else(|e| {
+                log::warn!("couldn't fetch the language of {chat_id}: {e:#}");
+                None
+            });
+        self.chat_cache().insert(chat_id.clone(), CachedLang { lang, at: now });
+        lang
+    }
+}
+
+/// Builds the [`LanguageService`], connecting to the user-service when it's configured and spawning
+/// a background task to keep the user cache tidy. Falls back to a disabled user-service (Telegram
+/// languages only) when it's not configured or unreachable — the chat-language part keeps working.
+pub async fn init_language_service(config: &IntegrationsConfig, chats: Chats) -> LanguageService<UserServiceClientGrpc> {
+    let users = connect_user_service(config).await;
+    LanguageService {
+        users,
+        chats,
+        chat_cache: Arc::new(Mutex::new(HashMap::new())),
+        chat_ttl: Duration::from_secs(config.chat_language_cache_time_secs),
+    }
+}
+
+async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserServiceClientGrpc> {
     let Some(cfg) = config.user_service.as_ref() else {
         log::warn!("user-service integration is disabled (GRPC_ADDR_USER_SERVICE is not set)");
         return UserService::Disabled;
@@ -198,13 +290,10 @@ fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_time_secs: u64) {
     });
 }
 
-/// Resolves the effective language once per update: the preference stored in user-service (when
+/// Resolves the effective language for a single user: the preference stored in user-service (when
 /// the service is connected and the user is registered) takes precedence over the Telegram-provided
-/// `language_code`; otherwise it falls back to the stateless [`LanguageCode::from_maybe_user`].
-pub async fn resolve_language<C: UserServiceClient>(update: Update, svc: UserService<C>) -> LanguageCode {
-    resolve_language_for(update.from(), &svc).await
-}
-
+/// `language_code`; otherwise it falls back to the stateless [`LanguageCode::from_maybe_user`]. The
+/// chat-wide override is handled one level up, in [`LanguageService::resolve`].
 pub(crate) async fn resolve_language_for<C: UserServiceClient>(
     user: Option<&teloxide::types::User>,
     svc: &UserService<C>,

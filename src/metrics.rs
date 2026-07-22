@@ -33,6 +33,10 @@ pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
     UserServiceCounters::new("user_service_get_total", "count of user-service get() resolutions, split by whether they were served from cache or sent over gRPC"));
+pub static CMD_LANGUAGE: Lazy<LanguageCommandCounters> = Lazy::new(||
+    LanguageCommandCounters::new("command_language_usage_total", "count of /language invocations, split by whether they targeted the personal or the chat-wide language"));
+pub static CHAT_LANGUAGE: Lazy<ChatLanguageCounters> = Lazy::new(||
+    ChatLanguageCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -68,6 +72,8 @@ fn force_registration() {
     Lazy::force(&CMD_IMPORT);
     Lazy::force(&CMD_PROMO);
     Lazy::force(&USER_SERVICE);
+    Lazy::force(&CMD_LANGUAGE);
+    Lazy::force(&CHAT_LANGUAGE);
 }
 
 pub struct Counter(IntCounter);
@@ -93,6 +99,14 @@ pub struct DeepLinkedCommandsCounters {
 pub struct UserServiceCounters {
     cache: Counter,
     sent: Counter,
+}
+pub struct LanguageCommandCounters {
+    personal: Counter,
+    chat: Counter,
+}
+pub struct ChatLanguageCounters {
+    cache: Counter,
+    db: Counter,
 }
 
 impl Counter {
@@ -194,5 +208,45 @@ impl UserServiceCounters {
     /// A `get()` resolution that hit the network (an actual gRPC request).
     pub fn request_sent(&self) {
         self.sent.inc()
+    }
+}
+
+impl LanguageCommandCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["scope"]);
+        Self {
+            personal: vec.counter(&["personal"]),
+            chat: vec.counter(&["chat"]),
+        }
+    }
+
+    /// A `/language` invocation that targeted the caller's personal language (a private chat).
+    pub fn personal(&self) {
+        self.personal.inc()
+    }
+
+    /// A `/language` invocation that targeted the chat-wide language (a group chat).
+    pub fn chat(&self) {
+        self.chat.inc()
+    }
+}
+
+impl ChatLanguageCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        Self {
+            cache: vec.counter(&["cache"]),
+            db: vec.counter(&["db"]),
+        }
+    }
+
+    /// A chat-language resolution served from the local TTL cache.
+    pub fn cache_hit(&self) {
+        self.cache.inc()
+    }
+
+    /// A chat-language resolution that hit the database.
+    pub fn db_query(&self) {
+        self.db.inc()
     }
 }

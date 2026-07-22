@@ -9,6 +9,12 @@ commands:
     errors:
       unavailable: "Questa funzione al momento non è disponibile."
       unsupported: "Spiacenti, questa lingua non è supportata. Prova una di: 🇬🇧 en, 🇷🇺 ru, 🇮🇹 it, 🇮🇷 fa, 🇨🇳 zh."
+      admins_only: "Solo gli amministratori della chat possono cambiare la lingua della chat."
+    chat:
+      prompt: "Scegli la lingua per tutta questa chat:"
+      success: "Fatto! Ora rispondo a tutti in questa chat nella lingua selezionata."
+      reset: "Fatto! La lingua della chat è stata azzerata — risponderò di nuovo a ciascuno nella propria lingua."
+      auto_button: "🌐 Auto (lingua di ciascuno)"
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
   grow:
