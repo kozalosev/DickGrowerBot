@@ -138,7 +138,9 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: &Message, answer: T) -> JsonRe
 
 #[macro_export]
 macro_rules! reply_html {
-    ($bot:ident, $msg:ident, $answer:expr) => {
+    // `$bot` is an expr (not an ident) so call sites may pass e.g. `bot.clone()`. It is
+    // used exactly once below, so there is no double-evaluation concern.
+    ($bot:expr, $msg:ident, $answer:expr) => {
         anyhow::Context::context(
             reply_html($bot, &$msg, $answer).await,
             format!("failed for {:?}", $msg)
@@ -154,12 +156,9 @@ macro_rules! reply_html {
 #[macro_export]
 macro_rules! reply_html_ephemeral {
     ($bot:ident, $msg:ident, $answer:expr, $svc:ident, $group:expr, $lang:expr) => {{
-        // `reply_html` consumes the `Bot`, so send with a clone and keep `$bot` for the
+        // Send with a clone (`reply_html` consumes the `Bot`) and keep `$bot` for the
         // scheduler (a `Bot` is a cheap `Arc` clone).
-        let sent = anyhow::Context::context(
-            reply_html($bot.clone(), &$msg, $answer).await,
-            format!("failed for {:?}", $msg)
-        )?;
+        let sent = $crate::reply_html!($bot.clone(), $msg, $answer);
         $svc.schedule(&$bot, &sent, $group, $lang);
         sent
     }};
@@ -214,8 +213,12 @@ pub mod checks {
         teloxide::dptree::filter(is_group_account).endpoint(handle_group_account)
     }
 
-    async fn handle_group_account(bot: Bot, msg: Message, lang_code: LanguageCode,
-                                  self_destruction: SelfDestructionService) -> HandlerResult {
+    async fn handle_group_account(
+        bot: Bot,
+        msg: Message,
+        lang_code: LanguageCode,
+        self_destruction: SelfDestructionService
+    ) -> HandlerResult {
         let answer = t!("errors.group_account", locale = &lang_code);
         reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
         Ok(())

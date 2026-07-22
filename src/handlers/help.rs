@@ -1,7 +1,7 @@
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
-use crate::config::MessageGroup;
+use crate::config::MessageGroup::Notice;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::{HandlerResult, reply_html};
 use crate::handlers::utils::SelfDestructionService;
@@ -24,6 +24,6 @@ pub async fn help_cmd_handler(
 ) -> HandlerResult {
     metrics::CMD_HELP_COUNTER.inc();
     let help = container.get_help_message(&lang_code);
-    reply_html_ephemeral!(bot, msg, help, self_destruction, MessageGroup::Notice, &lang_code);
+    reply_html_ephemeral!(bot, msg, help, self_destruction, Notice, &lang_code);
     Ok(())
 }

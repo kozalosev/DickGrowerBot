@@ -1,12 +1,12 @@
 use std::borrow::Cow;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::types::{LinkPreviewOptions, Message};
-use crate::{config, metrics, repo};
-use crate::config::{DickOfDaySelectionMode, MessageGroup};
+use crate::{metrics, repo};
+use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::{FromRefs, HandlerResult, TaggedReply, reply_html, utils};
@@ -25,7 +25,7 @@ pub enum DickOfDayCommands {
 pub async fn dod_cmd_handler(
     bot: Bot,
     msg: Message,
-    cfg: config::AppConfig,
+    cfg: AppConfig,
     repos: repo::Repositories,
     incr: Incrementor,
     lang_code: LanguageCode,
@@ -40,13 +40,13 @@ pub async fn dod_cmd_handler(
     let reply = dick_of_day_impl(cfg, &repos, incr, from_refs, lang_code.clone()).await?;
     let sent = reply_html(bot.clone(), &msg, reply.text)
         .link_preview_options(disabled_link_preview())
-        .await?;
+        .await.context(format!("failed for {msg:?}"))?;
     self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
     Ok(())
 }
 
 pub(crate) async fn dick_of_day_impl(
-    cfg: config::AppConfig,
+    cfg: AppConfig,
     repos: &repo::Repositories,
     incr: Incrementor,
     from_refs: FromRefs<'_>,

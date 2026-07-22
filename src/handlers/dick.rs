@@ -11,8 +11,8 @@ use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
-use config::MessageGroup;
-use crate::{config, metrics, repo};
+use crate::config::{AppConfig, MessageGroup};
+use crate::{metrics, reply_html, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
@@ -37,7 +37,7 @@ pub async fn dick_cmd_handler(
     cmd: DickCommands,
     repos: repo::Repositories,
     incr: Incrementor,
-    config: config::AppConfig,
+    config: AppConfig,
     lang_code: LanguageCode,
     self_destruction: SelfDestructionService,
 ) -> HandlerResult {
@@ -50,8 +50,7 @@ pub async fn dick_cmd_handler(
             // scheduled (as a Notice). `grow_impl` tells the two apart via the reply group.
             metrics::CMD_GROW_COUNTER.chat.inc();
             let reply = grow_impl(&repos, incr, from_refs, lang_code.clone()).await?;
-            let sent = reply_html(bot.clone(), &msg, reply.text)
-                .await.context(format!("failed for {msg:?}"))?;
+            let sent = reply_html!(bot.clone(), msg, reply.text);
             self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
         },
         DickCommands::Top => {
@@ -144,7 +143,7 @@ impl Top {
 
 pub(crate) async fn top_impl(
     repos: &repo::Repositories,
-    config: &config::AppConfig,
+    config: &AppConfig,
     from_refs: FromRefs<'_>,
     lang_code: LanguageCode,
     page: Page,
@@ -210,7 +209,7 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
 pub async fn page_callback_handler(
     bot: Bot,
     q: CallbackQuery,
-    config: config::AppConfig,
+    config: AppConfig,
     repos: repo::Repositories,
     lang_code: LanguageCode,
 ) -> HandlerResult {
