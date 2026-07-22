@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uid, code, affected_chats, activated_at as \"activated_at!\"\n                FROM Promo_Code_Activations WHERE uid = $1 AND code = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "promo_code_activations",
+            "name": "uid"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "code",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "promo_code_activations",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "affected_chats",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "promo_code_activations",
+            "name": "affected_chats"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "activated_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "promo_code_activations",
+            "name": "activated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "2a9c98d8f30544449a11d3827e5947909a0b524983639f642e30771882726a88"
+}

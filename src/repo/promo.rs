@@ -114,7 +114,7 @@ repository!(Promo,
         affected_chats: u64,
     ) -> anyhow::Result<()> {
         let affected_chats: i32 = affected_chats.try_into()?;
-        sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats) VALUES ($1, $2, $3)",
+        sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats, activated_at) VALUES ($1, $2, $3, current_timestamp)",
                 uid as UserId, code, affected_chats)
             .execute(&mut **tx)
             .await
