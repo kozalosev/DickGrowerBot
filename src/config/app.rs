@@ -1,7 +1,9 @@
+use std::time::Duration;
 use reqwest::Url;
 use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
+use crate::config::self_destruction::*;
 use crate::domain::primitives::{Bet, DaysCount, Limit, Ratio};
 use crate::domain::primitives::SupportedLanguage::{EN, RU, IT, FA, ZH};
 
@@ -15,6 +17,7 @@ pub struct AppConfig {
     pub dod_rich_exclusion_ratio: Option<Ratio>,
     pub pvp_default_bet: Bet,
     pub announcements: AnnouncementsConfig,
+    pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
 }
 
@@ -45,6 +48,11 @@ impl AppConfig {
         let announcement_it = get_optional_env_value("ANNOUNCEMENT_IT");
         let announcement_fa = get_optional_env_value("ANNOUNCEMENT_FA");
         let announcement_zh = get_optional_env_value("ANNOUNCEMENT_ZH");
+        let delay_minutes = |key| Duration::from_secs(get_env_value_or_default(key, 0u64).saturating_mul(60));
+        let self_destruction = SelfDestructionConfig {
+            notice: delay_minutes("MSG_SELFDESTRUCT_DELAY_NOTICE"),
+            report: delay_minutes("MSG_SELFDESTRUCT_DELAY_REPORT"),
+        };
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -76,6 +84,7 @@ impl AppConfig {
                     .filter_map(|(lc, mb_ann)| mb_ann.map(|ann| (lc, ann)))
                     .collect()
             },
+            self_destruction,
             command_toggles: Default::default(),
         }
     }

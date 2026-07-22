@@ -1,10 +1,12 @@
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
+use crate::config::MessageGroup;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::{HandlerResult, reply_html};
+use crate::handlers::utils::SelfDestructionService;
 use crate::help::HelpContainer;
-use crate::{metrics, reply_html};
+use crate::{metrics, reply_html_ephemeral};
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -13,10 +15,11 @@ pub enum HelpCommands {
     Help,
 }
 
-pub async fn help_cmd_handler(bot: Bot, msg: Message, container: HelpContainer) -> HandlerResult {
+pub async fn help_cmd_handler(bot: Bot, msg: Message, container: HelpContainer,
+                              self_destruction: SelfDestructionService) -> HandlerResult {
     metrics::CMD_HELP_COUNTER.inc();
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     let help = container.get_help_message(lang_code);
-    reply_html!(bot, msg, help);
+    reply_html_ephemeral!(bot, msg, help, self_destruction, MessageGroup::Notice);
     Ok(())
 }

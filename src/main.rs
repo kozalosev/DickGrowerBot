@@ -84,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let help_context = config::build_context_for_help_messages(me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
+    let self_destruction = handlers::utils::SelfDestructionService::new(app_config.self_destruction);
 
     let webhook_url: Option<Url> = match std::env::var(ENV_WEBHOOK_URL) {
         Ok(env_url) if !env_url.is_empty() => Some(env_url.parse()?),
@@ -101,6 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app_config,
         help_container,
         battle_locker,
+        self_destruction,
         InMemStorage::<PromoCommandState>::new()
     ];
 

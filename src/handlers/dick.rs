@@ -17,7 +17,7 @@ use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
 use crate::handlers::{HandlerResult, reply_html, utils};
-use crate::handlers::utils::{callbacks, Incrementor};
+use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
@@ -33,27 +33,31 @@ pub enum DickCommands {
 
 pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                               repos: repo::Repositories, incr: Incrementor,
-                              config: config::AppConfig) -> HandlerResult {
+                              config: config::AppConfig,
+                              self_destruction: SelfDestructionService) -> HandlerResult {
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     match cmd {
         DickCommands::Grow => {
+            // A growth is an event (permanent) — never scheduled for self-destruction.
             metrics::CMD_GROW_COUNTER.chat.inc();
             let answer = grow_impl(&repos, incr, from_refs).await?;
             reply_html(bot, &msg, answer)
+                .await.context(format!("failed for {msg:?}"))?;
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
             let top = top_impl(&repos, &config, from_refs, Page::first()).await?;
-            let mut request = reply_html(bot, &msg, top.lines);
+            let mut request = reply_html(bot.clone(), &msg, top.lines);
             if top.has_more_pages && config.features.top_unlimited {
                 let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
                 request.reply_markup.replace(keyboard);
             }
-            request
+            let sent = request.await.context(format!("failed for {msg:?}"))?;
+            self_destruction.schedule(&bot, &sent, config::MessageGroup::Report);
         }
-    }.await.context(format!("failed for {msg:?}"))?;
+    };
     Ok(())
 }
 
