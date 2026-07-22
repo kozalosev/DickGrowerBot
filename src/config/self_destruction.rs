@@ -9,7 +9,8 @@ use std::time::Duration;
 ///
 /// In the proof-of-concept only [`MessageGroup::Notice`] and [`MessageGroup::Report`]
 /// are ever scheduled for deletion; `Event` and `Application` are always permanent.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, strum_macros::Display)]
+#[strum(serialize_all = "lowercase")]
 pub enum MessageGroup {
     Notice,
     Report,
@@ -21,12 +22,20 @@ pub enum MessageGroup {
     Application,
 }
 
-/// Per-group self-destruction delays. A zero delay means messages of that group are
-/// permanent. The default (all-zero) disables the feature entirely, so it ships dark.
+/// Per-group self-destruction delays and tuning. A zero group delay means messages of
+/// that group are permanent. The default (all-zero) disables the feature entirely, so it
+/// ships dark.
 #[derive(Clone, Copy, Default)]
 pub struct SelfDestructionConfig {
     pub notice: Duration,
     pub report: Duration,
+    /// Visible characters an average reader gets through per minute; the base delay of a
+    /// long message is stretched to at least its estimated reading time. A value of 0
+    /// disables the reading-time adjustment.
+    pub reading_speed_cpm: u64,
+    /// Grace period during which the message is replaced with a "will be deleted" warning
+    /// before it is actually removed. Zero deletes the message without any warning.
+    pub warning: Duration,
 }
 
 impl SelfDestructionConfig {
@@ -61,6 +70,7 @@ mod tests {
         let config = SelfDestructionConfig {
             notice: Duration::from_secs(120),
             report: Duration::from_secs(300),
+            ..Default::default()
         };
         assert_eq!(config.delay_for(MessageGroup::Notice), Some(Duration::from_secs(120)));
         assert_eq!(config.delay_for(MessageGroup::Report), Some(Duration::from_secs(300)));

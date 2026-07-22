@@ -30,10 +30,19 @@ pub use import::*;
 pub use inline::*;
 pub use promo::*;
 pub use loan::LoanCommands;
+use crate::config::MessageGroup;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup),
+/// so the caller knows whether (and how soon) to schedule it for deletion. Shared by the
+/// commands whose reply may be either a permanent event or an ephemeral status (grow, DoD).
+pub(crate) struct TaggedReply {
+    pub text: String,
+    pub group: MessageGroup,
+}
 
 pub enum CallbackResult {
     EditMessage(String, Option<InlineKeyboardMarkup>),
@@ -137,18 +146,19 @@ macro_rules! reply_html {
 
 /// Like [`reply_html!`], but additionally registers the sent message with the
 /// [`SelfDestructionService`](crate::handlers::utils::SelfDestructionService) so it
-/// self-destructs after the delay configured for `$group`. Evaluates to the sent
-/// `Message`. `$svc` must be a `SelfDestructionService` in scope.
+/// self-destructs after the delay configured for `$group`. `$lang` (a `&LanguageCode`) is
+/// used to localize the optional deletion warning. Evaluates to the sent `Message`.
+/// `$svc` must be a `SelfDestructionService` in scope.
 #[macro_export]
 macro_rules! reply_html_ephemeral {
-    ($bot:ident, $msg:ident, $answer:expr, $svc:ident, $group:expr) => {{
+    ($bot:ident, $msg:ident, $answer:expr, $svc:ident, $group:expr, $lang:expr) => {{
         // `reply_html` consumes the `Bot`, so send with a clone and keep `$bot` for the
         // scheduler (a `Bot` is a cheap `Arc` clone).
         let sent = anyhow::Context::context(
             reply_html($bot.clone(), &$msg, $answer).await,
             format!("failed for {:?}", $msg)
         )?;
-        $svc.schedule(&$bot, &sent, $group);
+        $svc.schedule(&$bot, &sent, $group, $lang);
         sent
     }};
 }
@@ -206,7 +216,7 @@ pub mod checks {
     async fn handle_group_account(bot: Bot, msg: Message, self_destruction: SelfDestructionService) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         let answer = t!("errors.group_account", locale = &lang_code);
-        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
         Ok(())
     }
 

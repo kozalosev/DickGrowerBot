@@ -32,6 +32,6 @@ pub async fn privacy_cmd_handler(bot: Bot, msg: Message,
         FA => FA_POLICY,
         ZH => ZH_POLICY,
     };
-    reply_html_ephemeral!(bot, msg, policy, self_destruction, MessageGroup::Notice);
+    reply_html_ephemeral!(bot, msg, policy, self_destruction, MessageGroup::Notice, &lang_code);
     Ok(())
 }

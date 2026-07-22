@@ -11,12 +11,12 @@ use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
-
+use config::MessageGroup;
 use crate::{config, metrics, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
-use crate::handlers::{HandlerResult, reply_html, utils};
+use crate::handlers::{HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
@@ -40,11 +40,14 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
     let from_refs = FromRefs(from, &chat_id);
     match cmd {
         DickCommands::Grow => {
-            // A growth is an event (permanent) — never scheduled for self-destruction.
+            // A real growth is a permanent event; only the "come back tomorrow" status is
+            // scheduled (as a Notice). `grow_impl` tells the two apart via the reply group.
             metrics::CMD_GROW_COUNTER.chat.inc();
-            let answer = grow_impl(&repos, incr, from_refs).await?;
-            reply_html(bot, &msg, answer)
+            let reply = grow_impl(&repos, incr, from_refs).await?;
+            let lang_code = LanguageCode::from_user(from);
+            let sent = reply_html(bot.clone(), &msg, reply.text)
                 .await.context(format!("failed for {msg:?}"))?;
+            self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
@@ -55,7 +58,8 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
                 request.reply_markup.replace(keyboard);
             }
             let sent = request.await.context(format!("failed for {msg:?}"))?;
-            self_destruction.schedule(&bot, &sent, config::MessageGroup::Report);
+            let lang_code = LanguageCode::from_user(from);
+            self_destruction.schedule(&bot, &sent, MessageGroup::Report, &lang_code);
         }
     };
     Ok(())
@@ -63,7 +67,7 @@ pub async fn dick_cmd_handler(bot: Bot, msg: Message, cmd: DickCommands,
 
 pub struct FromRefs<'a>(pub &'a TeloxideUser, pub &'a ChatIdPartiality);
 
-pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<String> {
+pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<TaggedReply> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let uid = UserId::from(from);
     let name = utils::get_full_name(from);
@@ -76,7 +80,7 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
     let grow_result = repos.dicks.create_or_grow(uid, chat_id, increment.total).await;
     let lang_code = LanguageCode::from_user(from);
 
-    let main_part = match grow_result {
+    let (main_part, group) = match grow_result {
         Ok(GrowthResult { new_length, pos_in_top }) => {
             let event_key = if increment.total.value().is_negative() { "shrunk" } else { "grown" };
             let event_template = format!("commands.grow.direction.{event_key}");
@@ -84,27 +88,29 @@ pub(crate) async fn grow_impl(repos: &repo::Repositories, incr: Incrementor, fro
             let answer = t!("commands.grow.result", locale = &lang_code,
                 event = event, incr = increment.total.value().abs(), length = new_length);
             let perks_part = increment.perks_part_of_answer(&lang_code);
-            if let Some(pos) = pos_in_top {
+            let text = if let Some(pos) = pos_in_top {
                 let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
                 format!("{answer}\n{position}{perks_part}")
             } else {
                 format!("{answer}{perks_part}")
-            }
+            };
+            (text, MessageGroup::Event)
         },
         Err(e) => {
             let db_err = e.downcast::<sqlx::Error>()?;
             if let sqlx::Error::Database(e) = db_err {
-                e.code()
+                let text = e.code()
                     .filter(|c| c == TOMORROW_SQL_CODE)
                     .map(|_| t!("commands.grow.tomorrow", locale = &lang_code).to_string())
-                    .ok_or(anyhow!(e))?
+                    .ok_or(anyhow!(e))?;
+                (text, MessageGroup::Notice)
             } else {
                 Err(db_err)?
             }
         }
     };
     let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-    Ok(format!("{main_part}{time_left_part}"))
+    Ok(TaggedReply { text: format!("{main_part}{time_left_part}"), group })
 }
 
 pub(crate) struct Top {

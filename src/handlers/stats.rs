@@ -24,6 +24,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
     let features = app_config.features.pvp;
     if features.show_stats {
         let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+        let lang_code = LanguageCode::from_user(from);
         let chat_id = msg.chat.id.into();
         let from_refs = FromRefs(from, &chat_id);
 
@@ -33,7 +34,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
             chat_stats_impl(&repos, from_refs, features).await?
         };
 
-        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Report);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Report, &lang_code);
     } else {
         log::info!("ignoring the /stats command since it's disabled");
     }

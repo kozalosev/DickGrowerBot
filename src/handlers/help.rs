@@ -19,7 +19,7 @@ pub async fn help_cmd_handler(bot: Bot, msg: Message, container: HelpContainer,
                               self_destruction: SelfDestructionService) -> HandlerResult {
     metrics::CMD_HELP_COUNTER.inc();
     let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
-    let help = container.get_help_message(lang_code);
-    reply_html_ephemeral!(bot, msg, help, self_destruction, MessageGroup::Notice);
+    let help = container.get_help_message(&lang_code);
+    reply_html_ephemeral!(bot, msg, help, self_destruction, MessageGroup::Notice, &lang_code);
     Ok(())
 }

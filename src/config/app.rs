@@ -48,10 +48,11 @@ impl AppConfig {
         let announcement_it = get_optional_env_value("ANNOUNCEMENT_IT");
         let announcement_fa = get_optional_env_value("ANNOUNCEMENT_FA");
         let announcement_zh = get_optional_env_value("ANNOUNCEMENT_ZH");
-        let delay_minutes = |key| Duration::from_secs(get_env_value_or_default(key, 0u64).saturating_mul(60));
         let self_destruction = SelfDestructionConfig {
-            notice: delay_minutes("MSG_SELFDESTRUCT_DELAY_NOTICE"),
-            report: delay_minutes("MSG_SELFDESTRUCT_DELAY_REPORT"),
+            notice: get_optional_env_minutes("MSG_SELFDESTRUCT_DELAY_NOTICE"),
+            report: get_optional_env_minutes("MSG_SELFDESTRUCT_DELAY_REPORT"),
+            reading_speed_cpm: get_env_value_or_default("MSG_SELFDESTRUCT_READING_SPEED_CPM", 500),
+            warning: Duration::from_secs(get_optional_env_value("MSG_SELFDESTRUCT_WARNING_SECONDS")),
         };
         Self {
             features: FeatureToggles {
