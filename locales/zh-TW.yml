@@ -2,8 +2,8 @@ commands:
   language:
     description: "變更介面語言"
     prompt: "請選擇你的語言："
-    success: "完成！你的語言偏好已儲存，並將套用於所有 Kozalo 的機器人。"
-    not_registered: "你尚未在共用帳號服務中註冊。請先透過 @LocPlaceBot 註冊 —— 然後你的語言就會在所有 Kozalo 的機器人間同步。"
+    success: "完成！你的語言偏好已儲存，並將套用於所有 SadBot.Dev 的機器人。"
+    not_registered: "你尚未在共用帳號服務中註冊。請先透過 @LocPlaceBot 註冊 —— 然後你的語言就會在所有 SadBot.Dev 的機器人間同步。"
     errors:
       unavailable: "此功能目前無法使用。"
       unsupported: "抱歉，暫不支援此語言。請嘗試：🇬🇧 en、🇷🇺 ru、🇮🇹 it、🇮🇷 fa、🇨🇳 zh。"

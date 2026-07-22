@@ -4,8 +4,8 @@ commands:
   language:
     description: "Cambia la lingua dell'interfaccia"
     prompt: "Scegli la tua lingua:"
-    success: "Fatto! La tua preferenza di lingua è stata salvata e verrà applicata a tutti i bot di Kozalo."
-    not_registered: "Non sei ancora registrato nel servizio account condiviso. Registrati prima tramite @LocPlaceBot — poi la lingua sarà sincronizzata su tutti i bot di Kozalo."
+    success: "Fatto! La tua preferenza di lingua è stata salvata e verrà applicata a tutti i bot di SadBot.Dev."
+    not_registered: "Non sei ancora registrato nel servizio account condiviso. Registrati prima tramite @LocPlaceBot — poi la lingua sarà sincronizzata su tutti i bot di SadBot.Dev."
     errors:
       unavailable: "Questa funzione al momento non è disponibile."
       unsupported: "Spiacenti, questa lingua non è supportata. Prova una di: 🇬🇧 en, 🇷🇺 ru, 🇮🇹 it, 🇮🇷 fa, 🇨🇳 zh."
