@@ -4,8 +4,9 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
 use crate::handlers::{FromRefs, HandlerResult, reply_html};
-use crate::{metrics, reply_html, repo};
-use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::handlers::utils::SelfDestructionService;
+use crate::{metrics, reply_html_ephemeral, repo};
+use crate::config::{AppConfig, BattlesFeatureToggles, MessageGroup};
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::objects::WinRateAware;
 
@@ -22,6 +23,7 @@ pub async fn cmd_handler(
     repos: repo::Repositories,
     app_config: AppConfig,
     lang_code: LanguageCode,
+    self_destruction: SelfDestructionService,
 ) -> HandlerResult {
     metrics::CMD_STATS.chat.inc();
 
@@ -32,12 +34,12 @@ pub async fn cmd_handler(
         let from_refs = FromRefs(from, &chat_id);
 
         let answer = if msg.chat.is_private() {
-            personal_stats_impl(&repos, from_refs, lang_code).await?
+            personal_stats_impl(&repos, from_refs, lang_code.clone()).await?
         } else {
-            chat_stats_impl(&repos, from_refs, features, lang_code).await?
+            chat_stats_impl(&repos, from_refs, features, lang_code.clone()).await?
         };
 
-        reply_html!(bot, msg, answer);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Report, &lang_code);
     } else {
         log::info!("ignoring the /stats command since it's disabled");
     }

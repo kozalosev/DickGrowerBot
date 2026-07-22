@@ -68,7 +68,7 @@ impl InlineCommand {
                 metrics::CMD_GROW_COUNTER.inline.inc();
                 dick::grow_impl(repos, incr, from_refs, lang_code)
                     .await
-                    .map(InlineResult::text)
+                    .map(|reply| InlineResult::text(reply.text))
             },
             InlineCommand::Top => {
                 metrics::CMD_TOP_COUNTER.inline.inc();
@@ -85,7 +85,7 @@ impl InlineCommand {
                 metrics::CMD_DOD_COUNTER.inline.inc();
                 dod::dick_of_day_impl(config, repos, incr, from_refs, lang_code)
                     .await
-                    .map(InlineResult::text)
+                    .map(|reply| InlineResult::text(reply.text))
             },
             InlineCommand::Loan => {
                 metrics::CMD_LOAN_COUNTER.invoked.inline.inc();

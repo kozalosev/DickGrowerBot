@@ -139,3 +139,5 @@ errors:
   not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
   group_account: "Non puoi giocare per conto di un gruppo o canale — disattiva la modalità anonima e riprova!"
   feature_disabled: "Questa funzione non è al momento disponibile."
+self_destruction:
+  warning: "🧹 <i>Per mantenere pulita la chat, questo messaggio verrà eliminato tra <b>%{seconds}</b> secondi…</i>"

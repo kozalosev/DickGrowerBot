@@ -6,11 +6,11 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::types::{LinkPreviewOptions, Message};
 use crate::{config, metrics, repo};
-use crate::config::DickOfDaySelectionMode;
+use crate::config::{DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::LanguageCode;
-use crate::handlers::{FromRefs, HandlerResult, reply_html, utils};
-use crate::handlers::utils::Incrementor;
+use crate::handlers::{FromRefs, HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::utils::{Incrementor, SelfDestructionService};
 
 const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
 
@@ -29,15 +29,19 @@ pub async fn dod_cmd_handler(
     repos: repo::Repositories,
     incr: Incrementor,
     lang_code: LanguageCode,
+    self_destruction: SelfDestructionService,
 ) -> HandlerResult {
     metrics::CMD_DOD_COUNTER.chat.inc();
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
-    let answer = dick_of_day_impl(cfg, &repos, incr, from_refs, lang_code).await?;
-    reply_html(bot, &msg, answer)
+    // A real election is a permanent event; the "already chosen"/"no candidates" statuses
+    // are scheduled (as a Notice). `dick_of_day_impl` tells them apart via the reply group.
+    let reply = dick_of_day_impl(cfg, &repos, incr, from_refs, lang_code.clone()).await?;
+    let sent = reply_html(bot.clone(), &msg, reply.text)
         .link_preview_options(disabled_link_preview())
         .await?;
+    self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
     Ok(())
 }
 
@@ -47,7 +51,7 @@ pub(crate) async fn dick_of_day_impl(
     incr: Incrementor,
     from_refs: FromRefs<'_>,
     lang_code: LanguageCode,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<TaggedReply> {
     let chat_id = from_refs.1;
     let winner = match cfg.features.dod_selection_mode {
         DickOfDaySelectionMode::WEIGHTS => {
@@ -59,46 +63,49 @@ pub(crate) async fn dick_of_day_impl(
         },
         _ => repos.users.get_random_active_member(&chat_id.kind()).await?
     };
-    let answer = match winner {
+    let (answer, group) = match winner {
         Some(winner) => {
             let increment = incr.dod_increment(winner.uid, chat_id.kind()).await;
             let dod_result = repos.dicks.set_dod_winner(chat_id, winner.uid, increment.total).await;
-            let main_part = match dod_result {
+            let (main_part, group) = match dod_result {
                 Ok(Some(GrowthResult { new_length, pos_in_top })) => {
                     let answer = t!("commands.dod.result", locale = &lang_code,
                         uid = winner.uid, name = winner.name.escaped(), growth = increment.total, length = new_length);
                     let perks_part = increment.perks_part_of_answer(&lang_code);
-                    if let Some(pos) = pos_in_top {
+                    let text = if let Some(pos) = pos_in_top {
                         let position = t!("commands.dod.position", locale = &lang_code, pos = pos);
                         format!("{answer}\n{position}{perks_part}")
                     } else {
                         format!("{answer}{perks_part}")
-                    }
+                    };
+                    (text, MessageGroup::Event)
                 },
                 Ok(None) => {
                     log::error!("there was an attempt to set a non-existent dick as a winner (UserID={}, ChatId={})",
                         winner.uid, chat_id);
-                    t!("commands.dod.no_candidates", locale = &lang_code).to_string()
+                    let text = t!("commands.dod.no_candidates", locale = &lang_code).to_string();
+                    (text, MessageGroup::Notice)
                 }
                 Err(e) => {
                     match e.downcast::<sqlx::Error>()? {
                         sqlx::Error::Database(e)
                         if e.code() == Some(Cow::Borrowed(DOD_ALREADY_CHOSEN_SQL_CODE)) => {
-                            t!("commands.dod.already_chosen", locale = &lang_code, name = e.message()).to_string()
+                            let text = t!("commands.dod.already_chosen", locale = &lang_code, name = e.message()).to_string();
+                            (text, MessageGroup::Notice)
                         }
                         e => Err(e)?
                     }
                 }
             };
             let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-            format!("{main_part}{time_left_part}")
+            (format!("{main_part}{time_left_part}"), group)
         },
-        None => t!("commands.dod.no_candidates", locale = &lang_code).to_string()
+        None => (t!("commands.dod.no_candidates", locale = &lang_code).to_string(), MessageGroup::Notice)
     };
     let announcement = repos.announcements.get_new(&chat_id.kind(), &lang_code).await?
         .map(|announcement| format!("\n\n<i>{announcement}</i>"))
         .unwrap_or_default();
-    Ok(format!("{answer}{announcement}"))
+    Ok(TaggedReply { text: format!("{answer}{announcement}"), group })
 }
 
 fn disabled_link_preview() -> LinkPreviewOptions {

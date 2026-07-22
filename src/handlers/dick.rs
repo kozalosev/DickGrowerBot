@@ -11,13 +11,13 @@ use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
-
+use config::MessageGroup;
 use crate::{config, metrics, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
-use crate::handlers::{HandlerResult, reply_html, utils};
-use crate::handlers::utils::{callbacks, Incrementor};
+use crate::handlers::{HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
@@ -39,27 +39,33 @@ pub async fn dick_cmd_handler(
     incr: Incrementor,
     config: config::AppConfig,
     lang_code: LanguageCode,
+    self_destruction: SelfDestructionService,
 ) -> HandlerResult {
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     match cmd {
         DickCommands::Grow => {
+            // A real growth is a permanent event; only the "come back tomorrow" status is
+            // scheduled (as a Notice). `grow_impl` tells the two apart via the reply group.
             metrics::CMD_GROW_COUNTER.chat.inc();
-            let answer = grow_impl(&repos, incr, from_refs, lang_code).await?;
-            reply_html(bot, &msg, answer)
+            let reply = grow_impl(&repos, incr, from_refs, lang_code.clone()).await?;
+            let sent = reply_html(bot.clone(), &msg, reply.text)
+                .await.context(format!("failed for {msg:?}"))?;
+            self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
-            let top = top_impl(&repos, &config, from_refs, lang_code, Page::first()).await?;
-            let mut request = reply_html(bot, &msg, top.lines);
+            let top = top_impl(&repos, &config, from_refs, lang_code.clone(), Page::first()).await?;
+            let mut request = reply_html(bot.clone(), &msg, top.lines);
             if top.has_more_pages && config.features.top_unlimited {
                 let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
                 request.reply_markup.replace(keyboard);
             }
-            request
+            let sent = request.await.context(format!("failed for {msg:?}"))?;
+            self_destruction.schedule(&bot, &sent, MessageGroup::Report, &lang_code);
         }
-    }.await.context(format!("failed for {msg:?}"))?;
+    };
     Ok(())
 }
 
@@ -70,7 +76,7 @@ pub(crate) async fn grow_impl(
     incr: Incrementor,
     from_refs: FromRefs<'_>,
     lang_code: LanguageCode,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<TaggedReply> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let uid = UserId::from(from);
     let name = utils::get_full_name(from);
@@ -82,7 +88,7 @@ pub(crate) async fn grow_impl(
     let increment = incr.growth_increment(uid, chat_id.kind(), days_since_registration).await;
     let grow_result = repos.dicks.create_or_grow(uid, chat_id, increment.total).await;
 
-    let main_part = match grow_result {
+    let (main_part, group) = match grow_result {
         Ok(GrowthResult { new_length, pos_in_top }) => {
             let event_key = if increment.total.value().is_negative() { "shrunk" } else { "grown" };
             let event_template = format!("commands.grow.direction.{event_key}");
@@ -90,27 +96,29 @@ pub(crate) async fn grow_impl(
             let answer = t!("commands.grow.result", locale = &lang_code,
                 event = event, incr = increment.total.value().abs(), length = new_length);
             let perks_part = increment.perks_part_of_answer(&lang_code);
-            if let Some(pos) = pos_in_top {
+            let text = if let Some(pos) = pos_in_top {
                 let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
                 format!("{answer}\n{position}{perks_part}")
             } else {
                 format!("{answer}{perks_part}")
-            }
+            };
+            (text, MessageGroup::Event)
         },
         Err(e) => {
             let db_err = e.downcast::<sqlx::Error>()?;
             if let sqlx::Error::Database(e) = db_err {
-                e.code()
+                let text = e.code()
                     .filter(|c| c == TOMORROW_SQL_CODE)
                     .map(|_| t!("commands.grow.tomorrow", locale = &lang_code).to_string())
-                    .ok_or(anyhow!(e))?
+                    .ok_or(anyhow!(e))?;
+                (text, MessageGroup::Notice)
             } else {
                 Err(db_err)?
             }
         }
     };
     let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
-    Ok(format!("{main_part}{time_left_part}"))
+    Ok(TaggedReply { text: format!("{main_part}{time_left_part}"), group })
 }
 
 pub(crate) struct Top {

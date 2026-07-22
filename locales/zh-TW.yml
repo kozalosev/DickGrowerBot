@@ -127,3 +127,5 @@ errors:
   not_group_chat: "此機器人僅在群聊中執行任務！"
   group_account: "不能以群組或頻道的身份遊玩——請關閉匿名模式後重試！"
   feature_disabled: "此功能當前暫時禁用。"
+self_destruction:
+  warning: "🧹 <i>為保持群聊整潔，此訊息將在 <b>%{seconds}</b> 秒後刪除……</i>"

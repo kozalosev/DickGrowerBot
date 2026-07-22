@@ -24,7 +24,7 @@ pub async fn start_cmd_handler(
 ) -> HandlerResult {
     let answer = if msg.from.as_ref().is_none() {
         log::warn!("The /start command was invoked without a FROM field for message: {:?}", msg);
-        help.get_help_message(lang_code).to_owned()
+        help.get_help_message(&lang_code).to_owned()
     } else {
         match cmd {
             StartCommands::Start(promo_code) if promo_code.starts_with(PROMO_START_PARAM_PREFIX) => {
