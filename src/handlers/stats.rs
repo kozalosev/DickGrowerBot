@@ -4,8 +4,9 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
 use crate::handlers::{FromRefs, HandlerResult, reply_html};
-use crate::{metrics, reply_html, repo};
-use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::handlers::utils::SelfDestructionService;
+use crate::{metrics, reply_html_ephemeral, repo};
+use crate::config::{AppConfig, BattlesFeatureToggles, MessageGroup};
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::objects::WinRateAware;
 
@@ -16,12 +17,14 @@ pub enum StatsCommands {
     Stats
 }
 
-pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_config: AppConfig) -> HandlerResult {
+pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_config: AppConfig,
+                         self_destruction: SelfDestructionService) -> HandlerResult {
     metrics::CMD_STATS.chat.inc();
-    
+
     let features = app_config.features.pvp;
     if features.show_stats {
         let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
+        let lang_code = LanguageCode::from_user(from);
         let chat_id = msg.chat.id.into();
         let from_refs = FromRefs(from, &chat_id);
 
@@ -31,7 +34,7 @@ pub async fn cmd_handler(bot: Bot, msg: Message, repos: repo::Repositories, app_
             chat_stats_impl(&repos, from_refs, features).await?
         };
 
-        reply_html!(bot, msg, answer);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Report, &lang_code);
     } else {
         log::info!("ignoring the /stats command since it's disabled");
     }

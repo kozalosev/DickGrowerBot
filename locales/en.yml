@@ -125,3 +125,5 @@ errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"
   feature_disabled: "This feature is currently temporarily disabled."
+self_destruction:
+  warning: "🧹 <i>To keep the chat clean, this message will be deleted in <b>%{seconds}</b> seconds…</i>"

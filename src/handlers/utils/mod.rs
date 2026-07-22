@@ -2,9 +2,11 @@ pub mod callbacks;
 pub mod locks;
 mod tghack;
 mod incrementor;
+mod self_destruction;
 
 pub use tghack::*;
 pub use incrementor::*;
+pub use self_destruction::*;
 
 use teloxide::types::User;
 use crate::domain::primitives::Username;
