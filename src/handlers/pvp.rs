@@ -92,12 +92,17 @@ impl TryFrom<String> for BattleCallbackData {
     }
 }
 
-pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
-                         repos: Repositories, config: AppConfig) -> HandlerResult {
+pub async fn cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cmd: BattleCommands,
+    repos: Repositories,
+    config: AppConfig,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let user = msg.from.as_ref().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
-    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     let params = BattleParams {
         repos,
         features: config.features.pvp,
@@ -113,10 +118,9 @@ pub async fn cmd_handler(bot: Bot, msg: Message, cmd: BattleCommands,
     Ok(())
 }
 
-pub async fn cmd_handler_no_args(bot: Bot, msg: Message) -> HandlerResult {
+pub async fn cmd_handler_no_args(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
-    let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
     reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
     Ok(())
 }
@@ -131,12 +135,11 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
     maybe_bet.is_ok()
 }
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
+pub async fn inline_handler(bot: Bot, query: InlineQuery, lang_code: LanguageCode) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let bet = Bet::new(query.query.parse()?)
         .map_err(|e| anyhow!(e))?;
-    let lang_code = LanguageCode::from_user(&query.from);
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
@@ -149,7 +152,12 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
     Ok(())
 }
 
-pub(super) fn build_inline_keyboard_article_result(uid: UserId, lang_code: &LanguageCode, name: &Username, bet: Bet) -> InlineQueryResult {
+pub(super) fn build_inline_keyboard_article_result(
+    uid: UserId,
+    lang_code: &LanguageCode,
+    name: &Username,
+    bet: Bet,
+) -> InlineQueryResult {
     log::debug!("Starting a PvP for {uid} (bet = {bet})...");
 
     let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
@@ -174,8 +182,14 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     BattleCallbackData::check_prefix(query)
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories, config: AppConfig,
-                              mut battle_locker: LockCallbackServiceFacade) -> HandlerResult {
+pub async fn callback_handler(
+    bot: Bot,
+    query: CallbackQuery,
+    repos: Repositories,
+    config: AppConfig,
+    mut battle_locker: LockCallbackServiceFacade,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat().id)
         .map(TelegramChatId::from)
@@ -203,7 +217,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     let params = BattleParams {
         repos,
         features: config.features.pvp,
-        lang_code: LanguageCode::from_user(&query.from),
+        lang_code,
         chat_id: chat_id.clone(),
     };
     let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;
@@ -257,7 +271,11 @@ impl Into<UserId> for UserInfo {
     }
 }
 
-pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: Bet) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+pub(crate) async fn pvp_impl_start(
+    p: BattleParams,
+    initiator: UserInfo,
+    bet: Bet,
+) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     log::debug!("Starting a PvP for {} in the chat with id = {} (bet = {bet}, enough = {enough})...", initiator.uid, p.chat_id);
 
@@ -275,7 +293,12 @@ pub(crate) async fn pvp_impl_start(p: BattleParams, initiator: UserInfo, bet: Be
     Ok(data)
 }
 
-async fn pvp_impl_attack(p: BattleParams, initiator: UserId, acceptor: UserInfo, bet: Bet) -> anyhow::Result<CallbackResult> {
+async fn pvp_impl_attack(
+    p: BattleParams,
+    initiator: UserId,
+    acceptor: UserInfo,
+    bet: Bet,
+) -> anyhow::Result<CallbackResult> {
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
@@ -361,7 +384,11 @@ async fn get_user_info(users: &repo::Users, user_uid: UserId, acceptor: &UserInf
     Ok(user)
 }
 
-async fn pay_for_loan_if_needed(p: &BattleParams, winner_id: UserId, award: Bet) -> anyhow::Result<Option<(GrowthResult, LoanPayout)>> {
+async fn pay_for_loan_if_needed(
+    p: &BattleParams,
+    winner_id: UserId,
+    award: Bet,
+) -> anyhow::Result<Option<(GrowthResult, LoanPayout)>> {
     let chat_id_kind = p.chat_id.kind();
     let loan = match p.repos.loans.get_active_loan(winner_id, &chat_id_kind).await? {
         Some(loan) => loan,

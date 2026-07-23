@@ -4,7 +4,8 @@ use teloxide::types::User;
 use domain_types_macro::domain_type;
 
 static DEFAULT: Lazy<LanguageCode> = Lazy::new(|| LanguageCode("en".to_string()));
-static LOCALE_TO_LANGUAGE: [(&str, SupportedLanguage); 10] = [
+static LOCALE_TO_LANGUAGE: [(&str, SupportedLanguage); 11] = [
+    ("en", SupportedLanguage::EN),
     ("ru", SupportedLanguage::RU),
     ("uk", SupportedLanguage::RU),
     ("be", SupportedLanguage::RU),
@@ -20,7 +21,7 @@ static LOCALE_TO_LANGUAGE: [(&str, SupportedLanguage); 10] = [
 #[domain_type]
 struct LanguageCode(String);
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, sqlx::Type)]
+#[derive(Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, strum_macros::EnumString, sqlx::Type)]
 #[strum(serialize_all = "lowercase")]
 #[sqlx(type_name = "language_code", rename_all = "lowercase")]
 #[cfg_attr(test, derive(Debug))]
@@ -30,6 +31,37 @@ pub enum SupportedLanguage {
     IT,
     FA,
     ZH,
+}
+
+impl SupportedLanguage {
+    pub const ALL: [SupportedLanguage; 5] = [Self::EN, Self::RU, Self::IT, Self::FA, Self::ZH];
+
+    pub fn flag(&self) -> &'static str {
+        match self {
+            Self::EN => "🇬🇧",
+            Self::RU => "🇷🇺",
+            Self::IT => "🇮🇹",
+            Self::FA => "🇮🇷",
+            Self::ZH => "🇨🇳",
+        }
+    }
+
+    pub fn native_name(&self) -> &'static str {
+        match self {
+            Self::EN => "English",
+            Self::RU => "Русский",
+            Self::IT => "Italiano",
+            Self::FA => "فارسی",
+            Self::ZH => "中文",
+        }
+    }
+
+    /// Parses a flag emoji into a language (accepts both 🇬🇧 and 🇺🇸 for English).
+    pub fn from_flag(flag: &str) -> Option<Self> {
+        Self::ALL.into_iter()
+            .find(|lang| lang.flag() == flag)
+            .or_else(|| (flag == "🇺🇸").then_some(Self::EN))
+    }
 }
 
 impl LanguageCode {
@@ -45,14 +77,20 @@ impl LanguageCode {
     }
 
     pub fn to_supported_language(&self) -> SupportedLanguage {
+        self.as_supported_language().unwrap_or(SupportedLanguage::EN)
+    }
+
+    /// Resolves this code to a supported language, or `None` if it isn't one we localize.
+    /// Unlike [`Self::to_supported_language`], unrecognized codes don't silently fall back to
+    /// English — useful when the caller needs to reject unknown input (e.g. the `/language` argument).
+    pub fn as_supported_language(&self) -> Option<SupportedLanguage> {
         let code = self.to_ascii_lowercase();
         if code.len() < 2 {
-            return SupportedLanguage::EN
+            return None
         }
         LOCALE_TO_LANGUAGE.iter()
             .find(|(locale, _)| *locale == &code[..2])
             .map(|(_, lang)| *lang)
-            .unwrap_or(SupportedLanguage::EN)
     }
 
     fn get_language_code_or_log_if_missing(user: &User) -> Option<&String> {

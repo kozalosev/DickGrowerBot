@@ -1,6 +1,20 @@
 commands:
   help:
     description: "有什么问题吗"
+  language:
+    description: "更改界面语言"
+    prompt: "请选择你的语言："
+    success: "完成！你的语言偏好已保存，并将应用于所有 SadBot.Dev 的机器人。"
+    not_registered: "你还没有在共享账号服务中注册。请先通过 @LocPlaceBot 注册 —— 然后你的语言就会在所有 SadBot.Dev 的机器人间同步。"
+    errors:
+      unavailable: "此功能当前不可用。"
+      unsupported: "抱歉，暂不支持该语言。请尝试：🇬🇧 en、🇷🇺 ru、🇮🇹 it、🇮🇷 fa、🇨🇳 zh。"
+      admins_only: "只有群管理员才能更改群聊语言。"
+    chat:
+      prompt: "请为整个群聊选择语言："
+      success: "完成！现在我会用这种语言回复本群所有人。"
+      reset: "完成！群聊语言已清除 —— 我会重新按每个人自己的语言回复。"
+      auto_button: "🌐 自动（各自的语言）"
   privacy:
     description: "存储数据说明详见隐私政策，"
   grow:

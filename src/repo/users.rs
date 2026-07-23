@@ -42,7 +42,11 @@ repository!(Users,
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
-    pub async fn get_random_active_poor_member(&self, chat_id: &ChatIdKind, rich_exclusion_ratio: Ratio) -> anyhow::Result<Option<User>> {
+    pub async fn get_random_active_poor_member(
+        &self,
+        chat_id: &ChatIdKind,
+        rich_exclusion_ratio: Ratio,
+    ) -> anyhow::Result<Option<User>> {
         let wealth_borderline = (Ratio::literal(1.0) - rich_exclusion_ratio)?;
         sqlx::query_as!(User,
             r#"WITH ranked_users AS (
@@ -68,7 +72,10 @@ repository!(Users,
     // scale, so a poorer member is favored while everyone keeps a realistic chance (see #60).
     // When every length is equal (STDDEV_POP = 0), the z-score is coalesced to 0, which yields
     // an equal weight of 0.5 for all the members.
-    pub async fn get_random_active_member_with_poor_in_priority(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
+    pub async fn get_random_active_member_with_poor_in_priority(
+        &self,
+        chat_id: &ChatIdKind,
+    ) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             r#"WITH user_weights AS (
                 SELECT u.uid, u.name, u.created_at, d.length,

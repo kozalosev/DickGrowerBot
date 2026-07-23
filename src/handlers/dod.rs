@@ -1,12 +1,12 @@
 use std::borrow::Cow;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::types::{LinkPreviewOptions, Message};
-use crate::{config, metrics, repo};
-use crate::config::{DickOfDaySelectionMode, MessageGroup};
+use crate::{metrics, repo};
+use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::{FromRefs, HandlerResult, TaggedReply, reply_html, utils};
@@ -22,28 +22,37 @@ pub enum DickOfDayCommands {
     Dod,
 }
 
-pub async fn dod_cmd_handler(bot: Bot, msg: Message,
-                             cfg: config::AppConfig, repos: repo::Repositories, incr: Incrementor,
-                             self_destruction: SelfDestructionService) -> HandlerResult {
+pub async fn dod_cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cfg: AppConfig,
+    repos: repo::Repositories,
+    incr: Incrementor,
+    lang_code: LanguageCode,
+    self_destruction: SelfDestructionService,
+) -> HandlerResult {
     metrics::CMD_DOD_COUNTER.chat.inc();
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
-    let lang_code = LanguageCode::from_user(from);
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
     // A real election is a permanent event; the "already chosen"/"no candidates" statuses
     // are scheduled (as a Notice). `dick_of_day_impl` tells them apart via the reply group.
-    let reply = dick_of_day_impl(cfg, &repos, incr, from_refs).await?;
+    let reply = dick_of_day_impl(cfg, &repos, incr, from_refs, lang_code.clone()).await?;
     let sent = reply_html(bot.clone(), &msg, reply.text)
         .link_preview_options(disabled_link_preview())
-        .await?;
+        .await.context(format!("failed for {msg:?}"))?;
     self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
     Ok(())
 }
 
-pub(crate) async fn dick_of_day_impl(cfg: config::AppConfig, repos: &repo::Repositories, incr: Incrementor,
-                                     from_refs: FromRefs<'_>) -> anyhow::Result<TaggedReply> {
-    let (from, chat_id) = (from_refs.0, from_refs.1);
-    let lang_code = LanguageCode::from_user(from);
+pub(crate) async fn dick_of_day_impl(
+    cfg: AppConfig,
+    repos: &repo::Repositories,
+    incr: Incrementor,
+    from_refs: FromRefs<'_>,
+    lang_code: LanguageCode,
+) -> anyhow::Result<TaggedReply> {
+    let chat_id = from_refs.1;
     let winner = match cfg.features.dod_selection_mode {
         DickOfDaySelectionMode::WEIGHTS => {
             repos.users.get_random_active_member_with_poor_in_priority(&chat_id.kind()).await?

@@ -5,24 +5,22 @@ mod help;
 mod metrics;
 mod config;
 mod commands;
+mod users;
 
-use std::env::VarError;
 use std::net::SocketAddr;
 use futures::future::join_all;
-use reqwest::Url;
 use rust_i18n::i18n;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::UpdateListener;
-use crate::handlers::{checks, HelpCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
+use crate::handlers::{checks, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
-
-const ENV_WEBHOOK_URL: &str = "WEBHOOK_URL";
+use crate::users::LanguageService;
 
 i18n!(fallback = "en");    // load localizations with default parameters
 
@@ -35,12 +33,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app_config = config::AppConfig::from_env();
     let database_config = config::DatabaseConfig::from_env()?;
+    let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
+    let repos = repo::Repositories::new(&db_conn, &app_config);
+    let language_service = users::init_language_service(&integrations_config, repos.chats.clone()).await;
 
     let handler = dptree::entry()
+        .map_async(|upd: Update, ls: LanguageService| async move { ls.resolve(&upd).await })
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
+        .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::cmd_handler))
         .branch(Update::filter_message().filter_command::<DickCommands>().filter(checks::is_group_chat).branch(checks::reject_group_accounts()).endpoint(handlers::dick_cmd_handler))
         .branch(Update::filter_message().filter_command::<DickOfDayCommands>().filter(checks::is_group_chat).branch(checks::reject_group_accounts()).endpoint(handlers::dod_cmd_handler))
         .branch(Update::filter_message().filter_command::<BattleCommands>().filter(checks::is_group_chat).branch(checks::reject_group_accounts()).endpoint(handlers::pvp::cmd_handler))
@@ -62,15 +65,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::pvp::callback_filter).endpoint(handlers::pvp::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
 
     let bot = Bot::from_env();
     bot.delete_webhook().await?;
 
+    // The personal /language relies on the user-service; when it's unavailable, hide /language from
+    // the private-chat menu. The chat-wide /language (groups, admins-only) stays available regardless.
+    let command_toggles = commands::CommandToggles {
+        env: app_config.command_toggles.clone(),
+        personal_language_enabled: language_service.user_service_enabled(),
+    };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
         .iter()
-        .map(|locale| commands::set_my_commands(&bot, locale, &app_config.command_toggles));
+        .map(|locale| commands::set_my_commands(&bot, locale, &command_toggles));
     join_all(set_my_commands_requests)
         .await
         .into_iter()
@@ -78,7 +88,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
     let me = bot.get_me().await?;
-    let repos = repo::Repositories::new(&db_conn, &app_config);
     let perks = handlers::perks::all(&db_conn, &app_config);
     let incrementor = handlers::utils::Incrementor::from_env(&repos.dicks, perks);
     let help_context = config::build_context_for_help_messages(me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
@@ -86,12 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
     let self_destruction = handlers::utils::SelfDestructionService::new(app_config.self_destruction);
 
-    let webhook_url: Option<Url> = match std::env::var(ENV_WEBHOOK_URL) {
-        Ok(env_url) if !env_url.is_empty() => Some(env_url.parse()?),
-        Ok(env_url) if env_url.is_empty() => None,
-        Err(VarError::NotPresent) => None,
-        _ => Err("invalid webhook URL!")?
-    };
+    let webhook_url = integrations_config.webhook_url;
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let metrics_router = metrics::init();
 
@@ -102,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app_config,
         help_container,
         battle_locker,
+        language_service,
         self_destruction,
         InMemStorage::<PromoCommandState>::new()
     ];

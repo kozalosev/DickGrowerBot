@@ -153,8 +153,13 @@ pub async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartial
     create_another_user_and_dick(db, chat_id, 2, name, 1).await;
 }
 
-pub async fn create_another_user_and_dick(db: &Pool<Postgres>, chat_id: &ChatIdPartiality,
-                                          n: u8, name: &str, increment: i64) {
+pub async fn create_another_user_and_dick(
+    db: &Pool<Postgres>,
+    chat_id: &ChatIdPartiality,
+    n: u8,
+    name: &str,
+    increment: i64,
+) {
     assert!(n > 1);
     let n = n.to_i64().expect("couldn't convert n to i64");
 

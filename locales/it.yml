@@ -1,6 +1,20 @@
 commands:
   help:
     description: "Ti aiuterò, mio amico"
+  language:
+    description: "Cambia la lingua dell'interfaccia"
+    prompt: "Scegli la tua lingua:"
+    success: "Fatto! La tua preferenza di lingua è stata salvata e verrà applicata a tutti i bot di SadBot.Dev."
+    not_registered: "Non sei ancora registrato nel servizio account condiviso. Registrati prima tramite @LocPlaceBot — poi la lingua sarà sincronizzata su tutti i bot di SadBot.Dev."
+    errors:
+      unavailable: "Questa funzione al momento non è disponibile."
+      unsupported: "Spiacenti, questa lingua non è supportata. Prova una di: 🇬🇧 en, 🇷🇺 ru, 🇮🇹 it, 🇮🇷 fa, 🇨🇳 zh."
+      admins_only: "Solo gli amministratori della chat possono cambiare la lingua della chat."
+    chat:
+      prompt: "Scegli la lingua per tutta questa chat:"
+      success: "Fatto! Ora rispondo a tutti in questa chat nella lingua selezionata."
+      reset: "Fatto! La lingua della chat è stata azzerata — risponderò di nuovo a ciascuno nella propria lingua."
+      auto_button: "🌐 Auto (lingua di ciascuno)"
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
   grow:

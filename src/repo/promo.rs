@@ -80,7 +80,10 @@ repository!(Promo,
         Ok(ActivationResult{ chats_affected, bonus_length: bonus })
     }
 ,
-    async fn find_code_length_and_decr_capacity(tx: &mut sqlx::Transaction<'_, Postgres>, code: &str) -> anyhow::Result<Option<PromoCodeInfo>> {
+    async fn find_code_length_and_decr_capacity(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        code: &str,
+    ) -> anyhow::Result<Option<PromoCodeInfo>> {
          sqlx::query_as!(PromoCodeInfo,
             "UPDATE Promo_Codes SET capacity = (capacity - 1)
                 WHERE lower(code) = lower($1) AND capacity > 0 AND
@@ -104,7 +107,12 @@ repository!(Promo,
         Ok(rows_affected)
     }
 ,
-    async fn add_activation(tx: &mut sqlx::Transaction<'_, Postgres>, uid: UserId, code: &str, affected_chats: u64) -> anyhow::Result<()> {
+    async fn add_activation(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        uid: UserId,
+        code: &str,
+        affected_chats: u64,
+    ) -> anyhow::Result<()> {
         let affected_chats: i32 = affected_chats.try_into()?;
         sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats, activated_at) VALUES ($1, $2, $3, current_timestamp)",
                 uid as UserId, code, affected_chats)

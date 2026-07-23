@@ -47,7 +47,12 @@ impl Dicks {
         }
     }
 
-    pub async fn create_or_grow(&self, uid: UserId, chat_id: &ChatIdPartiality, increment: LengthChange) -> anyhow::Result<GrowthResult> {
+    pub async fn create_or_grow(
+        &self,
+        uid: UserId,
+        chat_id: &ChatIdPartiality,
+        increment: LengthChange,
+    ) -> anyhow::Result<GrowthResult> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
         let new_length = sqlx::query_scalar!(
             "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
@@ -106,7 +111,12 @@ impl Dicks {
             .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
-    pub async fn set_dod_winner(&self, chat_id: &ChatIdPartiality, user_id: UserId, bonus: LengthChange) -> anyhow::Result<Option<GrowthResult>> {
+    pub async fn set_dod_winner(
+        &self,
+        chat_id: &ChatIdPartiality,
+        user_id: UserId,
+        bonus: LengthChange,
+    ) -> anyhow::Result<Option<GrowthResult>> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;
@@ -133,7 +143,13 @@ impl Dicks {
             .context(format!("couldn't check the dick {chat_id}, {user_id} to have at least {length} cm"))
     }
 
-    pub async fn move_length(&self, chat_id: &ChatIdPartiality, from: UserId, to: UserId, length: Bet) -> anyhow::Result<(GrowthResult, GrowthResult)> {
+    pub async fn move_length(
+        &self,
+        chat_id: &ChatIdPartiality,
+        from: UserId,
+        to: UserId,
+        length: Bet,
+    ) -> anyhow::Result<(GrowthResult, GrowthResult)> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
         let winner_change = length.as_length_change_for_winner();
         let loser_change = length.as_length_change_for_loser();
@@ -156,7 +172,12 @@ impl Dicks {
         Ok((gr_from, gr_to))
     }
 
-    async fn move_length_for_one_user(tx: &mut Transaction<'_, Postgres>, chat_id_internal: InternalChatId, user_id: UserId, change: LengthChange) -> anyhow::Result<Length> {
+    async fn move_length_for_one_user(
+        tx: &mut Transaction<'_, Postgres>,
+        chat_id_internal: InternalChatId,
+        user_id: UserId,
+        change: LengthChange,
+    ) -> anyhow::Result<Length> {
         sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
                     chat_id_internal as InternalChatId, user_id as UserId, change.value() as i64)
             .fetch_one(&mut **tx)
@@ -165,7 +186,11 @@ impl Dicks {
             .context(format!("couldn't update the length by {change} for {chat_id_internal}, {user_id}"))
     }
 
-    async fn get_position_in_top(&self, chat_id_internal: InternalChatId, uid: UserId) -> anyhow::Result<Option<Position>> {
+    async fn get_position_in_top(
+        &self,
+        chat_id_internal: InternalChatId,
+        uid: UserId,
+    ) -> anyhow::Result<Option<Position>> {
         if !self.features.top_unlimited {
             return Ok(None)
         }
@@ -184,7 +209,12 @@ impl Dicks {
             .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
     }
     
-    pub async fn grow_no_attempts_check(&self, chat_id: &ChatIdKind, user_id: UserId, change: LengthChange) -> anyhow::Result<GrowthResult> {
+    pub async fn grow_no_attempts_check(
+        &self,
+        chat_id: &ChatIdKind,
+        user_id: UserId,
+        change: LengthChange,
+    ) -> anyhow::Result<GrowthResult> {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
 
         let new_length = Self::grow_no_attempts_check_internal(&self.pool, chat_internal_id, user_id, change).await?
@@ -194,7 +224,12 @@ impl Dicks {
         Ok(GrowthResult { new_length, pos_in_top })
     }
 
-    pub(super) async fn grow_no_attempts_check_internal<'c, E>(executor: E, chat_id_internal: InternalChatId, user_id: UserId, bonus: LengthChange) -> anyhow::Result<Option<Length>>
+    pub(super) async fn grow_no_attempts_check_internal<'c, E>(
+        executor: E,
+        chat_id_internal: InternalChatId,
+        user_id: UserId,
+        bonus: LengthChange,
+    ) -> anyhow::Result<Option<Length>>
     where E: Executor<'c, Database = Postgres>,
     {
         sqlx::query_scalar!(
@@ -208,7 +243,11 @@ impl Dicks {
             .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
     }
 
-    async fn insert_to_dod_table(tx: &mut Transaction<'_, Postgres>, chat_id_internal: InternalChatId, user_id: UserId) -> anyhow::Result<()> {
+    async fn insert_to_dod_table(
+        tx: &mut Transaction<'_, Postgres>,
+        chat_id_internal: InternalChatId,
+        user_id: UserId,
+    ) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
                 chat_id_internal as InternalChatId, user_id as UserId)
             .execute(&mut **tx)

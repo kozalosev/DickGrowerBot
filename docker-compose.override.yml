@@ -1,5 +1,7 @@
-version: "3.8"
 services:
   postgres:
     ports:
       - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+  user-service:
+    ports:
+      - "${USER_SERVICE_GRPC_PORT}:${USER_SERVICE_GRPC_PORT}"

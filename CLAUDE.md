@@ -40,6 +40,33 @@ DATABASE_URL=postgres://...
 TELOXIDE_TOKEN=...
 ```
 
+### Optional: user-service integration
+
+The bot can integrate with the [user-service](https://github.com/Kozalo-Blog/user-service)
+microservice (gRPC) to read/update a user's preferred language across all of Kozalo's bots:
+
+```
+GRPC_ADDR_USER_SERVICE=host:port   # unset => integration disabled, personal /language hidden in PMs
+USER_CACHE_TIME_SECS=360           # optional cache TTL for fetched users
+```
+
+`/language` is overloaded: in a private chat it changes the caller's personal language (via
+user-service, above); in a group it sets a chat-wide language (admins only) that applies to
+everyone and overrides each user's own preference. The chat-wide setting is stored in our own
+`Chats.settings` (jsonb) column, so it works even when user-service is disabled:
+
+```
+CHAT_LANGUAGE_CACHE_TIME_SECS=3600 # optional TTL for the per-chat language cache (we own the data)
+```
+
+The proto contract is vendored as the `user-service-proto` git submodule and compiled by
+`build.rs` (via `tonic-prost-build`), so **`protoc` must be installed** and the submodule
+checked out to build:
+
+```bash
+git submodule update --init
+```
+
 Migrations run automatically on startup via `sqlx::migrate!` — but that's only at
 runtime. `sqlx::query!`/`query_as!` macros type-check against the live schema at
 `DATABASE_URL` when compiling (no `.sqlx/` cache, or it's stale), so **`cargo build`
@@ -96,6 +123,41 @@ Repositories are grouped in a `Repositories` struct and injected into handlers v
 ### Feature toggles
 
 Runtime features are gated by environment variables parsed in `config/`. Check `config/` for the list of flags.
+
+## Code Style
+
+- **ALWAYS** break a function signature onto one parameter per line when the single-line signature
+  reaches **120+ characters**. Put the opening `(` at the end of the `fn` line, each parameter on
+  its own line with a trailing comma, and the closing `)` plus return type on their own line
+  (rustfmt block style); keep any `where` clause after the `)`:
+
+  ```rust
+  // ❌ too long on one line
+  pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
+
+  // ✅ one parameter per line
+  pub async fn set_chat_language(
+      &self,
+      chat_id: &ChatIdPartiality,
+      lang: Option<SupportedLanguage>,
+  ) -> anyhow::Result<()> {
+  ```
+
+  Signatures under 120 characters may stay on a single line.
+
+- **Avoid long, complex one-line expressions.** Break a method/`await` chain across lines at the
+  dots, and don't inline a call inside an assertion: assign its result to a variable first, then
+  assert on the variable. A trailing `.await.expect(...)` may stay together on one continuation line.
+
+  ```rust
+  // ❌ long chain inlined in the assertion
+  assert_eq!(chats.get_chat_language(&kind).await.expect("couldn't read the language"), None);
+
+  // ✅ split by dots, bind, then assert
+  let lang = chats.get_chat_language(&kind)
+      .await.expect("couldn't read the language");
+  assert_eq!(lang, None);
+  ```
 
 ## DB Migrations
 

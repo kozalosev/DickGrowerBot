@@ -134,7 +134,12 @@ impl Incrementor {
             .collect();
     }
 
-    pub async fn growth_increment(&self, user_id: UserId, chat_id: ChatIdKind, days_since_registration: DaysCount) -> Increment {
+    pub async fn growth_increment(
+        &self,
+        user_id: UserId,
+        chat_id: ChatIdKind,
+        days_since_registration: DaysCount,
+    ) -> Increment {
         let dick_id = DickId(user_id, chat_id);
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
             self.config.grow_shrink_ratio

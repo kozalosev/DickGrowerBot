@@ -36,38 +36,47 @@ pub enum PromoCommandState {
 
 pub type PromoCodeDialogue = Dialogue<PromoCommandState, InMemStorage<PromoCommandState>>;
 
-pub async fn promo_cmd_handler(bot: Bot, msg: Message, cmd: PromoCommands, dialogue: PromoCodeDialogue,
-                               repos: repo::Repositories) -> HandlerResult {
+pub async fn promo_cmd_handler(
+    bot: Bot,
+    msg: Message,
+    cmd: PromoCommands,
+    dialogue: PromoCodeDialogue,
+    repos: repo::Repositories,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::CMD_PROMO.invoked_by_command.inc();
     let user = msg.from.as_ref().ok_or("no from user")?;
     let answer = match cmd {
         PromoCommands::Promo(code) if code.is_empty() => {
             dialogue.update(PromoCommandState::Requested).await?;
 
-            let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
             t!("commands.promo.request", locale = &lang_code).to_string()
         }
         PromoCommands::Promo(code) => {
             dialogue.exit().await?;
 
-            promo_activation_impl(repos.promo, user, &PromoCode::new(code)).await?
+            promo_activation_impl(repos.promo, user, &PromoCode::new(code), lang_code).await?
         },
     };
     reply_html!(bot, msg, answer);
     Ok(())
 }
 
-pub async fn promo_requested_handler(bot: Bot, msg: Message, dialogue: PromoCodeDialogue,
-                                     repos: repo::Repositories) -> HandlerResult {
+pub async fn promo_requested_handler(
+    bot: Bot,
+    msg: Message,
+    dialogue: PromoCodeDialogue,
+    repos: repo::Repositories,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     let answer = match msg.text() {
         Some(code) => {
             dialogue.exit().await?;
-            
+
             let user = msg.from.as_ref().ok_or("no from user")?;
-            promo_activation_impl(repos.promo, user, &PromoCode::of(code)).await?
+            promo_activation_impl(repos.promo, user, &PromoCode::of(code), lang_code).await?
         },
         None => {
-            let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
             t!("commands.promo.request", locale = &lang_code).to_string()
         }
     };
@@ -79,10 +88,9 @@ pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
     PROMO_CODE_FORMAT_REGEXP.is_match(&query)
 }
 
-pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult {
+pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, lang_code: LanguageCode) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
-    let lang_code = LanguageCode::from_user(&query.from);
     let promo_code = query.query;
     let button_text = t!("commands.promo.inline.switch_button", locale = &lang_code, code = promo_code);
     let encoded_query = URL_SAFE_NO_PAD.encode(promo_code.as_bytes());
@@ -101,8 +109,12 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery) -> HandlerResult
     Ok(())
 }
 
-pub(crate) async fn promo_activation_impl(promo_repo: repo::Promo, user: &User, promo_code: &PromoCode) -> anyhow::Result<String> {
-    let lang_code = LanguageCode::from_user(user);
+pub(crate) async fn promo_activation_impl(
+    promo_repo: repo::Promo,
+    user: &User,
+    promo_code: &PromoCode,
+    lang_code: LanguageCode,
+) -> anyhow::Result<String> {
     let answer = match promo_repo.activate(UserId::from(user), promo_code).await {
         Ok(res) => {
             metrics::CMD_PROMO.finished.inc();
