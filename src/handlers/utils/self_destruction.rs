@@ -7,6 +7,7 @@ use teloxide::types::Message;
 use teloxide::types::ParseMode::Html;
 use crate::config::{MessageGroup, SelfDestructionConfig};
 use crate::domain::primitives::LanguageCode;
+use crate::metrics;
 
 /// Estimated time needed to read `char_count` visible characters at `cpm` characters per
 /// minute. Returns zero when `cpm` is zero (reading-time adjustment disabled).
@@ -73,8 +74,12 @@ impl SelfDestructionService {
             }
 
             log::debug!("self-destruction: sending delete request for {group} message {message_id} in chat {chat_id}");
-            if let Err(e) = bot.delete_message(chat_id, message_id).await {
-                log::warn!("self-destruction: couldn't delete {group} message {message_id} in chat {chat_id}: {e}");
+            match bot.delete_message(chat_id, message_id).await {
+                Ok(_) => metrics::SELF_DESTRUCTION.record(&group.to_string(), true),
+                Err(e) => {
+                    log::warn!("self-destruction: couldn't delete {group} message {message_id} in chat {chat_id}: {e}");
+                    metrics::SELF_DESTRUCTION.record(&group.to_string(), false);
+                }
             }
         });
     }

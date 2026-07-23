@@ -39,6 +39,8 @@ pub static CHAT_LANGUAGE: Lazy<ChatLanguageCounters> = Lazy::new(||
     ChatLanguageCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
 pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
     SpokenLanguageCounter::new("used_language_total", "count of updates by the sender's Telegram (client) language_code, region suffix kept — an anonymous proxy for the languages the audience speaks"));
+pub static SELF_DESTRUCTION: Lazy<SelfDestructionCounters> = Lazy::new(||
+    SelfDestructionCounters::new("self_destruction_total", "count of the bot's own messages removed by the self-destruction feature, split by message group and outcome (deleted/failed)"));
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -77,6 +79,7 @@ fn force_registration() {
     Lazy::force(&CMD_LANGUAGE);
     Lazy::force(&CHAT_LANGUAGE);
     Lazy::force(&USED_LANGUAGE);
+    Lazy::force(&SELF_DESTRUCTION);
 }
 
 pub struct Counter(IntCounter);
@@ -284,6 +287,29 @@ impl SpokenLanguageCounter {
     /// (absent or unrecognized => `unknown`). Carries no user id — anonymous.
     pub fn record(&self, code: Option<&str>) {
         self.0.counter(&[&language_label(code)]).inc()
+    }
+}
+
+/// Counts the bot's own messages removed by the self-destruction feature, labeled by
+/// message group (the lowercase `MessageGroup` Display string) and outcome.
+pub struct SelfDestructionCounters(CounterVec);
+
+impl SelfDestructionCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["group", "outcome"]);
+        for group in ["notice", "report"] {
+            for outcome in ["deleted", "failed"] {
+                vec.counter(&[group, outcome]);
+            }
+        }
+        Self(vec)
+    }
+
+    /// Record the result of one self-destruction deletion for `group` (its lowercase
+    /// `MessageGroup` Display string): `deleted` when the message was removed, otherwise failed.
+    pub fn record(&self, group: &str, deleted: bool) {
+        let outcome = if deleted { "deleted" } else { "failed" };
+        self.0.counter(&[group, outcome]).inc()
     }
 }
 
