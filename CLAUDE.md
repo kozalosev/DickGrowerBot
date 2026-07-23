@@ -159,6 +159,30 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   assert_eq!(lang, None);
   ```
 
+- **Prefer combinators over `match` on `Result`/`Option`** when there are only two outcomes and
+  you don't need `return`, extra conditions, or other special control flow. Use `map` /
+  `map_err` / `and_then` / `unwrap_or_default` for the values and `inspect` / `inspect_err` for
+  side effects (like logging) instead of spelling out `Ok`/`Err` (or `Some`/`None`) arms.
+
+  ```rust
+  // ❌ two-arm match just to log and fall back
+  let file = match serde_saphyr::from_str(&content) {
+      Ok(file) => file,
+      Err(e) => {
+          log::warn!("couldn't parse the file: {e}");
+          Default::default()
+      }
+  };
+
+  // ✅ inspect_err for the log, unwrap_or_default for the fallback
+  let file = serde_saphyr::from_str(&content)
+      .inspect_err(|e| log::warn!("couldn't parse the file: {e}"))
+      .unwrap_or_default();
+  ```
+
+  A `match` is still the right tool when a branch needs `return`/`continue`, guards
+  (`Err(e) if …`), or more than two outcomes.
+
 ## DB Migrations
 
 Migration files live in `migrations/`, numbered sequentially. They are applied

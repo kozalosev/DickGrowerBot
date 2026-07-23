@@ -1,0 +1,15 @@
+# Announcements shown at the end of the "Dick of the Day" message.
+#
+# This is the default file the bot loads (path overridable via the ANNOUNCEMENTS_FILE env var).
+
+# How many times a given announcement is shown per chat before it stops (0 = never show).
+# The counter resets automatically whenever the text changes.
+max_shows: 5
+
+# Per-language texts, keyed by language code: en, ru, it, fa, zh.
+# Omit a language (or leave it empty) to show no announcement for it.
+texts:
+  en: |
+    <a href="https://t.me/kozalo_blog/20">What's new in v1.3.5 and what to expect next?</a>
+  ru: |
+    <a href="https://t.me/kozaloru/712">Что нового в v1.3.5 и что будет дальше?</a>

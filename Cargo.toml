@@ -33,6 +33,7 @@ prost-types = "0.14"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json"] }
 # Serialization / deserialization
 serde = { version = "1.0.229", features = ["derive"] }
+serde-saphyr = "0.0.29"
 # HTML and templates
 tinytemplate = "1.2.1"
 # Derive macros

@@ -232,6 +232,15 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         quote! { PartialOrd },
     ];
 
+    // Validated types can't derive `Deserialize`: the transparent newtype derive would
+    // construct `Self(value)` directly, bypassing the range validator (the same hazard as
+    // `Neg` and the plain `FromStr`). They get a hand-written impl routing through `Self::new`
+    // in `generate_validated_domain_number_impls` instead.
+    let is_validated = matches!(&info.variant, DomainTypeKind::Number(NumberKind { validated: true, .. }));
+    if !is_validated {
+        derives.push(quote! { ::serde::Deserialize });
+    }
+
     match &info.variant {
         DomainTypeKind::String => {
             derives.push(quote! { Eq });
@@ -370,6 +379,19 @@ fn generate_validated_domain_number_impls(info: &TypeInfo) -> TokenStream {
             pub const fn literal(value: #inner_type) -> Self {
                 assert!(#validator(&value), #error_msg);
                 Self(value)
+            }
+        }
+
+        // Hand-written instead of derived so deserialization can't bypass the validator:
+        // the inner value is read transparently, then routed through the fallible `Self::new`.
+        #[automatically_derived]
+        impl<'de> ::serde::Deserialize<'de> for #name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: ::serde::Deserializer<'de>,
+            {
+                let value = <#inner_type as ::serde::Deserialize>::deserialize(deserializer)?;
+                Self::new(value).map_err(::serde::de::Error::custom)
             }
         }
 
