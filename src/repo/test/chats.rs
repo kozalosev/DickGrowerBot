@@ -64,12 +64,9 @@ async fn upsert_chat() {
 }
 
 async fn clear_dicks_and_chats(db: &Pool<Postgres>) {
-    sqlx::query!("DELETE FROM Dicks")
+    sqlx::query!("TRUNCATE Dicks, Chats")
         .execute(db)
-        .await.expect("couldn't delete dicks");
-    sqlx::query!("DELETE FROM Chats")
-        .execute(db)
-        .await.expect("couldn't delete chats");
+        .await.expect("couldn't clear dicks and chats");
 }
 
 async fn old_chat_id_new_instance(chats: &repo::Chats, full: ChatIdFull) {
