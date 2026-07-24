@@ -1,4 +1,5 @@
 mod app;
+mod bot;
 mod toggles;
 mod announcements;
 mod self_destruction;
@@ -7,6 +8,7 @@ mod help;
 mod integrations;
 
 pub use app::*;
+pub use bot::*;
 pub use toggles::*;
 pub use announcements::*;
 pub use self_destruction::*;

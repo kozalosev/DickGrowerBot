@@ -40,6 +40,22 @@ DATABASE_URL=postgres://...
 TELOXIDE_TOKEN=...
 ```
 
+### Optional: bot HTTP-client timeouts
+
+The bot's Telegram API client (`config/bot.rs`, `BotConfig::build_bot`) has tunable timeouts so a
+stalled request (e.g. when DPI equipment lets the connection hang instead of resetting it) fails
+after a bounded time instead of blocking update processing. Both vars are optional and each
+overrides only its own knob; leaving **both** unset keeps teloxide's stock client:
+
+```
+BOT_HTTP_CONNECT_TIMEOUT_SECS=5  # teloxide default when unset
+BOT_HTTP_TIMEOUT_SECS=17         # total per-request timeout; teloxide default when unset
+```
+
+Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are auto-detected by
+reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read only by the stock
+`Bot::from_env()` client (i.e. when both timeouts are unset).
+
 ### Optional: user-service integration
 
 The bot can integrate with the [user-service](https://github.com/Kozalo-Blog/user-service)

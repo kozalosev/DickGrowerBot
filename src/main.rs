@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
 
-    let bot = Bot::from_env();
+    let bot = config::BotConfig::build_bot()?;
     bot.delete_webhook().await?;
 
     // The personal /language relies on the user-service; when it's unavailable, hide /language from
