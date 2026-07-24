@@ -2,6 +2,7 @@ use axum::routing::get;
 use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
+use crate::domain::primitives::SupportedLanguage;
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
 static REGISTRY: Lazy<prometheus::Registry> = Lazy::new(prometheus::Registry::new);
@@ -41,6 +42,8 @@ pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
     SpokenLanguageCounter::new("used_language_total", "count of updates by the sender's Telegram (client) language_code, region suffix kept — an anonymous proxy for the languages the audience speaks"));
 pub static SELF_DESTRUCTION: Lazy<SelfDestructionCounters> = Lazy::new(||
     SelfDestructionCounters::new("self_destruction_total", "count of the bot's own messages removed by the self-destruction feature, split by message group and outcome (deleted/failed)"));
+pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
+    AnnouncementCounter::new("announcement_shown_total", "count of announcements shown at the end of the Dick of the Day message, split by the recipient's language"));
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -80,6 +83,7 @@ fn force_registration() {
     Lazy::force(&CHAT_LANGUAGE);
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&SELF_DESTRUCTION);
+    Lazy::force(&ANNOUNCEMENT_SHOWN);
 }
 
 pub struct Counter(IntCounter);
@@ -310,6 +314,27 @@ impl SelfDestructionCounters {
     pub fn record(&self, group: &str, deleted: bool) {
         let outcome = if deleted { "deleted" } else { "failed" };
         self.0.counter(&[group, outcome]).inc()
+    }
+}
+
+/// Counts announcements actually shown at the end of the Dick of the Day message, labeled by the
+/// recipient's resolved [`SupportedLanguage`] (with fallback, the audience's language — not
+/// necessarily the language the borrowed text is written in).
+pub struct AnnouncementCounter(CounterVec);
+
+impl AnnouncementCounter {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["language"]);
+        // Pre-create every language's series so they all appear in /metrics even at zero.
+        for lang in SupportedLanguage::ALL {
+            vec.counter(&[&lang.to_string()]);
+        }
+        Self(vec)
+    }
+
+    /// Record one announcement shown to a recipient of the given language.
+    pub fn record(&self, lang: SupportedLanguage) {
+        self.0.counter(&[&lang.to_string()]).inc()
     }
 }
 

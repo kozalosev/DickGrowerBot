@@ -34,12 +34,7 @@ services:
       - LOAN_PAYOUT_COEF
       - DOD_SELECTION_MODE
       - DOD_RICH_EXCLUSION_RATIO
-      - ANNOUNCEMENT_MAX_SHOWS
-      - ANNOUNCEMENT_EN
-      - ANNOUNCEMENT_RU
-      - ANNOUNCEMENT_IT
-      - ANNOUNCEMENT_FA
-      - ANNOUNCEMENT_ZH
+      - ANNOUNCEMENTS_FILE
       - GRPC_ADDR_USER_SERVICE
       - USER_CACHE_TIME_SECS
       - USER_SERVICE_TIMEOUT_SECS
@@ -50,6 +45,8 @@ services:
       - MSG_SELFDESTRUCT_WARNING_SECONDS
     expose:
       - 8080
+    volumes:
+      - ./announcements.yml:/announcements.yml:ro
     networks:
       - postgres-network
       - user-service-network

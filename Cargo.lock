@@ -789,6 +789,7 @@ dependencies = [
  "reqwest 0.13.4",
  "rust-i18n",
  "serde",
+ "serde-saphyr",
  "sha2 0.11.0",
  "sqlx",
  "strum",
