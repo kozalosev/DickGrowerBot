@@ -103,6 +103,7 @@ pub(crate) async fn dick_of_day_impl(
         None => (t!("commands.dod.no_candidates", locale = &lang_code).to_string(), MessageGroup::Notice)
     };
     let announcement = repos.announcements.get_new(&chat_id.kind(), &lang_code).await?
+        .inspect(|_| metrics::ANNOUNCEMENT_SHOWN.record(lang_code.to_supported_language()))
         .map(|announcement| format!("\n\n<i>{announcement}</i>"))
         .unwrap_or_default();
     Ok(TaggedReply { text: format!("{answer}{announcement}"), group })
