@@ -1,4 +1,5 @@
 mod domain;
+mod error_handler;
 mod handlers;
 mod repo;
 mod help;
@@ -20,6 +21,7 @@ use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoComm
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
+use crate::error_handler::MetricsErrorHandler;
 use crate::users::LanguageService;
 
 i18n!(fallback = "en");    // load localizations with default parameters
@@ -121,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let error_handler = LoggingErrorHandler::with_custom_text("An error from the update listener");
             let mut dispatcher = Dispatcher::builder(bot, handler)
                 .default_handler(ignore_unknown_updates)
+                .error_handler(MetricsErrorHandler::new("An error in a handler"))
                 .dependencies(deps)
                 .build();
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
@@ -146,6 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bot_fut = tokio::spawn(async move {
                 Dispatcher::builder(bot, handler)
                     .default_handler(ignore_unknown_updates)
+                    .error_handler(MetricsErrorHandler::new("An error in a handler"))
                     .dependencies(deps)
                     .enable_ctrlc_handler()
                     .build()

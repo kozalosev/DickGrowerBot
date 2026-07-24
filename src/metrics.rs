@@ -44,6 +44,8 @@ pub static SELF_DESTRUCTION: Lazy<SelfDestructionCounters> = Lazy::new(||
     SelfDestructionCounters::new("self_destruction_total", "count of the bot's own messages removed by the self-destruction feature, split by message group and outcome (deleted/failed)"));
 pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
     AnnouncementCounter::new("announcement_shown_total", "count of announcements shown at the end of the Dick of the Day message, split by the recipient's language"));
+pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
+    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/other) — a spike of connect/timeout is the DPI-stalling signal"));
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -84,6 +86,7 @@ fn force_registration() {
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&SELF_DESTRUCTION);
     Lazy::force(&ANNOUNCEMENT_SHOWN);
+    Lazy::force(&TELEGRAM_REQUEST_ERRORS);
 }
 
 pub struct Counter(IntCounter);
@@ -325,7 +328,6 @@ pub struct AnnouncementCounter(CounterVec);
 impl AnnouncementCounter {
     fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["language"]);
-        // Pre-create every language's series so they all appear in /metrics even at zero.
         for lang in SupportedLanguage::ALL {
             vec.counter(&[&lang.to_string()]);
         }
@@ -335,6 +337,29 @@ impl AnnouncementCounter {
     /// Record one announcement shown to a recipient of the given language.
     pub fn record(&self, lang: SupportedLanguage) {
         self.0.counter(&[&lang.to_string()]).inc()
+    }
+}
+
+/// Counts failed requests to the Telegram Bot API, labeled by `kind`:
+/// * `connect` (the connection couldn't be established — includes connect timeouts, the DPI/ТСПУ signal),
+/// * `timeout` (a read/total timeout after connecting),
+/// * `network` (other network/IO errors),
+/// * `api` (a legitimate Telegram API error — the network was fine),
+/// * `other` (anything else).
+pub struct TelegramRequestErrorCounters(CounterVec);
+
+impl TelegramRequestErrorCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["kind"]);
+        for kind in ["connect", "timeout", "network", "api", "other"] {
+            vec.counter(&[kind]);
+        }
+        Self(vec)
+    }
+
+    /// Records one failed Telegram API request of the given `kind` (see the type docs).
+    pub fn record(&self, kind: &str) {
+        self.0.counter(&[kind]).inc()
     }
 }
 
