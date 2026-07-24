@@ -40,6 +40,36 @@ DATABASE_URL=postgres://...
 TELOXIDE_TOKEN=...
 ```
 
+### Observability / tracing
+
+Logging and tracing go through `tracing` (initialized in `src/observability.rs` via
+`observability::init_tracing()` in `main.rs`). The existing `log::*` calls are captured
+automatically by the `tracing-log` bridge, so both console output and OpenTelemetry spans
+share one pipeline.
+
+```
+RUST_LOG=info                                  # console verbosity (EnvFilter)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # OTLP/gRPC exporter; unset => export disabled (console-only)
+```
+
+Spans are exported over OTLP/gRPC (batch) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the
+service name is the crate name (`dick-grower-bot`). Inbound webhook requests (axum) and
+outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context propagates
+to the user-service. `docker-compose.yml` bundles an **optional** Jaeger all-in-one, gated behind
+the `tracing` Compose profile. The `infra`/`infra:full` tasks start it (they name it, activating the
+profile) and `docker-compose.override.yml` publishes its ports to `localhost` (UI
+`http://localhost:16686`, OTLP `localhost:4317`) for the local-binary flow. For `task up` (skips the
+override) enable it with `COMPOSE_PROFILES=tracing`; there it's network-internal and the in-Docker
+bot reaches it at `jaeger:4317`. (`user-service` is likewise optional, behind the `user-service`
+profile.)
+
+Aggregate function-level metrics (request rate / error rate / latency histograms) come from
+[`autometrics`](https://docs.rs/autometrics): handlers and query-executing repo methods carry
+`#[autometrics]` (paired with `#[tracing::instrument]`). The exporter is initialized
+in `main.rs` (`autometrics::prometheus_exporter::init()`) and its output is appended to the
+existing `/metrics` endpoint in `src/metrics.rs`, alongside the `axum-prometheus` and custom
+counters — all scraped by Prometheus from the same port `8080` `/metrics` route.
+
 ### Optional: user-service integration
 
 The bot can integrate with the [user-service](https://github.com/Kozalo-Blog/user-service)

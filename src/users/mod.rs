@@ -7,6 +7,8 @@ use std::time::Duration;
 use teloxide::types::{UserId, Update};
 use tonic::{Code, Response};
 use tonic::transport::Channel;
+use tonic_tracing_opentelemetry::middleware::client::{OtelGrpcLayer, OtelGrpcService};
+use tower::Layer;
 use generated::user_service_client::UserServiceClient as GrpcClient;
 use generated::update_user_request::Target;
 use generated::{GetUserRequest, UpdateUserRequest, User};
@@ -65,7 +67,7 @@ impl From<Option<User>> for CachedUser {
 /// internal id from the cache without an extra round-trip.
 #[derive(Clone)]
 pub struct UserServiceClientGrpc {
-    inner: GrpcClient<Channel>,
+    inner: GrpcClient<OtelGrpcService<Channel>>,
     cache: Arc<Mutex<HashMap<UserId, CachedUser>>>,
     cache_ttl: Duration,
 }
@@ -84,7 +86,7 @@ impl UserServiceClientGrpc {
             .connect()
             .await?;
         Ok(Self {
-            inner: GrpcClient::new(channel),
+            inner: GrpcClient::new(OtelGrpcLayer.layer(channel)),
             cache: Arc::new(Mutex::new(HashMap::new())),
             cache_ttl: Duration::from_secs(cache_time_secs),
         })
@@ -120,6 +122,7 @@ impl UserServiceClientGrpc {
     }
 
     /// Resolves the internal service id, reusing the shared cache the middleware populated.
+    #[tracing::instrument(skip_all, fields(uid = uid.0))]
     async fn get_internal_id(&self, uid: UserId) -> Result<i64, tonic::Status> {
         self.get(uid).await?
             .map(|u| u.id)
@@ -128,6 +131,7 @@ impl UserServiceClientGrpc {
 }
 
 impl UserServiceClient for UserServiceClientGrpc {
+    #[tracing::instrument(skip_all, fields(uid = uid.0))]
     async fn get(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
         if let Some(cached) = self.cached_fresh(uid) {
             metrics::USER_SERVICE.cache_hit();
@@ -153,6 +157,7 @@ impl UserServiceClient for UserServiceClientGrpc {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(uid = uid.0, code = %code))]
     async fn set_language(&self, uid: UserId, code: &str) -> Result<(), tonic::Status> {
         let id = self.get_internal_id(uid).await?;
         self.inner.clone().update(UpdateUserRequest {
@@ -189,6 +194,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// Resolves the effective language for an update: a group's stored language (when set) wins for
     /// everyone and short-circuits the user-service call; otherwise we fall back to the per-user
     /// resolution ([`resolve_language_for`]).
+    #[tracing::instrument(skip_all)]
     pub(crate) async fn resolve(&self, update: &Update) -> LanguageCode {
         // Anonymously record the sender's Telegram (client) language — our best proxy for the
         // languages the audience actually speaks, independent of any chat/personal override below.
@@ -213,6 +219,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     }
 
     /// Fetches a user from the user-service, or `Ok(None)` when the integration is disabled.
+    #[tracing::instrument(skip_all, fields(uid = uid.0))]
     pub(crate) async fn user(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
         match &self.users {
             UserService::Connected(client) => client.get(uid).await,
@@ -221,6 +228,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     }
 
     /// Updates a user's personal language in the user-service.
+    #[tracing::instrument(skip_all, fields(uid = uid.0, code = %code))]
     pub(crate) async fn set_user_language(&self, uid: UserId, code: &str) -> Result<(), tonic::Status> {
         match &self.users {
             UserService::Connected(client) => client.set_language(uid, code).await,

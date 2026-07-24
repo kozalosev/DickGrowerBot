@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::Context;
 use sqlx::{Postgres, Transaction};
 
@@ -44,6 +45,8 @@ impl Loans {
         Self { pool, chats, payout_ratio }
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id))]
     pub async fn get_active_loan(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Loan>> {
         let maybe_loan = sqlx::query_as!(LoanEntity,
             r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio FROM loans
@@ -58,6 +61,8 @@ impl Loans {
         Ok(maybe_loan)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, value = %value))]
     pub async fn borrow(&self, user_id: UserId, chat_id: &ChatIdKind, value: Debt) -> anyhow::Result<BorrowResult> {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
         let mut tx = self.pool.begin().await?;
@@ -80,6 +85,8 @@ impl Loans {
         Ok(BorrowResult::Granted)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id, value = %value))]
     pub async fn pay(&self, uid: UserId, chat_id: &ChatIdKind, value: LoanPayout) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Loans SET debt = debt - $3
                         WHERE uid = $1 AND
@@ -94,6 +101,8 @@ impl Loans {
     }
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_internal_id))]
 async fn fetch_length_locked(
     tx: &mut Transaction<'_, Postgres>,
     uid: UserId,
@@ -106,6 +115,8 @@ async fn fetch_length_locked(
         .context(format!("couldn't fetch and lock the length for internal {chat_internal_id} and {uid}"))
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_internal_id))]
 async fn get_active_loan(
     tx: &mut Transaction<'_, Postgres>,
     uid: UserId,
@@ -122,6 +133,8 @@ async fn get_active_loan(
     Ok(maybe_loan)
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_internal_id, value = %value, payout_ratio = payout_ratio.value()))]
 async fn create_loan(
     tx: &mut Transaction<'_, Postgres>,
     chat_internal_id: InternalChatId,
@@ -137,6 +150,8 @@ async fn create_loan(
         .context(format!("couldn't create a loan for {chat_internal_id} and {uid} with value of {value}"))?
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(loan_id = id.value(), value = %value, payout_ratio = payout_ratio.value()))]
 async fn refinance_loan(
     tx: &mut Transaction<'_, Postgres>,
     id: LoanId,

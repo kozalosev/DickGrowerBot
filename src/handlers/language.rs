@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::fmt;
 use anyhow::anyhow;
 use rust_i18n::t;
@@ -31,6 +32,8 @@ impl LanguageCommands {
     }
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
@@ -115,6 +118,8 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     LanguageCallbackData::check_prefix(query)
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), user_id = query.from.id.0, lang_code = %lang_code))]
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,

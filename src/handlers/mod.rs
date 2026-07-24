@@ -38,6 +38,18 @@ use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
+/// A message sender's Telegram id for `#[tracing::instrument]` span fields
+/// (`None` for messages without a sender, e.g. anonymous/channel posts).
+pub(crate) fn msg_user_id(msg: &Message) -> Option<u64> {
+    msg.from.as_ref().map(|u| u.id.0)
+}
+
+/// The chat id a callback query originated from, when its message is still accessible —
+/// for `#[tracing::instrument]` span fields.
+pub(crate) fn cq_chat_id(query: &CallbackQuery) -> Option<i64> {
+    query.message.as_ref().map(|m| m.chat().id.0)
+}
+
 /// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup),
 /// so the caller knows whether (and how soon) to schedule it for deletion. Shared by the
 /// commands whose reply may be either a permanent event or an ephemeral status (grow, DoD).
@@ -174,6 +186,7 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
 }
 
 pub mod checks {
+    use autometrics::autometrics;
     use rust_i18n::t;
     use teloxide::Bot;
     use teloxide::dispatching::UpdateHandler;
@@ -194,6 +207,8 @@ pub mod checks {
         !is_group_chat(msg)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
     pub async fn handle_not_group_chat(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
         let answer = t!("errors.not_group_chat", locale = &lang_code);
         reply_html!(bot, msg, answer);
@@ -225,6 +240,7 @@ pub mod checks {
     }
 
     pub mod inline {
+        use autometrics::autometrics;
         use teloxide::Bot;
         use teloxide::payloads::AnswerInlineQuerySetters;
         use teloxide::prelude::{InlineQuery, Requester};
@@ -241,6 +257,8 @@ pub mod checks {
             !is_group_chat(query)
         }
 
+        #[autometrics]
+        #[tracing::instrument(skip_all, fields(user_id = query.from.id.0))]
         pub async fn handle_not_group_chat(bot: Bot, query: InlineQuery) -> HandlerResult {
             bot.answer_inline_query(query.id, vec![])
                 .is_personal(true)

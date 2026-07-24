@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
@@ -21,6 +22,8 @@ pub enum PrivacyCommands {
     Privacy,
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn privacy_cmd_handler(
     bot: Bot,
     msg: Message,

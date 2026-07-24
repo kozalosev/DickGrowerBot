@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::Context;
 use crate::domain::objects::User;
 use crate::domain::primitives::{Ratio, UserId, Username};
@@ -5,6 +6,8 @@ use crate::repo::ChatIdKind;
 use crate::repository;
 
 repository!(Users,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), name = %name))]
     pub async fn create_or_update(&self, user_id: UserId, name: &str) -> anyhow::Result<User> {
         sqlx::query_as!(User,
             r#"INSERT INTO Users(uid, name) VALUES ($1, $2)
@@ -16,6 +19,8 @@ repository!(Users,
             .context(format!("couldn't upsert a user with id = {user_id}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_chat_members(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User,
             r#"SELECT u.uid AS "uid: UserId", name AS "name: Username", created_at FROM Users u
@@ -28,6 +33,8 @@ repository!(Users,
             .context(format!("couldn't get users of the chat with id = {chat_id}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_random_active_member(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             r#"SELECT u.uid AS "uid: UserId", name AS "name: Username", u.created_at FROM Users u
@@ -42,6 +49,8 @@ repository!(Users,
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, rich_exclusion_ratio = rich_exclusion_ratio.value()))]
     pub async fn get_random_active_poor_member(
         &self,
         chat_id: &ChatIdKind,
@@ -72,6 +81,8 @@ repository!(Users,
     // scale, so a poorer member is favored while everyone keeps a realistic chance (see #60).
     // When every length is equal (STDDEV_POP = 0), the z-score is coalesced to 0, which yields
     // an equal weight of 0.5 for all the members.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_random_active_member_with_poor_in_priority(
         &self,
         chat_id: &ChatIdKind,
@@ -108,6 +119,8 @@ repository!(Users,
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(user_id = user_id.value()))]
     pub async fn get(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users WHERE uid = $1"#, user_id as UserId)
             .fetch_optional(&self.pool)
@@ -116,6 +129,8 @@ repository!(Users,
     }
 ,
     #[cfg(test)]
+    #[autometrics]
+    #[tracing::instrument(skip_all)]
     pub async fn get_all(&self) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users"#)
             .fetch_all(&self.pool)

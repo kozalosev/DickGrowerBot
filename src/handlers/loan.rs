@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::anyhow;
 use derive_more::Display;
 use rust_i18n::t;
@@ -25,6 +26,8 @@ pub enum LoanCommands {
     Borrow,
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
@@ -108,6 +111,8 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     LoanCallbackData::check_prefix(query)
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), user_id = query.from.id.0, lang_code = %lang_code))]
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,

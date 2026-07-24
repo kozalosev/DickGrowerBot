@@ -7,6 +7,7 @@ services:
     environment:
       - TELOXIDE_TOKEN
       - RUST_LOG
+      - OTEL_EXPORTER_OTLP_ENDPOINT
       - WEBHOOK_URL
       - DATABASE_URL=postgres://${POSTGRES_USER:?error}:${POSTGRES_PASSWORD:?error}@${POSTGRES_HOST:?error}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:?error}
       - DATABASE_MAX_CONNECTIONS
@@ -50,6 +51,7 @@ services:
     networks:
       - postgres-network
       - user-service-network
+      - tracing-network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     logging:
@@ -87,13 +89,15 @@ services:
     logging:
       driver: local
   # Optional user-service integration (personal /language, cross-bot user languages).
-  # The bot reaches it over gRPC at user-service:8090; enable by setting
-  # GRPC_ADDR_USER_SERVICE=user-service:${USER_SERVICE_GRCP_PORT} in .env. It shares
-  # the `postgres` server above but uses its own database (provisioned by
-  # postgres/init-user-service-db.sh).
+  # Gated behind the `user-service` Compose profile, so it only starts when that profile is enabled
+  # (COMPOSE_PROFILES=user-service in .env) or when explicitly named (the `infra*` tasks do). The bot
+  # reaches it over gRPC at user-service:8090; point it there by setting
+  # GRPC_ADDR_USER_SERVICE=user-service:${USER_SERVICE_GRPC_PORT} in .env. It shares the `postgres`
+  # server above but uses its own database (provisioned by postgres/init-user-service-db.sh).
   user-service:
     image: ghcr.io/kozalo-blog/user-service
     container_name: dickgrowerbot-user-service
+    profiles: ["user-service"]
     restart: unless-stopped
     environment:
       - RUST_LOG
@@ -107,8 +111,26 @@ services:
       driver: local
     depends_on:
       - postgres
+  # Jaeger all-in-one — receives the bot's OpenTelemetry traces over OTLP/gRPC and serves the UI.
+  # Optional: gated behind the `tracing` Compose profile, so it only starts when that profile is
+  # enabled (COMPOSE_PROFILES=tracing in .env, or `docker compose --profile tracing up`). Traces
+  # are exported only when OTEL_EXPORTER_OTLP_ENDPOINT is set (see .env).
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: dickgrowerbot-jaeger
+    profiles: ["tracing"]
+    restart: unless-stopped
+    expose:
+      - 4317   # OTLP gRPC
+      - 16686  # Jaeger UI
+    networks:
+      - tracing-network
+    logging:
+      driver: local
 networks:
   postgres-network:
     driver: bridge
   user-service-network:
+    driver: bridge
+  tracing-network:
     driver: bridge

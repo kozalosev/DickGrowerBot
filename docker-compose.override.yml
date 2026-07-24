@@ -5,3 +5,7 @@ services:
   user-service:
     ports:
       - "${USER_SERVICE_GRPC_PORT}:${USER_SERVICE_GRPC_PORT}"
+  jaeger:
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "16686:16686" # Jaeger UI

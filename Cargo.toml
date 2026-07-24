@@ -18,9 +18,18 @@ tokio = { version =  "1.53.1", default-features = false, features = ["rt-multi-t
 axum = "0.8.9"
 axum-prometheus = "0.10.0"
 prometheus = "0.14.0"
-# Logging and envs
+autometrics = { version = "3.0.0", features = ["prometheus-exporter"] }
+# Logging, tracing and envs
 log = "0.4.33"
-pretty_env_logger = "0.5.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
+tracing-opentelemetry = "0.33.0"
+opentelemetry = "0.32.0"
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic"] }
+axum-tracing-opentelemetry = "0.38.0"
+tonic-tracing-opentelemetry = "0.38.0"
+tower = "0.5.3"
 dotenvy = "0.15.7"
 # Database and SQL
 sqlx = { version = "0.9.0", features = [ "runtime-tokio", "postgres", "chrono", "tls-rustls", "macros" ] }
@@ -33,7 +42,7 @@ prost-types = "0.14"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json"] }
 # Serialization / deserialization
 serde = { version = "1.0.229", features = ["derive"] }
-serde-saphyr = "0.0.29"
+serde-saphyr = "1.0.0-rc.1"
 # HTML and templates
 tinytemplate = "1.2.1"
 # Derive macros
@@ -45,7 +54,7 @@ anyhow = { version = "1.0.104", features = ["backtrace"] }
 regex = "1.13.1"
 rand = "0.10.2"
 chrono = { version = "0.4.45", features = [ "serde" ] }
-base64 = "0.22.1"
+base64 = "0.23.0"
 byteorder = "1.5.0"
 flurry = "0.5.2"
 sha2 = "0.11.0"

@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -18,6 +19,8 @@ pub enum StatsCommands {
     Stats
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,

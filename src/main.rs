@@ -6,8 +6,10 @@ mod metrics;
 mod config;
 mod commands;
 mod users;
+mod observability;
 
 use std::net::SocketAddr;
+use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use futures::future::join_all;
 use rust_i18n::i18n;
 use teloxide::dispatching::dialogue::InMemStorage;
@@ -29,7 +31,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     dotenvy::dotenv()?;
 
-    pretty_env_logger::init();
+    let tracer_provider = observability::init_tracing()?;
+    autometrics::prometheus_exporter::init();
 
     let app_config = config::AppConfig::from_env();
     let database_config = config::DatabaseConfig::from_env()?;
@@ -111,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         InMemStorage::<PromoCommandState>::new()
     ];
 
-    match webhook_url {
+    let join_result = match webhook_url {
         Some(url) => {
             log::info!("Setting a webhook: {url}");
 
@@ -131,7 +134,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .inspect_err(|_| stop_token.stop())?;
                 let app = axum::Router::new()
                     .merge(metrics_router)
-                    .merge(bot_router);
+                    .merge(bot_router)
+                    .layer(OtelInResponseLayer)
+                    .layer(OtelAxumLayer::default());
                 axum::serve(tcp_listener, app)
                     .with_graceful_shutdown(stop_flag)
                     .await
@@ -168,5 +173,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (res, _) = futures::join!(srv, bot_fut);
             res
         }
-    }?.map_err(Into::into)
+    };
+
+    tracer_provider.shutdown()?;
+    join_result?.map_err(Into::into)
 }

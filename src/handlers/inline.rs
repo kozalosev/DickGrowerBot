@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::str::FromStr;
@@ -135,6 +136,8 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
     }
 ]));
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(user_id = query.from.id.0, lang_code = %lang_code))]
 pub async fn inline_handler(
     bot: Bot,
     query: InlineQuery,
@@ -180,6 +183,8 @@ pub async fn inline_handler(
     Ok(())
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(user_id = result.from.id.0, lang_code = %lang_code))]
 pub async fn inline_chosen_handler(
     bot: Bot,
     result: ChosenInlineResult,
@@ -224,6 +229,8 @@ pub async fn inline_chosen_handler(
     Ok(())
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), user_id = query.from.id.0, lang_code = %lang_code))]
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,

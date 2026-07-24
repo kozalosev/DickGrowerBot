@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::Context;
 use num_traits::ToPrimitive;
 use sqlx::FromRow;
@@ -28,6 +29,8 @@ impl From<PersonalStatsEntity> for PersonalStats {
 }
 
 repository!(PersonalStatsRepo,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(user_id = user_id.value()))]
     pub async fn get(&self, user_id: UserId) -> anyhow::Result<PersonalStats> {
         sqlx::query_as!(PersonalStatsEntity,
                 r#"SELECT count(chat_id) AS chats,

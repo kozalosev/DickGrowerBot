@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::Context;
 use sqlx::{Postgres, Transaction};
 use teloxide::types::ChatId;
@@ -6,6 +7,8 @@ use crate::domain::primitives::{Length, UserId};
 use crate::repository;
 
 repository!(Import,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = chat_id.0))]
     pub async fn get_imported_users(&self, chat_id: ChatId) -> anyhow::Result<Vec<ExternalUser>> {
         sqlx::query_as!(ExternalUser,
                 r#"SELECT uid AS "uid: UserId", original_length AS "length: Length" FROM Imports WHERE chat_id = $1"#,
@@ -15,6 +18,8 @@ repository!(Import,
             .context(format!("couldn't get imported users of {chat_id}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = chat_id.0))]
     pub async fn import(&self, chat_id: ChatId, users: &[ExternalUser]) -> anyhow::Result<()> {
         let chat_id = chat_id.0;
         let mut tx = self.pool.begin().await?;
@@ -24,6 +29,8 @@ repository!(Import,
         Ok(())
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id))]
     async fn insert_into_imports_table(
         tx: &mut Transaction<'_, Postgres>,
         chat_id: i64,
@@ -40,6 +47,8 @@ repository!(Import,
         Ok(uids)
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id))]
     async fn update_dicks(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uids: Vec<UserId>) -> anyhow::Result<()> {
         sqlx::query!("WITH original AS (SELECT c.id as chat_id, uid, original_length
                         FROM Imports JOIN Chats c USING (chat_id)

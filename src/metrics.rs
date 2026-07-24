@@ -57,8 +57,10 @@ pub fn init() -> axum::Router {
                 .expect("unable to encode custom metrics");
             let custom_metrics = String::from_utf8(buffer)
                 .expect("metrics buffer is not valid UTF-8");
+            let auto_metrics = autometrics::prometheus_exporter::encode_to_string()
+                .expect("unable to encode autometrics");
 
-            metric_handle.render() + custom_metrics.as_str()
+            metric_handle.render() + custom_metrics.as_str() + auto_metrics.as_str()
         }))
         .layer(prometheus_layer)
 }

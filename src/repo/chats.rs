@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::fmt::Formatter;
 use std::str::FromStr;
 use anyhow::{bail, Context};
@@ -45,6 +46,8 @@ impl TryInto<ChatIdPartiality> for Chat {
 }
 
 repository!(Chats, with_feature_toggles,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_chat(&self, chat_id: ChatIdKind) -> anyhow::Result<Option<Chat>> {
         sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
                 WHERE chat_id = $1::bigint OR chat_instance = $1::text",
@@ -54,6 +57,8 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't get the information about the chat with id = {chat_id}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<InternalChatId, SearchError<ChatIdKind>> {
         self.get_chat(chat_id.clone()).await
             .map_err(SearchError::Internal)?
@@ -62,6 +67,8 @@ repository!(Chats, with_feature_toggles,
             .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_chat_language(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<SupportedLanguage>> {
         sqlx::query_scalar!(
                 "SELECT settings->>'language' FROM Chats
@@ -78,6 +85,8 @@ repository!(Chats, with_feature_toggles,
             .transpose()
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, lang = ?lang))]
     pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
         let internal_id = self.upsert_chat(chat_id).await?;
         match lang {
@@ -96,6 +105,8 @@ repository!(Chats, with_feature_toggles,
         Ok(())
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<InternalChatId> {
         let (id, instance) = match chat_id {
             ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.value()), Some(full.instance.to_string())),
@@ -122,6 +133,8 @@ repository!(Chats, with_feature_toggles,
         Ok(InternalChatId::new(internal_id))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = ?chat_id, chat_instance = ?chat_instance))]
     async fn create_chat(
         tx: &mut Transaction<'_, Postgres>,
         chat_id: Option<i64>,
@@ -135,6 +148,8 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't create a chat with chat_id = {chat_id:?} or chat_instance = {chat_instance:?}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_id, chat_id = ?chat_id, chat_instance = ?chat_instance))]
     async fn update_chat(
         tx: &mut Transaction<'_, Postgres>,
         internal_id: i64,
@@ -150,6 +165,8 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't update the chat with id = {internal_id} to chat_id = {chat_id:?}, chat_instance = {chat_instance:?}))"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_a = chats[0].internal_id, chat_b = chats[1].internal_id))]
     async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<i64> {
         let state = merge_chat_objects(&chats)?;
         let updated_dicks = sqlx::query!(

@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::borrow::Cow;
 use anyhow::{anyhow, Context};
 use rust_i18n::t;
@@ -22,6 +23,8 @@ pub enum DickOfDayCommands {
     Dod,
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn dod_cmd_handler(
     bot: Bot,
     msg: Message,

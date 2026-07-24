@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use teloxide::Bot;
@@ -14,6 +15,8 @@ pub enum StartCommands {
     Start(String),
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn start_cmd_handler(
     bot: Bot,
     msg: Message,

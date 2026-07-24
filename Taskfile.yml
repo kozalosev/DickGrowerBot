@@ -9,9 +9,15 @@
 # services over the Compose network, so they pass `-f docker-compose.yml` to skip that
 # dev-only port forwarding.
 #
+# The bundled `user-service` and `jaeger` containers are optional — each sits behind a Compose
+# profile (`user-service`, `tracing`). The `infra`/`infra:full` tasks start them by naming them
+# explicitly (naming a service activates its profile); a bare `docker compose up` / `task up` starts
+# them only when COMPOSE_PROFILES lists the profile (see .env.example).
+#
 # Because the in-Docker bot uses the Compose network (not localhost), `task up` needs a
 # Docker-oriented .env — the opposite of the local-binary flow:
 #   POSTGRES_HOST=postgres
+#   COMPOSE_PROFILES=user-service                                   # to start the bundled user-service
 #   GRPC_ADDR_USER_SERVICE=user-service:${USER_SERVICE_GRPC_PORT}   # only if the integration is on
 # The default .env.example ships localhost values tuned for `task run` (bot as a binary).
 version: '3'
@@ -33,7 +39,7 @@ tasks:
   infra:full:
     desc: Start PostgreSQL + user-service in Docker, ports forwarded to localhost.
     cmds:
-      - docker compose up -d --wait postgres user-service
+      - docker compose up -d --wait postgres user-service jaeger
 
   infra:min:
     desc: Start only PostgreSQL in Docker (no user-service), ports forwarded to localhost.
@@ -43,7 +49,7 @@ tasks:
   infra:down:
     desc: Stop the Docker infrastructure (keeps data).
     cmds:
-      - docker compose stop postgres user-service
+      - docker compose stop postgres user-service jaeger
 
   migrate:
     desc: Apply pending database migrations to the bot database (requires sqlx-cli).

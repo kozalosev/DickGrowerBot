@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use futures::TryFutureExt;
 use sqlx::{Executor, Pool, Postgres, Transaction};
@@ -47,6 +48,8 @@ impl Dicks {
         }
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id, increment = %increment))]
     pub async fn create_or_grow(
         &self,
         uid: UserId,
@@ -66,6 +69,8 @@ impl Dicks {
         Ok(GrowthResult { new_length: Length::new(new_length), pos_in_top })
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id))]
     pub async fn fetch_length(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Length> {
         sqlx::query_scalar!("SELECT d.length FROM Dicks d \
                 JOIN Chats c ON d.chat_id = c.id \
@@ -78,6 +83,8 @@ impl Dicks {
             .context(format!("couldn't fetch length for {chat_id} and {uid}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id))]
     pub async fn fetch_dick(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Dick>> {
         sqlx::query_as!(DickEntity,
             r#"SELECT length AS "length: Length", uid AS "owner_uid: UserId", name as owner_name, updated_at as grown_at, position FROM (
@@ -95,6 +102,8 @@ impl Dicks {
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, offset = %offset, limit = %limit))]
     pub async fn get_top(&self, chat_id: &ChatIdKind, offset: Offset, limit: Limit) -> anyhow::Result<Vec<Dick>> {
         sqlx::query_as!(DickEntity,
             r#"SELECT length AS "length: Length", uid AS "owner_uid: UserId", name as owner_name, updated_at as grown_at,
@@ -111,6 +120,8 @@ impl Dicks {
             .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, bonus = %bonus))]
     pub async fn set_dod_winner(
         &self,
         chat_id: &ChatIdPartiality,
@@ -131,6 +142,8 @@ impl Dicks {
         Ok(Some(GrowthResult { new_length, pos_in_top }))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, length = %length))]
     pub async fn check_dick(&self, chat_id: &ChatIdKind, user_id: UserId, length: Bet) -> anyhow::Result<bool> {
         sqlx::query_scalar!(r#"SELECT length >= $3 AS "enough!" FROM Dicks d
                 JOIN Chats c ON d.chat_id = c.id
@@ -143,6 +156,8 @@ impl Dicks {
             .context(format!("couldn't check the dick {chat_id}, {user_id} to have at least {length} cm"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(from = from.value(), to = to.value(), chat_id = %chat_id, length = %length))]
     pub async fn move_length(
         &self,
         chat_id: &ChatIdPartiality,
@@ -172,6 +187,8 @@ impl Dicks {
         Ok((gr_from, gr_to))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, user_id = user_id.value(), change = %change))]
     async fn move_length_for_one_user(
         tx: &mut Transaction<'_, Postgres>,
         chat_id_internal: InternalChatId,
@@ -186,6 +203,8 @@ impl Dicks {
             .context(format!("couldn't update the length by {change} for {chat_id_internal}, {user_id}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, uid = uid.value()))]
     async fn get_position_in_top(
         &self,
         chat_id_internal: InternalChatId,
@@ -209,6 +228,8 @@ impl Dicks {
             .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
     }
     
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, change = %change))]
     pub async fn grow_no_attempts_check(
         &self,
         chat_id: &ChatIdKind,
@@ -224,6 +245,8 @@ impl Dicks {
         Ok(GrowthResult { new_length, pos_in_top })
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, user_id = user_id.value(), bonus = %bonus))]
     pub(super) async fn grow_no_attempts_check_internal<'c, E>(
         executor: E,
         chat_id_internal: InternalChatId,
@@ -243,6 +266,8 @@ impl Dicks {
             .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, user_id = user_id.value()))]
     async fn insert_to_dod_table(
         tx: &mut Transaction<'_, Postgres>,
         chat_id_internal: InternalChatId,
