@@ -6,6 +6,12 @@
 # The counter resets automatically whenever the text changes.
 max_shows: 5
 
+# When a language has no announcement of its own (empty or unset), borrow another's.
+# Maps a source language to the target languages that reuse its text. Here, locales without a
+# translation (it, fa, zh) show the English announcement instead of nothing.
+fallback:
+  en: [it, fa, zh]
+
 # Per-language texts, keyed by language code: en, ru, it, fa, zh.
 # Omit a language (or leave it empty) to show no announcement for it.
 texts:
