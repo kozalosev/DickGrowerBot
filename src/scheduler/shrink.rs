@@ -22,7 +22,11 @@ pub async fn run_daily_shrink(
     config: AppConfig,
 ) -> anyhow::Result<()> {
     let events = repos.shrinks
-        .perform_daily_shrink(config.stale_dicks_shrinking.ratio, config.stale_dicks_shrinking.grace_period_days)
+        .perform_daily_shrink(
+            config.stale_dicks_shrinking.ratio,
+            config.stale_dicks_shrinking.grace_period_days,
+            config.stale_dicks_shrinking.ramp_up_days,
+        )
         .await?;
     if events.is_empty() {
         log::info!("daily shrink: nothing to shrink today");

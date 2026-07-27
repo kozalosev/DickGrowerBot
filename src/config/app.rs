@@ -47,6 +47,7 @@ impl AppConfig {
         let stale_dicks_shrinking = StaleDicksShrinkingConfig {
             ratio: get_env_value_or_default("SHRINK_RATIO", Ratio::literal(0.0)),
             grace_period_days: get_env_value_or_default("SHRINK_GRACE_DAYS", DaysCount::new(7)),
+            ramp_up_days: get_env_value_or_default("SHRINK_RAMP_UP_DAYS", DaysCount::new(7)),
             history_window_days: get_env_value_or_default("SHRINK_EVENTS_DAYS", DaysCount::new(7)),
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
