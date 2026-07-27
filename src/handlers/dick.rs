@@ -151,7 +151,7 @@ pub(crate) async fn top_impl(
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let offset = Offset::calculate(page, config.top_limit);
     let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
-    let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
+    let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
     let has_more_pages = (dicks.len() as i16) > config.top_limit.value();
     let mut any_inactive = false;
     let lines = dicks.into_iter()

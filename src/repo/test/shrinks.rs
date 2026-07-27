@@ -4,15 +4,11 @@ use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, NAME, start_postgres, UID, USER_ID};
 
-fn grace_days() -> DaysCount {
-    DaysCount::new(7)
-}
+const GRACE_DAYS: DaysCount = DaysCount::new(7);
 
 /// `<= 1` disables the ramp, applying the full ratio from the first overdue day — the old,
 /// pre-ramp behavior that most tests want so their expected losses stay simple round numbers.
-fn no_ramp() -> DaysCount {
-    DaysCount::new(0)
-}
+const NO_RAMP: DaysCount = DaysCount::new(0);
 
 /// Inserts a dick directly (bypassing `create_or_grow`) with an explicit age, so we can seed
 /// dicks that look stale. A direct INSERT is required because the `Dicks` BEFORE UPDATE trigger
@@ -123,7 +119,7 @@ async fn test_perform_daily_shrink() {
         .await.expect("couldn't create the bonus user");
     seed_aged_dick_with_bonus_attempts(&db, chat_id, bonus_uid, 100, 10, 1).await;
 
-    let events = shrinks.perform_daily_shrink(Ratio::literal(0.1), grace_days(), no_ramp())
+    let events = shrinks.perform_daily_shrink(Ratio::literal(0.1), GRACE_DAYS, NO_RAMP)
         .await.expect("couldn't perform the daily shrink");
 
     assert_eq!(events.len(), 2, "the two stale, positive dicks should have shrunk");
@@ -181,7 +177,7 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
         .await.expect("couldn't create the way-overdue user");
     seed_aged_dick(&db, chat_id, way_overdue_uid, 1000, 20).await;
 
-    let events = shrinks.perform_daily_shrink(Ratio::literal(0.5), grace_days(), DaysCount::new(4))
+    let events = shrinks.perform_daily_shrink(Ratio::literal(0.5), GRACE_DAYS, DaysCount::new(4))
         .await.expect("couldn't perform the daily shrink");
 
     let loss_of = |uid: i64| events.iter()
@@ -191,6 +187,40 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
     assert_eq!(loss_of(just_overdue_uid), 125, "1/4 of the ramp: ceil(1000 * 0.5 * 1/4)");
     assert_eq!(loss_of(fully_ramped_uid), 500, "ramp fully kicked in: ceil(1000 * 0.5)");
     assert_eq!(loss_of(way_overdue_uid), 500, "ramp is capped at the full ratio, not exceeded");
+}
+
+/// The loss formula floors at `GREATEST(1, ...)`, so any neglected, positive-length dick loses at
+/// least 1 cm per (real, daily-cadenced) run no matter how small `ratio * length` rounds down to —
+/// it can always reach exactly 0 eventually, and `LEAST(length, ...)` caps the loss at the dick's
+/// current length so it can never be shrunk past 0 into negative territory. This pins down the
+/// terminal step directly: a 1 cm dick with a tiny ratio still loses exactly 1 cm, landing on 0.
+#[tokio::test]
+async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
+    let (_container, db) = start_postgres().await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let shrinks = repo::Shrinks::new(db.clone());
+    let users = repo::Users::new(db.clone());
+
+    users.create_or_update(USER_ID, NAME)
+        .await.expect("couldn't create the primary user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
+        .await.expect("couldn't create a dummy dick and the Chats row");
+    let chat_id = internal_chat_id(&db).await;
+
+    let victim_uid = UID + 1;
+    users.create_or_update(UserId::literal(victim_uid), "one-cm-left")
+        .await.expect("couldn't create the victim");
+    seed_aged_dick(&db, chat_id, victim_uid, 1, 100).await;
+
+    // ratio * length rounds down to 0 cm on its own — GREATEST(1, ...) must still floor it at 1.
+    let events = shrinks.perform_daily_shrink(Ratio::literal(0.01), GRACE_DAYS, NO_RAMP)
+        .await.expect("couldn't perform the daily shrink");
+
+    let event = events.iter().find(|e| e.uid == UserId::literal(victim_uid))
+        .expect("the 1cm dick must still shrink despite the tiny ratio");
+    assert_eq!(event.lost_length, 1, "the floor must apply even though ratio * length rounds to 0");
+    assert_eq!(event.new_length, 0);
+    assert_eq!(length_of(&db, victim_uid, chat_id).await, 0);
 }
 
 #[tokio::test]
@@ -212,7 +242,7 @@ async fn test_get_recent_shrinks_respects_the_day_window() {
     seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
 
     // Today's shrink (logged with created_at = current_date).
-    shrinks.perform_daily_shrink(Ratio::literal(0.1), grace_days(), no_ramp())
+    shrinks.perform_daily_shrink(Ratio::literal(0.1), GRACE_DAYS, NO_RAMP)
         .await.expect("couldn't perform the daily shrink");
     // An older shrink, 8 days ago — outside a 7-day window.
     seed_old_shrink(&db, chat_id, UID, 5, 8).await;

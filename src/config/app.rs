@@ -44,6 +44,7 @@ impl AppConfig {
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
         let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
         let most_popular_language_enabled = get_env_value_or_default("MOST_POPULAR_LANGUAGE_ENABLED", true);
+        let hide_inactive_zero_length_from_top = get_env_value_or_default("HIDE_INACTIVE_ZERO_LENGTH_FROM_TOP_ENABLED", true);
         let stale_dicks_shrinking = StaleDicksShrinkingConfig {
             ratio: get_env_value_or_default("SHRINK_RATIO", Ratio::literal(0.0)),
             grace_period_days: get_env_value_or_default("SHRINK_GRACE_DAYS", DaysCount::new(7)),
@@ -70,6 +71,7 @@ impl AppConfig {
                     show_stats_notice,
                 },
                 most_popular_language_enabled,
+                hide_inactive_zero_length_from_top,
             },
             top_limit,
             inactivity_days,

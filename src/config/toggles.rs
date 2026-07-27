@@ -20,6 +20,7 @@ pub struct FeatureToggles {
     pub dod_selection_mode: DickOfDaySelectionMode,
     pub pvp: BattlesFeatureToggles,
     pub most_popular_language_enabled: bool,
+    pub hide_inactive_zero_length_from_top: bool,
 }
 
 #[cfg(test)]
@@ -32,6 +33,7 @@ impl Default for FeatureToggles {
             dod_selection_mode: Default::default(),
             pvp: Default::default(),
             most_popular_language_enabled: true,
+            hide_inactive_zero_length_from_top: true,
         }
     }
 }
