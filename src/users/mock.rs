@@ -36,6 +36,13 @@ impl UserServiceClient for UserServiceClientMock {
         Ok(self.users.lock().unwrap().get(&uid).cloned())
     }
 
+    async fn get_many(&self, uids: &[UserId]) -> Result<HashMap<UserId, User>, Status> {
+        let users = self.users.lock().unwrap();
+        Ok(uids.iter()
+            .filter_map(|uid| users.get(uid).map(|user| (*uid, user.clone())))
+            .collect())
+    }
+
     async fn set_language(&self, uid: UserId, code: &str) -> Result<(), Status> {
         let mut users = self.users.lock().unwrap();
         let user = users.get_mut(&uid).ok_or_else(|| Status::not_found("user"))?;

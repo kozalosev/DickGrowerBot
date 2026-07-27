@@ -32,6 +32,14 @@ commands:
     ending: "<i>[+] significa che un giocatore non ha ancora fatto crescere il suo pene oggi.</i>"
     ending_inactive: "<i>[~] significa che un giocatore non ha fatto crescere il suo pene per più di %{days} giorni.</i>"
     empty: "Nessuno sta giocando :("
+  shrink:
+    notification:
+      header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per una settimana e si sono un po' accorciati:"
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm, testa alta!)"
+    recent:
+      header: "✂️ <b>Chi si è accorciato di recente:</b>"
+      line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm"
+    empty: "Silenzio… Nessuno si è accorciato ultimamente. Sembra che tutti tengano il passo 💪"
   dod:
     description: "Eleggi il Pene del Giorno"
     result: "Il Pene del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pene è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."
@@ -120,6 +128,7 @@ inline:
       pvp: "Sfida gli altri con una scommessa di %{bet} cm!"
       stats: "Statistiche"
       loan: "Sei in debito? Chiedi un prestito!"
+      shrinks: "Vedi gli accorciamenti recenti"
   callback:
     errors:
       another_user: "Questo messaggio è stato inviato da un'altra persona."

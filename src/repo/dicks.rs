@@ -95,6 +95,19 @@ impl Dicks {
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
+    /// Returns the uids of everyone who has a dick in the chat (i.e. its players). Used by the
+    /// daily-shrink broadcast to tally the most popular language among the chat's members.
+    pub async fn get_player_uids(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<UserId>> {
+        sqlx::query_scalar!(
+            r#"SELECT d.uid AS "uid: UserId" FROM Dicks d
+                JOIN Chats c ON c.id = d.chat_id
+                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text"#,
+                chat_id.value() as String)
+            .fetch_all(&self.pool)
+            .await
+            .context(format!("couldn't fetch player uids for {chat_id}"))
+    }
+
     pub async fn get_top(&self, chat_id: &ChatIdKind, offset: Offset, limit: Limit) -> anyhow::Result<Vec<Dick>> {
         sqlx::query_as!(DickEntity,
             r#"SELECT length AS "length: Length", uid AS "owner_uid: UserId", name as owner_name, updated_at as grown_at,

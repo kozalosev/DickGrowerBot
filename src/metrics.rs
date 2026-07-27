@@ -28,6 +28,8 @@ pub static CMD_PVP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_pvp_usage_total", "count of /pvp invocations"));
 pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
+pub static CMD_SHRINKS: Lazy<BothModesCounters> = Lazy::new(||
+    BothModesCounters::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
 pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_import_usage_total", "count of /import invocations and successes", ["invoked", "finished"]));
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
@@ -76,6 +78,7 @@ fn force_registration() {
     Lazy::force(&CMD_DOD_COUNTER);
     Lazy::force(&CMD_PVP_COUNTER);
     Lazy::force(&CMD_STATS);
+    Lazy::force(&CMD_SHRINKS);
     Lazy::force(&CMD_IMPORT);
     Lazy::force(&CMD_PROMO);
     Lazy::force(&USER_SERVICE);

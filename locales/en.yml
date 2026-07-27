@@ -32,6 +32,14 @@ commands:
     ending: "<i>[+] means a grower hasn't grown his dick today yet.</i>"
     ending_inactive: "<i>[~] means a grower hasn't grown his dick for more than %{days} days.</i>"
     empty: "No one is in the game yet :("
+  shrink:
+    notification:
+      header: "✂️ <b>Time to trim the neglected!</b> These dicks haven't grown in a week and shrank a bit:"
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm, chin up!)"
+    recent:
+      header: "✂️ <b>Who's been shrinking lately:</b>"
+      line: "— <b>%{name}</b> lost <b>%{lost}</b> cm"
+    empty: "Silence… No one has shrunk lately. Guess everybody's keeping up the pace 💪"
   dod:
     description: "Elect the Dick of a Day"
     result: "The Dick of the Day is <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."
@@ -120,6 +128,7 @@ inline:
       pvp: "Challenge others with a bet of %{bet} cm!"
       stats: "Win statistics"
       loan: "Minus? Take a loan!"
+      shrinks: "See recent shrinks"
   callback:
     errors:
       another_user: "This message was sent by another person."

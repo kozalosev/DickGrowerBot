@@ -6,6 +6,7 @@ mod dod;
 mod import;
 mod promo;
 mod inline;
+mod shrink;
 pub mod language;
 pub mod utils;
 pub mod pvp;
