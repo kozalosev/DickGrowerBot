@@ -95,8 +95,7 @@ impl Dicks {
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
-    /// Returns the uids of everyone who has a dick in the chat (i.e. its players). Used by the
-    /// daily-shrink broadcast to tally the most popular language among the chat's members.
+    /// Returns the uids of everyone who has a dick in the chat (i.e. its players).
     pub async fn get_player_uids(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<UserId>> {
         sqlx::query_scalar!(
             r#"SELECT d.uid AS "uid: UserId" FROM Dicks d

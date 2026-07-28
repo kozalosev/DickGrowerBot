@@ -9,18 +9,18 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
 use crate::{metrics, reply_html, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
-use crate::handlers::{answer_callback_feature_disabled, build_pagination_keyboard, HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::{answer_callback_feature_disabled, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
-pub(crate) const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
+const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -59,7 +59,7 @@ pub async fn dick_cmd_handler(
             let mut request = reply_html(bot.clone(), &msg, top.lines);
             if top.has_more_pages && config.features.top_unlimited {
                 let keyboard = ReplyMarkup::InlineKeyboard(
-                    build_pagination_keyboard(Page::first(), top.has_more_pages, CALLBACK_PREFIX_TOP_PAGE));
+                    build_pagination_keyboard(Page::first(), top.has_more_pages));
                 request.reply_markup.replace(keyboard);
             }
             let sent = request.await.context(format!("failed for {msg:?}"))?;
@@ -153,7 +153,7 @@ pub(crate) async fn top_impl(
     let offset = Offset::calculate(page, config.top_limit);
     let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
-    let has_more_pages = (dicks.len() as i16) > config.top_limit.value();
+    let has_more_pages = dicks.len() > config.top_limit.value() as usize;
     let mut any_inactive = false;
     let lines = dicks.into_iter()
         .take(config.top_limit.value() as usize)
@@ -234,7 +234,7 @@ pub async fn page_callback_handler(
     let from_refs = FromRefs(&q.from, &chat_id_partiality);
     let top = top_impl(&repos, &config, from_refs, lang_code, page).await?;
 
-    let keyboard = build_pagination_keyboard(page, top.has_more_pages, CALLBACK_PREFIX_TOP_PAGE);
+    let keyboard = build_pagination_keyboard(page, top.has_more_pages);
     let (answer_callback_query_result, edit_message_result) = match &edit_msg_req_params {
         callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
             let mut edit_message_text_req = bot.edit_message_text(*chat_id, *message_id, top.lines);
@@ -260,3 +260,15 @@ pub async fn page_callback_handler(
     Ok(())
 }
 
+pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
+    let mut buttons = Vec::new();
+    if page > 0 {
+        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
+        buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{prev_page}")))
+    }
+    if has_more_pages {
+        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
+        buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
+    }
+    InlineKeyboardMarkup::new(vec![buttons])
+}

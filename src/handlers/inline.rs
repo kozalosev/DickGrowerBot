@@ -15,7 +15,7 @@ use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
-use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
+use crate::handlers::{dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -78,7 +78,7 @@ impl InlineCommand {
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
                         res.keyboard = config.features.top_unlimited
-                            .then_some(build_pagination_keyboard(Page::first(), top.has_more_pages, dick::CALLBACK_PREFIX_TOP_PAGE));
+                            .then_some(dick::build_pagination_keyboard(Page::first(), top.has_more_pages));
                         res
                     })
             },
@@ -104,11 +104,9 @@ impl InlineCommand {
                 metrics::CMD_SHRINKS.inline.inc();
                 shrink::recent_shrinks_impl(repos, from_refs, &config, &lang_code)
                     .await
-                    .map(|page| {
+                    .map(|(page, keyboard)| {
                         let mut res = InlineResult::text(page.lines);
-                        let prefix = shrink::ShrinkView::Recent.callback_prefix();
-                        res.keyboard = page.has_more_pages
-                            .then(|| build_pagination_keyboard(Page::first(), page.has_more_pages, &prefix));
+                        res.keyboard = keyboard;
                         res
                     })
             },

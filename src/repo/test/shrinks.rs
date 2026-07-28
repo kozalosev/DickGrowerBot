@@ -258,7 +258,7 @@ async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wra
 }
 
 #[tokio::test]
-async fn test_get_recent_shrinks_respects_the_day_window() {
+async fn test_get_shrinks_for_date_only_returns_that_day() {
     let (_container, db) = start_postgres().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
@@ -278,21 +278,22 @@ async fn test_get_recent_shrinks_respects_the_day_window() {
     // Today's shrink (logged with created_at = current_date).
     shrinks.perform_daily_shrink(Ratio::literal(0.1), GRACE_DAYS, NO_RAMP)
         .await.expect("couldn't perform the daily shrink");
-    // An older shrink, 8 days ago — outside a 7-day window.
+    // An older shrink, on a different day — must not leak into today's exact-date query.
     seed_old_shrink(&db, chat_id, UID, 5, 8).await;
 
-    let recent = shrinks.get_recent_shrinks(&CHAT_ID_KIND, DaysCount::new(7), Offset::new(0), Limit::literal(10)).await
-        .expect("couldn't fetch recent shrinks");
-    assert_eq!(recent.len(), 1, "only the shrink within the last 7 days should be returned");
+    let today = chrono::Utc::now().date_naive();
+    let recent = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, today, Offset::new(0), Limit::literal(10)).await
+        .expect("couldn't fetch today's shrinks");
+    assert_eq!(recent.len(), 1, "only today's shrink should be returned, not the older one");
     assert_eq!(recent[0].lost_length, 10);
     assert_eq!(recent[0].length, 90, "the victim's current (post-shrink) length, joined from Dicks");
 }
 
-/// The broadcast and the inline `shrinks` command both page off `get_recent_shrinks`, so a chat
+/// The broadcast and the inline `shrinks` command both page off `get_shrinks_for_date`, so a day
 /// with more victims than fit on one page must split cleanly: same ordering, no row repeated or
 /// skipped between page 0 and page 1.
 #[tokio::test]
-async fn test_get_recent_shrinks_pages() {
+async fn test_get_shrinks_for_date_pages() {
     let (_container, db) = start_postgres().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
@@ -304,30 +305,98 @@ async fn test_get_recent_shrinks_pages() {
         .await.expect("couldn't create a dummy dick");
     let chat_id = internal_chat_id(&db).await;
 
-    // Three shrinks, newest to oldest (days_ago 1..3), with distinct lost_length so ordering is
-    // unambiguous (get_recent_shrinks orders by created_at DESC, lost_length DESC).
+    // Three shrinks logged on the same day (days_ago 1), with distinct lost_length so ordering is
+    // unambiguous (get_shrinks_for_date orders by lost_length DESC).
     for (n, lost) in [(1i32, 30i64), (2, 20), (3, 10)] {
         let uid = UID + n as i64;
         users.create_or_update(UserId::literal(uid), &format!("victim-{n}"))
             .await.expect("couldn't create a victim");
         seed_aged_dick(&db, chat_id, uid, 100, 10).await;
-        seed_old_shrink(&db, chat_id, uid, lost, n).await;
+        seed_old_shrink(&db, chat_id, uid, lost, 1).await;
     }
 
-    let page0 = shrinks.get_recent_shrinks(&CHAT_ID_KIND, DaysCount::new(7), Offset::new(0), Limit::literal(2)).await
+    let date = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
+    let page0 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(0), Limit::literal(2)).await
         .expect("couldn't fetch page 0");
-    let page1 = shrinks.get_recent_shrinks(&CHAT_ID_KIND, DaysCount::new(7), Offset::new(2), Limit::literal(2)).await
+    let page1 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(2), Limit::literal(2)).await
         .expect("couldn't fetch page 1");
 
     assert_eq!(page0.len(), 2, "page 0 must be full");
     assert_eq!(page1.len(), 1, "page 1 holds the remainder");
-    assert_eq!(page0[0].lost_length, 30, "most recent (least days ago) shrink comes first");
+    assert_eq!(page0[0].lost_length, 30, "the biggest loss comes first");
     assert_eq!(page0[1].lost_length, 20);
-    assert_eq!(page1[0].lost_length, 10, "oldest shrink lands on the last page");
+    assert_eq!(page1[0].lost_length, 10, "the smallest loss lands on the last page");
 
     let page0_uids: Vec<_> = page0.iter().map(|s| s.uid).collect();
     let page1_uids: Vec<_> = page1.iter().map(|s| s.uid).collect();
     assert!(page0_uids.iter().all(|u| !page1_uids.contains(u)), "the pages must be disjoint");
+}
+
+#[tokio::test]
+async fn test_get_latest_shrink_date_returns_none_without_history() {
+    let (_container, db) = start_postgres().await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let shrinks = repo::Shrinks::new(db.clone());
+    let users = repo::Users::new(db.clone());
+
+    users.create_or_update(USER_ID, NAME)
+        .await.expect("couldn't create the primary user and the Chats row");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
+        .await.expect("couldn't create a dummy dick");
+
+    let date = shrinks.get_latest_shrink_date(&CHAT_ID_KIND).await
+        .expect("couldn't fetch the latest shrink date");
+    assert_eq!(date, None, "a chat with no logged shrinks has no latest date");
+}
+
+/// Seeds shrinks on three non-consecutive days (unbounded history — no window to fall outside of
+/// anymore) and checks both the latest-date lookup and the older/newer neighbor lookups from the
+/// middle date, including the `None` case at each end.
+#[tokio::test]
+async fn test_get_latest_and_adjacent_shrink_dates() {
+    let (_container, db) = start_postgres().await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let shrinks = repo::Shrinks::new(db.clone());
+    let users = repo::Users::new(db.clone());
+
+    users.create_or_update(USER_ID, NAME)
+        .await.expect("couldn't create the primary user and the Chats row");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
+        .await.expect("couldn't create a dummy dick");
+    let chat_id = internal_chat_id(&db).await;
+
+    // Non-consecutive days: 1, 3, and 8 days ago. Two shrinks on the same day (1 day ago) to also
+    // confirm MAX/MIN collapse duplicates rather than erroring.
+    for (n, days_ago) in [(1i32, 1i32), (2, 1), (3, 3), (4, 8)] {
+        let uid = UID + n as i64;
+        users.create_or_update(UserId::literal(uid), &format!("victim-{n}"))
+            .await.expect("couldn't create a victim");
+        seed_old_shrink(&db, chat_id, uid, 10, days_ago).await;
+    }
+
+    let today = chrono::Utc::now().date_naive();
+    let newest = today - chrono::Duration::days(1);
+    let middle = today - chrono::Duration::days(3);
+    let oldest = today - chrono::Duration::days(8);
+
+    let latest = shrinks.get_latest_shrink_date(&CHAT_ID_KIND).await
+        .expect("couldn't fetch the latest shrink date");
+    assert_eq!(latest, Some(newest), "the latest date must be the most recent day with shrinks");
+
+    let (older, newer) = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, middle).await
+        .expect("couldn't fetch neighbours of the middle date");
+    assert_eq!(older, Some(oldest), "the nearest older date");
+    assert_eq!(newer, Some(newest), "the nearest newer date");
+
+    let (older_of_newest, newer_of_newest) = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, newest).await
+        .expect("couldn't fetch neighbours of the newest date");
+    assert_eq!(older_of_newest, Some(middle));
+    assert_eq!(newer_of_newest, None, "there is nothing newer than the newest date");
+
+    let (older_of_oldest, newer_of_oldest) = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, oldest).await
+        .expect("couldn't fetch neighbours of the oldest date");
+    assert_eq!(older_of_oldest, None, "there is nothing older than the oldest date");
+    assert_eq!(newer_of_oldest, Some(middle));
 }
 
 #[tokio::test]

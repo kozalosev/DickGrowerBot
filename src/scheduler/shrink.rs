@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use chrono::Utc;
 use teloxide::Bot;
 use teloxide::adaptors::Throttle;
 use teloxide::payloads::SendMessageSetters;
@@ -9,8 +10,7 @@ use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Page, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
-use crate::handlers::build_pagination_keyboard;
-use crate::handlers::shrink::{shrinks_page_impl, ShrinkView};
+use crate::handlers::shrink::{build_shrink_keyboard, render_shrinks_page, ShrinkView};
 use crate::repo::{Repositories, ShrinkEvent};
 use crate::users::LanguageService;
 
@@ -35,6 +35,11 @@ pub async fn run_daily_shrink(
         return Ok(());
     }
 
+    // The scheduler only ever wakes up at UTC midnight (see `spawn_daily_shrink`), and the shrinks
+    // just logged carry Postgres's `current_date` — also UTC — so this is the exact day they belong
+    // to. Captured once so every chat's broadcast pins the same date its shrinks were logged under.
+    let today = Utc::now().date_naive();
+
     let mut by_chat: HashMap<TelegramChatId, Vec<ShrinkEvent>> = HashMap::new();
     for event in events {
         if let Some(chat_id) = event.messageable_chat_id {
@@ -43,45 +48,41 @@ pub async fn run_daily_shrink(
     }
 
     for (chat_id, victims) in by_chat {
-        // Operationally useful even though `shrinks_page_impl` renders the broadcast from a fresh
-        // query below, not from `victims` directly (which also keeps its fields from tripping the
-        // dead_code lint — they're the best coverage of the shrink math in `test_perform_daily_shrink`).
-        let summary = victims.iter()
-            .map(|v| format!("{} ({}) lost {} cm, now {} cm", v.owner_name, v.uid, v.lost_length, v.new_length))
-            .collect::<Vec<_>>()
-            .join("; ");
-        log::info!("daily shrink: chat {chat_id} victims: {summary}");
-
-        if let Err(e) = broadcast_shrink(&bot, &repos, &language_service, &config, chat_id).await {
+        if let Err(e) = broadcast_shrink(&bot, &repos, &language_service, &config, chat_id, today, &victims).await {
             log::warn!("daily shrink: couldn't notify chat {chat_id}: {e:#}");
         }
     }
     Ok(())
 }
 
-/// Sends page 0 of the chat's shrink list, off the same shared query and renderer the inline
-/// `shrinks` command and its pagination callback use (see [`crate::handlers::shrink`]) — so a
-/// chat with more victims than fit in one message gets a "next" button instead of a send failure.
+/// Sends page 0 of the chat's shrink list, rendered straight from `victims` — no query, since the
+/// daily job already holds exactly this data (and for most chats it's the whole list anyway).
+/// Pages 1+ (only reachable by an actual button press) fall back to [`shrinks_page_impl`], pinned
+/// to `date` so a click on day D+1 still shows day D's shrinks.
 async fn broadcast_shrink(
     bot: &Throttle<Bot>,
     repos: &Repositories,
     language_service: &LanguageService,
     config: &AppConfig,
     chat_id: TelegramChatId,
+    date: chrono::NaiveDate,
+    victims: &[ShrinkEvent],
 ) -> anyhow::Result<()> {
     let chat = ChatIdKind::from(chat_id);
     let lang = resolve_broadcast_language(repos, language_service, config, &chat).await;
     let lang_code = LanguageCode::new(lang.to_string());
 
-    let page = shrinks_page_impl(repos, config, &chat, &lang_code, ShrinkView::Broadcast, Page::first()).await?;
+    let has_more_pages = victims.len() > config.top_limit.value() as usize;
+    let page = render_shrinks_page(victims, config, &lang_code, ShrinkView::Broadcast, has_more_pages);
+    // A single day by definition, so day-navigation (`adjacent`) is always `None`.
+    let keyboard = build_shrink_keyboard(ShrinkView::Broadcast, date, Page::first(), page.has_more_pages, None);
+
     // The throttled request wraps the payload, so the keyboard goes through the setter rather than
     // the field the plain `Bot` exposes.
     let mut request = bot.send_message(ChatId(chat_id.value()), page.lines)
         .parse_mode(Html)
         .disable_link_preview(true);
-    if page.has_more_pages {
-        let prefix = ShrinkView::Broadcast.callback_prefix();
-        let keyboard = build_pagination_keyboard(Page::first(), page.has_more_pages, &prefix);
+    if let Some(keyboard) = keyboard {
         request = request.reply_markup(ReplyMarkup::InlineKeyboard(keyboard));
     }
     request.await?;

@@ -1,4 +1,5 @@
 use anyhow::Context;
+use chrono::NaiveDate;
 use crate::domain::primitives::{DaysCount, Length, Limit, Offset, Ratio, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::repository;
@@ -14,10 +15,8 @@ pub struct ShrinkEvent {
     pub messageable_chat_id: Option<TelegramChatId>,
 }
 
-/// A historical shrink row shared by the broadcast and the inline `shrinks` command. The
-/// `Stale_Dick_Shrinks` log only stores how much was lost, so `length` (the owner's *current*
-/// length) comes from a `Dicks` join — it's the post-shrink value when read moments after the
-/// daily run, and self-updates on a later page click.
+/// The log only stores how much was lost, so `length` (the owner's *current* length) comes from a
+/// `Dicks` join — the post-shrink value when read moments after the daily run, self-updating later.
 pub struct RecentShrink {
     pub uid: UserId,
     pub owner_name: Username,
@@ -73,10 +72,10 @@ repository!(Shrinks,
             .context("couldn't perform the daily shrink")
     },
 
-    pub async fn get_recent_shrinks(
+    pub async fn get_shrinks_for_date(
         &self,
         chat_id: &ChatIdKind,
-        days: DaysCount,
+        date: NaiveDate,
         offset: Offset,
         limit: Limit,
     ) -> anyhow::Result<Vec<RecentShrink>> {
@@ -88,12 +87,57 @@ repository!(Shrinks,
                 JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
                 JOIN Chats c ON c.id = s.chat_id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
-                  AND s.created_at > current_date - $2::bigint::int
-                ORDER BY s.created_at DESC, s.lost_length DESC
+                  AND s.created_at = $2
+                ORDER BY s.lost_length DESC
                 OFFSET $3 LIMIT $4"#,
-                chat_id.value() as String, days as DaysCount, offset as Offset, limit as Limit)
+                chat_id.value() as String, date, offset as Offset, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't fetch recent shrinks for {chat_id}"))
+            .context(format!("couldn't fetch shrinks of {chat_id} for {date}"))
+    },
+
+    pub async fn get_latest_shrink_date(
+        &self,
+        chat_id: &ChatIdKind,
+    ) -> anyhow::Result<Option<NaiveDate>> {
+        sqlx::query_scalar!(
+            r#"SELECT MAX(s.created_at) AS "created_at"
+                FROM Stale_Dick_Shrinks s
+                JOIN Chats c ON c.id = s.chat_id
+                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)"#,
+                chat_id.value() as String)
+            .fetch_one(&self.pool)
+            .await
+            .context(format!("couldn't fetch the latest shrink date for {chat_id}"))
+    },
+
+    /// Nearest older and newer dates with logged shrinks. Two scalar lookups rather than a date
+    /// list, so day-navigation stays constant-work however deep the history goes.
+    pub async fn get_adjacent_shrink_dates(
+        &self,
+        chat_id: &ChatIdKind,
+        date: NaiveDate,
+    ) -> anyhow::Result<(Option<NaiveDate>, Option<NaiveDate>)> {
+        let older = sqlx::query_scalar!(
+            r#"SELECT MAX(s.created_at) AS "created_at"
+                FROM Stale_Dick_Shrinks s
+                JOIN Chats c ON c.id = s.chat_id
+                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
+                  AND s.created_at < $2"#,
+                chat_id.value() as String, date)
+            .fetch_one(&self.pool)
+            .await
+            .context(format!("couldn't fetch the older shrink date for {chat_id}"))?;
+        let newer = sqlx::query_scalar!(
+            r#"SELECT MIN(s.created_at) AS "created_at"
+                FROM Stale_Dick_Shrinks s
+                JOIN Chats c ON c.id = s.chat_id
+                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
+                  AND s.created_at > $2"#,
+                chat_id.value() as String, date)
+            .fetch_one(&self.pool)
+            .await
+            .context(format!("couldn't fetch the newer shrink date for {chat_id}"))?;
+        Ok((older, newer))
     }
 );

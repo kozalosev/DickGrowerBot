@@ -6,7 +6,7 @@ mod dod;
 mod import;
 mod promo;
 mod inline;
-pub(crate) mod shrink;
+pub mod shrink;
 pub mod language;
 pub mod utils;
 pub mod pvp;
@@ -34,14 +34,14 @@ pub use promo::*;
 pub use language::LanguageCommands;
 pub use loan::LoanCommands;
 use crate::config::MessageGroup;
-use crate::domain::primitives::{LanguageCode, Page};
+use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup),
-/// so the caller knows whether (and how soon) to schedule it for deletion. Shared by the
-/// commands whose reply may be either a permanent event or an ephemeral status (grow, DoD).
+/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup), so the caller
+/// knows whether (and how soon) to schedule it for deletion — for commands whose reply may be
+/// either a permanent event or an ephemeral status.
 pub(crate) struct TaggedReply {
     pub text: String,
     pub group: MessageGroup,
@@ -174,26 +174,9 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
     Ok(())
 }
 
-/// Builds a "prev/next page" keyboard. `callback_prefix` is prepended directly to the target page
-/// number (e.g. `"top:page:"` -> `"top:page:1"`), so callers whose callback data carries more than
-/// just the page (see [`shrink::ShrinkView::callback_prefix`]) fold that extra state into the prefix
-/// itself rather than this function's signature.
-pub fn build_pagination_keyboard(page: Page, has_more_pages: bool, callback_prefix: &str) -> InlineKeyboardMarkup {
-    let mut buttons = Vec::new();
-    if page > 0 {
-        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
-        buttons.push(InlineKeyboardButton::callback("⬅️", format!("{callback_prefix}{prev_page}")))
-    }
-    if has_more_pages {
-        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
-        buttons.push(InlineKeyboardButton::callback("➡️", format!("{callback_prefix}{next_page}")))
-    }
-    InlineKeyboardMarkup::new(vec![buttons])
-}
-
 /// Answers a paging callback query with the "feature disabled" alert and strips the now-useless
-/// keyboard off the message it was attached to. Shared by every feature whose pagination callback
-/// can be reached after its underlying feature got toggled off (top, shrinks, …).
+/// keyboard off the message it was attached to — a stale button can outlive the toggle that
+/// enabled its feature.
 pub(crate) async fn answer_callback_feature_disabled(
     bot: Bot,
     q: &CallbackQuery,

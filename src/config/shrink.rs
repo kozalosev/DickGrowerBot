@@ -6,7 +6,6 @@ pub struct StaleDicksShrinkingConfig {
     pub ratio: Ratio,
     pub grace_period_days: DaysCount,
     pub ramp_up_days: DaysCount,
-    pub history_window_days: DaysCount,
 }
 
 impl StaleDicksShrinkingConfig {
