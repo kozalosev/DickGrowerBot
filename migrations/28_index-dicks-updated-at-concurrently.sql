@@ -1,0 +1,11 @@
+-- no-transaction
+-- Speeds up the daily scan for stale dicks. Partial on `length > 0` because only positive dicks
+-- can shrink — matching the WHERE of perform_daily_shrink — which keeps the index small and
+-- selective.
+--
+-- Built CONCURRENTLY so it doesn't lock Dicks against grow/pvp writes for the duration of the
+-- build, which a plain CREATE INDEX inside the startup migration would. That requires running
+-- outside a transaction, hence the `-- no-transaction` directive above. On failure CONCURRENTLY
+-- leaves behind an INVALID index that IF NOT EXISTS would happily skip, so drop it by hand before
+-- re-running if this ever fails.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS dicks_idx_updated_at ON Dicks(updated_at) WHERE length > 0;

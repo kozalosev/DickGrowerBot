@@ -7,8 +7,6 @@ CREATE TABLE IF NOT EXISTS Stale_Dick_Shrinks (
     PRIMARY KEY (chat_id, uid, created_at)
 );
 
-CREATE INDEX IF NOT EXISTS dicks_idx_updated_at ON Dicks(updated_at) WHERE length > 0;
-
 CREATE OR REPLACE FUNCTION forbid_stale_dick_shrinks_updates()
     RETURNS TRIGGER
     LANGUAGE PLPGSQL
