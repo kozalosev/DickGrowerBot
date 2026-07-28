@@ -35,9 +35,10 @@ pub mod date {
         }
     }
 
-    /// The gap between `now` and the upcoming UTC midnight, or `None` on the (practically
-    /// impossible) failure to build midnight.
-    fn duration_till_next_day(now: DateTime<Utc>) -> Option<Duration> {
+    /// The gap till the upcoming UTC midnight, or `None` on the (practically impossible) failure to
+    /// build it — which callers must not conflate with a legitimately zero duration.
+    pub fn duration_till_next_day() -> Option<Duration> {
+        let now = now_utc();
         Some(now + Duration::days(1))
             .and_then(|d| d.with_hour(0))
             .and_then(|d| d.with_minute(0))
@@ -45,14 +46,8 @@ pub mod date {
             .map(|tomorrow| tomorrow - now)
     }
 
-    /// `None` on the (practically impossible) failure to build midnight — the caller must not
-    /// treat that the same as a legitimately zero duration (see `duration_till_next_day`).
-    pub fn duration_till_next_day_utc() -> Option<Duration> {
-        duration_till_next_day(now_utc())
-    }
-
     pub fn get_time_till_next_day_string(lang_code: &LanguageCode) -> Cow<'_, str> {
-        duration_till_next_day(now_utc())
+        duration_till_next_day()
             .map(|time_left| {
                 let hrs = time_left.num_hours();
                 let mins = time_left.num_minutes() - hrs * 60;

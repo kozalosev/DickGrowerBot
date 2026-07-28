@@ -3,7 +3,7 @@ mod shrink;
 use teloxide::Bot;
 use teloxide::adaptors::throttle::{Limits, Throttle};
 use crate::config::AppConfig;
-use crate::handlers::utils::date::duration_till_next_day_utc;
+use crate::handlers::utils::date::duration_till_next_day;
 use crate::repo::Repositories;
 use crate::users::LanguageService;
 use shrink::run_daily_shrink;
@@ -28,12 +28,8 @@ pub fn spawn_daily_shrink(
         // notifications still pending, and there's no resume.
         let bot = Throttle::new_spawn(bot, Limits::default());
         loop {
-            let Some(till_next_day) = duration_till_next_day_utc() else {
-                log::error!("couldn't compute the duration till the next UTC day, stopping the daily shrink scheduler");
-                return;
-            };
-            let Ok(till_next_day) = till_next_day.to_std() else {
-                log::error!("the duration till the next UTC day came out negative, stopping the daily shrink scheduler");
+            let Some(till_next_day) = duration_till_next_day().and_then(|d| d.to_std().ok()) else {
+                log::error!("couldn't compute a valid duration till the next UTC midnight, stopping the daily shrink scheduler");
                 return;
             };
             tokio::time::sleep(till_next_day).await;
