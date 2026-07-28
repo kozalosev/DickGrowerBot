@@ -37,18 +37,16 @@ repository!(Shrinks,
         grace_days: DaysCount,
         ramp_up_days: DaysCount,
     ) -> anyhow::Result<Vec<ShrinkEvent>> {
-        let grace_days = grace_days.value() as i32;
-        let ramp_up_days = ramp_up_days.value() as i32;
         sqlx::query_as!(ShrinkEvent,
             r#"WITH victims AS (
                     SELECT d.uid, d.chat_id,
                            LEAST(d.length, GREATEST(1, CEIL(d.length * $1::double precision * LEAST(1.0,
-                               (EXTRACT(DAY FROM (current_timestamp - d.updated_at))::int - $2::int + 1)::double precision
-                                   / GREATEST($3::int, 1)
+                               (EXTRACT(DAY FROM (current_timestamp - d.updated_at))::int - $2::bigint::int + 1)::double precision
+                                   / GREATEST($3::bigint::int, 1)
                            ))::bigint)) AS loss
                     FROM Dicks d
                     WHERE d.length > 0
-                      AND d.updated_at <= current_timestamp - make_interval(days => $2::int)
+                      AND d.updated_at <= current_timestamp - make_interval(days => $2::bigint::int)
                 ),
                 updated AS (
                     UPDATE Dicks d SET length = d.length - v.loss, bonus_attempts = d.bonus_attempts + 1
@@ -65,7 +63,7 @@ repository!(Shrinks,
                 FROM updated u
                 JOIN Users usr USING (uid)
                 JOIN Chats c ON c.id = u.chat_id"#,
-                ratio as Ratio, grace_days, ramp_up_days)
+                ratio as Ratio, grace_days as DaysCount, ramp_up_days as DaysCount)
             .fetch_all(&self.pool)
             .await
             .context("couldn't perform the daily shrink")
@@ -76,16 +74,15 @@ repository!(Shrinks,
         chat_id: &ChatIdKind,
         days: DaysCount,
     ) -> anyhow::Result<Vec<RecentShrink>> {
-        let days = days.value() as i32;
         sqlx::query_as!(RecentShrink,
             r#"SELECT usr.name AS "owner_name: Username", s.lost_length AS "lost_length!: Length"
                 FROM Stale_Dick_Shrinks s
                 JOIN Users usr USING (uid)
                 JOIN Chats c ON c.id = s.chat_id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
-                  AND s.created_at > current_date - $2::int
+                  AND s.created_at > current_date - $2::bigint::int
                 ORDER BY s.created_at DESC, s.lost_length DESC"#,
-                chat_id.value() as String, days)
+                chat_id.value() as String, days as DaysCount)
             .fetch_all(&self.pool)
             .await
             .context(format!("couldn't fetch recent shrinks for {chat_id}"))

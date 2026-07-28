@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.uid AS \"uid: UserId\", name AS \"name: Username\", u.created_at FROM Users u\n                JOIN Dicks d USING (uid)\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                    AND updated_at > current_timestamp - make_interval(days => $2::int)\n                ORDER BY random() LIMIT 1",
+  "query": "SELECT u.uid AS \"uid: UserId\", name AS \"name: Username\", u.created_at FROM Users u\n                JOIN Dicks d USING (uid)\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                    AND updated_at > current_timestamp - make_interval(days => $2::bigint::int)\n                ORDER BY random() LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -40,7 +40,7 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Int4"
+        "Int8"
       ]
     },
     "nullable": [
@@ -49,5 +49,5 @@
       false
     ]
   },
-  "hash": "55c7c277cefa894c0008d3dca8c257573e4526d9a865871698f8fc714781425a"
+  "hash": "2af9a3ef1d244bb16670439709fc4fa924d9d446b9f9187fb1c6a9f1ac7ac614"
 }

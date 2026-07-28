@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT usr.name AS \"owner_name: Username\", s.lost_length AS \"lost_length!: Length\"\n                FROM Stale_Dick_Shrinks s\n                JOIN Users usr USING (uid)\n                JOIN Chats c ON c.id = s.chat_id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                  AND s.created_at > current_date - $2::int\n                ORDER BY s.created_at DESC, s.lost_length DESC",
+  "query": "SELECT usr.name AS \"owner_name: Username\", s.lost_length AS \"lost_length!: Length\"\n                FROM Stale_Dick_Shrinks s\n                JOIN Users usr USING (uid)\n                JOIN Chats c ON c.id = s.chat_id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                  AND s.created_at > current_date - $2::bigint::int\n                ORDER BY s.created_at DESC, s.lost_length DESC",
   "describe": {
     "columns": [
       {
@@ -29,7 +29,7 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Int4"
+        "Int8"
       ]
     },
     "nullable": [
@@ -37,5 +37,5 @@
       false
     ]
   },
-  "hash": "f73556cbdb81bec74ef71dad739cccaaa52a8939265ed22a2ff2e8d9583ba270"
+  "hash": "bec7b3bf3f53d1e8b4e54e7619b5d48f8fb53da681eea6244f60c06fda0c4088"
 }

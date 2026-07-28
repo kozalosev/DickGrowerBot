@@ -223,6 +223,40 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
     assert_eq!(length_of(&db, victim_uid, chat_id).await, 0);
 }
 
+/// `DaysCount` wraps a `u32`; a `grace_days` above `i32::MAX` (but still a perfectly valid `u32`,
+/// e.g. from a misconfigured `SHRINK_GRACE_DAYS`) used to get bound into the query as `.value() as
+/// i32`, which silently flipped negative on overflow — turning "hasn't grown in N days" into
+/// "grown within N days" and shrinking *everyone*, including dicks grown moments ago, with no
+/// error anywhere. `DaysCount` now embeds directly (`u32` bumped to `i64`/`bigint` on the wire,
+/// narrowed back to `int4` in SQL via an explicit `::bigint::int` cast), so an out-of-range value
+/// now surfaces as a genuine Postgres error instead of silently corrupting the result — fail loud,
+/// not silently wrong. Nothing gets shrunk on this call, so it's a safe failure mode too.
+#[tokio::test]
+async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wrapping() {
+    let (_container, db) = start_postgres().await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let shrinks = repo::Shrinks::new(db.clone());
+    let users = repo::Users::new(db.clone());
+
+    users.create_or_update(USER_ID, NAME)
+        .await.expect("couldn't create the primary user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
+        .await.expect("couldn't create a dummy dick and the Chats row");
+    let chat_id = internal_chat_id(&db).await;
+
+    let victim_uid = UID + 1;
+    users.create_or_update(UserId::literal(victim_uid), "hundred-days-old")
+        .await.expect("couldn't create the victim");
+    seed_aged_dick(&db, chat_id, victim_uid, 100, 100).await;
+
+    let absurd_grace_days = DaysCount::new(3_000_000_000); // > i32::MAX (~2.15 billion), valid u32
+    let result = shrinks.perform_daily_shrink(Ratio::literal(0.5), absurd_grace_days, NO_RAMP).await;
+
+    assert!(result.is_err(), "an out-of-range grace_days must error, not silently wrap to negative");
+    assert_eq!(length_of(&db, victim_uid, chat_id).await, 100,
+        "a failed run must not have shrunk anyone (the old sign-flip bug would've shrunk everyone)");
+}
+
 #[tokio::test]
 async fn test_get_recent_shrinks_respects_the_day_window() {
     let (_container, db) = start_postgres().await;

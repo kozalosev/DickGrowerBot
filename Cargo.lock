@@ -856,6 +856,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "sqlx",
  "syn 3.0.2",
 ]
 

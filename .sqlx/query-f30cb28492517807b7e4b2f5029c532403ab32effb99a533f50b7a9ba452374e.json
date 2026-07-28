@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT length AS \"length: Length\", uid AS \"owner_uid: UserId\", name as owner_name, updated_at as grown_at,\n                    ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position\n                FROM dicks d\n                JOIN users using (uid)\n                JOIN chats c ON c.id = d.chat_id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                  AND (NOT $4::bool OR d.length != 0 OR d.updated_at > current_timestamp - make_interval(days => $5::int))\n                OFFSET $2 LIMIT $3",
+  "query": "SELECT length AS \"length: Length\", uid AS \"owner_uid: UserId\", name as owner_name, updated_at as grown_at,\n                    ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position\n                FROM dicks d\n                JOIN users using (uid)\n                JOIN chats c ON c.id = d.chat_id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                  AND (NOT $4::bool OR d.length != 0 OR d.updated_at > current_timestamp - make_interval(days => $5::bigint::int))\n                OFFSET $2 LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -60,7 +60,7 @@
         "Int8",
         "Int8",
         "Bool",
-        "Int4"
+        "Int8"
       ]
     },
     "nullable": [
@@ -71,5 +71,5 @@
       null
     ]
   },
-  "hash": "483e7a1fb45a58f3ef8bd72735556d69b9bc2a8b8949330d316f7419a22bcf77"
+  "hash": "f30cb28492517807b7e4b2f5029c532403ab32effb99a533f50b7a9ba452374e"
 }
