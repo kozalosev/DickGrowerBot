@@ -1,15 +1,11 @@
-use std::future::IntoFuture;
 
 use anyhow::{anyhow, Context};
 use chrono::{Datelike, Utc};
-use futures::future::join;
-use futures::TryFutureExt;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
 use crate::{metrics, reply_html, repo};
@@ -235,28 +231,7 @@ pub async fn page_callback_handler(
     let top = top_impl(&repos, &config, from_refs, lang_code, page).await?;
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
-    let (answer_callback_query_result, edit_message_result) = match &edit_msg_req_params {
-        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-            let mut edit_message_text_req = bot.edit_message_text(*chat_id, *message_id, top.lines);
-            edit_message_text_req.parse_mode.replace(ParseMode::Html);
-            edit_message_text_req.reply_markup.replace(keyboard);
-            join(
-                bot.answer_callback_query(q.id.clone()).into_future(),
-                edit_message_text_req.into_future().map_ok(|_| ())
-            ).await
-        },
-        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-            let mut edit_message_text_inline_req = bot.edit_message_text_inline(inline_message_id, top.lines);
-            edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
-            edit_message_text_inline_req.reply_markup.replace(keyboard);
-            join(
-                bot.answer_callback_query(q.id.clone()).into_future(),
-                edit_message_text_inline_req.into_future().map_ok(|_| ())
-            ).await
-        }
-    };
-    answer_callback_query_result.context(format!("failed to answer a callback query {q:?}"))?;
-    edit_message_result.context(format!("failed to edit the message of {edit_msg_req_params:?}"))?;
+    callbacks::answer_and_edit_page(&bot, &q, &edit_msg_req_params, top.lines, keyboard).await?;
     Ok(())
 }
 

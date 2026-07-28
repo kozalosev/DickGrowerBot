@@ -1,11 +1,15 @@
+use std::future::IntoFuture;
 use std::str::{FromStr, Split};
+use anyhow::Context;
 use derive_more::{Display, Error};
+use futures::future::join;
+use futures::TryFutureExt;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::payloads::AnswerCallbackQuery;
 use teloxide::prelude::ChatId;
 use teloxide::requests::{JsonRequest, Requester};
-use teloxide::types::{CallbackQuery, MessageId, UserId};
+use teloxide::types::{CallbackQuery, InlineKeyboardMarkup, MessageId, ParseMode, UserId};
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::LanguageCode;
 
@@ -141,6 +145,38 @@ pub async fn edit_message_text(
             bot.edit_message_text_inline(inline_message_id, text).await?;
         }
     }
+    Ok(())
+}
+
+pub async fn answer_and_edit_page(
+    bot: &Bot,
+    q: &CallbackQuery,
+    params: &EditMessageReqParamsKind,
+    text: String,
+    keyboard: InlineKeyboardMarkup,
+) -> anyhow::Result<()> {
+    let (answered, edited) = match params {
+        EditMessageReqParamsKind::Chat(chat_id, message_id) => {
+            let mut req = bot.edit_message_text(*chat_id, *message_id, text);
+            req.parse_mode.replace(ParseMode::Html);
+            req.reply_markup.replace(keyboard);
+            join(
+                bot.answer_callback_query(q.id.clone()).into_future(),
+                req.into_future().map_ok(|_| ()),
+            ).await
+        },
+        EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
+            let mut req = bot.edit_message_text_inline(inline_message_id, text);
+            req.parse_mode.replace(ParseMode::Html);
+            req.reply_markup.replace(keyboard);
+            join(
+                bot.answer_callback_query(q.id.clone()).into_future(),
+                req.into_future().map_ok(|_| ()),
+            ).await
+        }
+    };
+    answered.context(format!("failed to answer a callback query {q:?}"))?;
+    edited.context(format!("failed to edit the message of {params:?}"))?;
     Ok(())
 }
 
