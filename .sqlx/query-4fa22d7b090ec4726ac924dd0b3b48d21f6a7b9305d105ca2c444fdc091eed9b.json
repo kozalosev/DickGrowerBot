@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.uid AS \"uid: UserId\", usr.name AS \"owner_name: Username\",\n                       s.lost_length AS \"lost_length!: Length\", d.length AS \"length!: Length\"\n                FROM Stale_Dick_Shrinks s\n                JOIN Users usr USING (uid)\n                JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id\n                JOIN Chats c ON c.id = s.chat_id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                  AND s.created_at > current_date - $2::bigint::int\n                ORDER BY s.created_at DESC, s.lost_length DESC\n                OFFSET $3 LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid: UserId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stale_dick_shrinks",
+            "name": "uid"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_name: Username",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lost_length!: Length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stale_dick_shrinks",
+            "name": "lost_length"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "length!: Length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4fa22d7b090ec4726ac924dd0b3b48d21f6a7b9305d105ca2c444fdc091eed9b"
+}

@@ -1,5 +1,5 @@
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{DaysCount, LengthChange, Ratio, UserId, Username};
+use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio, UserId, Username};
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, NAME, start_postgres, UID, USER_ID};
@@ -281,10 +281,53 @@ async fn test_get_recent_shrinks_respects_the_day_window() {
     // An older shrink, 8 days ago — outside a 7-day window.
     seed_old_shrink(&db, chat_id, UID, 5, 8).await;
 
-    let recent = shrinks.get_recent_shrinks(&CHAT_ID_KIND, DaysCount::new(7)).await
+    let recent = shrinks.get_recent_shrinks(&CHAT_ID_KIND, DaysCount::new(7), Offset::new(0), Limit::literal(10)).await
         .expect("couldn't fetch recent shrinks");
     assert_eq!(recent.len(), 1, "only the shrink within the last 7 days should be returned");
     assert_eq!(recent[0].lost_length, 10);
+    assert_eq!(recent[0].length, 90, "the victim's current (post-shrink) length, joined from Dicks");
+}
+
+/// The broadcast and the inline `shrinks` command both page off `get_recent_shrinks`, so a chat
+/// with more victims than fit on one page must split cleanly: same ordering, no row repeated or
+/// skipped between page 0 and page 1.
+#[tokio::test]
+async fn test_get_recent_shrinks_pages() {
+    let (_container, db) = start_postgres().await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let shrinks = repo::Shrinks::new(db.clone());
+    let users = repo::Users::new(db.clone());
+
+    users.create_or_update(USER_ID, NAME)
+        .await.expect("couldn't create the primary user and the Chats row");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
+        .await.expect("couldn't create a dummy dick");
+    let chat_id = internal_chat_id(&db).await;
+
+    // Three shrinks, newest to oldest (days_ago 1..3), with distinct lost_length so ordering is
+    // unambiguous (get_recent_shrinks orders by created_at DESC, lost_length DESC).
+    for (n, lost) in [(1i32, 30i64), (2, 20), (3, 10)] {
+        let uid = UID + n as i64;
+        users.create_or_update(UserId::literal(uid), &format!("victim-{n}"))
+            .await.expect("couldn't create a victim");
+        seed_aged_dick(&db, chat_id, uid, 100, 10).await;
+        seed_old_shrink(&db, chat_id, uid, lost, n).await;
+    }
+
+    let page0 = shrinks.get_recent_shrinks(&CHAT_ID_KIND, DaysCount::new(7), Offset::new(0), Limit::literal(2)).await
+        .expect("couldn't fetch page 0");
+    let page1 = shrinks.get_recent_shrinks(&CHAT_ID_KIND, DaysCount::new(7), Offset::new(2), Limit::literal(2)).await
+        .expect("couldn't fetch page 1");
+
+    assert_eq!(page0.len(), 2, "page 0 must be full");
+    assert_eq!(page1.len(), 1, "page 1 holds the remainder");
+    assert_eq!(page0[0].lost_length, 30, "most recent (least days ago) shrink comes first");
+    assert_eq!(page0[1].lost_length, 20);
+    assert_eq!(page1[0].lost_length, 10, "oldest shrink lands on the last page");
+
+    let page0_uids: Vec<_> = page0.iter().map(|s| s.uid).collect();
+    let page1_uids: Vec<_> = page1.iter().map(|s| s.uid).collect();
+    assert!(page0_uids.iter().all(|u| !page1_uids.contains(u)), "the pages must be disjoint");
 }
 
 #[tokio::test]

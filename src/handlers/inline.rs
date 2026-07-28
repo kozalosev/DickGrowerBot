@@ -78,7 +78,7 @@ impl InlineCommand {
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
                         res.keyboard = config.features.top_unlimited
-                            .then_some(build_pagination_keyboard(Page::first(), top.has_more_pages));
+                            .then_some(build_pagination_keyboard(Page::first(), top.has_more_pages, dick::CALLBACK_PREFIX_TOP_PAGE));
                         res
                     })
             },
@@ -104,7 +104,13 @@ impl InlineCommand {
                 metrics::CMD_SHRINKS.inline.inc();
                 shrink::recent_shrinks_impl(repos, from_refs, &config, &lang_code)
                     .await
-                    .map(InlineResult::text)
+                    .map(|page| {
+                        let mut res = InlineResult::text(page.lines);
+                        let prefix = shrink::ShrinkView::Recent.callback_prefix();
+                        res.keyboard = page.has_more_pages
+                            .then(|| build_pagination_keyboard(Page::first(), page.has_more_pages, &prefix));
+                        res
+                    })
             },
         }
     }

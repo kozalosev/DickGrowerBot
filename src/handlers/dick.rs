@@ -9,18 +9,18 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{CallbackQuery, Message, ParseMode, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
 use crate::{metrics, reply_html, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
-use crate::handlers::{HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::{answer_callback_feature_disabled, build_pagination_keyboard, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
-const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
+pub(crate) const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -58,7 +58,8 @@ pub async fn dick_cmd_handler(
             let top = top_impl(&repos, &config, from_refs, lang_code.clone(), Page::first()).await?;
             let mut request = reply_html(bot.clone(), &msg, top.lines);
             if top.has_more_pages && config.features.top_unlimited {
-                let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
+                let keyboard = ReplyMarkup::InlineKeyboard(
+                    build_pagination_keyboard(Page::first(), top.has_more_pages, CALLBACK_PREFIX_TOP_PAGE));
                 request.reply_markup.replace(keyboard);
             }
             let sent = request.await.context(format!("failed for {msg:?}"))?;
@@ -233,7 +234,7 @@ pub async fn page_callback_handler(
     let from_refs = FromRefs(&q.from, &chat_id_partiality);
     let top = top_impl(&repos, &config, from_refs, lang_code, page).await?;
 
-    let keyboard = build_pagination_keyboard(page, top.has_more_pages);
+    let keyboard = build_pagination_keyboard(page, top.has_more_pages, CALLBACK_PREFIX_TOP_PAGE);
     let (answer_callback_query_result, edit_message_result) = match &edit_msg_req_params {
         callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
             let mut edit_message_text_req = bot.edit_message_text(*chat_id, *message_id, top.lines);
@@ -259,37 +260,3 @@ pub async fn page_callback_handler(
     Ok(())
 }
 
-pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
-    let mut buttons = Vec::new();
-    if page > 0 {
-        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
-        buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{prev_page}")))
-    }
-    if has_more_pages {
-        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
-        buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
-    }
-    InlineKeyboardMarkup::new(vec![buttons])
-}
-
-async fn answer_callback_feature_disabled(
-    bot: Bot,
-    q: &CallbackQuery,
-    edit_msg_req_params: callbacks::EditMessageReqParamsKind,
-    lang_code: LanguageCode,
-) -> HandlerResult {
-    let mut answer = bot.answer_callback_query(q.id.clone());
-    answer.show_alert.replace(true);
-    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
-    answer.await?;
-
-    match edit_msg_req_params {
-        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
-            bot.edit_message_reply_markup(chat_id, message_id)
-                .await.map(|_| ())?,
-        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
-            bot.edit_message_reply_markup_inline(inline_message_id)
-                .await.map(|_| ())?
-    };
-    Ok(())
-}

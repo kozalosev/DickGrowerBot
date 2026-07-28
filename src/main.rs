@@ -64,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::inline_chosen_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
         .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::shrink::callback_filter).endpoint(handlers::shrink::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::pvp::callback_filter).endpoint(handlers::pvp::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::callback_handler))

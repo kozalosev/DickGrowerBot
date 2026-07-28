@@ -1,14 +1,15 @@
 use std::collections::HashMap;
-use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
 use teloxide::sugar::request::RequestLinkPreviewExt;
-use teloxide::types::{ChatId, UserId as TeloxideUserId};
+use teloxide::types::{ChatId, ReplyMarkup, UserId as TeloxideUserId};
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
-use crate::domain::primitives::{LanguageCode, SupportedLanguage};
+use crate::domain::primitives::{LanguageCode, Page, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
+use crate::handlers::build_pagination_keyboard;
+use crate::handlers::shrink::{shrinks_page_impl, ShrinkView};
 use crate::repo::{Repositories, ShrinkEvent};
 use crate::users::LanguageService;
 
@@ -41,40 +42,46 @@ pub async fn run_daily_shrink(
     }
 
     for (chat_id, victims) in by_chat {
-        if let Err(e) = broadcast_shrink(&bot, &repos, &language_service, &config, chat_id, &victims).await {
+        // Operationally useful even though `shrinks_page_impl` renders the broadcast from a fresh
+        // query below, not from `victims` directly (which also keeps its fields from tripping the
+        // dead_code lint — they're the best coverage of the shrink math in `test_perform_daily_shrink`).
+        let summary = victims.iter()
+            .map(|v| format!("{} ({}) lost {} cm, now {} cm", v.owner_name, v.uid, v.lost_length, v.new_length))
+            .collect::<Vec<_>>()
+            .join("; ");
+        log::info!("daily shrink: chat {chat_id} victims: {summary}");
+
+        if let Err(e) = broadcast_shrink(&bot, &repos, &language_service, &config, chat_id).await {
             log::warn!("daily shrink: couldn't notify chat {chat_id}: {e:#}");
         }
     }
     Ok(())
 }
 
+/// Sends page 0 of the chat's shrink list, off the same shared query and renderer the inline
+/// `shrinks` command and its pagination callback use (see [`crate::handlers::shrink`]) — so a
+/// chat with more victims than fit in one message gets a "next" button instead of a send failure.
 async fn broadcast_shrink(
     bot: &Bot,
     repos: &Repositories,
     language_service: &LanguageService,
     config: &AppConfig,
     chat_id: TelegramChatId,
-    victims: &[ShrinkEvent],
 ) -> anyhow::Result<()> {
     let chat = ChatIdKind::from(chat_id);
     let lang = resolve_broadcast_language(repos, language_service, config, &chat).await;
     let lang_code = LanguageCode::new(lang.to_string());
 
-    let lines = victims.iter()
-        .map(|v| {
-            let name = v.owner_name.escaped();
-            t!("commands.shrink.notification.line", locale = &lang_code,
-                uid = v.uid, name = name, lost = v.lost_length, length = v.new_length)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let header = t!("commands.shrink.notification.header", locale = &lang_code);
-    let text = format!("{header}\n{lines}");
-
-    bot.send_message(ChatId(chat_id.value()), text)
+    let page = shrinks_page_impl(repos, config, &chat, &lang_code, ShrinkView::Broadcast, Page::first()).await?;
+    let mut request = bot.send_message(ChatId(chat_id.value()), page.lines)
         .parse_mode(Html)
-        .disable_link_preview(true)
-        .await?;
+        .disable_link_preview(true);
+    if page.has_more_pages {
+        let prefix = ShrinkView::Broadcast.callback_prefix();
+        let keyboard = build_pagination_keyboard(Page::first(), page.has_more_pages, &prefix);
+        request.reply_markup.replace(ReplyMarkup::InlineKeyboard(keyboard));
+    }
+    request.await?;
     Ok(())
 }
 

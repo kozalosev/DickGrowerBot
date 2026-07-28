@@ -1,5 +1,5 @@
 use anyhow::Context;
-use crate::domain::primitives::{DaysCount, Length, Ratio, UserId, Username};
+use crate::domain::primitives::{DaysCount, Length, Limit, Offset, Ratio, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::repository;
 
@@ -14,11 +14,15 @@ pub struct ShrinkEvent {
     pub messageable_chat_id: Option<TelegramChatId>,
 }
 
-/// A historical shrink row for the inline `shrinks` command. The `Stale_Dick_Shrinks` log only
-/// stores how much was lost, so there's no post-shrink length here (unlike [`ShrinkEvent`]).
+/// A historical shrink row shared by the broadcast and the inline `shrinks` command. The
+/// `Stale_Dick_Shrinks` log only stores how much was lost, so `length` (the owner's *current*
+/// length) comes from a `Dicks` join — it's the post-shrink value when read moments after the
+/// daily run, and self-updates on a later page click.
 pub struct RecentShrink {
+    pub uid: UserId,
     pub owner_name: Username,
     pub lost_length: Length,
+    pub length: Length,
 }
 
 repository!(Shrinks,
@@ -73,16 +77,21 @@ repository!(Shrinks,
         &self,
         chat_id: &ChatIdKind,
         days: DaysCount,
+        offset: Offset,
+        limit: Limit,
     ) -> anyhow::Result<Vec<RecentShrink>> {
         sqlx::query_as!(RecentShrink,
-            r#"SELECT usr.name AS "owner_name: Username", s.lost_length AS "lost_length!: Length"
+            r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
+                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length"
                 FROM Stale_Dick_Shrinks s
                 JOIN Users usr USING (uid)
+                JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
                 JOIN Chats c ON c.id = s.chat_id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                   AND s.created_at > current_date - $2::bigint::int
-                ORDER BY s.created_at DESC, s.lost_length DESC"#,
-                chat_id.value() as String, days as DaysCount)
+                ORDER BY s.created_at DESC, s.lost_length DESC
+                OFFSET $3 LIMIT $4"#,
+                chat_id.value() as String, days as DaysCount, offset as Offset, limit as Limit)
             .fetch_all(&self.pool)
             .await
             .context(format!("couldn't fetch recent shrinks for {chat_id}"))
