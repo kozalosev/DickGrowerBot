@@ -162,8 +162,9 @@ impl UserServiceClient for UserServiceClientGrpc {
     async fn get_user_languages(&self, uids: &[UserId]) -> Result<HashMap<UserId, LanguageCode>, tonic::Status> {
         // Field-masked response, so `User.id` (unset, proto field 1) reads back as 0 — never cache
         // these shells into the shared `get()` cache, or a later `set_language` would resolve the
-        // wrong internal id. This is called once a day by the scheduler, so skipping the cache
-        // costs little.
+        // wrong internal id. Nor is the cache worth *reading* here: this is one round-trip whatever
+        // the id count, so serving part of the batch from the cache would only shorten the request,
+        // not avoid it — every member would have to be cached to skip the wire at all.
         metrics::USER_SERVICE.request_sent();
         let ids = uids.iter().map(|uid| uid.0 as i64).collect();
         let resp = self.inner.clone().get_many(GetUsersRequest {
@@ -288,7 +289,7 @@ impl<C: UserServiceClient> LanguageService<C> {
         self.chat_cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Read-through TTL cache over [`Chats::get_chat_language`]. Only [`Self::resolve`] uses it.
+    /// Read-through TTL cache over [`Chats::get_chat_language`].
     async fn chat_language(&self, chat_id: &ChatIdKind) -> Option<SupportedLanguage> {
         let now = tokio::time::Instant::now();
         if let Some(cached) = self.chat_cache().get(chat_id)
