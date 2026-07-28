@@ -45,8 +45,10 @@ pub mod date {
             .map(|tomorrow| tomorrow - now)
     }
 
-    pub fn duration_till_next_day_utc() -> Duration {
-        duration_till_next_day(now_utc()).unwrap_or_else(Duration::zero)
+    /// `None` on the (practically impossible) failure to build midnight — the caller must not
+    /// treat that the same as a legitimately zero duration (see `duration_till_next_day`).
+    pub fn duration_till_next_day_utc() -> Option<Duration> {
+        duration_till_next_day(now_utc())
     }
 
     pub fn get_time_till_next_day_string(lang_code: &LanguageCode) -> Cow<'_, str> {
