@@ -55,13 +55,13 @@ pub(crate) async fn dick_of_day_impl(
     let chat_id = from_refs.1;
     let winner = match cfg.features.dod_selection_mode {
         DickOfDaySelectionMode::WEIGHTS => {
-            repos.users.get_random_active_member_with_poor_in_priority(&chat_id.kind()).await?
+            repos.users.get_random_active_member_with_poor_in_priority(&chat_id.kind(), cfg.inactivity_days).await?
         },
         DickOfDaySelectionMode::EXCLUSION if cfg.dod_rich_exclusion_ratio.is_some() => {
             let rich_exclusion_ratio = cfg.dod_rich_exclusion_ratio.unwrap();
-            repos.users.get_random_active_poor_member(&chat_id.kind(), rich_exclusion_ratio).await?
+            repos.users.get_random_active_poor_member(&chat_id.kind(), rich_exclusion_ratio, cfg.inactivity_days).await?
         },
-        _ => repos.users.get_random_active_member(&chat_id.kind()).await?
+        _ => repos.users.get_random_active_member(&chat_id.kind(), cfg.inactivity_days).await?
     };
     let (answer, group) = match winner {
         Some(winner) => {
