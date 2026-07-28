@@ -1,6 +1,7 @@
 mod shrink;
 
 use teloxide::Bot;
+use teloxide::adaptors::throttle::{Limits, Throttle};
 use crate::config::AppConfig;
 use crate::handlers::utils::date::duration_till_next_day_utc;
 use crate::repo::Repositories;
@@ -21,10 +22,20 @@ pub fn spawn_daily_shrink(
         return;
     }
     tokio::spawn(async move {
+        // The broadcast fans out to every affected chat at once, which would blow past Telegram's
+        // rate limits unthrottled. Scoped to this task, so the dispatcher and handlers keep the
+        // plain `Bot`. The adapter's queue lives in memory only: a restart mid-broadcast drops the
+        // notifications still pending, and there's no resume.
+        let bot = Throttle::new_spawn(bot, Limits::default());
         loop {
-            let till_next_day = duration_till_next_day_utc()
-                .to_std()
-                .unwrap_or(std::time::Duration::ZERO);
+            let Some(till_next_day) = duration_till_next_day_utc() else {
+                log::error!("couldn't compute the duration till the next UTC day, stopping the daily shrink scheduler");
+                return;
+            };
+            let Ok(till_next_day) = till_next_day.to_std() else {
+                log::error!("the duration till the next UTC day came out negative, stopping the daily shrink scheduler");
+                return;
+            };
             tokio::time::sleep(till_next_day).await;
 
             run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())

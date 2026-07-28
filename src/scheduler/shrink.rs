@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use teloxide::Bot;
+use teloxide::adaptors::Throttle;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
 use teloxide::sugar::request::RequestLinkPreviewExt;
@@ -17,7 +18,7 @@ use crate::users::LanguageService;
 /// to every affected group chat. Inline-only chats (no messageable `chat_id`) are silently skipped —
 /// their members see the events via the `shrinks` inline command instead.
 pub async fn run_daily_shrink(
-    bot: Bot,
+    bot: Throttle<Bot>,
     repos: Repositories,
     language_service: LanguageService,
     config: AppConfig,
@@ -62,7 +63,7 @@ pub async fn run_daily_shrink(
 /// `shrinks` command and its pagination callback use (see [`crate::handlers::shrink`]) — so a
 /// chat with more victims than fit in one message gets a "next" button instead of a send failure.
 async fn broadcast_shrink(
-    bot: &Bot,
+    bot: &Throttle<Bot>,
     repos: &Repositories,
     language_service: &LanguageService,
     config: &AppConfig,
@@ -73,13 +74,15 @@ async fn broadcast_shrink(
     let lang_code = LanguageCode::new(lang.to_string());
 
     let page = shrinks_page_impl(repos, config, &chat, &lang_code, ShrinkView::Broadcast, Page::first()).await?;
+    // The throttled request wraps the payload, so the keyboard goes through the setter rather than
+    // the field the plain `Bot` exposes.
     let mut request = bot.send_message(ChatId(chat_id.value()), page.lines)
         .parse_mode(Html)
         .disable_link_preview(true);
     if page.has_more_pages {
         let prefix = ShrinkView::Broadcast.callback_prefix();
         let keyboard = build_pagination_keyboard(Page::first(), page.has_more_pages, &prefix);
-        request.reply_markup.replace(ReplyMarkup::InlineKeyboard(keyboard));
+        request = request.reply_markup(ReplyMarkup::InlineKeyboard(keyboard));
     }
     request.await?;
     Ok(())
