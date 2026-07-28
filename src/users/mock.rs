@@ -4,6 +4,7 @@ use teloxide::types::UserId;
 use tonic::Status;
 use super::generated::User;
 use super::{UserService, UserServiceClient};
+use crate::domain::primitives::LanguageCode;
 
 /// In-memory test double for [`UserServiceClient`]. Pre-populate registered users with
 /// [`Self::insert`]; users absent from the map behave as "not registered" (`get` → `None`,
@@ -36,10 +37,13 @@ impl UserServiceClient for UserServiceClientMock {
         Ok(self.users.lock().unwrap().get(&uid).cloned())
     }
 
-    async fn get_many(&self, uids: &[UserId]) -> Result<HashMap<UserId, User>, Status> {
+    async fn get_user_languages(&self, uids: &[UserId]) -> Result<HashMap<UserId, LanguageCode>, Status> {
         let users = self.users.lock().unwrap();
         Ok(uids.iter()
-            .filter_map(|uid| users.get(uid).map(|user| (*uid, user.clone())))
+            .filter_map(|uid| {
+                let code = users.get(uid)?.options.as_ref()?.language_code.clone()?;
+                Some((*uid, LanguageCode::new(code)))
+            })
             .collect())
     }
 

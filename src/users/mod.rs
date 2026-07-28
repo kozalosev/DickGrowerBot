@@ -27,10 +27,11 @@ pub trait UserServiceClient: Clone {
     /// Returns `Ok(None)` when the user is not registered in the service.
     async fn get(&self, uid: UserId) -> Result<Option<User>, tonic::Status>;
 
-    /// Batch variant of [`Self::get`]: fetches many users by their Telegram ids in one round-trip
-    /// (`by_external_id = true`). The returned map is keyed by the requested [`UserId`]; ids that
-    /// aren't registered are simply absent from it.
-    async fn get_many(&self, uids: &[UserId]) -> Result<HashMap<UserId, User>, tonic::Status>;
+    /// Batch-fetches just the preferred language of many users by their Telegram ids in one
+    /// round-trip (`by_external_id = true`). The returned map is keyed by the requested [`UserId`];
+    /// ids that aren't registered, or are registered but have no language code, are simply absent
+    /// from it. Uncached — see the impl for why.
+    async fn get_user_languages(&self, uids: &[UserId]) -> Result<HashMap<UserId, LanguageCode>, tonic::Status>;
 
     /// Updates the user's preferred language, propagating it to all bots that
     /// read from the same service. Requires the user to be already registered.
@@ -158,28 +159,13 @@ impl UserServiceClient for UserServiceClientGrpc {
         }
     }
 
-    async fn get_many(&self, uids: &[UserId]) -> Result<HashMap<UserId, User>, tonic::Status> {
-        // Serve everything we can from the shared cache; only the misses hit the wire. `None`
-        // cache entries (known-unregistered) count as hits — they just don't land in the result.
-        let mut result = HashMap::new();
-        let mut misses = Vec::new();
-        for &uid in uids {
-            match self.cached_fresh(uid) {
-                Some(cached) => {
-                    metrics::USER_SERVICE.cache_hit();
-                    if let Some(user) = cached {
-                        result.insert(uid, user);
-                    }
-                }
-                None => misses.push(uid),
-            }
-        }
-        if misses.is_empty() {
-            return Ok(result);
-        }
-
+    async fn get_user_languages(&self, uids: &[UserId]) -> Result<HashMap<UserId, LanguageCode>, tonic::Status> {
+        // Field-masked response, so `User.id` (unset, proto field 1) reads back as 0 — never cache
+        // these shells into the shared `get()` cache, or a later `set_language` would resolve the
+        // wrong internal id. This is called once a day by the scheduler, so skipping the cache
+        // costs little.
         metrics::USER_SERVICE.request_sent();
-        let ids = misses.iter().map(|uid| uid.0 as i64).collect();
+        let ids = uids.iter().map(|uid| uid.0 as i64).collect();
         let resp = self.inner.clone().get_many(GetUsersRequest {
             ids,
             by_external_id: true,
@@ -188,13 +174,14 @@ impl UserServiceClient for UserServiceClientGrpc {
             }),
         }).await?.into_inner();
 
-        for uid in misses {
-            let user = resp.users.get(&(uid.0 as i64)).cloned();
-            self.cache_put(uid, user.clone());          // caches None for the unregistered too
-            if let Some(user) = user {
-                result.insert(uid, user);
-            }
-        }
+        let result = uids.iter()
+            .filter_map(|&uid| {
+                let code = resp.users.get(&(uid.0 as i64))?
+                    .options.as_ref()?
+                    .language_code.clone()?;
+                Some((uid, LanguageCode::new(code)))
+            })
+            .collect();
         Ok(result)
     }
 
@@ -209,17 +196,12 @@ impl UserServiceClient for UserServiceClientGrpc {
     }
 }
 
-/// The most frequent supported language among the given users (by their preference), or `None` when
-/// none of them has a language we localize. Pure and DB-free so it can be unit-tested directly.
-fn most_popular_language<'a>(users: impl Iterator<Item = &'a User>) -> Option<SupportedLanguage> {
+/// The most frequent supported language among the given language codes, or `None` when none of
+/// them is a language we localize. Pure and DB-free so it can be unit-tested directly.
+fn most_popular_language<'a>(codes: impl Iterator<Item = &'a LanguageCode>) -> Option<SupportedLanguage> {
     let mut tally: HashMap<SupportedLanguage, usize> = HashMap::new();
-    for user in users {
-        let lang = user.options.as_ref()
-            .and_then(|opts| opts.language_code.as_ref())
-            .and_then(|code| LanguageCode::new(code.clone()).as_supported_language());
-        if let Some(lang) = lang {
-            *tally.entry(lang).or_default() += 1;
-        }
+    for lang in codes.filter_map(LanguageCode::as_supported_language) {
+        *tally.entry(lang).or_default() += 1;
     }
     tally.into_iter()
         .max_by_key(|(_, count)| *count)
@@ -288,10 +270,10 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// none has a language we localize — the caller then falls back to English.
     pub(crate) async fn popular_language(&self, uids: &[UserId]) -> Option<SupportedLanguage> {
         let UserService::Connected(client) = &self.users else { return None };
-        let users = client.get_many(uids).await
-            .inspect_err(|status| log::warn!("couldn't batch-fetch users for the language tally: {status}"))
+        let langs = client.get_user_languages(uids).await
+            .inspect_err(|status| log::warn!("couldn't batch-fetch user languages for the tally: {status}"))
             .ok()?;
-        most_popular_language(users.values())
+        most_popular_language(langs.values())
     }
 
     /// Updates a user's personal language in the user-service.
@@ -396,7 +378,7 @@ pub(crate) async fn resolve_language_for<C: UserServiceClient>(
 #[cfg(test)]
 mod test {
     use teloxide::types::{User, UserId};
-    use crate::domain::primitives::SupportedLanguage;
+    use crate::domain::primitives::{LanguageCode, SupportedLanguage};
     use crate::users::generated::{User as ServiceUser, user::Options};
     use crate::users::mock::UserServiceClientMock;
     use super::{most_popular_language, resolve_language_for, UserService, UserServiceClient};
@@ -412,37 +394,38 @@ mod test {
 
     #[test]
     fn most_popular_language_picks_the_mode() {
-        let users = [
-            service_user(1, Some("ru")),
-            service_user(2, Some("ru-RU")),
-            service_user(3, Some("it")),
-            service_user(4, None),          // no preference — ignored
-            service_user(5, Some("xx")),    // not a supported language — ignored
+        let codes = [
+            LanguageCode::new("ru".to_owned()),
+            LanguageCode::new("ru-RU".to_owned()),
+            LanguageCode::new("it".to_owned()),
+            LanguageCode::new("xx".to_owned()),    // not a supported language — ignored
         ];
-        let lang = most_popular_language(users.iter());
+        let lang = most_popular_language(codes.iter());
         assert_eq!(lang, Some(SupportedLanguage::RU));
     }
 
     #[test]
     fn most_popular_language_none_when_nothing_supported() {
-        let users = [service_user(1, None), service_user(2, Some("xx"))];
-        assert_eq!(most_popular_language(users.iter()), None);
+        let codes = [LanguageCode::new("xx".to_owned())];
+        assert_eq!(most_popular_language(codes.iter()), None);
         assert_eq!(most_popular_language([].iter()), None);
     }
 
     #[tokio::test]
-    async fn get_many_returns_only_registered_users() {
+    async fn get_user_languages_returns_only_users_with_a_language() {
         let svc = UserServiceClientMock::new();
         let UserService::Connected(client) = &svc else { panic!("mock must be connected") };
         client.insert(UserId(1), service_user(1, Some("ru")));
         client.insert(UserId(2), service_user(2, Some("it")));
+        client.insert(UserId(3), service_user(3, None)); // registered, but no language code
 
-        let found = client.get_many(&[UserId(1), UserId(2), UserId(3)]).await
-            .expect("get_many must succeed");
+        let found = client.get_user_languages(&[UserId(1), UserId(2), UserId(3), UserId(4)]).await
+            .expect("get_user_languages must succeed");
         assert_eq!(found.len(), 2);
-        assert!(found.contains_key(&UserId(1)));
-        assert!(found.contains_key(&UserId(2)));
+        assert_eq!(found.get(&UserId(1)).map(ToString::to_string), Some("ru".to_owned()));
+        assert_eq!(found.get(&UserId(2)).map(ToString::to_string), Some("it".to_owned()));
         assert!(!found.contains_key(&UserId(3)));
+        assert!(!found.contains_key(&UserId(4)));
     }
 
     fn tg_user(id: u64, language_code: Option<&str>) -> User {
