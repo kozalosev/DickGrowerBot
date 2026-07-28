@@ -122,7 +122,9 @@ pub(crate) async fn shrinks_page_impl(
         .collect::<Vec<_>>()
         .join("\n");
     let header_key = format!("{prefix}.header");
-    let header = t!(&header_key, locale = lang_code);
+    // `days` only matters for the notification header; rust-i18n silently ignores unused args,
+    // so it's safe to pass it unconditionally for the recent header too.
+    let header = t!(&header_key, locale = lang_code, days = config.stale_dicks_shrinking.grace_period_days);
     Ok(ShrinksPage { lines: format!("{header}\n{lines}"), has_more_pages })
 }
 

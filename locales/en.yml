@@ -34,7 +34,7 @@ commands:
     empty: "No one is in the game yet :("
   shrink:
     notification:
-      header: "✂️ <b>Time to trim the neglected!</b> These dicks haven't grown in a week and shrank a bit:"
+      header: "✂️ <b>Time to trim the neglected!</b> These dicks haven't grown in %{days} days and shrank a bit:"
       line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm, chin up!)"
     recent:
       header: "✂️ <b>Who's been shrinking lately:</b>"

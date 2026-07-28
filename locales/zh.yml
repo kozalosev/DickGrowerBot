@@ -34,7 +34,7 @@ commands:
     empty: "还没有人加入游戏 :("
   shrink:
     notification:
-      header: "✂️ <b>该修剪被忽视的了！</b> 这些屌一周没长还缩水了一点："
+      header: "✂️ <b>该修剪被忽视的了！</b> 这些屌 %{days} 天没长还缩水了一点："
       line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> 缩了 <b>%{lost}</b> 厘米（现在 <b>%{length}</b> 厘米，别灰心！）"
     recent:
       header: "✂️ <b>最近都是谁缩水了：</b>"

@@ -34,7 +34,7 @@ commands:
     empty: "Nessuno sta giocando :("
   shrink:
     notification:
-      header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per una settimana e si sono un po' accorciati:"
+      header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per %{days} giorni e si sono un po' accorciati:"
       line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm, testa alta!)"
     recent:
       header: "✂️ <b>Chi si è accorciato di recente:</b>"
