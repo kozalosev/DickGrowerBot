@@ -6,32 +6,68 @@
       {
         "ordinal": 0,
         "name": "battles_total",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_total"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "battles_won",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_won"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "win_streak_max",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "win_streak_max"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "win_streak_current",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "win_streak_current"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "acquired_length",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "acquired_length"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "lost_length",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "lost_length"
+          }
+        }
       }
     ],
     "parameters": {

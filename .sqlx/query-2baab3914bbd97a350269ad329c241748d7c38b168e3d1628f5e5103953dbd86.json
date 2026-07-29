@@ -6,17 +6,35 @@
       {
         "ordinal": 0,
         "name": "internal_id",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "chats",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "chat_id",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "chats",
+            "name": "chat_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "chat_instance",
-        "type_info": "Varchar"
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "chats",
+            "name": "chat_instance"
+          }
+        }
       }
     ],
     "parameters": {

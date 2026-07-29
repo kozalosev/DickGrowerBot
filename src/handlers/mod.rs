@@ -6,6 +6,8 @@ mod dod;
 mod import;
 mod promo;
 mod inline;
+pub mod shrink;
+pub mod language;
 pub mod utils;
 pub mod pvp;
 pub mod perks;
@@ -30,11 +32,21 @@ pub use dod::*;
 pub use import::*;
 pub use inline::*;
 pub use promo::*;
+pub use language::LanguageCommands;
 pub use loan::LoanCommands;
+use crate::config::MessageGroup;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup), so the caller
+/// knows whether (and how soon) to schedule it for deletion — for commands whose reply may be
+/// either a permanent event or an ephemeral status.
+pub(crate) struct TaggedReply {
+    pub text: String,
+    pub group: MessageGroup,
+}
 
 pub enum CallbackResult {
     EditMessage(String, Option<InlineKeyboardMarkup>),
@@ -128,12 +140,30 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: &Message, answer: T) -> JsonRe
 
 #[macro_export]
 macro_rules! reply_html {
-    ($bot:ident, $msg:ident, $answer:expr) => {
+    // `$bot` is an expr (not an ident) so call sites may pass e.g. `bot.clone()`. It is
+    // used exactly once below, so there is no double-evaluation concern.
+    ($bot:expr, $msg:ident, $answer:expr) => {
         anyhow::Context::context(
             reply_html($bot, &$msg, $answer).await,
             format!("failed for {:?}", $msg)
         )?
     };
+}
+
+/// Like [`reply_html!`], but additionally registers the sent message with the
+/// [`SelfDestructionService`](crate::handlers::utils::SelfDestructionService) so it
+/// self-destructs after the delay configured for `$group`. `$lang` (a `&LanguageCode`) is
+/// used to localize the optional deletion warning. Evaluates to the sent `Message`.
+/// `$svc` must be a `SelfDestructionService` in scope.
+#[macro_export]
+macro_rules! reply_html_ephemeral {
+    ($bot:ident, $msg:ident, $answer:expr, $svc:ident, $group:expr, $lang:expr) => {{
+        // Send with a clone (`reply_html` consumes the `Bot`) and keep `$bot` for the
+        // scheduler (a `Bot` is a cheap `Arc` clone).
+        let sent = $crate::reply_html!($bot.clone(), $msg, $answer);
+        $svc.schedule(&$bot, &sent, $group, $lang);
+        sent
+    }};
 }
 
 pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
@@ -145,6 +175,31 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
     Ok(())
 }
 
+/// Answers a paging callback query with the "feature disabled" alert and strips the now-useless
+/// keyboard off the message it was attached to — a stale button can outlive the toggle that
+/// enabled its feature.
+pub(crate) async fn answer_callback_feature_disabled(
+    bot: Bot,
+    q: &CallbackQuery,
+    edit_msg_req_params: utils::callbacks::EditMessageReqParamsKind,
+    lang_code: LanguageCode,
+) -> HandlerResult {
+    let mut answer = bot.answer_callback_query(q.id.clone());
+    answer.show_alert.replace(true);
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
+    answer.await?;
+
+    match edit_msg_req_params {
+        utils::callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
+            bot.edit_message_reply_markup(chat_id, message_id)
+                .await.map(|_| ())?,
+        utils::callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
+            bot.edit_message_reply_markup_inline(inline_message_id)
+                .await.map(|_| ())?
+    };
+    Ok(())
+}
+
 pub mod checks {
     use rust_i18n::t;
     use teloxide::Bot;
@@ -152,8 +207,10 @@ pub mod checks {
     use teloxide::types::{Update, Message};
     use teloxide::utils::command::BotCommands;
     use crate::config::AppConfig;
+    use crate::config::MessageGroup;
     use crate::domain::primitives::LanguageCode;
     use crate::domain::primitives::chat::TelegramChatId;
+    use crate::handlers::utils::SelfDestructionService;
     use crate::repo::Repositories;
     use super::{HandlerResult, reply_html};
 
@@ -168,10 +225,9 @@ pub mod checks {
         !is_group_chat(msg)
     }
 
-    pub async fn handle_not_group_chat(bot: Bot, msg: Message) -> HandlerResult {
-        let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+    pub async fn handle_not_group_chat(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
         let answer = t!("errors.not_group_chat", locale = &lang_code);
-        reply_html(bot, &msg, answer).await?;
+        reply_html!(bot, msg, answer);
         Ok(())
     }
 
@@ -188,10 +244,14 @@ pub mod checks {
         teloxide::dptree::filter(is_group_account).endpoint(handle_group_account)
     }
 
-    async fn handle_group_account(bot: Bot, msg: Message) -> HandlerResult {
-        let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+    async fn handle_group_account(
+        bot: Bot,
+        msg: Message,
+        lang_code: LanguageCode,
+        self_destruction: SelfDestructionService
+    ) -> HandlerResult {
         let answer = t!("errors.group_account", locale = &lang_code);
-        reply_html(bot, &msg, answer).await?;
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
         Ok(())
     }
 

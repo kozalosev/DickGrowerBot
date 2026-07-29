@@ -1,9 +1,11 @@
+use std::time::Duration;
 use reqwest::Url;
 use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
+use crate::config::self_destruction::*;
+use crate::config::shrink::StaleDicksShrinkingConfig;
 use crate::domain::primitives::{Bet, DaysCount, Limit, Ratio};
-use crate::domain::primitives::SupportedLanguage::{EN, RU};
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Default))]
@@ -14,7 +16,9 @@ pub struct AppConfig {
     pub loan_payout_ratio: Ratio,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
     pub pvp_default_bet: Bet,
+    pub stale_dicks_shrinking: StaleDicksShrinkingConfig,
     pub announcements: AnnouncementsConfig,
+    pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
 }
 
@@ -39,9 +43,20 @@ impl AppConfig {
         let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
         let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
-        let announcement_max_shows = get_optional_env_value("ANNOUNCEMENT_MAX_SHOWS");
-        let announcement_en = get_optional_env_value("ANNOUNCEMENT_EN");
-        let announcement_ru = get_optional_env_value("ANNOUNCEMENT_RU");
+        let most_popular_language_enabled = get_env_value_or_default("MOST_POPULAR_LANGUAGE_ENABLED", true);
+        let hide_inactive_zero_length_from_top = get_env_value_or_default("HIDE_INACTIVE_ZERO_LENGTH_FROM_TOP_ENABLED", true);
+        let stale_dicks_shrinking = StaleDicksShrinkingConfig {
+            ratio: get_env_value_or_default("SHRINK_RATIO", Ratio::literal(0.0)),
+            grace_period_days: get_env_value_or_default("SHRINK_GRACE_DAYS", DaysCount::new(7)),
+            ramp_up_days: get_env_value_or_default("SHRINK_RAMP_UP_DAYS", DaysCount::new(7)),
+        };
+        let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
+        let self_destruction = SelfDestructionConfig {
+            notice: get_optional_env_minutes("MSG_SELFDESTRUCT_DELAY_NOTICE"),
+            report: get_optional_env_minutes("MSG_SELFDESTRUCT_DELAY_REPORT"),
+            reading_speed_cpm: get_env_value_or_default("MSG_SELFDESTRUCT_READING_SPEED_CPM", 500),
+            warning: Duration::from_secs(get_optional_env_value("MSG_SELFDESTRUCT_WARNING_SECONDS")),
+        };
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -53,23 +68,18 @@ impl AppConfig {
                     callback_locks,
                     show_stats,
                     show_stats_notice,
-                }
+                },
+                most_popular_language_enabled,
+                hide_inactive_zero_length_from_top,
             },
             top_limit,
             inactivity_days,
             loan_payout_ratio,
             dod_rich_exclusion_ratio,
             pvp_default_bet,
-            announcements: AnnouncementsConfig {
-                max_shows: announcement_max_shows,
-                announcements: [
-                    (EN, announcement_en),
-                    (RU, announcement_ru),
-                ].map(|(lc, text)| (lc, Announcement::new(text)))
-                    .into_iter()
-                    .filter_map(|(lc, mb_ann)| mb_ann.map(|ann| (lc, ann)))
-                    .collect()
-            },
+            stale_dicks_shrinking,
+            announcements: AnnouncementsConfig::load(&announcements_file),
+            self_destruction,
             command_toggles: Default::default(),
         }
     }

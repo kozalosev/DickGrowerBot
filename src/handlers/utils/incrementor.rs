@@ -5,9 +5,8 @@ use async_trait::async_trait;
 use derive_more::Display;
 use downcast_rs::{Downcast, impl_downcast};
 use num_traits::PrimInt;
-use rand::distributions::uniform::SampleUniform;
-use rand::Rng;
-use rand::rngs::OsRng;
+use rand::distr::uniform::SampleUniform;
+use rand::RngExt;
 use rust_i18n::t;
 use crate::{config, repo};
 use crate::domain::primitives::chat::ChatIdKind;
@@ -135,7 +134,12 @@ impl Incrementor {
             .collect();
     }
 
-    pub async fn growth_increment(&self, user_id: UserId, chat_id: ChatIdKind, days_since_registration: DaysCount) -> Increment {
+    pub async fn growth_increment(
+        &self,
+        user_id: UserId,
+        chat_id: ChatIdKind,
+        days_since_registration: DaysCount,
+    ) -> Increment {
         let dick_id = DickId(user_id, chat_id);
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
             self.config.grow_shrink_ratio
@@ -148,7 +152,7 @@ impl Incrementor {
 
     pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind) -> Increment {
         let dick_id = DickId(user_id, chat_id);
-        let base_incr = OsRng.gen_range(self.config.dod_bonus_range.clone());
+        let base_incr = rand::rng().random_range(self.config.dod_bonus_range.clone());
         self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into())).await
     }
 
@@ -227,20 +231,20 @@ where
         100.. => 100,
         x => x
     };
-    let mut rng = OsRng;
+    let mut rng = rand::rng();
     let zero = <T as From<i8>>::from(0);
     if range.start() > &zero {
-        return rng.gen_range(range)
+        return rng.random_range(range)
     }
-    let positive = rng.gen_ratio(sign_ratio_percent, 100);
+    let positive = rng.random_ratio(sign_ratio_percent, 100);
     if positive {
         let end = *range.end();
         let one = <T as From<i8>>::from(1);
-        rng.gen_range(one..=end)
+        rng.random_range(one..=end)
     } else {
         let start = *range.start();
         let minus_one = <T as From<i8>>::from(-1);
-        rng.gen_range(start..=minus_one)
+        rng.random_range(start..=minus_one)
     }
 }
 

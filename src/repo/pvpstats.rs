@@ -37,7 +37,13 @@ impl From<UserStatsEntity> for UserStats {
 }
 
 repository!(BattleStatsRepo, with_(chats)_(Chats),
-    pub async fn send_battle_result(&self, chat_id_kind: &ChatIdKind, winner_id: UserId, loser_id: UserId, bet: Bet) -> anyhow::Result<BattleStats> {
+    pub async fn send_battle_result(
+        &self,
+        chat_id_kind: &ChatIdKind,
+        winner_id: UserId,
+        loser_id: UserId,
+        bet: Bet,
+    ) -> anyhow::Result<BattleStats> {
         let chat_id = self.chats.get_internal_id(chat_id_kind).await?;
         let mut tx = self.pool.begin().await?;
         let winner = update_winner(&mut tx, chat_id, winner_id, bet).await?;
@@ -58,7 +64,12 @@ repository!(BattleStatsRepo, with_(chats)_(Chats),
     }
 );
 
-async fn update_winner(tx: &mut Transaction<'_, Postgres>, chat_id: InternalChatId, uid: UserId, bet: Bet) -> anyhow::Result<WinnerStats> {
+async fn update_winner(
+    tx: &mut Transaction<'_, Postgres>,
+    chat_id: InternalChatId,
+    uid: UserId,
+    bet: Bet,
+) -> anyhow::Result<WinnerStats> {
     sqlx::query_as!(UserStatsEntity, "INSERT INTO Battle_Stats(uid, chat_id, battles_total, battles_won, win_streak_current, acquired_length) VALUES ($1, $2, 1, 1, 1, $3) \
                 ON CONFLICT (uid, chat_id) DO UPDATE SET \
                     battles_total = Battle_Stats.battles_total + 1, \
@@ -73,7 +84,12 @@ async fn update_winner(tx: &mut Transaction<'_, Postgres>, chat_id: InternalChat
         .context(format!("couldn't update the stats of the winner: {chat_id}, {uid}, {bet}"))
 }
 
-async fn update_loser(tx: &mut Transaction<'_, Postgres>, chat_id: InternalChatId, uid: UserId, bet: Bet) -> anyhow::Result<LoserStats> {
+async fn update_loser(
+    tx: &mut Transaction<'_, Postgres>,
+    chat_id: InternalChatId,
+    uid: UserId,
+    bet: Bet,
+) -> anyhow::Result<LoserStats> {
     let prev_win_streak = sqlx::query_scalar!("SELECT win_streak_current FROM Battle_Stats WHERE chat_id = $1 AND uid = $2", chat_id as InternalChatId, uid as UserId)
         .fetch_optional(&mut **tx)
         .await

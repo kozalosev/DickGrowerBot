@@ -16,7 +16,7 @@ use crate::config::AppConfig;
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
-use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils, pvp};
+use crate::handlers::{dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -30,6 +30,7 @@ enum InlineCommand {
     DickOfDay,
     Loan,
     Stats,
+    Shrinks,
 }
 
 struct InlineResult {
@@ -56,42 +57,59 @@ impl InlineResult {
 }
 
 impl InlineCommand {
-    async fn execute(&self, repos: &Repositories, config: AppConfig, incr: Incrementor, from_refs: FromRefs<'_>) -> anyhow::Result<InlineResult> {
+    async fn execute(
+        &self,
+        repos: &Repositories,
+        config: AppConfig,
+        incr: Incrementor,
+        from_refs: FromRefs<'_>,
+        lang_code: LanguageCode,
+    ) -> anyhow::Result<InlineResult> {
         match self {
             InlineCommand::Grow => {
                 metrics::CMD_GROW_COUNTER.inline.inc();
-                dick::grow_impl(repos, incr, from_refs)
+                dick::grow_impl(repos, incr, from_refs, lang_code)
                     .await
-                    .map(InlineResult::text)
+                    .map(|reply| InlineResult::text(reply.text))
             },
             InlineCommand::Top => {
                 metrics::CMD_TOP_COUNTER.inline.inc();
-                dick::top_impl(repos, &config, from_refs, Page::first())
+                dick::top_impl(repos, &config, from_refs, lang_code, Page::first())
                     .await
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
                         res.keyboard = config.features.top_unlimited
-                            .then_some(build_pagination_keyboard(Page::first(), top.has_more_pages));
+                            .then_some(dick::build_pagination_keyboard(Page::first(), top.has_more_pages));
                         res
                     })
             },
             InlineCommand::DickOfDay => {
                 metrics::CMD_DOD_COUNTER.inline.inc();
-                dod::dick_of_day_impl(config, repos, incr, from_refs)
+                dod::dick_of_day_impl(config, repos, incr, from_refs, lang_code)
                     .await
-                    .map(InlineResult::text)
+                    .map(|reply| InlineResult::text(reply.text))
             },
             InlineCommand::Loan => {
                 metrics::CMD_LOAN_COUNTER.invoked.inline.inc();
-                loan::loan_impl(repos, from_refs, config)
+                loan::loan_impl(repos, from_refs, config, lang_code)
                     .await
                     .map(InlineResult::from)
             },
             InlineCommand::Stats => {
                 metrics::CMD_STATS.inline.inc();
-                stats::chat_stats_impl(repos, from_refs, config.features.pvp)
+                stats::chat_stats_impl(repos, from_refs, config.features.pvp, &lang_code)
                     .await
                     .map(InlineResult::text)
+            },
+            InlineCommand::Shrinks => {
+                metrics::CMD_SHRINKS.inline.inc();
+                shrink::recent_shrinks_impl(repos, from_refs, &config, &lang_code)
+                    .await
+                    .map(|(page, keyboard)| {
+                        let mut res = InlineResult::text(page.lines);
+                        res.keyboard = keyboard;
+                        res
+                    })
             },
         }
     }
@@ -129,16 +147,23 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
     }
 ]));
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, app_config: AppConfig) -> HandlerResult {
+pub async fn inline_handler(
+    bot: Bot,
+    query: InlineQuery,
+    repos: Repositories,
+    app_config: AppConfig,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
     repos.users.create_or_update(DomainUserId::from(&query.from), &name).await?;
 
     let uid = query.from.id.0;
-    let lang_code = LanguageCode::from_user(&query.from);
     let btn_label = t!("inline.results.button", locale = &lang_code);
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
+        // The `shrinks` command only makes sense when the daily shrink feature is on.
+        .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.stale_dicks_shrinking.enabled())
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {
@@ -160,7 +185,7 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
         results.push(builder(&query, &lang_code, &app_config, &name))
     }
 
-    let mut answer = bot.answer_inline_query(&query.id, results.clone())
+    let mut answer = bot.answer_inline_query(query.id.clone(), results.clone())
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
@@ -169,9 +194,14 @@ pub async fn inline_handler(bot: Bot, query: InlineQuery, repos: Repositories, a
     Ok(())
 }
 
-pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
-                                   repos: Repositories, config: AppConfig,
-                                   incr: Incrementor) -> HandlerResult {
+pub async fn inline_chosen_handler(
+    bot: Bot,
+    result: ChosenInlineResult,
+    repos: Repositories,
+    config: AppConfig,
+    incr: Incrementor,
+    lang_code: LanguageCode,
+) -> HandlerResult {
     metrics::INLINE_COUNTER.finished();
 
     if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
@@ -192,7 +222,7 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
                 .context(format!("couldn't parse inline command '{}'", result.result_id))?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
@@ -208,11 +238,15 @@ pub async fn inline_chosen_handler(bot: Bot, result: ChosenInlineResult,
     Ok(())
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery,
-                              repos: Repositories, config: AppConfig,
-                              incr: Incrementor) -> HandlerResult {
-    let lang_code = LanguageCode::from_user(&query.from);
-    let mut answer = bot.answer_callback_query(&query.id);
+pub async fn callback_handler(
+    bot: Bot,
+    query: CallbackQuery,
+    repos: Repositories,
+    config: AppConfig,
+    incr: Incrementor,
+    lang_code: LanguageCode,
+) -> HandlerResult {
+    let mut answer = bot.answer_callback_query(query.id.clone());
 
     if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {
         let chat_id = config.features.chats_merging
@@ -234,7 +268,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery,
         let parse_res = parse_callback_data(data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, incr, from_refs).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
             let mut edit = bot.edit_message_text_inline(inline_msg_id, &inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);

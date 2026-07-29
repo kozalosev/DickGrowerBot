@@ -1,10 +1,19 @@
 commands:
-  help:
-    description: "有什麼問題嗎"
-  privacy:
-    description: "儲存資料說明詳見隱私權政策，"
+  language:
+    description: "變更介面語言"
+    prompt: "請選擇你的語言："
+    success: "完成！你的語言偏好已儲存，並將套用於所有 SadBot.Dev 的機器人。"
+    not_registered: "你尚未在共用帳號服務中註冊。請先透過 @LocPlaceBot 註冊 —— 然後你的語言就會在所有 SadBot.Dev 的機器人間同步。"
+    errors:
+      unavailable: "此功能目前無法使用。"
+      unsupported: "抱歉，暫不支援此語言。請嘗試：🇬🇧 en、🇷🇺 ru、🇮🇹 it、🇮🇷 fa、🇨🇳 zh。"
+      admins_only: "只有群組管理員才能變更群組語言。"
+    chat:
+      prompt: "請為整個群組選擇語言："
+      success: "完成！現在我會用這種語言回覆本群所有人。"
+      reset: "完成！群組語言已清除 —— 我會重新依每個人自己的語言回覆。"
+      auto_button: "🌐 自動（各自的語言）"
   grow:
-    description: "讓你的老二變大！"
     result: "你的老二已經<b>%{incr} 公分</b> %{event}，現在長度為<b>%{length} 公分</b>。"
     direction:
       grown: "增長了"
@@ -12,20 +21,25 @@ commands:
     position: "你在排行榜上的位置是<b>%{pos}</b>。"
     tomorrow: "你今天已經玩過你的老二了。"
   top:
-    description: "取得聊天中最大的老二"
     title: "最大的老二排行榜："
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> 公分"
     ending: "<i>[+] 表示一個成長者今天還沒有增長他的老二。</i>"
     ending_inactive: "<i>[~] 表示一個成長者超過 %{days} 天沒有增長他的老二了。</i>"
     empty: "還沒有人加入遊戲 :("
+  shrink:
+    notification:
+      header: "✂️ <b>該修剪被忽視的了！</b> 這些屌 %{days} 天沒長還縮水了一點："
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> 縮了 <b>%{lost}</b> 公分（現在 <b>%{length}</b> 公分，別灰心！）"
+    recent:
+      header: "✂️ <b>最近都是誰縮水了：</b>"
+      line: "— <b>%{name}</b> 縮了 <b>%{lost}</b> 公分"
+    empty: "安靜……最近沒人縮水。看來大家都跟上節奏了 💪"
   dod:
-    description: "選出今日老二"
     result: "今日老二是<b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>！\n\n他的老二增長了<b>%{growth} 公分</b>，現在長度為<b>%{length}</b> 公分。"
     position: "他在排行榜上的位置是<b>%{pos}</b>。"
     already_chosen: "今日老二已經被選出來了！是<b>%{name}</b>。"
     no_candidates: "沒有候選人可以選舉。在這個聊天中還沒有人加入遊戲 😢"
   pvp:
-    description: "PK！"
     results:
       start: "<b>%{name}</b> 向聊天發起了一個<b>%{bet} 公分</b>的挑戰！"
       finish: "勝利者是<b>%{winner_name}</b>！他的老二現在長度為<b>%{winner_length} 公分</b>。失敗者的老二長度為<b>%{loser_length}</b>。\n賭注是<b>%{bet} 公分</b>。"
@@ -45,13 +59,11 @@ commands:
       same_person: "你不能和自己PK！"
       battle_already_in_progress: "已經在對戰了！結果稍後就會更新……"
   stats:
-    description: "統計"
     length: "長度: <b>%{length}</b>\n在排行榜上的位置: <b>%{pos}</b>"
     pvp: "勝率: <b>%{win_rate}</b>。\n戰鬥次數: <b>%{battles}</b>。\n勝利次數: <b>%{wins}</b>。\n最大連勝: <b>%{win_streak}</b>。\n獲得長度: <b>%{acquired} 公分</b>。\n失去長度: <b>%{lost} 公分</b>。"
     notice: "統計收集從2024年7月2日開始。"
     personal: "<i>你的個人統計:</i>\n— 你參與的遊戲聊天數量: <b>%{chats}</b>。\n— 最大長度: <b>%{max_length}</b>。\n— 所有聊天中的老二總長度: <b>%{total_length}</b>。"
   loan:
-    description: "負數？申請貸款！"
     debt: "還需償還 <b>%{debt} 公分</b>"
     confirmation:
       text: "你的長度將重設為零，但每次增長將減少 <b>%{payout_percentage}</b>，直到償還所有 <b>%{debt} 公分</b>。"
@@ -65,7 +77,6 @@ commands:
     errors:
       positive_length: "抱歉，兄弟，這個提案只針對那些有非常非常深渴望的女孩。我不能讓你的大兄弟變得更長 :("
   import:
-    description: "從其他機器人導入老二"
     result:
       titles:
         imported: "以下使用者已被導入："
@@ -83,7 +94,6 @@ commands:
         template: "無法解析此訊息 🤔\n以下行無效：\n%{invalid_lines}"
         line: "➖ <b>%{line}</b>"
   promo:
-    description: "啟用神秘代碼"
     request: "輸入神秘代碼："
     success:
       template: "你已成功啟用此神秘代碼！%{ending}"
@@ -106,6 +116,7 @@ inline:
       pvp: "用 %{bet} 公分的賭注挑戰其他人！"
       stats: "勝利統計"
       loan: "負數？申請貸款！"
+      shrinks: "查看最近的縮水"
   callback:
     errors:
       another_user: "此訊息由其他人發送。"
@@ -129,3 +140,5 @@ errors:
   not_group_chat: "此機器人僅在群聊中執行任務！"
   group_account: "不能以群組或頻道的身份遊玩——請關閉匿名模式後重試！"
   feature_disabled: "此功能當前暫時禁用。"
+self_destruction:
+  warning: "🧹 <i>為保持群聊整潔，此訊息將在 <b>%{seconds}</b> 秒後刪除……</i>"

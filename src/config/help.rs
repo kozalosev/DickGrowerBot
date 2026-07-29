@@ -5,7 +5,11 @@ use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
 
-pub fn build_context_for_help_messages(me: Me, incr: &Incrementor, competitor_bots: &[&str]) -> anyhow::Result<help::Context> {
+pub fn build_context_for_help_messages(
+    me: Me,
+    incr: &Incrementor,
+    competitor_bots: &[&str],
+) -> anyhow::Result<help::Context> {
     let other_bots = competitor_bots
         .iter()
         .map(|username| Username::new(username.to_string()).value_with_at_sign())

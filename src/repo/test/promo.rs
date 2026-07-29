@@ -1,3 +1,5 @@
+use chrono::Utc;
+use sqlx::{Pool, Postgres};
 use crate::domain::primitives::Length;
 use crate::repo;
 use crate::repo::PromoCodeParams;
@@ -27,7 +29,23 @@ async fn activate() {
     assert_eq!(res.bonus_length, i64::from(PROMO_BONUS));
 
     check_dick(&db, Length::new(PROMO_BONUS.into())).await;
+    check_promo_code_activations(&db).await;
 
     let res = promo.activate(USER_ID, PROMO_CODE).await;
     assert!(res.is_err());
+}
+
+async fn check_promo_code_activations(db: &Pool<Postgres>) {
+    // activated_at is nullable in the schema; the insert always sets it, so force non-null.
+    let row = sqlx::query!(
+            r#"SELECT uid, code, affected_chats, activated_at as "activated_at!"
+                FROM Promo_Code_Activations WHERE uid = $1 AND code = $2"#,
+            i64::from(USER_ID), PROMO_CODE)
+        .fetch_one(db)
+        .await
+        .expect("couldn't fetch the promo code activation");
+    assert_eq!(row.uid, USER_ID.value());
+    assert_eq!(row.code, PROMO_CODE);
+    assert_eq!(row.affected_chats, 1);
+    assert_eq!(row.activated_at.date_naive(), Utc::now().date_naive());
 }

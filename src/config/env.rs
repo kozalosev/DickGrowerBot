@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt::Display;
 use std::str::FromStr;
+use std::time::Duration;
 use anyhow::anyhow;
 use crate::domain::primitives::Ratio;
 
@@ -38,6 +39,13 @@ where
     <T as FromStr>::Err: Error + Send + Sync + 'static
 {
     get_env_value_or_default(key, T::default())
+}
+
+/// Reads an optional environment variable holding a whole number of minutes and returns
+/// it as a [`Duration`]. A missing or invalid value yields a zero duration.
+pub(super) fn get_optional_env_minutes(key: &str) -> Duration {
+    let minutes: u64 = get_optional_env_value(key);
+    Duration::from_secs(minutes.saturating_mul(60))
 }
 
 pub(super) fn get_optional_env_ratio(key: &str) -> Option<Ratio> {

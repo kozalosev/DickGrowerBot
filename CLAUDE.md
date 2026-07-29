@@ -22,6 +22,10 @@ cargo test test_name_substring
 # Run tests for one workspace crate only
 cargo test -p domain_types
 
+# Apply pending migrations to DATABASE_URL (required before `cargo build`/`cargo check`
+# if the DB is behind — see note below)
+cargo sqlx migrate run
+
 # Regenerate sqlx offline query cache
 cargo sqlx prepare -- --tests
 
@@ -36,7 +40,40 @@ DATABASE_URL=postgres://...
 TELOXIDE_TOKEN=...
 ```
 
-Migrations run automatically on startup via `sqlx::migrate!`.
+### Optional: user-service integration
+
+The bot can integrate with the [user-service](https://github.com/Kozalo-Blog/user-service)
+microservice (gRPC) to read/update a user's preferred language across all of Kozalo's bots:
+
+```
+GRPC_ADDR_USER_SERVICE=host:port   # unset => integration disabled, personal /language hidden in PMs
+USER_CACHE_TIME_SECS=360           # optional cache TTL for fetched users
+```
+
+`/language` is overloaded: in a private chat it changes the caller's personal language (via
+user-service, above); in a group it sets a chat-wide language (admins only) that applies to
+everyone and overrides each user's own preference. The chat-wide setting is stored in our own
+`Chats.settings` (jsonb) column, so it works even when user-service is disabled:
+
+```
+CHAT_LANGUAGE_CACHE_TIME_SECS=3600 # optional TTL for the per-chat language cache (we own the data)
+```
+
+The proto contract is vendored as the `user-service-proto` git submodule and compiled by
+`build.rs` (via `tonic-prost-build`), so **`protoc` must be installed** and the submodule
+checked out to build:
+
+```bash
+git submodule update --init
+```
+
+Migrations run automatically on startup via `sqlx::migrate!` — but that's only at
+runtime. `sqlx::query!`/`query_as!` macros type-check against the live schema at
+`DATABASE_URL` when compiling (no `.sqlx/` cache, or it's stale), so **`cargo build`
+and `cargo check` will fail with confusing type-mismatch errors if your local DB
+hasn't had the latest migrations applied yet.** Run `cargo sqlx migrate run` first
+whenever a build fails right after pulling migration changes. Requires `sqlx-cli`
+(`cargo install sqlx-cli`).
 
 ## Architecture
 
@@ -57,7 +94,7 @@ handlers/    — teloxide update handlers and business logic
 repo/        — sqlx repository impls; DB access only
 help/        — help-message rendering (tinytemplate)
 locales/     — rust-i18n translation files (YAML)
-migrations/  — 21 SQL migration files, auto-applied on startup
+migrations/  — SQL migration files, auto-applied on startup (see DB Migrations below)
 ```
 
 ### Key frameworks
@@ -87,6 +124,94 @@ Repositories are grouped in a `Repositories` struct and injected into handlers v
 
 Runtime features are gated by environment variables parsed in `config/`. Check `config/` for the list of flags.
 
+## Code Style
+
+- **Prefer domain-type wrappers over raw primitives for long-living, meaningful values.** Config
+  fields, struct fields, and public function parameters/returns that carry a domain concept (a count
+  of days, a length, a ratio, an id, …) should use the newtype from `domain_types` / the
+  `#[domain_type]` macro (e.g. `DaysCount`, `Length`, `Ratio`, `UserId`) rather than a bare `i32` /
+  `u32` / `String`. This keeps units and intent in the type system and stays consistent with the
+  repo layer, which already speaks domain types. Convert to the primitive only at the true boundary
+  (e.g. `value() as i32` right before an sqlx bind). If a suitable wrapper doesn't exist yet, add one
+  (see `domain_types/src/traits.rs` and `domain_types_macro/src/lib.rs`) instead of falling back to a
+  primitive. Short-lived locals and loop indices don't need wrapping.
+
+  ```rust
+  // ❌ raw primitives for domain concepts on a long-living config struct
+  pub shrink_grace_days: i32,
+  pub shrink_events_days: u32,
+
+  // ✅ domain-type wrappers
+  pub shrink_grace_days: DaysCount,
+  pub shrink_events_days: DaysCount,
+  ```
+
+- **ALWAYS** break a function signature onto one parameter per line when the single-line signature
+  reaches **120+ characters**. Put the opening `(` at the end of the `fn` line, each parameter on
+  its own line with a trailing comma, and the closing `)` plus return type on their own line
+  (rustfmt block style); keep any `where` clause after the `)`:
+
+  ```rust
+  // ❌ too long on one line
+  pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
+
+  // ✅ one parameter per line
+  pub async fn set_chat_language(
+      &self,
+      chat_id: &ChatIdPartiality,
+      lang: Option<SupportedLanguage>,
+  ) -> anyhow::Result<()> {
+  ```
+
+  Signatures under 120 characters may stay on a single line.
+
+- **Avoid long, complex one-line expressions.** Break a method/`await` chain across lines at the
+  dots, and don't inline a call inside an assertion: assign its result to a variable first, then
+  assert on the variable. A trailing `.await.expect(...)` may stay together on one continuation line.
+
+  ```rust
+  // ❌ long chain inlined in the assertion
+  assert_eq!(chats.get_chat_language(&kind).await.expect("couldn't read the language"), None);
+
+  // ✅ split by dots, bind, then assert
+  let lang = chats.get_chat_language(&kind)
+      .await.expect("couldn't read the language");
+  assert_eq!(lang, None);
+  ```
+
+- **Prefer combinators over `match` on `Result`/`Option`** when there are only two outcomes and
+  you don't need `return`, extra conditions, or other special control flow. Use `map` /
+  `map_err` / `and_then` / `unwrap_or_default` for the values and `inspect` / `inspect_err` for
+  side effects (like logging) instead of spelling out `Ok`/`Err` (or `Some`/`None`) arms.
+
+  ```rust
+  // ❌ two-arm match just to log and fall back
+  let file = match serde_saphyr::from_str(&content) {
+      Ok(file) => file,
+      Err(e) => {
+          log::warn!("couldn't parse the file: {e}");
+          Default::default()
+      }
+  };
+
+  // ✅ inspect_err for the log, unwrap_or_default for the fallback
+  let file = serde_saphyr::from_str(&content)
+      .inspect_err(|e| log::warn!("couldn't parse the file: {e}"))
+      .unwrap_or_default();
+  ```
+
+  A `match` is still the right tool when a branch needs `return`/`continue`, guards
+  (`Err(e) if …`), or more than two outcomes.
+
 ## DB Migrations
 
-Migration files live in `migrations/` (21 files, numbered sequentially). They are applied automatically at startup — no manual step needed in development.
+Migration files live in `migrations/`, numbered sequentially. They are applied
+automatically at *startup* (`sqlx::migrate!`) — no manual step needed to run the bot.
+
+However, `cargo build`/`cargo check` compile-time-check queries against the live
+`DATABASE_URL` schema (unless relying on the offline `.sqlx/` cache), so after adding
+or pulling a new migration, apply it manually before building:
+
+```bash
+cargo sqlx migrate run
+```

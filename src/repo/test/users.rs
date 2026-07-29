@@ -1,10 +1,12 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::objects::User;
-use crate::domain::primitives::{LengthChange, Ratio, UserId};
+use crate::domain::primitives::{DaysCount, LengthChange, Ratio, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
 use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID, USER_ID};
 use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
+
+const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
 #[tokio::test]
 async fn create_or_update() {
@@ -94,20 +96,20 @@ macro_rules! base_checks {
 #[tokio::test]
 async fn get_random_active_member() {
     let (_container, db) = start_postgres().await;
-    base_checks!(db, get_random_active_member);
+    base_checks!(db, get_random_active_member, INACTIVITY_DAYS);
 }
 
 #[tokio::test]
 async fn get_random_active_poor_member() {
     let (_container, db) = start_postgres().await;
     let ratio = Ratio::new(0.9).unwrap();
-    base_checks!(db, get_random_active_poor_member, ratio);
+    base_checks!(db, get_random_active_poor_member, ratio, INACTIVITY_DAYS);
 
     // create middle-class and rich users and ensure they will never be selected as a winner
     let (users, chat_id) = prepare_for_additional_tests(&db).await;
 
     for attempt in 1..=10 {
-        let user = users.get_random_active_poor_member(&chat_id.kind(), ratio)
+        let user = users.get_random_active_poor_member(&chat_id.kind(), ratio, INACTIVITY_DAYS)
             .await
             .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
             .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));
@@ -118,7 +120,7 @@ async fn get_random_active_poor_member() {
 #[tokio::test]
 async fn get_random_active_member_with_poor_in_priority() {
     let (_container, db) = start_postgres().await;
-    base_checks!(db, get_random_active_member_with_poor_in_priority);
+    base_checks!(db, get_random_active_member_with_poor_in_priority, INACTIVITY_DAYS);
 
     // Create members with well-separated lengths (a negative one included) and check that the
     // poorer a member is, the more often they are chosen — without ever collapsing the selection
@@ -133,7 +135,7 @@ async fn get_random_active_member_with_poor_in_priority() {
     const ATTEMPTS: usize = 1000;
     let mut results = Vec::with_capacity(ATTEMPTS);
     for attempt in 1..=ATTEMPTS {
-        let user = users.get_random_active_member_with_poor_in_priority(&chat_id.kind())
+        let user = users.get_random_active_member_with_poor_in_priority(&chat_id.kind(), INACTIVITY_DAYS)
             .await
             .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
             .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));

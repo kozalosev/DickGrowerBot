@@ -6,7 +6,13 @@
       {
         "ordinal": 0,
         "name": "win_streak_current",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "win_streak_current"
+          }
+        }
       }
     ],
     "parameters": {

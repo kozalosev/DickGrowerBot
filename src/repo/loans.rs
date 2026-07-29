@@ -94,7 +94,11 @@ impl Loans {
     }
 }
 
-async fn fetch_length_locked(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_internal_id: InternalChatId) -> anyhow::Result<Option<i64>> {
+async fn fetch_length_locked(
+    tx: &mut Transaction<'_, Postgres>,
+    uid: UserId,
+    chat_internal_id: InternalChatId,
+) -> anyhow::Result<Option<i64>> {
     sqlx::query_scalar!("SELECT length FROM Dicks WHERE chat_id = $1 AND uid = $2 FOR UPDATE",
             chat_internal_id as InternalChatId, uid as UserId)
         .fetch_optional(&mut **tx)
@@ -102,7 +106,11 @@ async fn fetch_length_locked(tx: &mut Transaction<'_, Postgres>, uid: UserId, ch
         .context(format!("couldn't fetch and lock the length for internal {chat_internal_id} and {uid}"))
 }
 
-async fn get_active_loan(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_internal_id: InternalChatId) -> anyhow::Result<Option<LoanEntity>> {
+async fn get_active_loan(
+    tx: &mut Transaction<'_, Postgres>,
+    uid: UserId,
+    chat_internal_id: InternalChatId,
+) -> anyhow::Result<Option<LoanEntity>> {
     let maybe_loan = sqlx::query_as!(LoanEntity,
             r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio FROM loans
                     WHERE uid = $1 AND chat_id = $2
@@ -114,7 +122,13 @@ async fn get_active_loan(tx: &mut Transaction<'_, Postgres>, uid: UserId, chat_i
     Ok(maybe_loan)
 }
 
-async fn create_loan(tx: &mut Transaction<'_, Postgres>, chat_internal_id: InternalChatId, uid: UserId, value: Debt, payout_ratio: Ratio) -> anyhow::Result<()> {
+async fn create_loan(
+    tx: &mut Transaction<'_, Postgres>,
+    chat_internal_id: InternalChatId,
+    uid: UserId,
+    value: Debt,
+    payout_ratio: Ratio,
+) -> anyhow::Result<()> {
     sqlx::query!("INSERT INTO Loans (chat_id, uid, debt, payout_ratio) VALUES ($1, $2, $3, $4)",
                 chat_internal_id as InternalChatId, uid as UserId, value as Debt, payout_ratio.value() as f32)
         .execute(&mut **tx)
@@ -123,7 +137,12 @@ async fn create_loan(tx: &mut Transaction<'_, Postgres>, chat_internal_id: Inter
         .context(format!("couldn't create a loan for {chat_internal_id} and {uid} with value of {value}"))?
 }
 
-async fn refinance_loan(tx: &mut Transaction<'_, Postgres>, id: LoanId, value: Debt, payout_ratio: Ratio) -> anyhow::Result<()> {
+async fn refinance_loan(
+    tx: &mut Transaction<'_, Postgres>,
+    id: LoanId,
+    value: Debt,
+    payout_ratio: Ratio,
+) -> anyhow::Result<()> {
     sqlx::query!("UPDATE Loans l SET debt = l.debt + $2, payout_ratio = $3 WHERE id = $1",
                 id as LoanId, value as Debt, payout_ratio.value() as f32)
         .execute(&mut **tx)

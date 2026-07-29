@@ -6,17 +6,35 @@
       {
         "ordinal": 0,
         "name": "chat_id: InternalChatId",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "announcements",
+            "name": "chat_id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "hash",
-        "type_info": "Bytea"
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "announcements",
+            "name": "hash"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "times_shown: Counter",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "announcements",
+            "name": "times_shown"
+          }
+        }
       }
     ],
     "parameters": {
@@ -28,7 +46,10 @@
             "kind": {
               "Enum": [
                 "en",
-                "ru"
+                "ru",
+                "it",
+                "fa",
+                "zh"
               ]
             }
           }

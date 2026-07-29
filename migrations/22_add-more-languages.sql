@@ -1,0 +1,3 @@
+ALTER TYPE language_code ADD VALUE IF NOT EXISTS 'it';
+ALTER TYPE language_code ADD VALUE IF NOT EXISTS 'fa';
+ALTER TYPE language_code ADD VALUE IF NOT EXISTS 'zh';

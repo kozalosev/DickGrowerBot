@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH victims AS (\n                    SELECT d.uid, d.chat_id,\n                           LEAST(d.length, GREATEST(1, CEIL(d.length * $1::double precision * LEAST(1.0,\n                               (EXTRACT(DAY FROM (current_timestamp - d.updated_at))::int - $2::bigint::int + 1)::double precision\n                                   / GREATEST($3::bigint::int, 1)\n                           ))::bigint)) AS loss\n                    FROM Dicks d\n                    WHERE d.length > 0\n                      AND d.updated_at <= current_timestamp - make_interval(days => $2::bigint::int)\n                ),\n                updated AS (\n                    UPDATE Dicks d SET length = d.length - v.loss, bonus_attempts = d.bonus_attempts + 1\n                    FROM victims v WHERE d.uid = v.uid AND d.chat_id = v.chat_id\n                    RETURNING d.uid, d.chat_id, v.loss AS loss, d.length AS new_length\n                ),\n                logged AS (\n                    INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length)\n                    SELECT chat_id, uid, loss FROM updated\n                )\n                SELECT u.uid AS \"uid: UserId\", usr.name AS \"owner_name: Username\",\n                       u.loss AS \"lost_length!: Length\", u.new_length AS \"new_length!: Length\",\n                       c.chat_id AS \"messageable_chat_id: TelegramChatId\"\n                FROM updated u\n                JOIN Users usr USING (uid)\n                JOIN Chats c ON c.id = u.chat_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid: UserId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "uid"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_name: Username",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lost_length!: Length",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "new_length!: Length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "length"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "messageable_chat_id: TelegramChatId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "chats",
+            "name": "chat_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      true
+    ]
+  },
+  "hash": "11669b3c820fc5df371deb4f2d6481d74c495264541d04d8ffd01b35cad48f8d"
+}

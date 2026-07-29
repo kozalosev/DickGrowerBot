@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Promo_Code_Activations (uid, code, affected_chats, activated_at) VALUES ($1, $2, $3, current_timestamp)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0902ad48844dd7046abbbde54d24f5e1d123850702a3c85eae40b2ac66c94de2"
+}

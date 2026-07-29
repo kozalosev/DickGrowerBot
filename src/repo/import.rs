@@ -24,7 +24,11 @@ repository!(Import,
         Ok(())
     }
 ,
-    async fn insert_into_imports_table(tx: &mut Transaction<'_, Postgres>, chat_id: i64, users: &[ExternalUser]) -> anyhow::Result<Vec<UserId>> {
+    async fn insert_into_imports_table(
+        tx: &mut Transaction<'_, Postgres>,
+        chat_id: i64,
+        users: &[ExternalUser],
+    ) -> anyhow::Result<Vec<UserId>> {
         let (uids, lengths): (Vec<UserId>, Vec<Length>) = users.iter()
             .map(|user| (user.uid, user.length))
             .unzip();

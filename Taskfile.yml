@@ -1,0 +1,68 @@
+# https://taskfile.dev — cross-platform task runner (works on Windows via its built-in shell).
+# Install: https://taskfile.dev/installation/ , then run `task <name>` (e.g. `task run`).
+#
+# Note on Compose files: a plain `docker compose` command auto-merges
+# docker-compose.override.yml on top of docker-compose.yml. The override forwards the
+# containers' ports to localhost so a locally-run bot binary can reach them — that's why the
+# `infra*` and `run` tasks (which run the bot on the host) don't reference the override
+# explicitly. The `up`/`down` tasks run the whole stack IN Docker, where the bot reaches
+# services over the Compose network, so they pass `-f docker-compose.yml` to skip that
+# dev-only port forwarding.
+#
+# Because the in-Docker bot uses the Compose network (not localhost), `task up` needs a
+# Docker-oriented .env — the opposite of the local-binary flow:
+#   POSTGRES_HOST=postgres
+#   GRPC_ADDR_USER_SERVICE=user-service:${USER_SERVICE_GRPC_PORT}   # only if the integration is on
+# The default .env.example ships localhost values tuned for `task run` (bot as a binary).
+version: '3'
+
+dotenv: ['.env']
+
+tasks:
+  default:
+    desc: List available tasks.
+    cmds:
+      - task --list
+    silent: true
+
+  infra:
+    desc: Start the full infrastructure (alias for `infra:full`).
+    cmds:
+      - task: infra:full
+
+  infra:full:
+    desc: Start PostgreSQL + user-service in Docker, ports forwarded to localhost.
+    cmds:
+      - docker compose up -d --wait postgres user-service
+
+  infra:min:
+    desc: Start only PostgreSQL in Docker (no user-service), ports forwarded to localhost.
+    cmds:
+      - docker compose up -d --wait postgres
+
+  infra:down:
+    desc: Stop the Docker infrastructure (keeps data).
+    cmds:
+      - docker compose stop postgres user-service
+
+  migrate:
+    desc: Apply pending database migrations to the bot database (requires sqlx-cli).
+    cmds:
+      - cargo sqlx migrate run
+
+  run:
+    desc: Start the infra in Docker, apply migrations, then run the bot as a local binary.
+    deps: [infra]
+    cmds:
+      - task: migrate
+      - cargo run
+
+  up:
+    desc: Build and start the whole stack in Docker (needs a Docker-oriented .env — see header note).
+    cmds:
+      - docker compose -f docker-compose.yml up -d --build
+
+  down:
+    desc: Stop and remove the whole Docker stack (keeps data volumes).
+    cmds:
+      - docker compose -f docker-compose.yml down

@@ -1,13 +1,35 @@
 use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use crate::config::FeatureToggles;
-use crate::domain::primitives::{Bet, Length, LengthChange, Limit, Offset, Position, UserId};
+use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
-use crate::repo::test::{CHAT_ID_KIND, get_chat_id_and_dicks, NAME, start_postgres, UID, USER_ID};
+use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, get_chat_id_and_dicks, NAME, start_postgres, UID, USER_ID};
+
+const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
 fn increment_of(value: i64) -> LengthChange {
     LengthChange::signed(value)
+}
+
+async fn internal_chat_id(db: &Pool<Postgres>) -> i64 {
+    sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", CHAT_ID)
+        .fetch_one(db)
+        .await
+        .expect("couldn't resolve the internal chat id")
+}
+
+/// Inserts a `Dicks` row directly (bypassing `create_or_grow`, whose trigger always stamps
+/// `updated_at = now`), so we can seed a dick that looks like it decayed to `0` a while ago —
+/// mirrors `seed_aged_dick` in `repo/test/shrinks.rs`.
+async fn seed_stale_zero_length_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, days_ago: i32) {
+    sqlx::query!(
+        "INSERT INTO Dicks (uid, chat_id, length, updated_at) \
+            VALUES ($1, $2, 0, current_timestamp - make_interval(days => $3))",
+        uid, internal_chat_id, days_ago)
+        .execute(db)
+        .await
+        .expect("couldn't seed a stale zero-length dick");
 }
 
 #[tokio::test]
@@ -19,7 +41,7 @@ async fn test_all() {
     let user_id = USER_ID;
     let chat_id = CHAT_ID_KIND;
     let chat_id_partiality = chat_id.clone().into();
-    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1))
+    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the empty top");
     assert_eq!(d.len(), 0);
 
@@ -55,7 +77,7 @@ async fn test_all_with_top_pagination_disabled() {
     let user_id = USER_ID;
     let chat_id = CHAT_ID_KIND;
     let chat_id_partiality = chat_id.clone().into();
-    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1))
+    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the empty top");
     assert_eq!(d.len(), 0);
 
@@ -90,17 +112,84 @@ async fn test_top_page() {
     // create user and dick #2
     create_user_and_dick_2(&db, &chat_id_partiality, &user2_name).await;
 
-    let top_with_user2_only = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1))
+    let top_with_user2_only = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
     assert_eq!(top_with_user2_only.len(), 1);
     assert_eq!(top_with_user2_only[0].owner_name, user2_name);
     assert_eq!(top_with_user2_only[0].length, 1);
 
-    let top_with_user1_only = dicks.get_top(&chat_id, Offset::new(1), Limit::literal(1))
+    let top_with_user1_only = dicks.get_top(&chat_id, Offset::new(1), Limit::literal(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
     assert_eq!(top_with_user1_only.len(), 1);
     assert_eq!(top_with_user1_only[0].owner_name, NAME);
     assert_eq!(top_with_user1_only[0].length, 0);
+}
+
+#[tokio::test]
+async fn test_hide_inactive_zero_length_from_top() {
+    let (_container, db) = start_postgres().await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default()); // toggle is on by default in tests
+    let users = repo::Users::new(db.clone());
+    let chat_id = CHAT_ID_KIND;
+    let chat_id_partiality = chat_id.clone().into();
+
+    // An active player with a positive length — always visible.
+    create_user(&db).await;
+    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5))
+        .await.expect("couldn't grow the active dick");
+    let internal_chat_id = internal_chat_id(&db).await;
+
+    // A stale, zero-length dick (settled there by the shrink job) — hidden by the toggle.
+    let stale_uid = UID + 1;
+    users.create_or_update(UserId::literal(stale_uid), "stale-zero")
+        .await.expect("couldn't create the stale user");
+    seed_stale_zero_length_dick(&db, internal_chat_id, stale_uid, 10).await;
+
+    // A fresh, zero-length dick (just created today) — must stay visible despite length = 0.
+    let fresh_uid = UID + 2;
+    users.create_or_update(UserId::literal(fresh_uid), "fresh-zero")
+        .await.expect("couldn't create the fresh user");
+    dicks.create_or_grow(UserId::literal(fresh_uid), &chat_id_partiality, increment_of(0))
+        .await.expect("couldn't create the fresh zero-length dick");
+
+    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(10), INACTIVITY_DAYS)
+        .await.expect("couldn't fetch the top");
+
+    assert_eq!(top.len(), 2, "the stale zero-length dick must be hidden");
+    assert_eq!(top[0].owner_name, NAME);
+    assert_eq!(top[0].position, Some(Position::new(1)));
+    assert_eq!(top[1].owner_name, "fresh-zero");
+    assert_eq!(top[1].position, Some(Position::new(2)), "positions must renumber without a gap");
+}
+
+#[tokio::test]
+async fn test_hide_inactive_zero_length_from_top_disabled() {
+    let (_container, db) = start_postgres().await;
+    let dicks = {
+        let features = FeatureToggles {
+            hide_inactive_zero_length_from_top: false,
+            ..Default::default()
+        };
+        repo::Dicks::new(db.clone(), features)
+    };
+    let users = repo::Users::new(db.clone());
+    let chat_id = CHAT_ID_KIND;
+    let chat_id_partiality = chat_id.clone().into();
+
+    create_user(&db).await;
+    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5))
+        .await.expect("couldn't grow the active dick");
+    let internal_chat_id = internal_chat_id(&db).await;
+
+    let stale_uid = UID + 1;
+    users.create_or_update(UserId::literal(stale_uid), "stale-zero")
+        .await.expect("couldn't create the stale user");
+    seed_stale_zero_length_dick(&db, internal_chat_id, stale_uid, 10).await;
+
+    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(10), INACTIVITY_DAYS)
+        .await.expect("couldn't fetch the top");
+
+    assert_eq!(top.len(), 2, "the stale zero-length dick must remain visible when the toggle is off");
 }
 
 #[tokio::test]
@@ -153,8 +242,13 @@ pub async fn create_user_and_dick_2(db: &Pool<Postgres>, chat_id: &ChatIdPartial
     create_another_user_and_dick(db, chat_id, 2, name, 1).await;
 }
 
-pub async fn create_another_user_and_dick(db: &Pool<Postgres>, chat_id: &ChatIdPartiality,
-                                          n: u8, name: &str, increment: i64) {
+pub async fn create_another_user_and_dick(
+    db: &Pool<Postgres>,
+    chat_id: &ChatIdPartiality,
+    n: u8,
+    name: &str,
+    increment: i64,
+) {
     assert!(n > 1);
     let n = n.to_i64().expect("couldn't convert n to i64");
 
@@ -176,7 +270,7 @@ pub async fn create_dick(db: &Pool<Postgres>) {
 
 pub async fn check_dick(db: &Pool<Postgres>, length: Length) {
     let (chat_id, dicks) = get_chat_id_and_dicks(db);
-    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(2))
+    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(2), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].length, length);
@@ -184,7 +278,7 @@ pub async fn check_dick(db: &Pool<Postgres>, length: Length) {
 }
 
 async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i64) {
-    let d = dicks.get_top(chat_id, Offset::new(0), Limit::literal(1))
+    let d = dicks.get_top(chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top again");
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].length, length);

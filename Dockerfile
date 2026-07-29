@@ -1,6 +1,8 @@
 FROM rust:1.96-alpine3.21 AS chef
 WORKDIR /build
-RUN apk update && apk add --no-cache musl-dev
+# `protoc` and `protobuf-dev` are required by the build script to generate the
+# user-service gRPC client from the vendored proto contract.
+RUN apk update && apk add --no-cache musl-dev protoc protobuf-dev
 RUN cargo install cargo-chef --locked
 
 FROM chef AS planner
@@ -34,6 +36,8 @@ COPY domain_types_macro/ domain_types_macro/
 COPY locales/ locales/
 COPY migrations/ migrations/
 COPY .sqlx/ .sqlx/
+COPY build.rs ./
+COPY user-service-proto/ user-service-proto/
 COPY Cargo.* ./
 RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 
@@ -72,13 +76,25 @@ ARG GROWTH_DOD_BONUS_MAX
 ARG NEWCOMERS_GRACE_DAYS
 ARG TOP_LIMIT
 ARG INACTIVITY_DAYS
+ARG HIDE_INACTIVE_ZERO_LENGTH_FROM_TOP_ENABLED
+ARG SHRINK_RATIO
+ARG SHRINK_GRACE_DAYS
+ARG SHRINK_RAMP_UP_DAYS
+ARG SHRINK_RUN_ON_STARTUP
 ARG HELP_PUSSIES_COEF
 ARG LOAN_PAYOUT_COEF
 ARG DOD_SELECTION_MODE
 ARG DOD_RICH_EXCLUSION_RATIO
-ARG ANNOUNCEMENT_MAX_SHOWS
-ARG ANNOUNCEMENT_EN
-ARG ANNOUNCEMENT_RU
+ARG ANNOUNCEMENTS_FILE
+ARG GRPC_ADDR_USER_SERVICE
+ARG USER_CACHE_TIME_SECS
+ARG USER_SERVICE_TIMEOUT_SECS
+ARG CHAT_LANGUAGE_CACHE_TIME_SECS
+ARG MOST_POPULAR_LANGUAGE_ENABLED
+ARG MSG_SELFDESTRUCT_DELAY_NOTICE
+ARG MSG_SELFDESTRUCT_DELAY_REPORT
+ARG MSG_SELFDESTRUCT_READING_SPEED_CPM
+ARG MSG_SELFDESTRUCT_WARNING_SECONDS
 ENTRYPOINT [ "/usr/local/bin/dickGrowerBot" ]
 
 LABEL org.opencontainers.image.source=https://github.com/kozalosev/DickGrowerBot

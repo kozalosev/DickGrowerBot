@@ -2,9 +2,11 @@ pub mod callbacks;
 pub mod locks;
 mod tghack;
 mod incrementor;
+mod self_destruction;
 
 pub use tghack::*;
 pub use incrementor::*;
+pub use self_destruction::*;
 
 use teloxide::types::User;
 use crate::domain::primitives::Username;
@@ -22,19 +24,30 @@ pub mod date {
     use rust_i18n::t;
     use crate::domain::primitives::LanguageCode;
 
-    pub fn get_time_till_next_day_string(lang_code: &LanguageCode) -> Cow<'_, str> {
-        let now = if cfg!(test) {
+    #[inline]
+    fn now_utc() -> DateTime<Utc> {
+        if cfg!(test) {
             DateTime::parse_from_rfc3339("2023-10-21T22:10:57+00:00")
                 .expect("invalid datetime string")
                 .into()
         } else {
             Utc::now()
-        };
+        }
+    }
+
+    /// The gap till the upcoming UTC midnight, or `None` on the (practically impossible) failure to
+    /// build it — which callers must not conflate with a legitimately zero duration.
+    pub fn duration_till_next_day() -> Option<Duration> {
+        let now = now_utc();
         Some(now + Duration::days(1))
             .and_then(|d| d.with_hour(0))
             .and_then(|d| d.with_minute(0))
             .and_then(|d| d.with_second(0))
             .map(|tomorrow| tomorrow - now)
+    }
+
+    pub fn get_time_till_next_day_string(lang_code: &LanguageCode) -> Cow<'_, str> {
+        duration_till_next_day()
             .map(|time_left| {
                 let hrs = time_left.num_hours();
                 let mins = time_left.num_minutes() - hrs * 60;
