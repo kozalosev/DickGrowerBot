@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Dick_of_Day (chat_id, winner_uid, created_at)\n                    SELECT $1, winner_uid, created_at FROM Dick_of_Day WHERE chat_id = $2\n                    ON CONFLICT (chat_id, created_at) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe7b8abece2a11d4b7cf9bfcb54d28ee45f2a046342d5972a7922105388b6b4c"
+}

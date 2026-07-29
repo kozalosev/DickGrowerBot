@@ -6,12 +6,14 @@ mod dod;
 mod import;
 mod promo;
 mod inline;
+pub mod shrink;
 pub mod language;
 pub mod utils;
 pub mod pvp;
 pub mod perks;
 pub mod loan;
 pub mod stats;
+pub mod setup;
 
 use derive_more::Constructor;
 use rust_i18n::t;
@@ -50,9 +52,9 @@ pub(crate) fn cq_chat_id(query: &CallbackQuery) -> Option<i64> {
     query.message.as_ref().map(|m| m.chat().id.0)
 }
 
-/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup),
-/// so the caller knows whether (and how soon) to schedule it for deletion. Shared by the
-/// commands whose reply may be either a permanent event or an ephemeral status (grow, DoD).
+/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup), so the caller
+/// knows whether (and how soon) to schedule it for deletion — for commands whose reply may be
+/// either a permanent event or an ephemeral status.
 pub(crate) struct TaggedReply {
     pub text: String,
     pub group: MessageGroup,
@@ -185,15 +187,45 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
     Ok(())
 }
 
+/// Answers a paging callback query with the "feature disabled" alert and strips the now-useless
+/// keyboard off the message it was attached to — a stale button can outlive the toggle that
+/// enabled its feature.
+pub(crate) async fn answer_callback_feature_disabled(
+    bot: Bot,
+    q: &CallbackQuery,
+    edit_msg_req_params: utils::callbacks::EditMessageReqParamsKind,
+    lang_code: LanguageCode,
+) -> HandlerResult {
+    let mut answer = bot.answer_callback_query(q.id.clone());
+    answer.show_alert.replace(true);
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
+    answer.await?;
+
+    match edit_msg_req_params {
+        utils::callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
+            bot.edit_message_reply_markup(chat_id, message_id)
+                .await.map(|_| ())?,
+        utils::callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
+            bot.edit_message_reply_markup_inline(inline_message_id)
+                .await.map(|_| ())?
+    };
+    Ok(())
+}
+
 pub mod checks {
     use autometrics::autometrics;
+    use std::ops::Not;
     use rust_i18n::t;
     use teloxide::Bot;
-    use teloxide::dispatching::UpdateHandler;
-    use teloxide::types::Message;
+    use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
+    use teloxide::types::{Update, Message};
+    use teloxide::utils::command::BotCommands;
+    use crate::config::AppConfig;
     use crate::config::MessageGroup;
     use crate::domain::primitives::LanguageCode;
+    use crate::domain::primitives::chat::TelegramChatId;
     use crate::handlers::utils::SelfDestructionService;
+    use crate::repo::Repositories;
     use super::{HandlerResult, reply_html};
 
     pub fn is_group_chat(msg: Message) -> bool {
@@ -228,6 +260,8 @@ pub mod checks {
         teloxide::dptree::filter(is_group_account).endpoint(handle_group_account)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
     async fn handle_group_account(
         bot: Bot,
         msg: Message,
@@ -237,6 +271,59 @@ pub mod checks {
         let answer = t!("errors.group_account", locale = &lang_code);
         reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
         Ok(())
+    }
+
+    /// A legacy (basic) group can't be identified from an inline invocation, so playing in one
+    /// before its `chat_id`↔`chat_instance` pairing has been captured would silently split the
+    /// chat's state in two (issue #55). This predicate spots such not-yet-anchored groups.
+    ///
+    /// Only relevant when `chats_merging` is on: with it off, inline and command invocations are
+    /// deliberately kept in separate rows, so there is nothing to pair up and nothing to gate.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0))]
+    async fn needs_setup(msg: Message, repos: Repositories, config: AppConfig) -> bool {
+        if !config.features.chats_merging || !msg.chat.is_group() {
+            return false
+        }
+        repos.chats.is_anchored(&TelegramChatId::from(msg.chat.id))
+            .await
+            .inspect_err(|e| log::error!("couldn't check whether the chat is anchored: {e}"))
+            .map(bool::not)
+            // on a DB error, let the command through rather than locking the chat out
+            .unwrap_or(false)
+    }
+
+    /// A sub-branch that intercepts chat-stateful commands in legacy groups which haven't been
+    /// anchored yet (see [`needs_setup`]) and asks for the one-time setup tap instead.
+    ///
+    /// Also covers groups the bot joined before this shipped: those emit no "added" event, so the
+    /// setup message can only be triggered lazily, by the first command.
+    pub fn require_anchored_group() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
+        teloxide::dptree::filter_async(needs_setup).endpoint(handle_needs_setup)
+    }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg)))]
+    async fn handle_needs_setup(bot: Bot, msg: Message) -> HandlerResult {
+        let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+        super::setup::send_setup_message(&bot, msg.chat.id, &lang_code).await?;
+        Ok(())
+    }
+
+    /// A branch for a chat-stateful group command. They all sit behind the same checks: they only
+    /// make sense in a group, never on behalf of a group account ([`is_group_account`]), and not
+    /// until a legacy group has been anchored ([`require_anchored_group`]).
+    ///
+    /// The command filter stays innermost on purpose — hoisting the checks above it would apply
+    /// them to every group message, not just to these commands.
+    pub fn group_command<C>() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>>
+    where
+        C: BotCommands + Send + Sync + 'static
+    {
+        Update::filter_message().filter_command::<C>()
+            .filter(is_group_chat)
+            .branch(reject_group_accounts())
+            .branch(require_anchored_group())
     }
 
     pub mod inline {

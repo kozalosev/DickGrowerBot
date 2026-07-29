@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.uid AS \"uid: UserId\" FROM Dicks d\n                JOIN Chats c ON c.id = d.chat_id\n                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid: UserId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "uid"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2bc2bccc860e0283df0b79b4e9091109301150299d76166cdd3a6ba6ca29d28d"
+}

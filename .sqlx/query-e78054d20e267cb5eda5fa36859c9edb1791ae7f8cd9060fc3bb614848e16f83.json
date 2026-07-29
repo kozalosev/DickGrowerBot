@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lost_length AS \"lost_length!\" FROM Stale_Dick_Shrinks WHERE chat_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lost_length!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stale_dick_shrinks",
+            "name": "lost_length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e78054d20e267cb5eda5fa36859c9edb1791ae7f8cd9060fc3bb614848e16f83"
+}

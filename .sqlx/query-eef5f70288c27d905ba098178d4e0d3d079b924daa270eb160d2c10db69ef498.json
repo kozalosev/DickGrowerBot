@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "TRUNCATE Dicks, Chats",
+  "query": "TRUNCATE Dicks, Chats CASCADE",
   "describe": {
     "columns": [],
     "parameters": {
@@ -8,5 +8,5 @@
     },
     "nullable": []
   },
-  "hash": "b30cbc20bba15ab82bf2cf862a2ae4658d55b123617ebc9eabb8f01374a1081a"
+  "hash": "eef5f70288c27d905ba098178d4e0d3d079b924daa270eb160d2c10db69ef498"
 }

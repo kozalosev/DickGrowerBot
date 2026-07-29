@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Dicks (uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp - make_interval(days => $4))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3d94094f08c26e1f8c013ebbd223a8507c3e783454ae446c22d83a24c16b06dd"
+}

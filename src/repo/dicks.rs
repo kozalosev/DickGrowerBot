@@ -4,7 +4,7 @@ use futures::TryFutureExt;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
 use crate::domain::objects::{Dick, GrowthResult};
-use crate::domain::primitives::{Bet, LengthChange, Limit, Offset, UserId, Position, Length};
+use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
 use super::Chats;
 
@@ -102,18 +102,41 @@ impl Dicks {
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
+    /// Returns the uids of everyone who has a dick in the chat (i.e. its players).
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn get_player_uids(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<UserId>> {
+        sqlx::query_scalar!(
+            r#"SELECT d.uid AS "uid: UserId" FROM Dicks d
+                JOIN Chats c ON c.id = d.chat_id
+                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text"#,
+                chat_id.value() as String)
+            .fetch_all(&self.pool)
+            .await
+            .context(format!("couldn't fetch player uids for {chat_id}"))
+    }
+
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id, offset = %offset, limit = %limit))]
-    pub async fn get_top(&self, chat_id: &ChatIdKind, offset: Offset, limit: Limit) -> anyhow::Result<Vec<Dick>> {
+    pub async fn get_top(
+        &self,
+        chat_id: &ChatIdKind,
+        offset: Offset,
+        limit: Limit,
+        inactivity_days: DaysCount,
+    ) -> anyhow::Result<Vec<Dick>> {
+        let hide_inactive_zero_length = self.features.hide_inactive_zero_length_from_top;
         sqlx::query_as!(DickEntity,
             r#"SELECT length AS "length: Length", uid AS "owner_uid: UserId", name as owner_name, updated_at as grown_at,
                     ROW_NUMBER() OVER (ORDER BY length DESC, updated_at DESC, name) AS position
                 FROM dicks d
                 JOIN users using (uid)
                 JOIN chats c ON c.id = d.chat_id
-                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text
+                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
+                  AND (NOT $4::bool OR d.length != 0 OR d.updated_at > current_timestamp - make_interval(days => $5::bigint::int))
                 OFFSET $2 LIMIT $3"#,
-                chat_id.value() as String, offset as Offset, limit as Limit)
+                chat_id.value() as String, offset as Offset, limit as Limit,
+                hide_inactive_zero_length, inactivity_days as DaysCount)
             .fetch_all(&self.pool)
             .await
             .map(|dicks| dicks.into_iter().map(Dick::from).collect())

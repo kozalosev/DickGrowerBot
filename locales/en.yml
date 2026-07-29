@@ -32,6 +32,14 @@ commands:
     ending: "<i>[+] means a grower hasn't grown his dick today yet.</i>"
     ending_inactive: "<i>[~] means a grower hasn't grown his dick for more than %{days} days.</i>"
     empty: "No one is in the game yet :("
+  shrink:
+    notification:
+      header: "✂️ <b>Time to trim the neglected!</b> These dicks haven't grown in %{days} days and shrank a bit:"
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm, chin up!)"
+    recent:
+      header: "✂️ <b>Who's been shrinking lately:</b>"
+      line: "— <b>%{name}</b> lost <b>%{lost}</b> cm"
+    empty: "Silence… No one has shrunk lately. Guess everybody's keeping up the pace 💪"
   dod:
     description: "Elect the Dick of a Day"
     result: "The Dick of the Day is <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."
@@ -111,7 +119,8 @@ commands:
       switch_button: "Activate promo code '%{code}'…"
 inline:
   results:
-    text: "Since I cannot determine the chat by an inline query, you should click on the button bellow to get the result."
+    text: "Since I cannot determine the chat by an inline query, you should click on the button below to get the result."
+    text_legacy_group: "This group is not a supergroup, so I can't recognize it from an inline query — press the button below to get the result.\n\nThe button will be needed every time. Better yet, add the bot to the chat and press its activation button! Then the plain commands will do, and the inline results will count towards the same score.\n\nAnd do it before the group turns into a supergroup: otherwise everything played here through inline mode is lost for good."
     button: "Click me!"
     titles:
       grow: "Grow your dick!"
@@ -120,6 +129,7 @@ inline:
       pvp: "Challenge others with a bet of %{bet} cm!"
       stats: "Win statistics"
       loan: "Minus? Take a loan!"
+      shrinks: "See recent shrinks"
   callback:
     errors:
       another_user: "This message was sent by another person."
@@ -135,6 +145,13 @@ titles:
     top_line: "The following perks affected the result"
     help-pussies: "deep hole"
     loan-payout: "micro-loaner"
+setup:
+  text: "This group is not a supergroup, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual.\n\nUntil it is pressed, everything played through inline mode will be lost if the group turns into a supergroup."
+  button: "Activate"
+  activated: "Done! The bot is now activated in this group. Have fun! 🍆"
+migration:
+  lost: "This group has just become a supergroup, and Telegram has given it an entirely new identity — I can no longer recognize it as the group I used to know.\n\nIf anyone played here through inline mode, that history is sadly out of reach now and the scores start over. If nobody did, nothing was lost. From here on everything works as usual — and it won't happen again. 🍆"
+  lost_inline: "This group has just become a supergroup. Everything played through the commands came across with it and is safe.\n\nThe results from inline mode, though, never got tied to this group — that needed the activation button pressed before the upgrade. They are sadly out of reach now. If nobody played through inline mode here, nothing was lost. From here on everything works as usual. 🍆"
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"

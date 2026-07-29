@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Battle_Stats (uid, chat_id, battles_total, battles_won, win_streak_current, win_streak_max, acquired_length, lost_length)\n                    SELECT uid, $1, battles_total, battles_won, win_streak_current, win_streak_max, acquired_length, lost_length\n                        FROM Battle_Stats WHERE chat_id = $2\n                    ON CONFLICT (uid, chat_id) DO UPDATE SET\n                        battles_total = Battle_Stats.battles_total + EXCLUDED.battles_total,\n                        battles_won = Battle_Stats.battles_won + EXCLUDED.battles_won,\n                        win_streak_max = GREATEST(Battle_Stats.win_streak_max, EXCLUDED.win_streak_max),\n                        acquired_length = Battle_Stats.acquired_length + EXCLUDED.acquired_length,\n                        lost_length = Battle_Stats.lost_length + EXCLUDED.lost_length",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "152871eaafc0cf181bffd4f774b9c2c4bd5991811e8909cd9013c53849b19839"
+}

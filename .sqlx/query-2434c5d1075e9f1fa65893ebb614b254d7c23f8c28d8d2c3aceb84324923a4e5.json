@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Loans SET chat_id = $1 WHERE chat_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2434c5d1075e9f1fa65893ebb614b254d7c23f8c28d8d2c3aceb84324923a4e5"
+}

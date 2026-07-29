@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT length AS \"length: i64\", bonus_attempts FROM Dicks WHERE chat_id = $1 ORDER BY uid",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "length: i64",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "length"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "bonus_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "bonus_attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "210a6d9cf64514921d69d3c977da30094fb46fff7b03e3f75bb2e22d068ed509"
+}

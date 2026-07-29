@@ -8,7 +8,7 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, Requester, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
-use crate::domain::primitives::chat::ChatIdPartiality;
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdPartiality, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::handlers::{reply_html, HandlerResult};
 use crate::handlers::utils::callbacks;
@@ -142,7 +142,10 @@ pub async fn callback_handler(
         },
         LanguageScope::Chat => {
             let chat_id: ChatIdPartiality = query.message.as_ref()
-                .map(|m| m.chat().id.into())
+                .map(|m| ChatIdFull {
+                    id: TelegramChatId::from(m.chat().id),
+                    instance: TelegramChatInstanceId::new(query.chat_instance.clone()),
+                }.to_partiality(ChatIdSource::default()))
                 .ok_or(anyhow!("a chat-language callback without an attached message"))?;
             apply_chat_language(&language_service, &chat_id, data.selection.into_option(), &lang_code).await?
         }

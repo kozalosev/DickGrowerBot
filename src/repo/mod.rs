@@ -6,6 +6,7 @@ mod promo;
 mod loans;
 mod pvpstats;
 mod stats;
+mod shrinks;
 mod announcements;
 
 #[cfg(test)]
@@ -22,6 +23,7 @@ pub use promo::*;
 pub use loans::*;
 pub use pvpstats::*;
 pub use stats::*;
+pub use shrinks::*;
 pub use announcements::*;
 use crate::config;
 use crate::config::DatabaseConfig;
@@ -38,6 +40,7 @@ pub struct Repositories {
     pub announcements: Announcements,
     pub pvp_stats: BattleStatsRepo,
     pub personal_stats: PersonalStatsRepo,
+    pub shrinks: Shrinks,
 }
 
 impl Repositories {
@@ -52,6 +55,7 @@ impl Repositories {
             announcements: Announcements::new(db_conn.clone(), config.announcements.clone()),
             pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features),
             personal_stats: PersonalStatsRepo::new(db_conn.clone()),
+            shrinks: Shrinks::new(db_conn.clone()),
         }
     }
 }
