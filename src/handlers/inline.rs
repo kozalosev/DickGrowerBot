@@ -13,6 +13,7 @@ use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
+use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::handlers::{dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
@@ -160,6 +161,13 @@ pub async fn inline_handler(
 
     let uid = query.from.id.0;
     let btn_label = t!("inline.results.button", locale = &lang_code);
+    // Everywhere else the tap is a one-off — it teaches the bot the chat, and the next invocation
+    // resolves on its own. A legacy group never becomes identifiable from an inline query, so
+    // there the tap is permanent and the text has to say so instead of promising it'll get better.
+    let text_key = match query.chat_type {
+        Some(ChatType::Group) => "inline.results.text_legacy_group",
+        _ => "inline.results.text",
+    };
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
         // The `shrinks` command only makes sense when the daily shrink feature is on.
         .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.stale_dicks_shrinking.enabled())
@@ -169,7 +177,7 @@ pub async fn inline_handler(
             let t_key = format!("inline.results.titles.{key}");
             let title = t!(&t_key, locale = &lang_code);
             let content = InputMessageContent::Text(InputMessageContentText::new(
-                t!("inline.results.text", locale = &lang_code)));
+                t!(text_key, locale = &lang_code)));
             let mut article = InlineQueryResultArticle::new(
                 key.clone(), title, content
             );
@@ -251,10 +259,11 @@ pub async fn callback_handler(
         let chat_id = config.features.chats_merging
             .then(|| utils::resolve_inline_message_id(inline_msg_id))
             .map(|res| match res {
-                Ok(info) => ChatIdFull {
-                    id: info.chat_id,
+                Ok(InlineMessageIdInfo { chat_id: Some(id), .. }) => ChatIdFull {
+                    id,
                     instance: TelegramChatInstanceId::new(query.chat_instance.clone()),
                 }.to_partiality(ChatIdSource::InlineQuery),
+                Ok(InlineMessageIdInfo { chat_id: None, .. }) => query.chat_instance.clone().into(),
                 Err(err) => {
                     log::error!("callback_handler couldn't resolve an inline_message_id: {err}");
                     query.chat_instance.clone().into()
@@ -323,7 +332,7 @@ pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<TelegramChatId> {
     utils::resolve_inline_message_id(msg_id)
         .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
         .ok()
-        .map(|info| info.chat_id)
+        .and_then(|info| info.chat_id)
 }
 
 // TODO: move to mod.rs and use in message handlers too

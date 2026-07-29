@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length, created_at) VALUES ($1, $3, 5, current_date), ($2, $3, 3, current_date)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f580474e4273a77dc5c8b5cf088247f6c616b9ff9f5a30c48ef0aa96efd0c65d"
+}

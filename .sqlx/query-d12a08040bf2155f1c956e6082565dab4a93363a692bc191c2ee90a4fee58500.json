@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Battle_Stats (uid, chat_id, battles_total, battles_won) VALUES ($1, $2, 3, 2), ($1, $3, 4, 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d12a08040bf2155f1c956e6082565dab4a93363a692bc191c2ee90a4fee58500"
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT old_chat_instance FROM Chat_Migrations WHERE new_chat_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "old_chat_instance",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "chat_migrations",
+            "name": "old_chat_instance"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e76ccd1bbe5ceda8670d00705bff7b0c9034b494e1badf16233cffee90f4779b"
+}

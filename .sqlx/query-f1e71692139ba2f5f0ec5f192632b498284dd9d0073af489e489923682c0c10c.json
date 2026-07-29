@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Chat_Migrations (internal_id, old_chat_id, old_chat_instance, new_chat_id, migrated_at)\n                    SELECT $1, old_chat_id, old_chat_instance, new_chat_id, migrated_at\n                        FROM Chat_Migrations WHERE internal_id = $2\n                    ON CONFLICT (internal_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f1e71692139ba2f5f0ec5f192632b498284dd9d0073af489e489923682c0c10c"
+}

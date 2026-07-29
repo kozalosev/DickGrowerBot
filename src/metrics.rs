@@ -2,7 +2,9 @@ use axum::routing::get;
 use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
+use strum::IntoEnumIterator;
 use crate::domain::primitives::SupportedLanguage;
+use crate::repo::ChatMigrationOutcome;
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
 static REGISTRY: Lazy<prometheus::Registry> = Lazy::new(prometheus::Registry::new);
@@ -46,6 +48,8 @@ pub static SELF_DESTRUCTION: Lazy<SelfDestructionCounters> = Lazy::new(||
     SelfDestructionCounters::new("self_destruction_total", "count of the bot's own messages removed by the self-destruction feature, split by message group and outcome (deleted/failed)"));
 pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
     AnnouncementCounter::new("announcement_shown_total", "count of announcements shown at the end of the Dick of the Day message, split by the recipient's language"));
+pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
+    ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -87,6 +91,7 @@ fn force_registration() {
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&SELF_DESTRUCTION);
     Lazy::force(&ANNOUNCEMENT_SHOWN);
+    Lazy::force(&CHAT_MIGRATION);
 }
 
 pub struct Counter(IntCounter);
@@ -341,6 +346,26 @@ impl AnnouncementCounter {
     }
 }
 
+/// Counts the group to supergroup migrations the bot witnessed, labeled by what became of the
+/// chat. A migration is announced in both chats at once; only the announcement that lands in the
+/// new supergroup is counted, so one migration is one sample.
+pub struct ChatMigrationCounter(CounterVec);
+
+impl ChatMigrationCounter {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["outcome"]);
+        for outcome in ChatMigrationOutcome::iter() {
+            vec.counter(&[&outcome.to_string()]);
+        }
+        Self(vec)
+    }
+
+    /// Record what became of one migrated chat.
+    pub fn record(&self, outcome: ChatMigrationOutcome) {
+        self.0.counter(&[&outcome.to_string()]).inc()
+    }
+}
+
 /// The sender's Telegram `language_code`, kept whole (region suffix included) and lowercased
 /// (`"zh-TW"` → `"zh-tw"`, `"EN-us"` → `"en-us"`); anything absent or not shaped like a language
 /// tag becomes `"unknown"` (keeps the metric's label cardinality bounded).
@@ -354,7 +379,28 @@ fn language_label(code: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::language_label;
+    use once_cell::sync::Lazy;
+    use prometheus::{Encoder, TextEncoder};
+    use strum::IntoEnumIterator;
+    use crate::repo::ChatMigrationOutcome;
+    use super::{CHAT_MIGRATION, language_label, REGISTRY};
+
+    /// The outcomes worth alerting on are the ones that should never be incremented, so they have
+    /// to be exported at zero rather than spring into existence the first time a chat is lost.
+    #[test]
+    fn every_chat_migration_outcome_is_exported() {
+        Lazy::force(&CHAT_MIGRATION);
+        let mut buffer = vec![];
+        TextEncoder::new().encode(&REGISTRY.gather(), &mut buffer)
+            .expect("couldn't encode the metrics");
+        let rendered = String::from_utf8(buffer)
+            .expect("the metrics buffer is not valid UTF-8");
+
+        for outcome in ChatMigrationOutcome::iter() {
+            let series = format!("chat_migration_total{{outcome=\"{outcome}\"}}");
+            assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
+    }
 
     #[test]
     fn language_label_normalization() {
