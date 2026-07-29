@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Dicks (uid, chat_id, length, bonus_attempts, updated_at)\n                    SELECT uid, $1, length, bonus_attempts + 1, updated_at FROM Dicks WHERE chat_id = $2\n                    ON CONFLICT (chat_id, uid) DO UPDATE SET\n                        length = Dicks.length + EXCLUDED.length,\n                        bonus_attempts = Dicks.bonus_attempts + EXCLUDED.bonus_attempts + 1,\n                        updated_at = GREATEST(Dicks.updated_at, EXCLUDED.updated_at)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "936cf96764dc751c7977195d0470dffcdd43547f670c8b3b3c413e51430b735a"
+}

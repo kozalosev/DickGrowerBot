@@ -142,6 +142,26 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Code Style
 
+- **Prefer domain-type wrappers over raw primitives for long-living, meaningful values.** Config
+  fields, struct fields, and public function parameters/returns that carry a domain concept (a count
+  of days, a length, a ratio, an id, …) should use the newtype from `domain_types` / the
+  `#[domain_type]` macro (e.g. `DaysCount`, `Length`, `Ratio`, `UserId`) rather than a bare `i32` /
+  `u32` / `String`. This keeps units and intent in the type system and stays consistent with the
+  repo layer, which already speaks domain types. Convert to the primitive only at the true boundary
+  (e.g. `value() as i32` right before an sqlx bind). If a suitable wrapper doesn't exist yet, add one
+  (see `domain_types/src/traits.rs` and `domain_types_macro/src/lib.rs`) instead of falling back to a
+  primitive. Short-lived locals and loop indices don't need wrapping.
+
+  ```rust
+  // ❌ raw primitives for domain concepts on a long-living config struct
+  pub shrink_grace_days: i32,
+  pub shrink_events_days: u32,
+
+  // ✅ domain-type wrappers
+  pub shrink_grace_days: DaysCount,
+  pub shrink_events_days: DaysCount,
+  ```
+
 - **ALWAYS** break a function signature onto one parameter per line when the single-line signature
   reaches **120+ characters**. Put the opening `(` at the end of the `fn` line, each parameter on
   its own line with a trailing comma, and the closing `)` plus return type on their own line

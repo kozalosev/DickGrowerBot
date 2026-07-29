@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "ALTER TABLE Stale_Dick_Shrinks ENABLE TRIGGER trg_forbid_stale_dick_shrinks_updates",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "718ff434306cc19863b506f004d7544e854d9ac23b0b101951934113311972fd"
+}

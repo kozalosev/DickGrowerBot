@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length, created_at)\n                    SELECT $1, uid, lost_length, created_at FROM Stale_Dick_Shrinks WHERE chat_id = $2\n                    ON CONFLICT (chat_id, uid, created_at) DO UPDATE SET\n                        lost_length = Stale_Dick_Shrinks.lost_length + EXCLUDED.lost_length",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4bd9679eca8b8ba39672be2d3dae5db04c535866384c99506f031e4599b69a0b"
+}

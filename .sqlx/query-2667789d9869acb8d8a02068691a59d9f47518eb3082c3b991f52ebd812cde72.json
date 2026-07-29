@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.uid AS \"uid: UserId\", name AS \"name: Username\", u.created_at FROM Users u\n                JOIN Dicks d USING (uid)\n                JOIN Chats c ON d.chat_id = c.id\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                    AND updated_at > current_timestamp - interval '1 week'\n                ORDER BY random() LIMIT 1",
+  "query": "WITH ranked_users AS (\n                SELECT u.uid, name, u.created_at, PERCENT_RANK() OVER (ORDER BY length) AS percentile_rank\n                    FROM Users u\n                    JOIN Dicks d USING (uid)\n                    JOIN Chats c ON d.chat_id = c.id\n                    WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)\n                        AND updated_at > current_timestamp - make_interval(days => $3::bigint::int)\n            )\n            SELECT uid AS \"uid: UserId\", name AS \"name: Username\", created_at\n            FROM ranked_users\n            WHERE percentile_rank <= $2\n            ORDER BY random() LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -39,6 +39,8 @@
     ],
     "parameters": {
       "Left": [
+        "Int8",
+        "Float8",
         "Int8"
       ]
     },
@@ -48,5 +50,5 @@
       false
     ]
   },
-  "hash": "eb1cb01b110b8124096f916397f73cdc764e004077d5376e44623977c52dec7b"
+  "hash": "2667789d9869acb8d8a02068691a59d9f47518eb3082c3b991f52ebd812cde72"
 }

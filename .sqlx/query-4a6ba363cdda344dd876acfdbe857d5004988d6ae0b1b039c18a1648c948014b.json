@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Chat_Migrations WHERE internal_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a6ba363cdda344dd876acfdbe857d5004988d6ae0b1b039c18a1648c948014b"
+}

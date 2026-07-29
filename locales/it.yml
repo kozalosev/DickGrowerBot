@@ -32,6 +32,14 @@ commands:
     ending: "<i>[+] significa che un giocatore non ha ancora fatto crescere il suo pene oggi.</i>"
     ending_inactive: "<i>[~] significa che un giocatore non ha fatto crescere il suo pene per più di %{days} giorni.</i>"
     empty: "Nessuno sta giocando :("
+  shrink:
+    notification:
+      header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per %{days} giorni e si sono un po' accorciati:"
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm, testa alta!)"
+    recent:
+      header: "✂️ <b>Chi si è accorciato di recente:</b>"
+      line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm"
+    empty: "Silenzio… Nessuno si è accorciato ultimamente. Sembra che tutti tengano il passo 💪"
   dod:
     description: "Eleggi il Pene del Giorno"
     result: "Il Pene del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pene è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."
@@ -112,6 +120,7 @@ commands:
 inline:
   results:
     text: "Clicca il tasto qui sotto per avere il risultato!"
+    text_legacy_group: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo da una query inline — premi il tasto qui sotto per avere il risultato.\n\nIl tasto servirà ogni volta. Meglio ancora, aggiungi il bot alla chat e premi il suo tasto di attivazione! Così bastano i comandi normali, e i risultati inline conteranno insieme a loro.\n\nE fallo prima che il gruppo diventi un supergruppo: altrimenti tutto ciò che è stato giocato qui in modalità inline andrà perso per sempre."
     button: "Cliccami!"
     titles:
       grow: "Fai crescere il tuo pene!"
@@ -120,6 +129,7 @@ inline:
       pvp: "Sfida gli altri con una scommessa di %{bet} cm!"
       stats: "Statistiche"
       loan: "Sei in debito? Chiedi un prestito!"
+      shrinks: "Vedi gli accorciamenti recenti"
   callback:
     errors:
       another_user: "Questo messaggio è stato inviato da un'altra persona."
@@ -135,6 +145,13 @@ titles:
     top_line: "I seguenti vantaggi hanno influenzato il risultato:"
     help-pussies: "buco profondo"
     loan-payout: "micro-loaner"
+setup:
+  text: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo quando vengo chiamato in modalità inline.\n\nPremi il pulsante qui sotto <b>una volta</b> per attivarmi qui — dopodiché tutto funzionerà come al solito.\n\nFinché non viene premuto, tutto ciò che è stato giocato in modalità inline andrà perso se il gruppo diventa un supergruppo."
+  button: "Attiva"
+  activated: "Fatto! Il bot è ora attivo in questo gruppo. Buon divertimento! 🍆"
+migration:
+  lost: "Questo gruppo è appena diventato un supergruppo, e Telegram gli ha dato un'identità del tutto nuova — non riesco più a riconoscerlo come il gruppo che conoscevo.\n\nSe qualcuno ha giocato qui in modalità inline, quella storia purtroppo non è più raggiungibile e i punteggi ripartono da zero. Se nessuno l'ha fatto, non si è perso nulla. D'ora in poi tutto funziona come al solito, e non può più succedere. 🍆"
+  lost_inline: "Questo gruppo è appena diventato un supergruppo. Tutto ciò che è stato giocato con i comandi è arrivato insieme a lui ed è al sicuro.\n\nI risultati della modalità inline, invece, non erano mai stati legati a questo gruppo — sarebbe servito premere il tasto di attivazione prima del passaggio. Purtroppo ora non sono più raggiungibili. Se nessuno ha giocato qui in modalità inline, non si è perso nulla. D'ora in poi tutto funziona come al solito. 🍆"
 errors:
   not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
   group_account: "Non puoi giocare per conto di un gruppo o canale — disattiva la modalità anonima e riprova!"

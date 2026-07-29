@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Announcements (chat_id, language, hash, times_shown)\n                    SELECT $1, language, hash, times_shown FROM Announcements WHERE chat_id = $2\n                    ON CONFLICT (chat_id, language) DO UPDATE SET\n                        times_shown = Announcements.times_shown + EXCLUDED.times_shown",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fbae20b7523f75e7af540ca0c431bc81857f296a2cddbaaae097e1f53b5c5c45"
+}

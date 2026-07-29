@@ -3,6 +3,7 @@ mod bot;
 mod toggles;
 mod announcements;
 mod self_destruction;
+mod shrink;
 mod env;
 mod help;
 mod integrations;

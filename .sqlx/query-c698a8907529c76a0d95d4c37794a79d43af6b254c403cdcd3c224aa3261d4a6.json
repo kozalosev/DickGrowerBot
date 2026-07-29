@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "ALTER TABLE Dick_of_Day ENABLE TRIGGER trg_check_dod_timestamp",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "c698a8907529c76a0d95d4c37794a79d43af6b254c403cdcd3c224aa3261d4a6"
+}

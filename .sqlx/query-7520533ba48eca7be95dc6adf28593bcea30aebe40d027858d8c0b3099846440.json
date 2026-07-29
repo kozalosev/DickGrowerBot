@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Loans (uid, chat_id, debt, payout_ratio) VALUES ($1, $2, 10, 0.1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7520533ba48eca7be95dc6adf28593bcea30aebe40d027858d8c0b3099846440"
+}

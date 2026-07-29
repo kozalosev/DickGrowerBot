@@ -6,6 +6,7 @@ mod promo;
 mod loans;
 mod pvpstats;
 mod stats;
+mod shrinks;
 mod announcements;
 
 use std::str::FromStr;

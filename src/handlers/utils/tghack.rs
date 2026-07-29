@@ -105,14 +105,27 @@ impl IDFormatKind {
     }
 }
 
-fn fix_chat_id(number: i64) -> i64 {
-    if number.is_negative() {
-        // Calculate the chat_id by adding -100 * 10^x to the number
-        let power = (number.abs() as f64).log10().floor() as i64 + 1;
-        -100 * 10i64.pow(power as u32) + number
-    } else {
-        number
-    }
+/// The Bot API represents a supergroup or a channel as its MTProto peer id shifted into the
+/// `-100…` range: `chat_id = -1_000_000_000_000 - peer_id`. The decoded value already carries
+/// the peer id negated, so the shift is a plain addition.
+///
+/// The shift is a constant, *not* a `-100` prefix glued in front of however many digits the
+/// peer id happens to have: a peer id shorter than ten digits keeps the leading zeros of the
+/// twelve-digit field. Deriving the offset from the number of digits instead only agrees with
+/// the rule for exactly ten-digit peer ids, and silently invented a wrong chat for every
+/// supergroup registered before those ran out.
+const SUPERGROUP_ID_SHIFT: i64 = -1_000_000_000_000;
+
+/// Turns the peer id decoded out of an `inline_message_id` into a Bot API `chat_id`.
+///
+/// Only supergroups and channels come out negative. A legacy (basic) group's inline id doesn't
+/// encode the chat at all — it decodes to an unrelated positive number, typically the inline
+/// sender's user id — and a positive value is indistinguishable from a basic group's own peer
+/// id anyway, so nothing positive can be trusted.
+fn fix_chat_id(number: i64) -> Option<i64> {
+    number.is_negative()
+        .then(|| SUPERGROUP_ID_SHIFT.checked_add(number))
+        .flatten()
 }
 
 #[cfg(test)]
@@ -121,7 +134,15 @@ mod tests {
 
     #[test]
     fn test_fix_chat_id() {
-        assert_eq!(fix_chat_id(-1100294568), -1001100294568);
-        assert_eq!(fix_chat_id(68761694), 68761694);
+        // a ten-digit peer id
+        assert_eq!(fix_chat_id(-1100294568), Some(-1001100294568));
+        // supergroups registered earlier have shorter peer ids and keep the leading zeros
+        assert_eq!(fix_chat_id(-599075523), Some(-1000599075523));
+        assert_eq!(fix_chat_id(-1234567), Some(-1000001234567));
+        // a legacy group decodes to something positive, which is never a chat we can trust
+        assert_eq!(fix_chat_id(68761694), None);
+        assert_eq!(fix_chat_id(0), None);
+        // a value too far out to shift is garbage rather than a chat
+        assert_eq!(fix_chat_id(i64::MIN), None);
     }
 }
