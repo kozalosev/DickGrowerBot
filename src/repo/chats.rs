@@ -162,7 +162,9 @@ repository!(Chats, with_feature_toggles,
     /// Telegram announces a migration in both chats at once, and the dispatcher hands updates of
     /// different chats to different workers, so the two calls genuinely race. `FOR UPDATE` is what
     /// serializes them: the loser blocks on the locked row, then re-evaluates its `WHERE` against
-    /// the committed version, finds the chat no longer known by its old id, and gives up quietly.
+    /// the committed version and finds the chat no longer known by its old id. That looks exactly
+    /// like a chat we never knew, which is why the outcome is decided by looking under the new id
+    /// as well — the loser of the race has to report success, not loss.
     pub async fn migrate_chat_id(
         &self,
         old: &TelegramChatId,
@@ -175,7 +177,23 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't look up the chat to migrate from id = {old}"))?;
         let (old_internal_id, old_instance) = match old_chat {
             Some(chat) => (chat.id, chat.chat_instance),
-            None => return Ok(ChatMigrationOutcome::Untraceable)
+            // Nothing under the old id can mean two very different things, and only one of them is
+            // a loss: the row may be gone from there simply because the other announcement of this
+            // same migration already repointed it. Its presence under the new id tells them apart.
+            None => {
+                let already_migrated = sqlx::query_scalar!(
+                        r#"SELECT EXISTS(SELECT 1 FROM Chats WHERE chat_id = $1) AS "exists!""#,
+                        new.value())
+                    .fetch_one(&mut *tx)
+                    .await
+                    .context(format!("couldn't check whether the chat had already been migrated to {new}"))?;
+                return Ok(if already_migrated {
+                    log::debug!("the chat migrated from {old} to {new} had already been repointed");
+                    ChatMigrationOutcome::Migrated
+                } else {
+                    ChatMigrationOutcome::Untraceable
+                })
+            }
         };
         let new_internal_id = sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", new.value())
             .fetch_optional(&mut *tx)

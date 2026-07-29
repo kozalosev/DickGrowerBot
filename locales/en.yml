@@ -120,7 +120,7 @@ commands:
 inline:
   results:
     text: "Since I cannot determine the chat by an inline query, you should click on the button below to get the result."
-    text_legacy_group: "This group is not a supergroup, so I can't recognize it from an inline query — press the button below to get the result.\n\nThe button will be needed every time: that only goes away once the group becomes a supergroup. Better yet, add the bot to the chat! Then the plain commands will do, and the inline results will count towards the same score."
+    text_legacy_group: "This group is not a supergroup, so I can't recognize it from an inline query — press the button below to get the result.\n\nThe button will be needed every time. Better yet, add the bot to the chat and press its activation button! Then the plain commands will do, and the inline results will count towards the same score.\n\nAnd do it before the group turns into a supergroup: otherwise everything played here through inline mode is lost for good."
     button: "Click me!"
     titles:
       grow: "Grow your dick!"
@@ -146,7 +146,7 @@ titles:
     help-pussies: "deep hole"
     loan-payout: "micro-loaner"
 setup:
-  text: "This group is not a supergroup, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual."
+  text: "This group is not a supergroup, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual.\n\nUntil it is pressed, everything played through inline mode will be lost if the group turns into a supergroup."
   button: "Activate"
   activated: "Done! The bot is now activated in this group. Have fun! 🍆"
 migration:

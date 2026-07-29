@@ -3,6 +3,7 @@ use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Supporte
 use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality};
 use crate::repo;
+use crate::repo::ChatMigrationOutcome;
 use crate::repo::test::{CHAT_ID, start_postgres, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
 
@@ -96,9 +97,11 @@ async fn migrate_chat_id() {
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let (old, new) = (TelegramChatId::new(CHAT_ID), TelegramChatId::new(-1001234567890));
 
-    // nothing is known about the group yet — the migration is a no-op rather than an error
-    chats.migrate_chat_id(&old, &new)
+    // nothing is known about the group yet — the migration is a no-op rather than an error, and
+    // this is the one case where the chat's history really is beyond reach
+    let outcome = chats.migrate_chat_id(&old, &new)
         .await.expect("couldn't migrate an unknown chat");
+    assert_eq!(outcome, ChatMigrationOutcome::Untraceable);
     assert!(chats.get_chat(new.into()).await.expect("couldn't fetch").is_none());
 
     let old_partiality = ChatIdPartiality::Specific(old.into());
@@ -107,8 +110,9 @@ async fn migrate_chat_id() {
     dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5))
         .await.expect("couldn't create a dick");
 
-    chats.migrate_chat_id(&old, &new)
+    let outcome = chats.migrate_chat_id(&old, &new)
         .await.expect("couldn't migrate the chat");
+    assert_eq!(outcome, ChatMigrationOutcome::Migrated);
 
     // the row keeps its internal id, so the dick follows the chat to the supergroup
     let migrated = chats.get_chat(new.into())
@@ -122,9 +126,14 @@ async fn migrate_chat_id() {
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].length, 5);
 
-    // the second update of the same migration finds nothing left to do
-    chats.migrate_chat_id(&old, &new)
+    // The other announcement of the same migration finds nothing under the old id, which looks
+    // exactly like a chat that was never known — but the chat is right there under the new id, and
+    // reporting a loss here would tell a group that migrated perfectly well that it lost its
+    // history.
+    let outcome = chats.migrate_chat_id(&old, &new)
         .await.expect("the repeated migration must be a no-op");
+    assert_eq!(outcome, ChatMigrationOutcome::Migrated,
+        "the second announcement of a successful migration must not report a loss");
     let still_there = chats.get_chat(new.into())
         .await.expect("couldn't fetch")
         .expect("the chat must still exist");

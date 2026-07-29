@@ -120,7 +120,7 @@ commands:
 inline:
   results:
     text: "Clicca il tasto qui sotto per avere il risultato!"
-    text_legacy_group: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo da una query inline — premi il tasto qui sotto per avere il risultato.\n\nIl tasto servirà ogni volta: sparisce solo quando il gruppo diventa un supergruppo. Meglio ancora, aggiungi il bot alla chat! Così bastano i comandi normali, e i risultati inline conteranno insieme a loro."
+    text_legacy_group: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo da una query inline — premi il tasto qui sotto per avere il risultato.\n\nIl tasto servirà ogni volta. Meglio ancora, aggiungi il bot alla chat e premi il suo tasto di attivazione! Così bastano i comandi normali, e i risultati inline conteranno insieme a loro.\n\nE fallo prima che il gruppo diventi un supergruppo: altrimenti tutto ciò che è stato giocato qui in modalità inline andrà perso per sempre."
     button: "Cliccami!"
     titles:
       grow: "Fai crescere il tuo pene!"
@@ -146,7 +146,7 @@ titles:
     help-pussies: "buco profondo"
     loan-payout: "micro-loaner"
 setup:
-  text: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo quando vengo chiamato in modalità inline.\n\nPremi il pulsante qui sotto <b>una volta</b> per attivarmi qui — dopodiché tutto funzionerà come al solito."
+  text: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo quando vengo chiamato in modalità inline.\n\nPremi il pulsante qui sotto <b>una volta</b> per attivarmi qui — dopodiché tutto funzionerà come al solito.\n\nFinché non viene premuto, tutto ciò che è stato giocato in modalità inline andrà perso se il gruppo diventa un supergruppo."
   button: "Attiva"
   activated: "Fatto! Il bot è ora attivo in questo gruppo. Buon divertimento! 🍆"
 migration:
