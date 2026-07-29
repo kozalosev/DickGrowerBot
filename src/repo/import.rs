@@ -30,7 +30,7 @@ repository!(Import,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id))]
+    #[tracing::instrument(skip_all, fields(chat_id = chat_id))]
     async fn insert_into_imports_table(
         tx: &mut Transaction<'_, Postgres>,
         chat_id: i64,
@@ -48,7 +48,7 @@ repository!(Import,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id))]
+    #[tracing::instrument(skip_all, fields(chat_id = chat_id))]
     async fn update_dicks(tx: &mut Transaction<'_, Postgres>, chat_id: i64, uids: Vec<UserId>) -> anyhow::Result<()> {
         sqlx::query!("WITH original AS (SELECT c.id as chat_id, uid, original_length
                         FROM Imports JOIN Chats c USING (chat_id)

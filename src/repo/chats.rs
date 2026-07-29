@@ -274,7 +274,7 @@ repository!(Chats, with_feature_toggles,
     /// anchored. A chat migrates once, so an existing record means the journal is being written
     /// twice for one event and the first one stands.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(internal_id = internal_id, old = %old, new = %new))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id, old = %old, new = %new))]
     async fn journal_migration(
         tx: &mut Transaction<'_, Postgres>,
         internal_id: i64,
@@ -309,7 +309,7 @@ repository!(Chats, with_feature_toggles,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(internal_id, chat_id = ?chat_id, chat_instance = ?chat_instance))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id, chat_id = ?chat_id, chat_instance = ?chat_instance))]
     async fn update_chat(
         tx: &mut Transaction<'_, Postgres>,
         internal_id: i64,

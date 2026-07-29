@@ -240,7 +240,7 @@ pub mod checks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
     pub async fn handle_not_group_chat(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
         let answer = t!("errors.not_group_chat", locale = &lang_code);
         reply_html!(bot, msg, answer);
@@ -261,7 +261,7 @@ pub mod checks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
     async fn handle_group_account(
         bot: Bot,
         msg: Message,
@@ -279,7 +279,8 @@ pub mod checks {
     ///
     /// Only relevant when `chats_merging` is on: with it off, inline and command invocations are
     /// deliberately kept in separate rows, so there is nothing to pair up and nothing to gate.
-    #[autometrics]
+    // No `#[autometrics]`: this returns a plain `bool` and deliberately swallows a DB error into
+    // `false` (fail-open), so an error counter here would read zero exactly when the gate breaks.
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0))]
     async fn needs_setup(msg: Message, repos: Repositories, config: AppConfig) -> bool {
         if !config.features.chats_merging || !msg.chat.is_group() {
@@ -303,7 +304,7 @@ pub mod checks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg)))]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg)))]
     async fn handle_needs_setup(bot: Bot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         super::setup::send_setup_message(&bot, msg.chat.id, &lang_code).await?;
@@ -345,7 +346,7 @@ pub mod checks {
         }
 
         #[autometrics]
-        #[tracing::instrument(skip_all, fields(user_id = query.from.id.0))]
+        #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
         pub async fn handle_not_group_chat(bot: Bot, query: InlineQuery) -> HandlerResult {
             bot.answer_inline_query(query.id, vec![])
                 .is_personal(true)

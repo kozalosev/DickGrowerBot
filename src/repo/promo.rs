@@ -42,8 +42,6 @@ struct PromoCodeInfo {
 
 repository!(Promo,
     #[cfg(test)]
-    #[autometrics]
-    #[tracing::instrument(skip_all, fields(code = %p.code, bonus = p.bonus_length, capacity = p.capacity))]
     pub async fn create(&self, p: PromoCodeParams) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Promo_Codes (code, bonus_length, capacity) VALUES ($1, $2, $3)",
                 p.code, p.bonus_length as i32, p.capacity as i32)
@@ -53,7 +51,7 @@ repository!(Promo,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), code = %code))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), code = %code))]
     pub async fn activate(&self, user_id: UserId, code: &str) -> Result<ActivationResult, ActivationError> {
         let mut tx = self.pool.begin().await?;
 
@@ -105,7 +103,7 @@ repository!(Promo,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), bonus))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), bonus = bonus))]
     async fn grow_dicks(tx: &mut sqlx::Transaction<'_, Postgres>, user_id: UserId, bonus: i32) -> anyhow::Result<u64> {
         let rows_affected = sqlx::query!("UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $2) WHERE uid = $1",
                 user_id as UserId, i64::from(bonus))
@@ -117,7 +115,7 @@ repository!(Promo,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = uid.value(), code = %code, affected_chats))]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), code = %code, affected_chats = affected_chats))]
     async fn add_activation(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         uid: UserId,

@@ -56,7 +56,7 @@ repository!(BattleStatsRepo, with_(chats)_(Chats),
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_kind, user_id = user_id.value()))]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_kind, uid = user_id.value()))]
     pub async fn get_stats(&self, chat_id_kind: &ChatIdKind, user_id: UserId) -> anyhow::Result<UserStats> {
         sqlx::query_as!(UserStatsEntity, "SELECT battles_total, battles_won, win_streak_max, win_streak_current, acquired_length, lost_length FROM Battle_Stats \
                 WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text) AND uid = $2",

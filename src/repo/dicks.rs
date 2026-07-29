@@ -144,7 +144,7 @@ impl Dicks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, bonus = %bonus))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id, bonus = %bonus))]
     pub async fn set_dod_winner(
         &self,
         chat_id: &ChatIdPartiality,
@@ -166,7 +166,7 @@ impl Dicks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, length = %length))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id, length = %length))]
     pub async fn check_dick(&self, chat_id: &ChatIdKind, user_id: UserId, length: Bet) -> anyhow::Result<bool> {
         sqlx::query_scalar!(r#"SELECT length >= $3 AS "enough!" FROM Dicks d
                 JOIN Chats c ON d.chat_id = c.id
@@ -211,7 +211,7 @@ impl Dicks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, user_id = user_id.value(), change = %change))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = user_id.value(), change = %change))]
     async fn move_length_for_one_user(
         tx: &mut Transaction<'_, Postgres>,
         chat_id_internal: InternalChatId,
@@ -227,7 +227,7 @@ impl Dicks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, uid = uid.value()))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = uid.value()))]
     async fn get_position_in_top(
         &self,
         chat_id_internal: InternalChatId,
@@ -252,7 +252,7 @@ impl Dicks {
     }
     
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, change = %change))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id, change = %change))]
     pub async fn grow_no_attempts_check(
         &self,
         chat_id: &ChatIdKind,
@@ -269,7 +269,7 @@ impl Dicks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, user_id = user_id.value(), bonus = %bonus))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = user_id.value(), bonus = %bonus))]
     pub(super) async fn grow_no_attempts_check_internal<'c, E>(
         executor: E,
         chat_id_internal: InternalChatId,
@@ -290,7 +290,7 @@ impl Dicks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_internal, user_id = user_id.value()))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = user_id.value()))]
     async fn insert_to_dod_table(
         tx: &mut Transaction<'_, Postgres>,
         chat_id_internal: InternalChatId,

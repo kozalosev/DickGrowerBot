@@ -33,7 +33,7 @@ impl LanguageCommands {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
@@ -119,7 +119,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), user_id = query.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = %lang_code))]
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,

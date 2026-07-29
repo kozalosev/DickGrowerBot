@@ -62,7 +62,7 @@ impl Loans {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(user_id = user_id.value(), chat_id = %chat_id, value = %value))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id, value = %value))]
     pub async fn borrow(&self, user_id: UserId, chat_id: &ChatIdKind, value: Debt) -> anyhow::Result<BorrowResult> {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
         let mut tx = self.pool.begin().await?;
@@ -102,7 +102,7 @@ impl Loans {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_internal_id))]
+#[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_internal_id))]
 async fn fetch_length_locked(
     tx: &mut Transaction<'_, Postgres>,
     uid: UserId,
@@ -116,7 +116,7 @@ async fn fetch_length_locked(
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_internal_id))]
+#[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_internal_id))]
 async fn get_active_loan(
     tx: &mut Transaction<'_, Postgres>,
     uid: UserId,
@@ -134,7 +134,7 @@ async fn get_active_loan(
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_internal_id, value = %value, payout_ratio = payout_ratio.value()))]
+#[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_internal_id, value = %value, payout_ratio = payout_ratio.value()))]
 async fn create_loan(
     tx: &mut Transaction<'_, Postgres>,
     chat_internal_id: InternalChatId,

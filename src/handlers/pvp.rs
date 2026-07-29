@@ -94,7 +94,7 @@ impl TryFrom<String> for BattleCallbackData {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
@@ -122,7 +122,7 @@ pub async fn cmd_handler(
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, user_id = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
 pub async fn cmd_handler_no_args(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
     metrics::CMD_PVP_COUNTER.chat.inc();
 
@@ -141,7 +141,7 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(user_id = query.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = %lang_code))]
 pub async fn inline_handler(bot: Bot, query: InlineQuery, lang_code: LanguageCode) -> HandlerResult {
     metrics::INLINE_COUNTER.invoked();
 
@@ -192,7 +192,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), user_id = query.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = %lang_code))]
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,

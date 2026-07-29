@@ -82,7 +82,7 @@ pub fn added_to_legacy_group_filter(upd: ChatMemberUpdated, config: AppConfig) -
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = upd.chat.id.0, user_id = upd.from.id.0))]
+#[tracing::instrument(skip_all, fields(chat_id = upd.chat.id.0, uid = upd.from.id.0))]
 pub async fn added_to_legacy_group_handler(bot: Bot, upd: ChatMemberUpdated) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&upd.from);
     send_setup_message(&bot, upd.chat.id, &lang_code).await?;
@@ -153,7 +153,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), user_id = query.from.id.0))]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0))]
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories) -> HandlerResult {
     SetupCallbackData::parse(&query)?;
     let lang_code = LanguageCode::from_user(&query.from);
