@@ -24,6 +24,14 @@ pub struct RecentShrink {
     pub length: Length,
 }
 
+/// Named rather than a `(NaiveDate, NaiveDate)` pair: the two are trivially swappable, and the
+/// list runs newest-first, so "previous"/"next" would be ambiguous about which way they point.
+#[derive(Clone, Copy)]
+pub struct AdjacentDates {
+    pub older: Option<NaiveDate>,
+    pub newer: Option<NaiveDate>,
+}
+
 repository!(Shrinks,
     /// Shrinks every dick that is still positive and hasn't been grown for `grace_days`, logging
     /// each shrink into `Stale_Dick_Shrinks` and returning the events for the broadcast. The whole thing
@@ -117,7 +125,7 @@ repository!(Shrinks,
         &self,
         chat_id: &ChatIdKind,
         date: NaiveDate,
-    ) -> anyhow::Result<(Option<NaiveDate>, Option<NaiveDate>)> {
+    ) -> anyhow::Result<AdjacentDates> {
         let older = sqlx::query_scalar!(
             r#"SELECT MAX(s.created_at) AS "created_at"
                 FROM Stale_Dick_Shrinks s
@@ -138,6 +146,6 @@ repository!(Shrinks,
             .fetch_one(&self.pool)
             .await
             .context(format!("couldn't fetch the newer shrink date for {chat_id}"))?;
-        Ok((older, newer))
+        Ok(AdjacentDates { older, newer })
     }
 );

@@ -383,20 +383,20 @@ async fn test_get_latest_and_adjacent_shrink_dates() {
         .expect("couldn't fetch the latest shrink date");
     assert_eq!(latest, Some(newest), "the latest date must be the most recent day with shrinks");
 
-    let (older, newer) = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, middle).await
+    let from_middle = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, middle).await
         .expect("couldn't fetch neighbours of the middle date");
-    assert_eq!(older, Some(oldest), "the nearest older date");
-    assert_eq!(newer, Some(newest), "the nearest newer date");
+    assert_eq!(from_middle.older, Some(oldest), "the nearest older date");
+    assert_eq!(from_middle.newer, Some(newest), "the nearest newer date");
 
-    let (older_of_newest, newer_of_newest) = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, newest).await
+    let from_newest = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, newest).await
         .expect("couldn't fetch neighbours of the newest date");
-    assert_eq!(older_of_newest, Some(middle));
-    assert_eq!(newer_of_newest, None, "there is nothing newer than the newest date");
+    assert_eq!(from_newest.older, Some(middle));
+    assert_eq!(from_newest.newer, None, "there is nothing newer than the newest date");
 
-    let (older_of_oldest, newer_of_oldest) = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, oldest).await
+    let from_oldest = shrinks.get_adjacent_shrink_dates(&CHAT_ID_KIND, oldest).await
         .expect("couldn't fetch neighbours of the oldest date");
-    assert_eq!(older_of_oldest, None, "there is nothing older than the oldest date");
-    assert_eq!(newer_of_oldest, Some(middle));
+    assert_eq!(from_oldest.older, None, "there is nothing older than the oldest date");
+    assert_eq!(from_oldest.newer, Some(middle));
 }
 
 #[tokio::test]

@@ -11,7 +11,7 @@ use crate::domain::primitives::chat::ChatIdKind;
 use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerResult};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
-use crate::repo::{RecentShrink, Repositories, ShrinkEvent};
+use crate::repo::{AdjacentDates, RecentShrink, Repositories, ShrinkEvent};
 
 pub(crate) struct ShrinksPage {
     pub lines: String,
@@ -149,7 +149,7 @@ pub(crate) fn build_shrink_keyboard(
     date: NaiveDate,
     page: Page,
     has_more_pages: bool,
-    adjacent: Option<(Option<NaiveDate>, Option<NaiveDate>)>,
+    adjacent: Option<AdjacentDates>,
 ) -> Option<InlineKeyboardMarkup> {
     let callback = |date: NaiveDate, page: Page| ShrinkCallbackData { view, date, page }.to_data_string();
 
@@ -163,7 +163,7 @@ pub(crate) fn build_shrink_keyboard(
         user_row.push(InlineKeyboardButton::callback("➡️", callback(date, next_page)));
     }
 
-    let day_row = adjacent.map(|(older, newer)| {
+    let day_row = adjacent.map(|AdjacentDates { older, newer }| {
         let mut row = Vec::new();
         if let Some(d) = older {
             row.push(InlineKeyboardButton::callback(format!("⬅️ {}", d.format("%d %b")), callback(d, Page::first())));
