@@ -102,7 +102,7 @@ impl InlineCommand {
                     .map(InlineResult::text)
             },
             InlineCommand::Shrinks => {
-                metrics::CMD_SHRINKS.inline.inc();
+                metrics::CMD_SHRINKS.inc();
                 shrink::recent_shrinks_impl(repos, from_refs, &config, &lang_code)
                     .await
                     .map(|(page, keyboard)| {

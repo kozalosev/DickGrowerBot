@@ -30,8 +30,8 @@ pub static CMD_PVP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_pvp_usage_total", "count of /pvp invocations"));
 pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
-pub static CMD_SHRINKS: Lazy<BothModesCounters> = Lazy::new(||
-    BothModesCounters::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
+pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
 pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_import_usage_total", "count of /import invocations and successes", ["invoked", "finished"]));
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
@@ -50,6 +50,7 @@ pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
     AnnouncementCounter::new("announcement_shown_total", "count of announcements shown at the end of the Dick of the Day message, split by the recipient's language"));
 pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
+pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
 
 pub fn init() -> axum::Router {
     force_registration();
@@ -92,6 +93,7 @@ fn force_registration() {
     Lazy::force(&SELF_DESTRUCTION);
     Lazy::force(&ANNOUNCEMENT_SHOWN);
     Lazy::force(&CHAT_MIGRATION);
+    Lazy::force(&DAILY_SHRINK);
 }
 
 pub struct Counter(IntCounter);
@@ -142,6 +144,10 @@ impl Counter {
 
     pub fn inc(&self) {
         self.0.inc()
+    }
+
+    pub fn inc_by(&self, count: u64) {
+        self.0.inc_by(count)
     }
 }
 
@@ -366,6 +372,75 @@ impl ChatMigrationCounter {
     }
 }
 
+/// Counters of the daily shrink job: the runs, the shrunk dicks, and the sent summaries.
+/// Without them the job is visible in the logs only.
+///
+/// Alert on `daily_shrink_run_total` when it stops growing for more than 26 hours. That means the
+/// scheduler died: it is a detached task and it stops for good if it can't compute the next
+/// wake-up time (see `spawn_daily_shrink`). A day with nothing to shrink still counts as a run,
+/// under the `empty` label, so a quiet day doesn't look like a dead scheduler.
+pub struct DailyShrinkCounters {
+    runs: CounterVec,
+    victims: CounterVec,
+    broadcasts: CounterVec,
+}
+
+impl DailyShrinkCounters {
+    fn new() -> Self {
+        let runs = CounterVec::new("daily_shrink_run_total",
+            "count of daily shrink runs by outcome: succeeded when dicks were shrunk, empty when there was nothing to shrink today, failed when the shrinking statement itself errored", &["outcome"]);
+        let victims = CounterVec::new("daily_shrink_victims_total",
+            "count of dicks shrunk, by how their owners get to hear about it: broadcast when their chat can be messaged, inline_only when it can't and the shrinks command is the only way to see it", &["delivery"]);
+        let broadcasts = CounterVec::new("daily_shrink_broadcast_total",
+            "count of per-chat shrink summaries by outcome: sent, or failed when Telegram rejected the message (one sample per chat, not per victim)", &["outcome"]);
+        for outcome in ["succeeded", "empty", "failed"] {
+            runs.counter(&[outcome]);
+        }
+        for delivery in ["broadcast", "inline_only"] {
+            victims.counter(&[delivery]);
+        }
+        for outcome in ["sent", "failed"] {
+            broadcasts.counter(&[outcome]);
+        }
+        Self { runs, victims, broadcasts }
+    }
+
+    /// A run that shrank at least one dick.
+    pub fn run_succeeded(&self) {
+        self.runs.counter(&["succeeded"]).inc()
+    }
+
+    /// A run that found nothing to shrink. A normal day, not a problem.
+    pub fn run_empty(&self) {
+        self.runs.counter(&["empty"]).inc()
+    }
+
+    /// A run where the SQL statement failed. Nothing was shrunk and nothing was announced.
+    pub fn run_failed(&self) {
+        self.runs.counter(&["failed"]).inc()
+    }
+
+    /// `count` dicks shrunk in chats the bot can post to.
+    pub fn victims_to_broadcast(&self, count: u64) {
+        self.victims.counter(&["broadcast"]).inc_by(count)
+    }
+
+    /// `count` dicks shrunk in inline-only chats. Such chats get no summary message.
+    pub fn victims_inline_only(&self, count: u64) {
+        self.victims.counter(&["inline_only"]).inc_by(count)
+    }
+
+    /// One chat's summary delivered.
+    pub fn broadcast_sent(&self) {
+        self.broadcasts.counter(&["sent"]).inc()
+    }
+
+    /// One chat's summary was not delivered. Its members can still use the shrinks command.
+    pub fn broadcast_failed(&self) {
+        self.broadcasts.counter(&["failed"]).inc()
+    }
+}
+
 /// The sender's Telegram `language_code`, kept whole (region suffix included) and lowercased
 /// (`"zh-TW"` → `"zh-tw"`, `"EN-us"` → `"en-us"`); anything absent or not shaped like a language
 /// tag becomes `"unknown"` (keeps the metric's label cardinality bounded).
@@ -383,22 +458,48 @@ mod tests {
     use prometheus::{Encoder, TextEncoder};
     use strum::IntoEnumIterator;
     use crate::repo::ChatMigrationOutcome;
-    use super::{CHAT_MIGRATION, language_label, REGISTRY};
+    use super::{CHAT_MIGRATION, DAILY_SHRINK, language_label, REGISTRY};
+
+    /// The `/metrics` body, as the endpoint would render our own registry.
+    fn render_metrics() -> String {
+        let mut buffer = vec![];
+        TextEncoder::new().encode(&REGISTRY.gather(), &mut buffer)
+            .expect("couldn't encode the metrics");
+        String::from_utf8(buffer)
+            .expect("the metrics buffer is not valid UTF-8")
+    }
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.
     #[test]
     fn every_chat_migration_outcome_is_exported() {
         Lazy::force(&CHAT_MIGRATION);
-        let mut buffer = vec![];
-        TextEncoder::new().encode(&REGISTRY.gather(), &mut buffer)
-            .expect("couldn't encode the metrics");
-        let rendered = String::from_utf8(buffer)
-            .expect("the metrics buffer is not valid UTF-8");
+        let rendered = render_metrics();
 
         for outcome in ChatMigrationOutcome::iter() {
             let series = format!("chat_migration_total{{outcome=\"{outcome}\"}}");
             assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
+    }
+
+    /// We alert on counters that stop growing, so every series must exist from the start.
+    /// A `failed` series that appears only after the first failure gives no data at all
+    /// before it, and an alert can't tell that from a healthy day.
+    #[test]
+    fn every_daily_shrink_series_is_exported() {
+        Lazy::force(&DAILY_SHRINK);
+        let rendered = render_metrics();
+
+        let expected = [
+            ("daily_shrink_run_total", "outcome", ["succeeded", "empty", "failed"].as_slice()),
+            ("daily_shrink_victims_total", "delivery", ["broadcast", "inline_only"].as_slice()),
+            ("daily_shrink_broadcast_total", "outcome", ["sent", "failed"].as_slice()),
+        ];
+        for (metric, label, values) in expected {
+            for value in values {
+                let series = format!("{metric}{{{label}=\"{value}\"}}");
+                assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+            }
         }
     }
 

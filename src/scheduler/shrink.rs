@@ -11,12 +11,14 @@ use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Page, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::handlers::shrink::{build_shrink_keyboard, render_shrinks_page, ShrinkView};
+use crate::metrics;
 use crate::repo::{Repositories, ShrinkEvent};
 use crate::users::LanguageService;
 
 /// Runs the daily shrink: applies the decay in one DB statement, then broadcasts a per-chat summary
-/// to every affected group chat. Inline-only chats (no messageable `chat_id`) are silently skipped —
-/// their members see the events via the `shrinks` inline command instead.
+/// to every affected group chat. Inline-only chats (no messageable `chat_id`) get no message. Their
+/// members see the events via the `shrinks` inline command. Their victims are still counted, under
+/// the `inline_only` label of [`metrics::DAILY_SHRINK`].
 pub async fn run_daily_shrink(
     bot: Throttle<Bot>,
     repos: Repositories,
@@ -29,28 +31,41 @@ pub async fn run_daily_shrink(
             config.daily_shrink.inactivity_days,
             config.daily_shrink.ramp_up_days,
         )
-        .await?;
+        .await
+        .inspect_err(|_| metrics::DAILY_SHRINK.run_failed())?;
     if events.is_empty() {
+        metrics::DAILY_SHRINK.run_empty();
         log::info!("daily shrink: nothing to shrink today");
         return Ok(());
     }
+    metrics::DAILY_SHRINK.run_succeeded();
 
     // The scheduler only ever wakes up at UTC midnight (see `spawn_daily_shrink`), and the shrinks
     // just logged carry Postgres's `current_date` — also UTC — so this is the exact day they belong
     // to. Captured once so every chat's broadcast pins the same date its shrinks were logged under.
     let today = Utc::now().date_naive();
 
+    let total = events.len() as u64;
     let mut by_chat: HashMap<TelegramChatId, Vec<ShrinkEvent>> = HashMap::new();
     for event in events {
         if let Some(chat_id) = event.messageable_chat_id {
             by_chat.entry(chat_id).or_default().push(event);
         }
     }
+    // Everything not in `by_chat` is from an inline-only chat. Counting both labels here keeps
+    // their sum equal to the number of victims in this run.
+    let to_broadcast: u64 = by_chat.values().map(|victims| victims.len() as u64).sum();
+    metrics::DAILY_SHRINK.victims_to_broadcast(to_broadcast);
+    metrics::DAILY_SHRINK.victims_inline_only(total - to_broadcast);
 
     for (chat_id, victims) in by_chat {
-        if let Err(e) = broadcast_shrink(&bot, &repos, &language_service, &config, chat_id, today, &victims).await {
-            log::warn!("daily shrink: couldn't notify chat {chat_id}: {e:#}");
-        }
+        broadcast_shrink(&bot, &repos, &language_service, &config, chat_id, today, &victims)
+            .await
+            .inspect(|_| metrics::DAILY_SHRINK.broadcast_sent())
+            .unwrap_or_else(|e| {
+                metrics::DAILY_SHRINK.broadcast_failed();
+                log::warn!("daily shrink: couldn't notify chat {chat_id}: {e:#}");
+            });
     }
     Ok(())
 }
