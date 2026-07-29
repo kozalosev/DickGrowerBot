@@ -12,7 +12,8 @@ quote = "1.0.47"
 proc-macro2 = "1.0.107"
 
 # The generated code references `::domain_types`, `::derive_more`, `::serde`, `::num_traits`
-# (and `::sqlx` unless `features(not_database_type)`) — those are resolved in the CONSUMER
+# (and `::sqlx`, unless the inner type is an unsigned 64-bit integer with no signed type wide
+# enough to bump into — see `SqlxMode` in src/lib.rs) — those are resolved in the CONSUMER
 # crate, so they are only dev-dependencies here (for the integration tests).
 
 [dev-dependencies]
@@ -20,3 +21,4 @@ domain_types = { version = "0.1.0", path = "../domain_types" }
 derive_more = { version = "2.1.1", features = ["display", "from", "constructor", "error", "from_str", "add", "mul", "not", "add_assign", "mul_assign"] }
 serde = { version = "1.0.229", features = ["derive"] }
 num-traits = "0.2.19"
+sqlx = { version = "0.9.0", features = ["postgres"] }

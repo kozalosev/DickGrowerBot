@@ -15,7 +15,7 @@ use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
-use crate::handlers::{build_pagination_keyboard, dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, stats, utils, pvp};
+use crate::handlers::{dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -29,6 +29,7 @@ enum InlineCommand {
     DickOfDay,
     Loan,
     Stats,
+    Shrinks,
 }
 
 struct InlineResult {
@@ -77,7 +78,7 @@ impl InlineCommand {
                     .map(|top| {
                         let mut res = InlineResult::text(top.lines);
                         res.keyboard = config.features.top_unlimited
-                            .then_some(build_pagination_keyboard(Page::first(), top.has_more_pages));
+                            .then_some(dick::build_pagination_keyboard(Page::first(), top.has_more_pages));
                         res
                     })
             },
@@ -98,6 +99,16 @@ impl InlineCommand {
                 stats::chat_stats_impl(repos, from_refs, config.features.pvp, &lang_code)
                     .await
                     .map(InlineResult::text)
+            },
+            InlineCommand::Shrinks => {
+                metrics::CMD_SHRINKS.inline.inc();
+                shrink::recent_shrinks_impl(repos, from_refs, &config, &lang_code)
+                    .await
+                    .map(|(page, keyboard)| {
+                        let mut res = InlineResult::text(page.lines);
+                        res.keyboard = keyboard;
+                        res
+                    })
             },
         }
     }
@@ -150,6 +161,8 @@ pub async fn inline_handler(
     let uid = query.from.id.0;
     let btn_label = t!("inline.results.button", locale = &lang_code);
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
+        // The `shrinks` command only makes sense when the daily shrink feature is on.
+        .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.stale_dicks_shrinking.enabled())
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {

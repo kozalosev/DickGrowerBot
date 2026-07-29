@@ -26,6 +26,14 @@ commands:
     ending: "<i>[+] 表示一個成長者今天還沒有增長他的老二。</i>"
     ending_inactive: "<i>[~] 表示一個成長者超過 %{days} 天沒有增長他的老二了。</i>"
     empty: "還沒有人加入遊戲 :("
+  shrink:
+    notification:
+      header: "✂️ <b>該修剪被忽視的了！</b> 這些屌 %{days} 天沒長還縮水了一點："
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> 縮了 <b>%{lost}</b> 公分（現在 <b>%{length}</b> 公分，別灰心！）"
+    recent:
+      header: "✂️ <b>最近都是誰縮水了：</b>"
+      line: "— <b>%{name}</b> 縮了 <b>%{lost}</b> 公分"
+    empty: "安靜……最近沒人縮水。看來大家都跟上節奏了 💪"
   dod:
     result: "今日老二是<b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>！\n\n他的老二增長了<b>%{growth} 公分</b>，現在長度為<b>%{length}</b> 公分。"
     position: "他在排行榜上的位置是<b>%{pos}</b>。"
@@ -108,6 +116,7 @@ inline:
       pvp: "用 %{bet} 公分的賭注挑戰其他人！"
       stats: "勝利統計"
       loan: "負數？申請貸款！"
+      shrinks: "查看最近的縮水"
   callback:
     errors:
       another_user: "此訊息由其他人發送。"

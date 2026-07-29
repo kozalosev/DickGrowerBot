@@ -1,5 +1,5 @@
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{LengthChange, Limit, Offset, SupportedLanguage};
+use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, SupportedLanguage};
 use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality};
 use crate::repo;
@@ -116,7 +116,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
     check_chat(chats, id, inst).await;
 
     let chat_id_kind = chat_id.kind();
-    let dick = dicks.get_top(&chat_id_kind, Offset::new(0), Limit::literal(1))
+    let dick = dicks.get_top(&chat_id_kind, Offset::new(0), Limit::literal(1), DaysCount::new(7))
         .await.expect("couldn't fetch the dick");
     assert_eq!(dick.len(), 1);
     assert_eq!(dick[0].length, 3);

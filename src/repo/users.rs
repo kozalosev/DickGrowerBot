@@ -1,6 +1,6 @@
 use anyhow::Context;
 use crate::domain::objects::User;
-use crate::domain::primitives::{Ratio, UserId, Username};
+use crate::domain::primitives::{DaysCount, Ratio, UserId, Username};
 use crate::repo::ChatIdKind;
 use crate::repository;
 
@@ -28,15 +28,19 @@ repository!(Users,
             .context(format!("couldn't get users of the chat with id = {chat_id}"))
     }
 ,
-    pub async fn get_random_active_member(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<User>> {
+    pub async fn get_random_active_member(
+        &self,
+        chat_id: &ChatIdKind,
+        inactivity_days: DaysCount,
+    ) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             r#"SELECT u.uid AS "uid: UserId", name AS "name: Username", u.created_at FROM Users u
                 JOIN Dicks d USING (uid)
                 JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
-                    AND updated_at > current_timestamp - interval '1 week'
+                    AND updated_at > current_timestamp - make_interval(days => $2::bigint::int)
                 ORDER BY random() LIMIT 1"#,
-                chat_id.value() as String)
+                chat_id.value() as String, inactivity_days as DaysCount)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
@@ -46,6 +50,7 @@ repository!(Users,
         &self,
         chat_id: &ChatIdKind,
         rich_exclusion_ratio: Ratio,
+        inactivity_days: DaysCount,
     ) -> anyhow::Result<Option<User>> {
         let wealth_borderline = (Ratio::literal(1.0) - rich_exclusion_ratio)?;
         sqlx::query_as!(User,
@@ -55,13 +60,13 @@ repository!(Users,
                     JOIN Dicks d USING (uid)
                     JOIN Chats c ON d.chat_id = c.id
                     WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
-                        AND updated_at > current_timestamp - interval '1 week'
+                        AND updated_at > current_timestamp - make_interval(days => $3::bigint::int)
             )
             SELECT uid AS "uid: UserId", name AS "name: Username", created_at
             FROM ranked_users
             WHERE percentile_rank <= $2
             ORDER BY random() LIMIT 1"#,
-                chat_id.value() as String, wealth_borderline as Ratio)
+                chat_id.value() as String, wealth_borderline as Ratio, inactivity_days as DaysCount)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a random active poor user of the chat with id = {chat_id}"))
@@ -75,6 +80,7 @@ repository!(Users,
     pub async fn get_random_active_member_with_poor_in_priority(
         &self,
         chat_id: &ChatIdKind,
+        inactivity_days: DaysCount,
     ) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
             r#"WITH user_weights AS (
@@ -86,7 +92,7 @@ repository!(Users,
                   JOIN Dicks d USING (uid)
                   JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
-                  AND d.updated_at > current_timestamp - interval '1 week'
+                  AND d.updated_at > current_timestamp - make_interval(days => $2::bigint::int)
             ),
                  cumulative_weights AS (
                      SELECT uid, name, created_at, weight,
@@ -102,7 +108,7 @@ repository!(Users,
             WHERE cumulative_weight >= random_value.rand_value
             ORDER BY cumulative_weight
             LIMIT 1;  -- Select the first user whose cumulative weight exceeds the random value"#,
-                chat_id.value() as String)
+                chat_id.value() as String, inactivity_days as DaysCount)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))

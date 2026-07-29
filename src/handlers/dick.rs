@@ -1,22 +1,18 @@
-use std::future::IntoFuture;
 
 use anyhow::{anyhow, Context};
 use chrono::{Datelike, Utc};
-use futures::future::join;
-use futures::TryFutureExt;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
 use crate::{metrics, reply_html, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
-use crate::handlers::{HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::{answer_callback_feature_disabled, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
@@ -58,7 +54,8 @@ pub async fn dick_cmd_handler(
             let top = top_impl(&repos, &config, from_refs, lang_code.clone(), Page::first()).await?;
             let mut request = reply_html(bot.clone(), &msg, top.lines);
             if top.has_more_pages && config.features.top_unlimited {
-                let keyboard = ReplyMarkup::InlineKeyboard(build_pagination_keyboard(Page::first(), top.has_more_pages));
+                let keyboard = ReplyMarkup::InlineKeyboard(
+                    build_pagination_keyboard(Page::first(), top.has_more_pages));
                 request.reply_markup.replace(keyboard);
             }
             let sent = request.await.context(format!("failed for {msg:?}"))?;
@@ -151,8 +148,8 @@ pub(crate) async fn top_impl(
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let offset = Offset::calculate(page, config.top_limit);
     let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
-    let dicks = repos.dicks.get_top(&chat_id, offset, query_limit).await?;
-    let has_more_pages = (dicks.len() as i16) > config.top_limit.value();
+    let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
+    let has_more_pages = dicks.len() > config.top_limit.value() as usize;
     let mut any_inactive = false;
     let lines = dicks.into_iter()
         .take(config.top_limit.value() as usize)
@@ -234,32 +231,11 @@ pub async fn page_callback_handler(
     let top = top_impl(&repos, &config, from_refs, lang_code, page).await?;
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
-    let (answer_callback_query_result, edit_message_result) = match &edit_msg_req_params {
-        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-            let mut edit_message_text_req = bot.edit_message_text(*chat_id, *message_id, top.lines);
-            edit_message_text_req.parse_mode.replace(ParseMode::Html);
-            edit_message_text_req.reply_markup.replace(keyboard);
-            join(
-                bot.answer_callback_query(q.id.clone()).into_future(),
-                edit_message_text_req.into_future().map_ok(|_| ())
-            ).await
-        },
-        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-            let mut edit_message_text_inline_req = bot.edit_message_text_inline(inline_message_id, top.lines);
-            edit_message_text_inline_req.parse_mode.replace(ParseMode::Html);
-            edit_message_text_inline_req.reply_markup.replace(keyboard);
-            join(
-                bot.answer_callback_query(q.id.clone()).into_future(),
-                edit_message_text_inline_req.into_future().map_ok(|_| ())
-            ).await
-        }
-    };
-    answer_callback_query_result.context(format!("failed to answer a callback query {q:?}"))?;
-    edit_message_result.context(format!("failed to edit the message of {edit_msg_req_params:?}"))?;
+    callbacks::answer_and_edit_page(&bot, &q, &edit_msg_req_params, top.lines, keyboard).await?;
     Ok(())
 }
 
-pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
+pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
     let mut buttons = Vec::new();
     if page > 0 {
         let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
@@ -270,26 +246,4 @@ pub fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyb
         buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
     InlineKeyboardMarkup::new(vec![buttons])
-}
-
-async fn answer_callback_feature_disabled(
-    bot: Bot,
-    q: &CallbackQuery,
-    edit_msg_req_params: callbacks::EditMessageReqParamsKind,
-    lang_code: LanguageCode,
-) -> HandlerResult {
-    let mut answer = bot.answer_callback_query(q.id.clone());
-    answer.show_alert.replace(true);
-    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
-    answer.await?;
-
-    match edit_msg_req_params {
-        callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
-            bot.edit_message_reply_markup(chat_id, message_id)
-                .await.map(|_| ())?,
-        callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
-            bot.edit_message_reply_markup_inline(inline_message_id)
-                .await.map(|_| ())?
-    };
-    Ok(())
 }

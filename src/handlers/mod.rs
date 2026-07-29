@@ -6,6 +6,7 @@ mod dod;
 mod import;
 mod promo;
 mod inline;
+pub mod shrink;
 pub mod language;
 pub mod utils;
 pub mod pvp;
@@ -38,9 +39,9 @@ use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup),
-/// so the caller knows whether (and how soon) to schedule it for deletion. Shared by the
-/// commands whose reply may be either a permanent event or an ephemeral status (grow, DoD).
+/// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup), so the caller
+/// knows whether (and how soon) to schedule it for deletion — for commands whose reply may be
+/// either a permanent event or an ephemeral status.
 pub(crate) struct TaggedReply {
     pub text: String,
     pub group: MessageGroup,
@@ -170,6 +171,31 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
         .show_alert(true)
         .text(t!(tr_key, locale = &lang_code))
         .await?;
+    Ok(())
+}
+
+/// Answers a paging callback query with the "feature disabled" alert and strips the now-useless
+/// keyboard off the message it was attached to — a stale button can outlive the toggle that
+/// enabled its feature.
+pub(crate) async fn answer_callback_feature_disabled(
+    bot: Bot,
+    q: &CallbackQuery,
+    edit_msg_req_params: utils::callbacks::EditMessageReqParamsKind,
+    lang_code: LanguageCode,
+) -> HandlerResult {
+    let mut answer = bot.answer_callback_query(q.id.clone());
+    answer.show_alert.replace(true);
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
+    answer.await?;
+
+    match edit_msg_req_params {
+        utils::callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
+            bot.edit_message_reply_markup(chat_id, message_id)
+                .await.map(|_| ())?,
+        utils::callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
+            bot.edit_message_reply_markup_inline(inline_message_id)
+                .await.map(|_| ())?
+    };
     Ok(())
 }
 

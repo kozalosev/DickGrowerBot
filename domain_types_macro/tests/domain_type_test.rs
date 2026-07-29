@@ -1,8 +1,10 @@
 //! Integration tests for the `#[domain_type]` attribute macro.
 //!
-//! All types here use `features(not_database_type)` so that the tests
-//! don't need sqlx as a dev-dependency; the sqlx integration is exercised
-//! by the main crate itself.
+//! Every type here ends up `sqlx`-embeddable one way or another: signed/float/string inner types
+//! `#[sqlx(transparent)]`-derive directly, and unsigned inner types (`u8`/`u16`/`u32`) get hand-written
+//! impls bumped to the smallest signed integer that always fits (see `SqlxMode` in `src/lib.rs`) —
+//! which is why `sqlx` is a real dev-dependency here now, unlike when these tests opted out via the
+//! since-removed `not_database_type` flag.
 
 use std::str::FromStr;
 use domain_types_macro::domain_type;
@@ -19,60 +21,52 @@ const fn ratio_range(value: &f64) -> bool {
     *value >= 0.0 && *value <= 1.0
 }
 
-#[domain_type(features(not_database_type))]
+#[domain_type]
 struct Id(i64);
 
-#[domain_type(number, features(not_database_type))]
+#[domain_type(number)]
 struct Count(i32);
 
-#[domain_type(number, features(not_database_type))]
+#[domain_type(number)]
 struct Speed(f64);
 
 #[domain_type(
     number,
     validated(ge_zero, error_message("must be greater or equal to zero")),
-    features(not_database_type)
 )]
 struct Positive(i32);
 
 #[domain_type(
     number,
     validated(ratio_range, error_message("must be between 0 and 1")),
-    features(not_database_type)
 )]
 struct Ratio(f64);
 
-#[domain_type(number, division_result(Ratio), features(not_database_type))]
+#[domain_type(number, division_result(Ratio))]
 struct Wins(i64);
 
 // A validated ID/value type: no `number`, so no arithmetic surface is generated,
 // unlike `Positive` above.
 #[domain_type(
     validated(ge_zero_i64, error_message("must be greater or equal to zero")),
-    features(not_database_type)
 )]
 struct PositiveId(i64);
 
 // Same idea, over a float: a validated value type with no arithmetic surface.
 #[domain_type(
     validated(ratio_range, error_message("must be between 0 and 1")),
-    features(not_database_type)
 )]
 struct RatioValue(f64);
 
-#[domain_type(number, division_result(Speed), features(not_database_type))]
+#[domain_type(number, division_result(Speed))]
 struct Meters(i64);
 
-#[domain_type(features(not_database_type))]
+#[domain_type]
 struct Login(String);
 
-// Both feature flags combined, in either order, must parse.
 // `no_auto_display` types must provide Display manually (DomainType requires it).
-#[domain_type(features(not_database_type, no_auto_display))]
+#[domain_type(features(no_auto_display))]
 struct Opaque(i64);
-
-#[domain_type(features(no_auto_display, not_database_type))]
-struct OpaqueReversed(i64);
 
 impl std::fmt::Display for Opaque {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -80,11 +74,20 @@ impl std::fmt::Display for Opaque {
     }
 }
 
-impl std::fmt::Display for OpaqueReversed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "opaque[{}]", self.0)
-    }
-}
+// Unsigned inner types: `SqlxMode::Bumped` for u8/u16/u32 (bumped to i16/i32/i64 respectively —
+// see `sqlx_embeddable_for_every_bump_width` below), `SqlxMode::None` for u64 (no signed Postgres
+// type wide enough to bump into, so no `sqlx` impls at all — it just can't bind into a query).
+#[domain_type(number)]
+struct TinyCount(u8);
+
+#[domain_type(number)]
+struct MediumCount(u16);
+
+#[domain_type(number)]
+struct LargeCount(u32);
+
+#[domain_type(number)]
+struct HugeCount(u64);
 
 mod value_basics {
     use super::*;
@@ -320,11 +323,37 @@ mod combined_features {
 
     #[test]
     fn no_auto_display_types_use_the_manual_impl() {
-        // The real assertion is that the structs above compile at all (the feature list
-        // parses with a comma, in both orders); the manual Display is a bonus check.
         assert_eq!(Opaque::new(1).value(), 1);
         assert_eq!(Opaque::new(1).to_string(), "opaque[1]");
-        assert_eq!(OpaqueReversed::new(2).value(), 2);
+    }
+}
+
+mod bumped_unsigned_types {
+    use super::*;
+
+    #[test]
+    fn value_basics_hold_for_every_width() {
+        assert_eq!(TinyCount::new(200), 200);
+        assert_eq!(MediumCount::new(60_000), 60_000);
+        assert_eq!(LargeCount::new(4_000_000_000), 4_000_000_000);
+        assert_eq!(HugeCount::new(10_000_000_000_000_000_000), 10_000_000_000_000_000_000);
+    }
+
+    // Compile-time-only proof (no live DB needed) that u8/u16/u32-backed types are directly
+    // bindable into a Postgres query via sqlx, each bumped to the smallest signed integer that
+    // always fits (i16/i32/i64 respectively).
+    fn assert_sqlx_postgres_embeddable<T>()
+    where
+        T: for<'q> sqlx::Encode<'q, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>,
+    {
+    }
+
+    #[test]
+    fn sqlx_embeddable_for_every_bump_width() {
+        assert_sqlx_postgres_embeddable::<TinyCount>();
+        assert_sqlx_postgres_embeddable::<MediumCount>();
+        assert_sqlx_postgres_embeddable::<LargeCount>();
+        // No matching call for HugeCount (u64) — see the comment above its definition.
     }
 }
 

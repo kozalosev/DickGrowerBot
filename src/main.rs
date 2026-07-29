@@ -6,6 +6,7 @@ mod metrics;
 mod config;
 mod commands;
 mod users;
+mod scheduler;
 
 use std::net::SocketAddr;
 use futures::future::join_all;
@@ -63,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::inline_chosen_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
         .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::shrink::callback_filter).endpoint(handlers::shrink::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::pvp::callback_filter).endpoint(handlers::pvp::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::callback_handler))
@@ -98,6 +100,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webhook_url = integrations_config.webhook_url;
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let metrics_router = metrics::init();
+
+    // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
+    // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
+    scheduler::spawn_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), app_config.clone());
 
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![

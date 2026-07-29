@@ -32,6 +32,14 @@ commands:
     ending: "<i>[+] 表示一个牛子怪今天还没有增长他的丁丁。</i>"
     ending_inactive: "<i>[~] 表示一个牛子怪超过 %{days} 天没有增长他的丁丁了。</i>"
     empty: "还没有人加入游戏 :("
+  shrink:
+    notification:
+      header: "✂️ <b>该修剪被忽视的了！</b> 这些屌 %{days} 天没长还缩水了一点："
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> 缩了 <b>%{lost}</b> 厘米（现在 <b>%{length}</b> 厘米，别灰心！）"
+    recent:
+      header: "✂️ <b>最近都是谁缩水了：</b>"
+      line: "— <b>%{name}</b> 缩了 <b>%{lost}</b> 厘米"
+    empty: "安静……最近没人缩水。看来大家都跟上节奏了 💪"
   dod:
     description: "选举今日丁丁"
     result: "今日丁丁是<b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>！\n\n他的丁丁增长了<b>%{growth} 厘米</b>，现在长度为<b>%{length}</b> 厘米。"
@@ -120,6 +128,7 @@ inline:
       pvp: "用 %{bet} 厘米的赌注挑战其他人！"
       stats: "胜利统计"
       loan: "负数？申请贷款！"
+      shrinks: "查看最近的缩水"
   callback:
     errors:
       another_user: "此消息由其他人发送。"

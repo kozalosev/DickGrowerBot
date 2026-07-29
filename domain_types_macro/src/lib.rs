@@ -10,7 +10,6 @@ mod kw {
     syn::custom_keyword!(validated);
     syn::custom_keyword!(error_message);
     syn::custom_keyword!(features);
-    syn::custom_keyword!(not_database_type);
     syn::custom_keyword!(no_auto_display);
     syn::custom_keyword!(division_result);
 }
@@ -50,16 +49,28 @@ enum InnerTypeKind {
     String,
 }
 
+/// How a domain type maps onto `sqlx`. Postgres has no unsigned wire type, so an unsigned inner
+/// type can't `#[sqlx(transparent)]`-derive directly; instead it's encoded/decoded through the
+/// smallest signed integer type that can always represent its full range (see `bump_signed_type`).
+/// An unsigned type with no such "bump" type available (`u64` — `i128` isn't a Postgres wire type)
+/// gets no `sqlx` impls at all: it simply can't be bound into a query, and callers convert at the
+/// query boundary as needed.
+enum SqlxMode {
+    Transparent,
+    Bumped(Box<Type>),
+    None,
+}
+
 struct TypeInfo<'a> {
     name: &'a Ident,
     inner_type: Type,
     variant: DomainTypeKind,
     args: DomainTypeAttr,
+    sqlx_mode: SqlxMode,
 }
 
 struct DomainTypeAttr {
     number: bool,
-    not_database_type: bool,
     no_auto_display: bool,
     validator: Option<syn::Expr>,
     error_msg: Option<syn::LitStr>,
@@ -71,7 +82,6 @@ impl Parse for DomainTypeAttr {
         let mut number = false;
         let mut validator = None;
         let mut error_msg = None;
-        let mut not_database_type = false;
         let mut no_auto_display = false;
         let mut division_result = None;
 
@@ -95,9 +105,7 @@ impl Parse for DomainTypeAttr {
             }
             else if lookahead.peek(kw::features) {
                 input.parse::<kw::features>()?;
-                let (nd, na) = parse_features(input)?;
-                not_database_type = nd;
-                no_auto_display = na;
+                no_auto_display = parse_features(input)?;
             }
             else {
                 return Err(lookahead.error());
@@ -111,7 +119,6 @@ impl Parse for DomainTypeAttr {
 
         Ok(Self {
             number,
-            not_database_type,
             no_auto_display,
             validator,
             error_msg,
@@ -136,19 +143,15 @@ fn parse_validated(input: ParseStream) -> syn::Result<(syn::Expr, syn::LitStr)> 
     Ok((validator, error_msg))
 }
 
-/// Parses the comma-separated, order-independent flag list inside `features(...)`.
-fn parse_features(input: ParseStream) -> syn::Result<(bool, bool)> {
+/// Parses the comma-separated flag list inside `features(...)`.
+fn parse_features(input: ParseStream) -> syn::Result<bool> {
     let content;
     syn::parenthesized!(content in input);
 
-    let mut not_database_type = false;
     let mut no_auto_display = false;
     while !content.is_empty() {
         let feature_lookahead = content.lookahead1();
-        if feature_lookahead.peek(kw::not_database_type) {
-            content.parse::<kw::not_database_type>()?;
-            not_database_type = true;
-        } else if feature_lookahead.peek(kw::no_auto_display) {
+        if feature_lookahead.peek(kw::no_auto_display) {
             content.parse::<kw::no_auto_display>()?;
             no_auto_display = true;
         } else {
@@ -158,7 +161,25 @@ fn parse_features(input: ParseStream) -> syn::Result<(bool, bool)> {
             content.parse::<syn::Token![,]>()?;
         }
     }
-    Ok((not_database_type, no_auto_display))
+    Ok(no_auto_display)
+}
+
+/// The smallest signed integer type that can always represent the full range of `unsigned_ident`
+/// (`"u8"`, `"u16"`, ...), for `SqlxMode::Bumped`. `None` for `u64` (and anything unrecognized) —
+/// see `SqlxMode` for why.
+fn bump_signed_type(ty: &Type) -> Option<Type> {
+    if let Type::Group(group) = ty {
+        return bump_signed_type(&group.elem);
+    }
+    let Type::Path(type_path) = ty else { return None };
+    let ident = &type_path.path.segments.last()?.ident;
+    let bumped = match ident.to_string().as_str() {
+        "u8" => "i16",
+        "u16" => "i32",
+        "u32" => "i64",
+        _ => return None,
+    };
+    syn::parse_str(bumped).ok()
 }
 
 #[proc_macro_attribute]
@@ -197,16 +218,26 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
         panic!("division_result is only applicable to integer domain numbers")
     }
 
+    let sqlx_mode = match &variant {
+        DomainTypeKind::Number(NumberKind { primitive: PrimitiveKind::Integer(IntegerSignedness::Unsigned), .. }) => {
+            match bump_signed_type(&inner_type) {
+                Some(bump) => SqlxMode::Bumped(Box::new(bump)),
+                None => SqlxMode::None,
+            }
+        }
+        _ => SqlxMode::Transparent,
+    };
+
     let info = TypeInfo {
-        name, inner_type, args, variant,
+        name, inner_type, args, variant, sqlx_mode,
     };
     let derives = generate_derives(&info);
     let impls = generate_impls(&info);
 
-    let sqlx_transparent = if !info.args.not_database_type {
-        quote! { #[sqlx(transparent)] }
-    } else {
-        quote! {}
+    let (sqlx_transparent, bumped_sqlx_impls) = match &info.sqlx_mode {
+        SqlxMode::Transparent => (quote! { #[sqlx(transparent)] }, TokenStream::new()),
+        SqlxMode::Bumped(bump) => (quote! {}, generate_bumped_sqlx_impls(&info, bump)),
+        SqlxMode::None => (quote! {}, TokenStream::new()),
     };
 
     let TypeInfo { name, inner_type, .. } = info;
@@ -217,9 +248,55 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
         pub struct #name(#inner_type);
 
         #impls
+        #bumped_sqlx_impls
     };
 
     proc_macro::TokenStream::from(output)
+}
+
+/// Hand-written `Type`/`Encode`/`Decode`, delegating to `bump` (the smallest signed integer that
+/// always fits the unsigned inner type — see `bump_signed_type`). `#[sqlx(transparent)]` can't be
+/// used here since it requires the wrapped field's own type to already implement these traits,
+/// with no substitution; unsigned integers never do (Postgres has no unsigned wire type).
+fn generate_bumped_sqlx_impls(info: &TypeInfo, bump: &Type) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    quote! {
+        #[automatically_derived]
+        impl<DB: ::sqlx::Database> ::sqlx::Type<DB> for #name
+        where #bump: ::sqlx::Type<DB>
+        {
+            fn type_info() -> DB::TypeInfo {
+                <#bump as ::sqlx::Type<DB>>::type_info()
+            }
+        }
+
+        #[automatically_derived]
+        impl<'q, DB: ::sqlx::Database> ::sqlx::Encode<'q, DB> for #name
+        where #bump: ::sqlx::Encode<'q, DB>
+        {
+            fn encode_by_ref(
+                &self,
+                buf: &mut <DB as ::sqlx::Database>::ArgumentBuffer,
+            ) -> ::std::result::Result<::sqlx::encode::IsNull, ::sqlx::error::BoxDynError> {
+                // Always lossless: `bump` is chosen to be wide enough for the full range of
+                // #inner_type.
+                <#bump as ::sqlx::Encode<DB>>::encode_by_ref(&(self.0 as #bump), buf)
+            }
+        }
+
+        #[automatically_derived]
+        impl<'r, DB: ::sqlx::Database> ::sqlx::Decode<'r, DB> for #name
+        where #bump: ::sqlx::Decode<'r, DB>
+        {
+            fn decode(
+                value: <DB as ::sqlx::Database>::ValueRef<'r>,
+            ) -> ::std::result::Result<Self, ::sqlx::error::BoxDynError> {
+                let raw = <#bump as ::sqlx::Decode<DB>>::decode(value)?;
+                // Only fails for genuinely corrupted/out-of-range column data.
+                Ok(Self(<#inner_type as ::std::convert::TryFrom<#bump>>::try_from(raw)?))
+            }
+        }
+    }
 }
 
 fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
@@ -266,7 +343,7 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         }
     }
 
-    if !info.args.not_database_type {
+    if matches!(info.sqlx_mode, SqlxMode::Transparent) {
         derives.push(quote! { ::sqlx::Type })
     }
     if !info.args.no_auto_display {
