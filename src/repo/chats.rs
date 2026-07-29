@@ -234,7 +234,7 @@ repository!(Chats, with_feature_toggles,
             }
             Some(id) if id == old_internal_id => {
                 log::debug!("the chat with id = {old_internal_id} has already been migrated to {new}");
-                ChatMigrationOutcome::Migrated
+                ChatMigrationOutcome::of_migrated(old_instance.as_deref())
             }
             // Two rows for what is one and the same chat. Folding them together would mean moving
             // dicks, loans and stats across rows, some of which sit behind triggers that forbid
