@@ -151,6 +151,7 @@ setup:
   activated: "Fatto! Il bot è ora attivo in questo gruppo. Buon divertimento! 🍆"
 migration:
   lost: "Questo gruppo è appena diventato un supergruppo, e Telegram gli ha dato un'identità del tutto nuova — non riesco più a riconoscerlo come il gruppo che conoscevo.\n\nSe qualcuno ha giocato qui in modalità inline, quella storia purtroppo non è più raggiungibile e i punteggi ripartono da zero. Se nessuno l'ha fatto, non si è perso nulla. D'ora in poi tutto funziona come al solito, e non può più succedere. 🍆"
+  lost_inline: "Questo gruppo è appena diventato un supergruppo. Tutto ciò che è stato giocato con i comandi è arrivato insieme a lui ed è al sicuro.\n\nI risultati della modalità inline, invece, non erano mai stati legati a questo gruppo — sarebbe servito premere il tasto di attivazione prima del passaggio. Purtroppo ora non sono più raggiungibili. Se nessuno ha giocato qui in modalità inline, non si è perso nulla. D'ora in poi tutto funziona come al solito. 🍆"
 errors:
   not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
   group_account: "Non puoi giocare per conto di un gruppo o canale — disattiva la modalità anonima e riprova!"

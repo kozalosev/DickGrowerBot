@@ -110,9 +110,10 @@ async fn migrate_chat_id() {
     dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5))
         .await.expect("couldn't create a dick");
 
+    // this chat was never anchored, so its inline half — if it ever had one — is left behind
     let outcome = chats.migrate_chat_id(&old, &new)
         .await.expect("couldn't migrate the chat");
-    assert_eq!(outcome, ChatMigrationOutcome::Migrated);
+    assert_eq!(outcome, ChatMigrationOutcome::MigratedUnanchored);
 
     // the row keeps its internal id, so the dick follows the chat to the supergroup
     let migrated = chats.get_chat(new.into())
@@ -132,8 +133,8 @@ async fn migrate_chat_id() {
     // history.
     let outcome = chats.migrate_chat_id(&old, &new)
         .await.expect("the repeated migration must be a no-op");
-    assert_eq!(outcome, ChatMigrationOutcome::Migrated,
-        "the second announcement of a successful migration must not report a loss");
+    assert_eq!(outcome, ChatMigrationOutcome::MigratedUnanchored,
+        "both announcements of one migration must reach the same verdict");
     let still_there = chats.get_chat(new.into())
         .await.expect("couldn't fetch")
         .expect("the chat must still exist");
@@ -146,6 +147,31 @@ async fn migrate_chat_id() {
         .await.expect("the migration must be journaled");
     assert_eq!((journal.old_chat_id, journal.new_chat_id), (old.value(), new.value()));
     assert_eq!(journal.old_chat_instance, None);
+}
+
+/// An anchored chat has nothing left behind to warn about: its two halves already share a row,
+/// and that row simply moves to the new id.
+#[tokio::test]
+async fn migrate_anchored_chat_id() {
+    let (_container, db) = start_postgres().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let (old, new) = (TelegramChatId::new(CHAT_ID), TelegramChatId::new(-1001234567890));
+
+    let full = ChatIdFull { id: old, instance: TelegramChatInstanceId::of("instance") };
+    chats.upsert_chat(&full.to_partiality(Default::default()))
+        .await.expect("couldn't anchor the chat");
+
+    let outcome = chats.migrate_chat_id(&old, &new)
+        .await.expect("couldn't migrate the chat");
+    assert_eq!(outcome, ChatMigrationOutcome::Migrated);
+
+    // the instance the chat had is worth keeping: the row still carries the stale one until the
+    // next callback overwrites it, and the journal is the only place the pairing survives
+    let old_instance = sqlx::query_scalar!("SELECT old_chat_instance FROM Chat_Migrations WHERE new_chat_id = $1",
+            new.value())
+        .fetch_one(&db)
+        .await.expect("the migration must be journaled");
+    assert_eq!(old_instance.as_deref(), Some("instance"));
 }
 
 /// A loan taken through inline mode sits on the `chat_instance` row. Anchoring the chat merges

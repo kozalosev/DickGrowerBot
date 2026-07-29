@@ -111,13 +111,25 @@ pub async fn migration_handler(
         .migrate_chat_id(&TelegramChatId::from(old), &TelegramChatId::from(new))
         .await?;
 
-    // A chat known only by its `chat_instance` can't be found by the old `chat_id`, and the
-    // instance changes with the migration as well, so whatever it held is gone for good. There's
-    // no telling that apart from a group where nobody had ever played, hence the careful wording.
-    if in_new_chat && outcome == ChatMigrationOutcome::Untraceable {
-        log::warn!("the chat migrated from {old} to {new} was unknown by its old id; \
-            anything it had under a chat_instance is now unreachable");
-        bot.send_message(msg.chat.id, t!("migration.lost", locale = &lang_code)).await?;
+    // An instance is reissued along with the chat id, so a row keyed by one is unreachable after a
+    // migration. Both outcomes below leave such a row behind; they differ in whether the rest of
+    // the chat came across, which is too big a difference to paper over with one message. Neither
+    // can tell "the inline half is gone" from "nobody ever played here", hence the careful wording.
+    let lost_text_key = match outcome {
+        ChatMigrationOutcome::Untraceable => {
+            log::warn!("the chat migrated from {old} to {new} was unknown by its old id; \
+                anything it had under a chat_instance is now unreachable");
+            Some("migration.lost")
+        }
+        ChatMigrationOutcome::MigratedUnanchored => {
+            log::warn!("the chat migrated from {old} to {new} had never been anchored; \
+                anything it played through inline mode is now unreachable");
+            Some("migration.lost_inline")
+        }
+        _ => None
+    };
+    if let Some(key) = lost_text_key.filter(|_| in_new_chat) {
+        bot.send_message(msg.chat.id, t!(key, locale = &lang_code)).await?;
     }
     Ok(())
 }
@@ -140,7 +152,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
         instance: TelegramChatInstanceId::new(query.chat_instance.clone()),
     };
     log::info!("anchoring the chat: {chat_id}");
-    repos.chats.upsert_chat(&chat_id.to_partiality(ChatIdSource::Database)).await?;
+    repos.chats.upsert_chat(&chat_id.to_partiality(ChatIdSource::default())).await?;
 
     bot.edit_message_text(message.chat().id, message.id(),
             t!("setup.activated", locale = &lang_code))

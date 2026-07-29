@@ -23,6 +23,11 @@ pub enum ChatMigrationOutcome {
     /// The row was repointed at the new id, keeping its internal one, so everything the chat had
     /// came along.
     Migrated,
+    /// The row was repointed, but it had no `chat_instance` of its own — the chat was never
+    /// anchored. Whatever it played through inline mode sits in a separate row keyed by an
+    /// instance that the migration has just reissued, so that half is gone while the rest of the
+    /// chat came across intact.
+    MigratedUnanchored,
     /// Nothing was known by the old `chat_id`. Either the bot had never seen this chat, or it was
     /// only ever known by its `chat_instance` — and that changes with the migration too, which
     /// leaves such a row unreachable for good. The two are indistinguishable from here.
@@ -30,6 +35,13 @@ pub enum ChatMigrationOutcome {
     /// Both ids already have a row of their own. Nothing is lost, but the chat's state is split in
     /// two and only a human can decide how to fold it together.
     Conflict,
+}
+
+impl ChatMigrationOutcome {
+    /// Which of the two "the row moved" outcomes applies, given the instance that row held.
+    fn of_migrated(instance: Option<&str>) -> Self {
+        instance.map(|_| Self::Migrated).unwrap_or(Self::MigratedUnanchored)
+    }
 }
 
 /// SearchError is used when Option<T> may be returned theoretically but shouldn't in practice.
@@ -181,17 +193,18 @@ repository!(Chats, with_feature_toggles,
             // a loss: the row may be gone from there simply because the other announcement of this
             // same migration already repointed it. Its presence under the new id tells them apart.
             None => {
-                let already_migrated = sqlx::query_scalar!(
-                        r#"SELECT EXISTS(SELECT 1 FROM Chats WHERE chat_id = $1) AS "exists!""#,
-                        new.value())
-                    .fetch_one(&mut *tx)
+                // The repointed row still holds whatever instance it had before, so the loser of
+                // the race reads the same answer the winner reported.
+                let migrated = sqlx::query_scalar!("SELECT chat_instance FROM Chats WHERE chat_id = $1", new.value())
+                    .fetch_optional(&mut *tx)
                     .await
                     .context(format!("couldn't check whether the chat had already been migrated to {new}"))?;
-                return Ok(if already_migrated {
-                    log::debug!("the chat migrated from {old} to {new} had already been repointed");
-                    ChatMigrationOutcome::Migrated
-                } else {
-                    ChatMigrationOutcome::Untraceable
+                return Ok(match migrated {
+                    Some(instance) => {
+                        log::debug!("the chat migrated from {old} to {new} had already been repointed");
+                        ChatMigrationOutcome::of_migrated(instance.as_deref())
+                    }
+                    None => ChatMigrationOutcome::Untraceable
                 })
             }
         };
@@ -213,7 +226,7 @@ repository!(Chats, with_feature_toggles,
                     .context(format!("couldn't migrate the chat with id = {old_internal_id} from {old} to {new}"))?;
                 Self::journal_migration(&mut tx, old_internal_id, old, old_instance.as_deref(), new).await?;
                 log::info!("migrated the chat with id = {old_internal_id} from {old} to {new}");
-                ChatMigrationOutcome::Migrated
+                ChatMigrationOutcome::of_migrated(old_instance.as_deref())
             }
             Some(id) if id == old_internal_id => {
                 log::debug!("the chat with id = {old_internal_id} has already been migrated to {new}");
