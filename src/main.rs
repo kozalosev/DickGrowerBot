@@ -7,6 +7,7 @@ mod config;
 mod commands;
 mod users;
 mod scheduler;
+mod reload;
 
 use std::net::SocketAddr;
 use futures::future::join_all;
@@ -108,6 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
     scheduler::spawn_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), app_config.clone());
+    reload::spawn_reload_on_sighup(repos.announcements.clone());
 
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
