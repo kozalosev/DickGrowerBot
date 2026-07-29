@@ -17,8 +17,8 @@ pub fn spawn_daily_shrink(
     language_service: LanguageService,
     config: AppConfig,
 ) {
-    if !config.stale_dicks_shrinking.enabled() {
-        log::info!("the daily shrink is disabled (set SHRINK_RATIO and SHRINK_GRACE_DAYS to enable it)");
+    if !config.daily_shrink.enabled() {
+        log::info!("the daily shrink is disabled (set DAILY_SHRINK_RATIO and DAILY_SHRINK_INACTIVITY_DAYS to enable it)");
         return;
     }
     tokio::spawn(async move {
@@ -30,8 +30,8 @@ pub fn spawn_daily_shrink(
         // Puts the feature into effect at once instead of hours later. Re-running the same day is
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and
         // aborts on Stale_Dick_Shrinks' primary key, rolling the length change back with it.
-        if get_env_value_or_default("SHRINK_RUN_ON_STARTUP", false) {
-            log::warn!("SHRINK_RUN_ON_STARTUP is set — running the daily shrink right now");
+        if get_env_value_or_default("DAILY_SHRINK_RUN_ON_STARTUP", false) {
+            log::warn!("DAILY_SHRINK_RUN_ON_STARTUP is set — running the daily shrink right now");
             run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())
                 .await.unwrap_or_else(|e| log::error!("the daily shrink run failed: {e:#}"))
         }

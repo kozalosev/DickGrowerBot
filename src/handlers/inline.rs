@@ -170,7 +170,7 @@ pub async fn inline_handler(
     };
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
         // The `shrinks` command only makes sense when the daily shrink feature is on.
-        .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.stale_dicks_shrinking.enabled())
+        .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.daily_shrink.enabled())
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {

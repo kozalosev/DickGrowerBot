@@ -121,7 +121,7 @@ pub(crate) fn render_shrinks_page<T: ShrinkLine>(
         .collect::<Vec<_>>()
         .join("\n");
     let header_key = format!("{prefix}.header");
-    let header = t!(&header_key, locale = lang_code, days = config.stale_dicks_shrinking.grace_period_days);
+    let header = t!(&header_key, locale = lang_code, days = config.daily_shrink.inactivity_days);
     ShrinksPage { lines: format!("{header}\n{lines}"), has_more_pages }
 }
 
@@ -209,7 +209,7 @@ pub async fn callback_handler(
     lang_code: LanguageCode,
 ) -> HandlerResult {
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
-    if !config.stale_dicks_shrinking.enabled() {
+    if !config.daily_shrink.enabled() {
         return answer_callback_feature_disabled(bot, &q, edit_msg_req_params, lang_code).await
     }
 

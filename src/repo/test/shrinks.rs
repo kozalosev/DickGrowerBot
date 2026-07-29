@@ -224,7 +224,7 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
 }
 
 /// `DaysCount` wraps a `u32`; a `grace_days` above `i32::MAX` (but still a perfectly valid `u32`,
-/// e.g. from a misconfigured `SHRINK_GRACE_DAYS`) used to get bound into the query as `.value() as
+/// e.g. from a misconfigured `DAILY_SHRINK_INACTIVITY_DAYS`) used to get bound into the query as `.value() as
 /// i32`, which silently flipped negative on overflow — turning "hasn't grown in N days" into
 /// "grown within N days" and shrinking *everyone*, including dicks grown moments ago, with no
 /// error anywhere. `DaysCount` now embeds directly (`u32` bumped to `i64`/`bigint` on the wire,
