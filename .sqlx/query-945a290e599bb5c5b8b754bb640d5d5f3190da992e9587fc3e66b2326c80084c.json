@@ -6,12 +6,24 @@
       {
         "ordinal": 0,
         "name": "battles_total",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_total"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "battles_won",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_won"
+          }
+        }
       }
     ],
     "parameters": {

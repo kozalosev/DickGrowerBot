@@ -144,6 +144,10 @@ titles:
     top_line: "I seguenti vantaggi hanno influenzato il risultato:"
     help-pussies: "buco profondo"
     loan-payout: "micro-loaner"
+setup:
+  text: "Questo gruppo usa il vecchio formato, perciò non riesco a riconoscerlo quando vengo chiamato in modalità inline.\n\nPremi il pulsante qui sotto <b>una volta</b> per attivarmi qui — dopodiché tutto funzionerà come al solito."
+  button: "Attiva"
+  activated: "Fatto! Il bot è ora attivo in questo gruppo. Buon divertimento! 🍆"
 errors:
   not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
   group_account: "Non puoi giocare per conto di un gruppo o canale — disattiva la modalità anonima e riprova!"

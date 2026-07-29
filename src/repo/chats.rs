@@ -217,13 +217,10 @@ repository!(Chats, with_feature_toggles,
 ,
     /// Carries everything that references the chat being merged away over to the surviving row.
     ///
-    /// `Loans` and `Announcements` reference `Chats(id)` without `ON DELETE`, so leaving their
-    /// rows behind doesn't just orphan them — it makes the whole merge fail on a foreign key
-    /// violation. `Battle_Stats` cascades instead, which silently throws the statistics away.
-    ///
-    /// `Dick_of_Day` is deliberately left alone: it sits behind a trigger that forbids updates
-    /// outright, and re-inserting rewrites `created_at`, which would corrupt the history. It has
-    /// no foreign key, so its rows are merely orphaned rather than blocking anything.
+    /// `Loans`, `Announcements`, `Dick_of_Day` and `Stale_Dick_Shrinks` reference `Chats(id)`
+    /// without `ON DELETE`, so leaving their rows behind doesn't just orphan them — it makes the
+    /// whole merge fail on a foreign key violation. `Battle_Stats` cascades instead, which
+    /// silently throws the statistics away.
     async fn move_dependent_rows(tx: &mut Transaction<'_, Postgres>, main_id: i64, deleted_id: i64) -> anyhow::Result<()> {
         // nothing constrains (uid, chat_id) here, so the loans can just be repointed
         let loans = sqlx::query!("UPDATE Loans SET chat_id = $1 WHERE chat_id = $2", main_id, deleted_id)
@@ -285,8 +282,64 @@ repository!(Chats, with_feature_toggles,
             .await
             .context(format!("couldn't delete imports of the chat with id = {deleted_id}"))?;
 
+        // Both tables below are append-only histories, guarded by triggers that would either
+        // rewrite the dates (`Dick_of_Day` stamps `created_at` on every insert) or reject the
+        // write outright (`Stale_Dick_Shrinks` forbids updates). Muting those triggers is what
+        // lets the rows move across verbatim instead of being mangled or left behind; the
+        // ACCESS EXCLUSIVE lock it takes lasts until the transaction ends, which is acceptable
+        // for something that happens once in a chat's lifetime.
+
+        // keyed by (chat_id, created_at); a day both chats crowned a winner keeps the main one's
+        sqlx::query!("ALTER TABLE Dick_of_Day DISABLE TRIGGER trg_check_dod_timestamp")
+            .execute(&mut **tx)
+            .await
+            .context("couldn't mute the insertion trigger of Dick_of_Day")?;
+        let dod = sqlx::query!(
+            "INSERT INTO Dick_of_Day (chat_id, winner_uid, created_at)
+                    SELECT $1, winner_uid, created_at FROM Dick_of_Day WHERE chat_id = $2
+                    ON CONFLICT (chat_id, created_at) DO NOTHING",
+                main_id, deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move the dicks of the day from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("ALTER TABLE Dick_of_Day ENABLE TRIGGER trg_check_dod_timestamp")
+            .execute(&mut **tx)
+            .await
+            .context("couldn't restore the insertion trigger of Dick_of_Day")?;
+        sqlx::query!("DELETE FROM Dick_of_Day WHERE chat_id = $1", deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete the dicks of the day of the chat with id = {deleted_id}"))?;
+
+        // keyed by (chat_id, uid, created_at); the same user really did shrink twice that day
+        // when both chats recorded it, so the lengths add up
+        sqlx::query!("ALTER TABLE Stale_Dick_Shrinks DISABLE TRIGGER trg_forbid_stale_dick_shrinks_updates")
+            .execute(&mut **tx)
+            .await
+            .context("couldn't mute the update trigger of Stale_Dick_Shrinks")?;
+        let shrinks = sqlx::query!(
+            "INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length, created_at)
+                    SELECT $1, uid, lost_length, created_at FROM Stale_Dick_Shrinks WHERE chat_id = $2
+                    ON CONFLICT (chat_id, uid, created_at) DO UPDATE SET
+                        lost_length = Stale_Dick_Shrinks.lost_length + EXCLUDED.lost_length",
+                main_id, deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move shrinks from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("ALTER TABLE Stale_Dick_Shrinks ENABLE TRIGGER trg_forbid_stale_dick_shrinks_updates")
+            .execute(&mut **tx)
+            .await
+            .context("couldn't restore the update trigger of Stale_Dick_Shrinks")?;
+        sqlx::query!("DELETE FROM Stale_Dick_Shrinks WHERE chat_id = $1", deleted_id)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete shrinks of the chat with id = {deleted_id}"))?;
+
         log::info!("moved rows from the chat with id = {deleted_id} to {main_id}: \
-            loans: {loans}, battle stats: {battle_stats}, announcements: {announcements}, imports: {imports}");
+            loans: {loans}, battle stats: {battle_stats}, announcements: {announcements}, \
+            imports: {imports}, dicks of the day: {dod}, shrinks: {shrinks}");
         Ok(())
     }
 ,

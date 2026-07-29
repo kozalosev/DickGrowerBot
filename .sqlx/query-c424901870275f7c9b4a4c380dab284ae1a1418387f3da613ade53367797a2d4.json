@@ -6,17 +6,35 @@
       {
         "ordinal": 0,
         "name": "uid",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "uid"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "chat_id",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "chat_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "bonus_attempts",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "bonus_attempts"
+          }
+        }
       }
     ],
     "parameters": {

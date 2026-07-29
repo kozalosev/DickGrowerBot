@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT chat_id FROM Loans WHERE uid = $1",
+  "query": "SELECT lost_length AS \"lost_length!\" FROM Stale_Dick_Shrinks WHERE chat_id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "chat_id",
+        "name": "lost_length!",
         "type_info": "Int8",
         "origin": {
           "Table": {
-            "table": "loans",
-            "name": "chat_id"
+            "table": "stale_dick_shrinks",
+            "name": "lost_length"
           }
         }
       }
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "ccfbc0de61a4eeac4926df7a1ad374844d56d864717ee1d3d8ef573fa1865dd3"
+  "hash": "e78054d20e267cb5eda5fa36859c9edb1791ae7f8cd9060fc3bb614848e16f83"
 }

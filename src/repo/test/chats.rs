@@ -117,7 +117,7 @@ async fn migrate_chat_id() {
     assert_eq!(migrated.internal_id, internal_id.value());
     assert!(chats.get_chat(old.into()).await.expect("couldn't fetch").is_none());
 
-    let top = dicks.get_top(&ChatIdKind::ID(new), Offset::new(0), Limit::literal(1))
+    let top = dicks.get_top(&ChatIdKind::ID(new), Offset::new(0), Limit::literal(1), DaysCount::new(7))
         .await.expect("couldn't fetch the top");
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].length, 5);
@@ -125,13 +125,15 @@ async fn migrate_chat_id() {
     // the second update of the same migration finds nothing left to do
     chats.migrate_chat_id(&old, &new)
         .await.expect("the repeated migration must be a no-op");
-    assert_eq!(chats.get_chat(new.into()).await.expect("couldn't fetch")
-        .expect("the chat must still exist").internal_id, internal_id.value());
+    let still_there = chats.get_chat(new.into())
+        .await.expect("couldn't fetch")
+        .expect("the chat must still exist");
+    assert_eq!(still_there.internal_id, internal_id.value());
 }
 
 /// A loan taken through inline mode sits on the `chat_instance` row. Anchoring the chat merges
 /// that row away, so the merge has to carry the loan over instead of leaving it dangling behind
-/// a `NOT NULL` foreign key.
+/// a `NOT NULL` foreign key. The same goes for every other table referencing `Chats(id)`.
 #[tokio::test]
 async fn merge_moves_dependent_rows() {
     let (_container, db) = start_postgres().await;
@@ -157,6 +159,22 @@ async fn merge_moves_dependent_rows() {
             UID, instance_row, id_row)
         .execute(&db)
         .await.expect("couldn't create battle stats");
+    // the insertion trigger stamps `created_at` with today's date, so a dated row can only be
+    // planted past it — which is exactly what the merge has to do to keep the history intact
+    sqlx::query!("ALTER TABLE Dick_of_Day DISABLE TRIGGER trg_check_dod_timestamp")
+        .execute(&db)
+        .await.expect("couldn't mute the trigger");
+    sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid, created_at) VALUES ($1, $2, current_date - 1)",
+            instance_row, UID)
+        .execute(&db)
+        .await.expect("couldn't create a dick of the day");
+    sqlx::query!("ALTER TABLE Dick_of_Day ENABLE TRIGGER trg_check_dod_timestamp")
+        .execute(&db)
+        .await.expect("couldn't restore the trigger");
+    sqlx::query!("INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length, created_at) VALUES ($1, $3, 5, current_date), ($2, $3, 3, current_date)",
+            instance_row, id_row, UID)
+        .execute(&db)
+        .await.expect("couldn't create shrinks");
 
     chats.upsert_chat(&full.to_partiality(Default::default()))
         .await.expect("couldn't merge the chats");
@@ -178,6 +196,23 @@ async fn merge_moves_dependent_rows() {
         .fetch_one(&db)
         .await.expect("couldn't count the leftovers");
     assert_eq!(leftovers, 0);
+
+    // the win keeps the day it was won on instead of being restamped with today's date
+    let dod_day = sqlx::query_scalar!(r#"SELECT current_date - created_at AS "days_ago!" FROM Dick_of_Day WHERE chat_id = $1"#, id_row)
+        .fetch_one(&db)
+        .await.expect("the dick of the day must survive the merge");
+    assert_eq!(dod_day, 1);
+
+    // both chats shrank the same user on the same day, so the lost lengths add up
+    let lost_length = sqlx::query_scalar!(r#"SELECT lost_length AS "lost_length!" FROM Stale_Dick_Shrinks WHERE chat_id = $1"#, id_row)
+        .fetch_one(&db)
+        .await.expect("the shrinks must survive the merge");
+    assert_eq!(lost_length, 8);
+
+    let orphans = sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM Dick_of_Day WHERE chat_id = $1"#, instance_row)
+        .fetch_one(&db)
+        .await.expect("couldn't count the orphaned dicks of the day");
+    assert_eq!(orphans, 0);
 }
 
 #[tokio::test]
