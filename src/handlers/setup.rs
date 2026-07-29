@@ -31,6 +31,7 @@ use crate::domain::primitives::LanguageCode;
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::handlers::HandlerResult;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
+use crate::metrics;
 use crate::repo::{ChatMigrationOutcome, Repositories};
 
 #[derive(Display)]
@@ -111,6 +112,13 @@ pub async fn migration_handler(
         .migrate_chat_id(&TelegramChatId::from(old), &TelegramChatId::from(new))
         .await?;
 
+    // Both announcements reach the same verdict, so everything below happens once, on the side
+    // that lands where the members now are.
+    if !in_new_chat {
+        return Ok(())
+    }
+    metrics::CHAT_MIGRATION.record(outcome);
+
     // An instance is reissued along with the chat id, so a row keyed by one is unreachable after a
     // migration. Both outcomes below leave such a row behind; they differ in whether the rest of
     // the chat came across, which is too big a difference to paper over with one message. Neither
@@ -128,7 +136,7 @@ pub async fn migration_handler(
         }
         _ => None
     };
-    if let Some(key) = lost_text_key.filter(|_| in_new_chat) {
+    if let Some(key) = lost_text_key {
         bot.send_message(msg.chat.id, t!(key, locale = &lang_code)).await?;
     }
     Ok(())

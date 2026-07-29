@@ -18,7 +18,11 @@ pub struct Chat {
 pub struct NoChatIdError(#[error(not(source))] i64);
 
 /// What became of a chat when Telegram turned its group into a supergroup.
-#[derive(Debug, PartialEq, Eq)]
+///
+/// The `Display` strings are the values of the `outcome` label of the migration metric, so they
+/// are a part of the observability contract — renaming a variant renames a time series.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, strum_macros::Display, strum_macros::EnumIter)]
+#[strum(serialize_all = "snake_case")]
 pub enum ChatMigrationOutcome {
     /// The row was repointed at the new id, keeping its internal one, so everything the chat had
     /// came along.
