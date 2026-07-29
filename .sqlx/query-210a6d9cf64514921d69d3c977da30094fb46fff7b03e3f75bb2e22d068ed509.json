@@ -1,21 +1,10 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uid, length AS \"length: i64\", bonus_attempts FROM Dicks WHERE chat_id = $1 ORDER BY uid",
+  "query": "SELECT length AS \"length: i64\", bonus_attempts FROM Dicks WHERE chat_id = $1 ORDER BY uid",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "uid",
-        "type_info": "Int8",
-        "origin": {
-          "Table": {
-            "table": "dicks",
-            "name": "uid"
-          }
-        }
-      },
-      {
-        "ordinal": 1,
         "name": "length: i64",
         "type_info": "Int8",
         "origin": {
@@ -26,7 +15,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 1,
         "name": "bonus_attempts",
         "type_info": "Int4",
         "origin": {
@@ -44,9 +33,8 @@
     },
     "nullable": [
       false,
-      false,
       false
     ]
   },
-  "hash": "42fc0a340bc56273ca0f01a7b61ec96b3cc7fd210e29538ac2a3e89f1db94bbf"
+  "hash": "210a6d9cf64514921d69d3c977da30094fb46fff7b03e3f75bb2e22d068ed509"
 }

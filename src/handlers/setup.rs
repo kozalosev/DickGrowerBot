@@ -9,9 +9,14 @@
 //! posts such a message and, on the tap, stores both ids in a single `Chats` row — *anchoring*
 //! the group. Afterward inline usage (keyed by `chat_instance`) merges into that same row.
 //!
-//! Until a legacy group is anchored, the chat-stateful commands are rejected (see
-//! [`crate::handlers::checks::require_anchored_group`]), because they'd otherwise operate on a
-//! bogus scope and produce nonsense such as issue #55.
+//! Until a legacy group is anchored, the chat-stateful **commands** are rejected (see
+//! [`crate::handlers::checks::require_anchored_group`]). Inline invocations are not, and can't
+//! be: an inline update carries no chat id to run the check against. Nor do they need to be —
+//! they key off `chat_instance` throughout, which is self-consistent on its own.
+//!
+//! What the gate buys is that a chat can't accumulate two separate halves of its state — command
+//! play on `chat_id`, inline play on `chat_instance` — before anyone has had the chance to pair
+//! the two ids up.
 
 use anyhow::anyhow;
 use derive_more::Display;

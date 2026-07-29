@@ -201,6 +201,7 @@ pub(crate) async fn answer_callback_feature_disabled(
 }
 
 pub mod checks {
+    use std::ops::Not;
     use rust_i18n::t;
     use teloxide::Bot;
     use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
@@ -268,7 +269,7 @@ pub mod checks {
         repos.chats.is_anchored(&TelegramChatId::from(msg.chat.id))
             .await
             .inspect_err(|e| log::error!("couldn't check whether the chat is anchored: {e}"))
-            .map(|anchored| !anchored)
+            .map(bool::not)
             // on a DB error, let the command through rather than locking the chat out
             .unwrap_or(false)
     }
