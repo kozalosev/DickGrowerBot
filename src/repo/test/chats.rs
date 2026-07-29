@@ -129,6 +129,14 @@ async fn migrate_chat_id() {
         .await.expect("couldn't fetch")
         .expect("the chat must still exist");
     assert_eq!(still_there.internal_id, internal_id.value());
+
+    // the journal keeps both ids; this chat had never been anchored, so it had no instance to keep
+    let journal = sqlx::query!("SELECT old_chat_id, old_chat_instance, new_chat_id FROM Chat_Migrations WHERE internal_id = $1",
+            internal_id.value())
+        .fetch_one(&db)
+        .await.expect("the migration must be journaled");
+    assert_eq!((journal.old_chat_id, journal.new_chat_id), (old.value(), new.value()));
+    assert_eq!(journal.old_chat_instance, None);
 }
 
 /// A loan taken through inline mode sits on the `chat_instance` row. Anchoring the chat merges

@@ -149,6 +149,8 @@ setup:
   text: "This group is not a supergroup, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual."
   button: "Activate"
   activated: "Done! The bot is now activated in this group. Have fun! 🍆"
+migration:
+  lost: "This group has just become a supergroup, and Telegram has given it an entirely new identity — I can no longer recognize it as the group I used to know.\n\nIf anyone played here through inline mode, that history is sadly out of reach now and the scores start over. If nobody did, nothing was lost. From here on everything works as usual — and it won't happen again. 🍆"
 errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"

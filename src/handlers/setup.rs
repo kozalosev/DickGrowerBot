@@ -31,7 +31,7 @@ use crate::domain::primitives::LanguageCode;
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::handlers::HandlerResult;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
-use crate::repo::Repositories;
+use crate::repo::{ChatMigrationOutcome, Repositories};
 
 #[derive(Display)]
 #[display("activate")]
@@ -93,13 +93,32 @@ pub fn migration_filter(msg: Message) -> bool {
     msg.chat_migration().is_some()
 }
 
-pub async fn migration_handler(msg: Message, repos: Repositories) -> HandlerResult {
-    let (old, new) = match msg.chat_migration() {
-        Some(ChatMigration::To { chat_id: new }) => (msg.chat.id, *new),
-        Some(ChatMigration::From { chat_id: old }) => (*old, msg.chat.id),
+pub async fn migration_handler(
+    bot: Bot,
+    msg: Message,
+    repos: Repositories,
+    lang_code: LanguageCode,
+) -> HandlerResult {
+    // `From` is the announcement that lands in the new supergroup, which is where the members
+    // now are — the old group is left behind, so only this side is worth answering, and picking
+    // one side also keeps the two announcements from producing two messages.
+    let (old, new, in_new_chat) = match msg.chat_migration() {
+        Some(ChatMigration::To { chat_id: new }) => (msg.chat.id, *new, false),
+        Some(ChatMigration::From { chat_id: old }) => (*old, msg.chat.id, true),
         None => return Err(anyhow!("the migration handler got a message without a migration").into())
     };
-    repos.chats.migrate_chat_id(&TelegramChatId::from(old), &TelegramChatId::from(new)).await?;
+    let outcome = repos.chats
+        .migrate_chat_id(&TelegramChatId::from(old), &TelegramChatId::from(new))
+        .await?;
+
+    // A chat known only by its `chat_instance` can't be found by the old `chat_id`, and the
+    // instance changes with the migration as well, so whatever it held is gone for good. There's
+    // no telling that apart from a group where nobody had ever played, hence the careful wording.
+    if in_new_chat && outcome == ChatMigrationOutcome::Untraceable {
+        log::warn!("the chat migrated from {old} to {new} was unknown by its old id; \
+            anything it had under a chat_instance is now unreachable");
+        bot.send_message(msg.chat.id, t!("migration.lost", locale = &lang_code)).await?;
+    }
     Ok(())
 }
 
@@ -123,10 +142,9 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositorie
     log::info!("anchoring the chat: {chat_id}");
     repos.chats.upsert_chat(&chat_id.to_partiality(ChatIdSource::Database)).await?;
 
-    let mut edit_req = bot.edit_message_text(message.chat().id, message.id(),
-        t!("setup.activated", locale = &lang_code));
-    edit_req.parse_mode.replace(ParseMode::Html);
-    edit_req.await?;
+    bot.edit_message_text(message.chat().id, message.id(),
+            t!("setup.activated", locale = &lang_code))
+        .await?;
     bot.answer_callback_query(query.id).await?;
     Ok(())
 }
