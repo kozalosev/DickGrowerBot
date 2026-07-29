@@ -119,7 +119,8 @@ commands:
       switch_button: "Activate promo code '%{code}'…"
 inline:
   results:
-    text: "Since I cannot determine the chat by an inline query, you should click on the button bellow to get the result."
+    text: "Since I cannot determine the chat by an inline query, you should click on the button below to get the result."
+    text_legacy_group: "This group is not a supergroup, so I can't recognize it from an inline query — press the button below to get the result.\n\nThe button will be needed every time: that only goes away once the group becomes a supergroup. Better yet, add the bot to the chat! Then the plain commands will do, and the inline results will count towards the same score."
     button: "Click me!"
     titles:
       grow: "Grow your dick!"
@@ -145,7 +146,7 @@ titles:
     help-pussies: "deep hole"
     loan-payout: "micro-loaner"
 setup:
-  text: "This group uses the old format, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual."
+  text: "This group is not a supergroup, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual."
   button: "Activate"
   activated: "Done! The bot is now activated in this group. Have fun! 🍆"
 errors:

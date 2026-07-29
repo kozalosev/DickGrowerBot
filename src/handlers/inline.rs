@@ -161,6 +161,13 @@ pub async fn inline_handler(
 
     let uid = query.from.id.0;
     let btn_label = t!("inline.results.button", locale = &lang_code);
+    // Everywhere else the tap is a one-off — it teaches the bot the chat, and the next invocation
+    // resolves on its own. A legacy group never becomes identifiable from an inline query, so
+    // there the tap is permanent and the text has to say so instead of promising it'll get better.
+    let text_key = match query.chat_type {
+        Some(ChatType::Group) => "inline.results.text_legacy_group",
+        _ => "inline.results.text",
+    };
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
         // The `shrinks` command only makes sense when the daily shrink feature is on.
         .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.stale_dicks_shrinking.enabled())
@@ -170,7 +177,7 @@ pub async fn inline_handler(
             let t_key = format!("inline.results.titles.{key}");
             let title = t!(&t_key, locale = &lang_code);
             let content = InputMessageContent::Text(InputMessageContentText::new(
-                t!("inline.results.text", locale = &lang_code)));
+                t!(text_key, locale = &lang_code)));
             let mut article = InlineQueryResultArticle::new(
                 key.clone(), title, content
             );

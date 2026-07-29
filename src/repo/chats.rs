@@ -143,9 +143,14 @@ repository!(Chats, with_feature_toggles,
     ///
     /// The row keeps its internal id, so everything referencing the chat — dicks, loans, battle
     /// stats, announcements — follows along untouched; only the external id changes.
+    ///
+    /// Telegram announces a migration in both chats at once, and the dispatcher hands updates of
+    /// different chats to different workers, so the two calls genuinely race. `FOR UPDATE` is what
+    /// serializes them: the loser blocks on the locked row, then re-evaluates its `WHERE` against
+    /// the committed version, finds the chat no longer known by its old id, and gives up quietly.
     pub async fn migrate_chat_id(&self, old: &TelegramChatId, new: &TelegramChatId) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
-        let old_internal_id = sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", old.value())
+        let old_internal_id = sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1 FOR UPDATE", old.value())
             .fetch_optional(&mut *tx)
             .await
             .context(format!("couldn't look up the chat to migrate from id = {old}"))?;
@@ -161,8 +166,8 @@ repository!(Chats, with_feature_toggles,
 
         match new_internal_id {
             // Telegram assigns a brand-new id to the supergroup, so this is the only case that
-            // normally happens; both updates of a migration converge on it (the second one finds
-            // no row for `old` anymore and returns early above).
+            // normally happens, and exactly one of the two announcements gets here — whichever
+            // takes the lock first. The other one returns early above.
             None => {
                 sqlx::query!("UPDATE Chats SET chat_id = $2 WHERE id = $1", old_internal_id, new.value())
                     .execute(&mut *tx)
