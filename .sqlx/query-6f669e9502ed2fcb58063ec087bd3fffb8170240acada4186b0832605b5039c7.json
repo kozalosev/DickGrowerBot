@@ -1,0 +1,127 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH loser_before AS (\n                    SELECT win_streak_current FROM Battle_Stats WHERE chat_id = $1 AND uid = $3\n                ),\n                winner_upsert AS (\n                    INSERT INTO Battle_Stats(uid, chat_id, battles_total, battles_won, win_streak_current, acquired_length)\n                    VALUES ($2, $1, 1, 1, 1, $4)\n                    ON CONFLICT (uid, chat_id) DO UPDATE SET\n                        battles_total = Battle_Stats.battles_total + 1,\n                        battles_won = Battle_Stats.battles_won + 1,\n                        win_streak_current = Battle_Stats.win_streak_current + 1,\n                        acquired_length = Battle_Stats.acquired_length + $4\n                    RETURNING battles_total, battles_won, win_streak_max, win_streak_current, acquired_length, lost_length\n                ),\n                loser_upsert AS (\n                    INSERT INTO Battle_Stats(uid, chat_id, battles_total, battles_won, win_streak_current, lost_length)\n                    VALUES ($3, $1, 1, 0, 0, $4)\n                    ON CONFLICT (uid, chat_id) DO UPDATE SET\n                        battles_total = Battle_Stats.battles_total + 1,\n                        win_streak_current = 0,\n                        lost_length = Battle_Stats.lost_length + $4\n                    RETURNING battles_total, battles_won\n                )\n                SELECT\n                    w.battles_total AS \"winner_battles_total!\", w.battles_won AS \"winner_battles_won!\",\n                    w.win_streak_max AS \"winner_win_streak_max!\", w.win_streak_current AS \"winner_win_streak_current!\",\n                    w.acquired_length AS \"winner_acquired_length!\", w.lost_length AS \"winner_lost_length!\",\n                    l.battles_total AS \"loser_battles_total!\", l.battles_won AS \"loser_battles_won!\",\n                    lb.win_streak_current AS loser_prev_win_streak\n                FROM winner_upsert w, loser_upsert l\n                LEFT JOIN loser_before lb ON true",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "winner_battles_total!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_total"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "winner_battles_won!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_won"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "winner_win_streak_max!",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "win_streak_max"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "winner_win_streak_current!",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "win_streak_current"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "winner_acquired_length!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "acquired_length"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "winner_lost_length!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "lost_length"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "loser_battles_total!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_total"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "loser_battles_won!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "battles_won"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "loser_prev_win_streak",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "battle_stats",
+            "name": "win_streak_current"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "6f669e9502ed2fcb58063ec087bd3fffb8170240acada4186b0832605b5039c7"
+}
