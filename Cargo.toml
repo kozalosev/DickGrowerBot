@@ -18,6 +18,7 @@ tokio = { version =  "1.53.1", default-features = false, features = ["rt-multi-t
 axum = "0.8.9"
 axum-prometheus = "0.10.0"
 prometheus = "0.14.0"
+tokio-metrics-collector = "0.3.1"
 # Logging and envs
 log = "0.4.33"
 pretty_env_logger = "0.5.0"
@@ -45,7 +46,7 @@ anyhow = { version = "1.0.104", features = ["backtrace"] }
 regex = "1.13.1"
 rand = "0.10.2"
 chrono = { version = "0.4.45", features = [ "serde" ] }
-base64 = "0.22.1"
+base64 = "0.23.0"
 byteorder = "1.5.0"
 flurry = "0.5.2"
 sha2 = "0.11.0"

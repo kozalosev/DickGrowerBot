@@ -342,14 +342,14 @@ async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserSe
 }
 
 fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_time_secs: u64) {
-    tokio::spawn(async move {
+    tokio::spawn(metrics::TASK_USER_SERVICE_CACHE_CLEANUP.instrument(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(cache_time_secs.max(1)));
         interval.tick().await; // consume the immediate first tick
         loop {
             interval.tick().await;
             client.clean_up_cache();
         }
-    });
+    }));
 }
 
 /// Resolves the effective language for a single user: the preference stored in user-service (when

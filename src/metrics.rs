@@ -3,6 +3,7 @@ use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
 use strum::IntoEnumIterator;
+use tokio_metrics_collector::TaskMonitor;
 use crate::domain::primitives::SupportedLanguage;
 use crate::repo::ChatMigrationOutcome;
 
@@ -52,12 +53,30 @@ pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
 
-pub fn init() -> axum::Router {
+pub static DB_POOL_CONNECTIONS_OPENED: Lazy<Counter> = Lazy::new(||
+    Counter::new("db_pool_connections_opened_total", "count of new physical connections opened by the sqlx pool"));
+pub static DB_POOL_IDLE_SECONDS: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("db_pool_connection_idle_seconds",
+        "how long a connection sat idle in the pool before being handed out to a caller",
+        &[0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0]));
+pub static DB_POOL_CONNECTION_AGE_SECONDS: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("db_pool_connection_age_seconds",
+        "how old a connection was (time since it was first opened) when it was returned to the pool",
+        &[1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0, 3600.0]));
+
+pub static TASK_WEBHOOK_SERVER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("webhook_http_server"));
+pub static TASK_POLLING_DISPATCHER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("polling_dispatcher"));
+pub static TASK_METRICS_SERVER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("metrics_http_server"));
+pub static TASK_DAILY_SHRINK: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("daily_shrink"));
+pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
+pub static TASK_USER_SERVICE_CACHE_CLEANUP: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("user_service_cache_cleanup"));
+
+pub fn init() -> (axum::Router, PrometheusMetricLayer<'static>) {
     force_registration();
 
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
     let registry = REGISTRY.clone();
-    axum::Router::new()
+    let router = axum::Router::new()
         .route("/metrics", get(|| async move {
             let mut buffer = vec![];
             TextEncoder::new().encode(&registry.gather(), &mut buffer)
@@ -66,8 +85,15 @@ pub fn init() -> axum::Router {
                 .expect("metrics buffer is not valid UTF-8");
 
             metric_handle.render() + custom_metrics.as_str()
-        }))
-        .layer(prometheus_layer)
+        }));
+    (router, prometheus_layer)
+}
+
+/// Registers the live sqlx pool gauges (`db_pool_size`, `db_pool_idle_connections`), read directly
+/// from `pool` at scrape time rather than polled on an interval. Call once `db_conn` is available.
+pub fn register_db_pool_collector(pool: sqlx::Pool<sqlx::Postgres>) {
+    REGISTRY.register(Box::new(DbPoolCollector::new(pool)))
+        .unwrap_or_else(|e| panic!("unable to register the db pool collector: {e}"));
 }
 
 /// The counters are registered on the first dereference of their `Lazy` statics, so all of them
@@ -94,10 +120,79 @@ fn force_registration() {
     Lazy::force(&ANNOUNCEMENT_SHOWN);
     Lazy::force(&CHAT_MIGRATION);
     Lazy::force(&DAILY_SHRINK);
+
+    Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
+    Lazy::force(&DB_POOL_IDLE_SECONDS);
+    Lazy::force(&DB_POOL_CONNECTION_AGE_SECONDS);
+
+    Lazy::force(&TASK_WEBHOOK_SERVER);
+    Lazy::force(&TASK_POLLING_DISPATCHER);
+    Lazy::force(&TASK_METRICS_SERVER);
+    Lazy::force(&TASK_DAILY_SHRINK);
+    Lazy::force(&TASK_SELF_DESTRUCTION);
+    Lazy::force(&TASK_USER_SERVICE_CACHE_CLEANUP);
+}
+
+static TASK_COLLECTOR_REGISTERED: Lazy<()> = Lazy::new(|| {
+    REGISTRY.register(Box::new(tokio_metrics_collector::default_task_collector()))
+        .unwrap_or_else(|e| panic!("unable to register the tokio task collector: {e}"));
+});
+
+fn task_monitor(label: &'static str) -> TaskMonitor {
+    Lazy::force(&TASK_COLLECTOR_REGISTERED);
+    let monitor = TaskMonitor::new();
+    tokio_metrics_collector::default_task_collector()
+        .add(label, monitor.clone())
+        .unwrap_or_else(|e| panic!("unable to register the {label} task monitor: {e}"));
+    monitor
+}
+
+/// Reads `pool.size()`/`pool.num_idle()` live at scrape time — no persistent metric state of its
+/// own, so its `Desc`s are built once and its `MetricFamily`s are rebuilt on every `collect()`.
+struct DbPoolCollector {
+    pool: sqlx::Pool<sqlx::Postgres>,
+    size_desc: prometheus::core::Desc,
+    idle_desc: prometheus::core::Desc,
+}
+
+impl DbPoolCollector {
+    fn new(pool: sqlx::Pool<sqlx::Postgres>) -> Self {
+        let size_desc = prometheus::core::Desc::new(
+            "db_pool_size".to_owned(),
+            "current number of connections in the sqlx pool (in use + idle)".to_owned(),
+            vec![], std::collections::HashMap::new())
+            .expect("invalid db_pool_size desc");
+        let idle_desc = prometheus::core::Desc::new(
+            "db_pool_idle_connections".to_owned(),
+            "current number of idle connections in the sqlx pool".to_owned(),
+            vec![], std::collections::HashMap::new())
+            .expect("invalid db_pool_idle_connections desc");
+        Self { pool, size_desc, idle_desc }
+    }
+}
+
+impl prometheus::core::Collector for DbPoolCollector {
+    fn desc(&self) -> Vec<&prometheus::core::Desc> {
+        vec![&self.size_desc, &self.idle_desc]
+    }
+
+    fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
+        let size = prometheus::IntGauge::new("db_pool_size", "current number of connections in the sqlx pool (in use + idle)")
+            .expect("invalid db_pool_size gauge");
+        size.set(self.pool.size() as i64);
+        let idle = prometheus::IntGauge::new("db_pool_idle_connections", "current number of idle connections in the sqlx pool")
+            .expect("invalid db_pool_idle_connections gauge");
+        idle.set(self.pool.num_idle() as i64);
+
+        let mut out = size.collect();
+        out.extend(idle.collect());
+        out
+    }
 }
 
 pub struct Counter(IntCounter);
 pub struct CounterVec(IntCounterVec);
+pub struct Histogram(prometheus::Histogram);
 
 pub struct ComplexCommandCounters {
     invoked: Counter,
@@ -148,6 +243,21 @@ impl Counter {
 
     pub fn inc_by(&self, count: u64) {
         self.0.inc_by(count)
+    }
+}
+
+impl Histogram {
+    fn new(name: &str, help: &str, buckets: &[f64]) -> Self {
+        let inner = prometheus::Histogram::with_opts(
+            prometheus::HistogramOpts::new(name, help).buckets(buckets.to_vec()))
+            .unwrap_or_else(|e| panic!("unable to create the {name} histogram: {e}"));
+        REGISTRY.register(Box::new(inner.clone()))
+            .unwrap_or_else(|e| panic!("unable to register the {name} histogram: {e}"));
+        Self(inner)
+    }
+
+    pub fn observe(&self, value: f64) {
+        self.0.observe(value)
     }
 }
 
@@ -458,7 +568,8 @@ mod tests {
     use prometheus::{Encoder, TextEncoder};
     use strum::IntoEnumIterator;
     use crate::repo::ChatMigrationOutcome;
-    use super::{CHAT_MIGRATION, DAILY_SHRINK, language_label, REGISTRY};
+    use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
+        DB_POOL_CONNECTION_AGE_SECONDS, TASK_DAILY_SHRINK, language_label, REGISTRY};
 
     /// The `/metrics` body, as the endpoint would render our own registry.
     fn render_metrics() -> String {
@@ -500,6 +611,27 @@ mod tests {
                 let series = format!("{metric}{{{label}=\"{value}\"}}");
                 assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
             }
+        }
+    }
+
+    /// The sqlx pool hook metrics and the tokio task monitors are both registered lazily; this
+    /// just confirms they actually make it into the `/metrics` output once forced, same as every
+    /// other metric in this file.
+    #[test]
+    fn sqlx_and_tokio_task_metrics_are_exported() {
+        Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
+        Lazy::force(&DB_POOL_IDLE_SECONDS);
+        Lazy::force(&DB_POOL_CONNECTION_AGE_SECONDS);
+        Lazy::force(&TASK_DAILY_SHRINK);
+        let rendered = render_metrics();
+
+        for series in [
+            "db_pool_connections_opened_total",
+            "db_pool_connection_idle_seconds_bucket",
+            "db_pool_connection_age_seconds_bucket",
+            "tokio_task_instrumented_count{task=\"daily_shrink\"}",
+        ] {
+            assert!(rendered.contains(series), "{series} is missing from:\n{rendered}");
         }
     }
 

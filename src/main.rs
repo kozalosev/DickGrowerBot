@@ -102,7 +102,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let webhook_url = integrations_config.webhook_url;
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    let metrics_router = metrics::init();
+    let (metrics_router, prometheus_layer) = metrics::init();
+    metrics::register_db_pool_collector(db_conn.clone());
 
     // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
@@ -134,17 +135,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .build();
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
 
-            let srv = tokio::spawn(async move {
+            let srv = tokio::spawn(metrics::TASK_WEBHOOK_SERVER.instrument(async move {
                 let tcp_listener = tokio::net::TcpListener::bind(addr)
                     .await
                     .inspect_err(|_| stop_token.stop())?;
                 let app = axum::Router::new()
                     .merge(metrics_router)
-                    .merge(bot_router);
+                    .merge(bot_router)
+                    .layer(prometheus_layer);
                 axum::serve(tcp_listener, app)
                     .with_graceful_shutdown(stop_flag)
                     .await
-            });
+            }));
 
             let (res, _) = futures::join!(srv, bot_fut);
             res
@@ -152,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => {
             log::info!("The polling dispatcher is activating...");
 
-            let bot_fut = tokio::spawn(async move {
+            let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
                 Dispatcher::builder(bot, handler)
                     .default_handler(ignore_unknown_updates)
                     .dependencies(deps)
@@ -160,11 +162,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .build()
                     .dispatch()
                     .await
-            });
+            }));
 
-            let srv = tokio::spawn(async move {
+            let srv = tokio::spawn(metrics::TASK_METRICS_SERVER.instrument(async move {
                 let tcp_listener = tokio::net::TcpListener::bind(addr).await?;
-                axum::serve(tcp_listener, metrics_router)
+                axum::serve(tcp_listener, metrics_router.layer(prometheus_layer))
                     .with_graceful_shutdown(async {
                         tokio::signal::ctrl_c()
                             .await
@@ -172,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         log::info!("Shutdown of the metrics server")
                     })
                     .await
-            });
+            }));
 
             let (res, _) = futures::join!(srv, bot_fut);
             res

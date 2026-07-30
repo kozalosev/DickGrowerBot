@@ -61,7 +61,7 @@ impl SelfDestructionService {
         let warning = self.config.warning;
         let lang_code = lang_code.clone();
         log::debug!("self-destruction: scheduling deletion of {group} message {message_id} in chat {chat_id} in {delay:?}");
-        tokio::spawn(async move {
+        tokio::spawn(metrics::TASK_SELF_DESTRUCTION.instrument(async move {
             tokio::time::sleep(delay).await;
 
             if !warning.is_zero() {
@@ -81,7 +81,7 @@ impl SelfDestructionService {
                     metrics::SELF_DESTRUCTION.record(&group.to_string(), false);
                 }
             }
-        });
+        }));
     }
 }
 

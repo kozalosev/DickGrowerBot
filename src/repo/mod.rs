@@ -62,6 +62,18 @@ impl Repositories {
 
 pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Pool<Postgres>, anyhow::Error> {
     let pool = sqlx::postgres::PgPoolOptions::new()
+        .after_connect(|_conn: &mut sqlx::PgConnection, _meta| Box::pin(async move {
+            crate::metrics::DB_POOL_CONNECTIONS_OPENED.inc();
+            Ok(())
+        }))
+        .before_acquire(|_conn: &mut sqlx::PgConnection, meta| Box::pin(async move {
+            crate::metrics::DB_POOL_IDLE_SECONDS.observe(meta.idle_for.as_secs_f64());
+            Ok(true)
+        }))
+        .after_release(|_conn: &mut sqlx::PgConnection, meta| Box::pin(async move {
+            crate::metrics::DB_POOL_CONNECTION_AGE_SECONDS.observe(meta.age.as_secs_f64());
+            Ok(true)
+        }))
         .max_connections(config.max_connections)
         .connect(config.url.as_str()).await?;
     sqlx::migrate!().run(&pool).await?;

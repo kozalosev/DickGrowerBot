@@ -4,6 +4,7 @@ use teloxide::Bot;
 use teloxide::adaptors::throttle::{Limits, Throttle};
 use crate::config::{get_env_value_or_default, AppConfig};
 use crate::handlers::utils::date::duration_till_next_day;
+use crate::metrics;
 use crate::repo::Repositories;
 use crate::users::LanguageService;
 use shrink::run_daily_shrink;
@@ -21,7 +22,7 @@ pub fn spawn_daily_shrink(
         log::info!("the daily shrink is disabled (set DAILY_SHRINK_RATIO and DAILY_SHRINK_INACTIVITY_DAYS to enable it)");
         return;
     }
-    tokio::spawn(async move {
+    tokio::spawn(metrics::TASK_DAILY_SHRINK.instrument(async move {
         // The broadcast fans out to every affected chat at once, which would blow past Telegram's
         // rate limits unthrottled. Scoped to this task, so the dispatcher and handlers keep the
         // plain `Bot`. The adapter's queue lives in memory only: a restart mid-broadcast drops the
@@ -45,5 +46,5 @@ pub fn spawn_daily_shrink(
             run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())
                 .await.unwrap_or_else(|e| log::error!("the daily shrink run failed: {e:#}"))
         }
-    });
+    }));
 }
