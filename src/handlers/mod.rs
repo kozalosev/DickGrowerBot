@@ -213,6 +213,7 @@ pub mod checks {
     use crate::domain::primitives::chat::TelegramChatId;
     use crate::handlers::utils::SelfDestructionService;
     use crate::repo::Repositories;
+    use crate::users::LanguageResolver;
     use super::{HandlerResult, reply_html};
 
     pub fn is_group_chat(msg: Message) -> bool {
@@ -226,7 +227,8 @@ pub mod checks {
         !is_group_chat(msg)
     }
 
-    pub async fn handle_not_group_chat(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
+    pub async fn handle_not_group_chat(bot: Bot, msg: Message, lang_resolver: LanguageResolver) -> HandlerResult {
+        let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.not_group_chat", locale = &lang_code);
         reply_html!(bot, msg, answer);
         Ok(())
@@ -248,9 +250,10 @@ pub mod checks {
     async fn handle_group_account(
         bot: Bot,
         msg: Message,
-        lang_code: LanguageCode,
+        lang_resolver: LanguageResolver,
         self_destruction: SelfDestructionService
     ) -> HandlerResult {
+        let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.group_account", locale = &lang_code);
         reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
         Ok(())

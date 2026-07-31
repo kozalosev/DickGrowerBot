@@ -63,8 +63,6 @@ domain_types_macro = { version = "0.1.0", path = "domain_types_macro" }
 
 [dev-dependencies]
 testcontainers = "0.27.3"
-# Building Telegram updates for tests from JSON, so the fixtures don't break on every teloxide bump
-serde_json = "1.0.145"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

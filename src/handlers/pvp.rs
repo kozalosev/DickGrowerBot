@@ -18,6 +18,7 @@ use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
 use crate::repo::Repositories;
+use crate::users::LanguageResolver;
 
 // let's calculate time offsets from 22.06.2024
 const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
@@ -98,8 +99,9 @@ pub async fn cmd_handler(
     cmd: BattleCommands,
     repos: Repositories,
     config: AppConfig,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let user = msg.from.as_ref().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
@@ -118,7 +120,8 @@ pub async fn cmd_handler(
     Ok(())
 }
 
-pub async fn cmd_handler_no_args(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
+pub async fn cmd_handler_no_args(bot: Bot, msg: Message, lang_resolver: LanguageResolver) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
@@ -135,7 +138,8 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
     maybe_bet.is_ok()
 }
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery, lang_code: LanguageCode) -> HandlerResult {
+pub async fn inline_handler(bot: Bot, query: InlineQuery, lang_resolver: LanguageResolver) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
     let bet = Bet::new(query.query.parse()?)
@@ -188,8 +192,9 @@ pub async fn callback_handler(
     repos: Repositories,
     config: AppConfig,
     mut battle_locker: LockCallbackServiceFacade,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat().id)
         .map(TelegramChatId::from)

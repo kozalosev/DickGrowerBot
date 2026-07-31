@@ -13,7 +13,6 @@ use generated::{GetUserRequest, GetUsersRequest, UpdateUserRequest, User};
 use crate::config::IntegrationsConfig;
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
-use crate::handlers::setup;
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::metrics;
 use crate::repo::Chats;
@@ -267,13 +266,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// Resolves the effective language for an update: a group's stored language (when set) wins for
     /// everyone and short-circuits the user-service call; otherwise we fall back to the per-user
     /// resolution ([`resolve_language_for`]).
-    pub(crate) async fn resolve(&self, update: &Update) -> LanguageCode {
-        metrics::UPDATE_KIND.record(&update.kind);
-        // Most of what Telegram sends us is group chatter no handler will touch. Resolving a
-        // language for it would query the database and the user-service for nothing.
-        if is_ignored_group_message(update) {
-            return LanguageCode::from_maybe_user(update.from());
-        }
+    pub async fn resolve(&self, update: &Update) -> LanguageCode {
         // Anonymously record the sender's Telegram (client) language — our best proxy for the
         // languages the audience actually speaks, independent of any chat/personal override below.
         if let Some(user) = update.from() {
@@ -283,6 +276,14 @@ impl<C: UserServiceClient> LanguageService<C> {
             return LanguageCode::new(lang.to_string());
         }
         resolve_language_for(update.from(), &self.users).await
+    }
+
+    /// Wraps this update in a [`LanguageResolver`] instead of resolving its language right away:
+    /// the chat-language lookup and the user-service call only happen if some handler dptree
+    /// actually routes the update to asks for it.
+    pub fn defer(self, update: Update) -> LanguageResolver<C> {
+        metrics::UPDATE_KIND.record(&update.kind);
+        LanguageResolver { service: self, update }
     }
 
     /// The chat-wide language of the chat the update happened in, if the chat is known and has one.
@@ -306,14 +307,14 @@ impl<C: UserServiceClient> LanguageService<C> {
 
     /// Sets (or clears, with `None`) the chat-wide language and refreshes the local cache so this
     /// instance is immediately consistent.
-    pub(crate) async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
+    pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
         self.chats.set_chat_language(chat_id, lang).await?;
         self.chat_cache().insert(chat_id.kind(), CachedLang { lang, at: tokio::time::Instant::now() });
         Ok(())
     }
 
     /// Fetches a user from the user-service, or `Ok(None)` when the integration is disabled.
-    pub(crate) async fn user(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
+    pub async fn user(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
         match &self.users {
             UserService::Connected(client) => client.get(uid).await,
             UserService::Disabled => Ok(None),
@@ -324,7 +325,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// preference), for choosing the language of a proactive broadcast to a chat with no chat-wide
     /// override. Returns `None` when the service is disabled, none of the users are registered, or
     /// none has a language we localize — the caller then falls back to English.
-    pub(crate) async fn popular_language(&self, uids: &[UserId]) -> Option<SupportedLanguage> {
+    pub async fn popular_language(&self, uids: &[UserId]) -> Option<SupportedLanguage> {
         let UserService::Connected(client) = &self.users else { return None };
         let langs = client.get_user_languages(uids).await
             .inspect_err(|status| log::warn!("couldn't batch-fetch user languages for the tally: {status}"))
@@ -333,7 +334,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     }
 
     /// Updates a user's personal language in the user-service.
-    pub(crate) async fn set_user_language(&self, uid: UserId, code: &str) -> Result<(), tonic::Status> {
+    pub async fn set_user_language(&self, uid: UserId, code: &str) -> Result<(), tonic::Status> {
         match &self.users {
             UserService::Connected(client) => client.set_language(uid, code).await,
             UserService::Disabled => Err(tonic::Status::unavailable("user-service is disabled")),
@@ -412,27 +413,18 @@ fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_time_secs: u64) {
     }));
 }
 
-/// Whether the update is a plain message in a group that no branch of the dispatcher can handle,
-/// so resolving its language would be pure waste. Such messages are the bulk of what Telegram
-/// sends a bot that sits in many groups (see the `update_kind_total` metric).
-///
-/// Every group branch of the handler tree in `main.rs` needs either a command, a migration service
-/// message, or a non-group chat, so the three checks below cover them all. The bare dialogue
-/// branch is not an exception: its storage is keyed by chat, and only `promo_cmd_handler` — which
-/// sits behind `checks::is_not_group_chat` — can move a chat into `PromoCommandState::Requested`,
-/// so a group is always in the `Start` state.
-///
-/// **Keep this in sync with the handler tree.** A new branch that handles plain group messages
-/// must be excluded here, or it will get the sender's Telegram language instead of the chat-wide
-/// one.
-fn is_ignored_group_message(update: &Update) -> bool {
-    let UpdateKind::Message(msg) = &update.kind else { return false };
-    let is_group = update.chat()
-        .is_some_and(|chat| !chat.is_private() && !chat.is_channel());
-    // Looser than teloxide's command parsing on purpose: anything command-shaped gets resolved.
-    let looks_like_command = msg.text().or(msg.caption())
-        .is_some_and(|text| text.starts_with('/'));
-    is_group && !looks_like_command && !setup::is_migration(msg)
+/// A `LanguageCode` not yet resolved: constructing this queries nothing, so an update matched
+/// by no handler never touches the chat-language lookup or the user-service.
+#[derive(Clone)]
+pub struct LanguageResolver<C: UserServiceClient = UserServiceClientGrpc> {
+    service: LanguageService<C>,
+    update: Update,
+}
+
+impl<C: UserServiceClient> LanguageResolver<C> {
+    pub async fn execute(&self) -> LanguageCode {
+        self.service.resolve(&self.update).await
+    }
 }
 
 /// Resolves the effective language for a single user: the preference stored in user-service (when
@@ -672,43 +664,19 @@ mod test {
         UpdateKind::CallbackQuery(query)
     }
 
-    /// A message in the known supergroup, from a user whose Telegram language is English.
-    /// `extra` adds fields to the message object (a text, a service field, …).
-    fn group_message_update(extra: &str) -> Update {
-        let json = format!(r#"{{
-            "update_id": 0,
-            "message": {{
-                "message_id": 1,
-                "date": 1700000000,
-                "chat": {{ "id": {SUPERGROUP_ID}, "type": "supergroup", "title": "test" }},
-                "from": {{ "id": 1, "is_bot": false, "first_name": "tester", "language_code": "en" }},
-                {extra}
-            }}
-        }}"#);
-        serde_json::from_str(&json).expect("couldn't build the update")
-    }
-
-    /// Chatter in a group reaches no endpoint, so it must not cost a chat-language lookup — while
-    /// everything the dispatcher can act on still gets the chat-wide language.
+    /// The point of `defer`: constructing a resolver must not touch the database, and only
+    /// `execute` actually resolves (and, in doing so, populates the chat-language cache).
     #[tokio::test]
-    async fn only_actionable_group_messages_are_resolved() {
+    async fn a_resolver_queries_nothing_until_executed() {
         let (_container, db) = start_postgres().await;
         let ls = language_service_of(db, true).await;
+        let update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
 
-        let chatter = group_message_update(r#""text": "hello everyone""#);
-        let lang = ls.resolve(&chatter).await;
-        assert_eq!(lang.to_string(), "en", "chatter must fall back to the sender's language");
-        assert!(ls.chat_cache().is_empty(), "a skipped update must not read the chat language");
+        let resolver = ls.clone().defer(update);
+        assert!(ls.chat_cache().is_empty());
 
-        // A command in the same chat is resolved as usual: the chat-wide language wins.
-        let command = group_message_update(r#""text": "/grow""#);
-        let lang = ls.resolve(&command).await;
-        assert_eq!(lang.to_string(), "ru");
-
-        // So is a migration service message — `migration_handler` answers it.
-        let migration = group_message_update(r#""migrate_from_chat_id": -1001100294560"#);
-        let lang = ls.resolve(&migration).await;
-        assert_eq!(lang.to_string(), "ru");
+        assert_eq!(resolver.execute().await.to_string(), "ru");
+        assert!(!ls.chat_cache().is_empty());
     }
 
     #[tokio::test]

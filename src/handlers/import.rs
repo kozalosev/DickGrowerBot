@@ -11,7 +11,8 @@ use teloxide::types::{ChatId, Message, UserId};
 use crate::handlers::{HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
 use crate::domain::objects::ExternalUser;
-use crate::domain::primitives::{LanguageCode, Length, UserId as DomainUserId, Username};
+use crate::domain::primitives::{Length, UserId as DomainUserId, Username};
+use crate::users::LanguageResolver;
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
@@ -114,8 +115,9 @@ pub async fn import_cmd_handler(
     bot: Bot,
     msg: Message,
     repos: repo::Repositories,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_IMPORT.invoked();
     let answer = match check_and_parse_message(&bot, &msg, &repos).await {
         Ok(parsed) => {

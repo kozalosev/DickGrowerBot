@@ -21,6 +21,7 @@ use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
 use crate::repo::{NoChatIdError, Repositories};
+use crate::users::LanguageResolver;
 
 #[derive(Debug, strum_macros::Display, EnumIter, EnumString)]
 #[strum(serialize_all = "snake_case")]
@@ -152,8 +153,9 @@ pub async fn inline_handler(
     query: InlineQuery,
     repos: Repositories,
     app_config: AppConfig,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
@@ -207,8 +209,9 @@ pub async fn inline_chosen_handler(
     repos: Repositories,
     config: AppConfig,
     incr: Incrementor,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.finished();
 
     if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
@@ -251,8 +254,9 @@ pub async fn callback_handler(
     repos: Repositories,
     config: AppConfig,
     incr: Incrementor,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     let mut answer = bot.answer_callback_query(query.id.clone());
 
     if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {

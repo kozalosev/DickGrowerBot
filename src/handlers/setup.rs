@@ -33,6 +33,7 @@ use crate::handlers::HandlerResult;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::metrics;
 use crate::repo::{ChatMigrationOutcome, Repositories};
+use crate::users::LanguageResolver;
 
 #[derive(Display)]
 #[display("activate")]
@@ -91,11 +92,6 @@ pub async fn added_to_legacy_group_handler(bot: Bot, upd: ChatMemberUpdated) -> 
 /// enough to repoint the chat; the other then finds nothing left to do.
 #[inline]
 pub fn migration_filter(msg: Message) -> bool {
-    is_migration(&msg)
-}
-
-#[inline]
-pub fn is_migration(msg: &Message) -> bool {
     msg.chat_migration().is_some()
 }
 
@@ -103,8 +99,9 @@ pub async fn migration_handler(
     bot: Bot,
     msg: Message,
     repos: Repositories,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     // `From` is the announcement that lands in the new supergroup, which is where the members
     // now are — the old group is left behind, so only this side is worth answering, and picking
     // one side also keeps the two announcements from producing two messages.

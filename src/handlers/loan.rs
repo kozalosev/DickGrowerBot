@@ -17,6 +17,7 @@ use crate::handlers::{CallbackButton, FromRefs, HandlerImplResult, HandlerResult
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
+use crate::users::LanguageResolver;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -31,8 +32,9 @@ pub async fn cmd_handler(
     msg: Message,
     repos: repo::Repositories,
     config: AppConfig,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
@@ -114,8 +116,9 @@ pub async fn callback_handler(
     query: CallbackQuery,
     repos: repo::Repositories,
     config: AppConfig,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     let data = LoanCallbackData::parse(&query)?;
     let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
     

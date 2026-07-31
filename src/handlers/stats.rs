@@ -10,6 +10,7 @@ use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, BattlesFeatureToggles};
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::objects::WinRateAware;
+use crate::users::LanguageResolver;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -23,9 +24,10 @@ pub async fn cmd_handler(
     msg: Message,
     repos: repo::Repositories,
     app_config: AppConfig,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
     self_destruction: SelfDestructionService,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_STATS.chat.inc();
 
     let features = app_config.features.pvp;

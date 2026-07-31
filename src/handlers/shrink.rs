@@ -12,6 +12,7 @@ use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerResult}
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::repo::{AdjacentDates, RecentShrink, Repositories, ShrinkEvent};
+use crate::users::LanguageResolver;
 
 pub(crate) struct ShrinksPage {
     pub lines: String,
@@ -206,8 +207,9 @@ pub async fn callback_handler(
     q: CallbackQuery,
     config: AppConfig,
     repos: Repositories,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.daily_shrink.enabled() {
         return answer_callback_feature_disabled(bot, &q, edit_msg_req_params, lang_code).await

@@ -5,8 +5,9 @@ use teloxide::macros::BotCommands;
 use teloxide::types::Message;
 use crate::handlers::{HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::primitives::{LanguageCode, PromoCode, Username};
+use crate::domain::primitives::{PromoCode, Username};
 use crate::help::HelpContainer;
+use crate::users::LanguageResolver;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -20,8 +21,9 @@ pub async fn start_cmd_handler(
     cmd: StartCommands,
     help: HelpContainer,
     repos: repo::Repositories,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     let answer = if msg.from.as_ref().is_none() {
         log::warn!("The /start command was invoked without a FROM field for message: {:?}", msg);
         help.get_help_message(&lang_code).to_owned()

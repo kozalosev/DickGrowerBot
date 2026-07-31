@@ -11,6 +11,7 @@ use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::{FromRefs, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{Incrementor, SelfDestructionService};
+use crate::users::LanguageResolver;
 
 const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
 
@@ -28,9 +29,10 @@ pub async fn dod_cmd_handler(
     cfg: AppConfig,
     repos: repo::Repositories,
     incr: Incrementor,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
     self_destruction: SelfDestructionService,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_DOD_COUNTER.chat.inc();
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();

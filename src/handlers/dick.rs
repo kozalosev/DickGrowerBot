@@ -14,6 +14,7 @@ use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
 use crate::handlers::{answer_callback_feature_disabled, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
+use crate::users::LanguageResolver;
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
@@ -34,9 +35,10 @@ pub async fn dick_cmd_handler(
     repos: repo::Repositories,
     incr: Incrementor,
     config: AppConfig,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
     self_destruction: SelfDestructionService,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
     let from_refs = FromRefs(from, &chat_id);
@@ -208,8 +210,9 @@ pub async fn page_callback_handler(
     q: CallbackQuery,
     config: AppConfig,
     repos: repo::Repositories,
-    lang_code: LanguageCode,
+    lang_resolver: LanguageResolver,
 ) -> HandlerResult {
+    let lang_code = lang_resolver.execute().await;
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
         return answer_callback_feature_disabled(bot, &q, edit_msg_req_params, lang_code).await

@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                         app_config.features.chats_merging).await;
 
     let handler = dptree::entry()
-        .map_async(|upd: Update, ls: LanguageService| async move { ls.resolve(&upd).await })
+        .map(|upd: Update, ls: LanguageService| ls.defer(upd))
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
