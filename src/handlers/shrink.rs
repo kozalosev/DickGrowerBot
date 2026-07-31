@@ -9,7 +9,7 @@ use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup}
 use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Length, Offset, Page, UserId, Username};
 use crate::domain::primitives::chat::ChatIdKind;
-use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerResult};
+use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerDeps, HandlerResult};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::repo::{AdjacentDates, RecentShrink, Repositories, ShrinkEvent};
@@ -122,7 +122,7 @@ pub(crate) fn render_shrinks_page<T: ShrinkLine>(
         .collect::<Vec<_>>()
         .join("\n");
     let header_key = format!("{prefix}.header");
-    let header = t!(&header_key, locale = lang_code, days = config.stale_dicks_shrinking.grace_period_days);
+    let header = t!(&header_key, locale = lang_code, days = config.daily_shrink.inactivity_days);
     ShrinksPage { lines: format!("{header}\n{lines}"), has_more_pages }
 }
 
@@ -207,12 +207,12 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 pub async fn callback_handler(
     bot: Bot,
     q: CallbackQuery,
-    config: AppConfig,
-    repos: Repositories,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
-    if !config.stale_dicks_shrinking.enabled() {
+    if !config.daily_shrink.enabled() {
         return answer_callback_feature_disabled(bot, &q, edit_msg_req_params, lang_code).await
     }
 

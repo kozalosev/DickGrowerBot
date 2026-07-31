@@ -14,6 +14,9 @@ pub struct ShrinkEvent {
     pub lost_length: Length,
     pub new_length: Length,
     pub messageable_chat_id: Option<TelegramChatId>,
+    /// The bot couldn't post to this chat last time it tried, so the broadcast skips it. Unrelated
+    /// to `messageable_chat_id`: a chat can be messageable in principle and still unreachable.
+    pub is_unreachable: bool,
 }
 
 /// The log only stores how much was lost, so `length` (the owner's *current* length) comes from a
@@ -73,7 +76,7 @@ repository!(Shrinks,
                 )
                 SELECT u.uid AS "uid: UserId", usr.name AS "owner_name: Username",
                        u.loss AS "lost_length!: Length", u.new_length AS "new_length!: Length",
-                       c.chat_id AS "messageable_chat_id: TelegramChatId"
+                       c.chat_id AS "messageable_chat_id: TelegramChatId", c.is_unreachable
                 FROM updated u
                 JOIN Users usr USING (uid)
                 JOIN Chats c ON c.id = u.chat_id"#,

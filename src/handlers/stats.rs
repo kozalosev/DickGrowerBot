@@ -5,10 +5,9 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
 use crate::config::MessageGroup::Report;
-use crate::handlers::{FromRefs, HandlerResult, reply_html};
-use crate::handlers::utils::SelfDestructionService;
+use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html_ephemeral, repo};
-use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::config::BattlesFeatureToggles;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::objects::WinRateAware;
 
@@ -24,11 +23,10 @@ pub enum StatsCommands {
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
-    repos: repo::Repositories,
-    app_config: AppConfig,
-    lang_code: LanguageCode,
-    self_destruction: SelfDestructionService,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config: app_config, self_destruction, lang_resolver } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_STATS.chat.inc();
 
     let features = app_config.features.pvp;

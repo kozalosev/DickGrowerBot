@@ -27,7 +27,7 @@ const POSTGRES_DB: &str = "test_db";
 const POSTGRES_PORT: u16 = 5432;
 
 pub const UID: i64 = 12345;
-pub const CHAT_ID: i64 = 67890;
+pub const CHAT_ID: i64 = -67890;
 pub const NAME: &str = "test";
 
 pub const USER_ID: UserId = UserId::literal(UID);

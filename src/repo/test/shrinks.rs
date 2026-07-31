@@ -129,6 +129,7 @@ async fn test_perform_daily_shrink() {
     assert_eq!(event.lost_length, 10, "loss = ceil(100 * 0.1)");
     assert_eq!(event.new_length, 90);
     assert_eq!(event.messageable_chat_id, Some(TelegramChatId::new(CHAT_ID)));
+    assert!(!event.is_unreachable, "the bot has no reason to think it can't post here");
 
     // The fresh and the zero-length dicks are untouched.
     assert_eq!(length_of(&db, UID, chat_id).await, 100, "the fresh dick must not shrink");
@@ -141,6 +142,42 @@ async fn test_perform_daily_shrink() {
 
     // The pending bonus attempt survives the shrink instead of being silently burned by the trigger.
     assert_eq!(bonus_attempts_of(&db, bonus_uid, chat_id).await, 1, "shrinking must not consume a bonus attempt");
+}
+
+/// A chat the bot can't post to keeps shrinking — only the broadcast is skipped, and the scheduler
+/// needs the flag to know that.
+#[tokio::test]
+async fn test_perform_daily_shrink_reports_unreachable_chats() {
+    let (_container, db) = start_postgres().await;
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let shrinks = repo::Shrinks::new(db.clone());
+    let users = repo::Users::new(db.clone());
+    let chats = repo::Chats::new(db.clone(), Default::default());
+
+    users.create_or_update(USER_ID, NAME)
+        .await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100))
+        .await.expect("couldn't create the dick");
+    let chat_id = internal_chat_id(&db).await;
+
+    let victim_uid = UID + 1;
+    users.create_or_update(UserId::literal(victim_uid), "stale-victim")
+        .await.expect("couldn't create the victim user");
+    seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
+
+    chats.mark_unreachable(&TelegramChatId::new(CHAT_ID))
+        .await.expect("couldn't mark the chat as unreachable");
+
+    let events = shrinks.perform_daily_shrink(Ratio::literal(0.1), GRACE_DAYS, NO_RAMP)
+        .await.expect("couldn't perform the daily shrink");
+
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert!(event.is_unreachable);
+    assert_eq!(event.messageable_chat_id, Some(TelegramChatId::new(CHAT_ID)),
+        "the chat is still messageable in principle — it just can't be reached right now");
+    assert_eq!(event.new_length, 90, "an unreachable chat shrinks like any other");
+    assert_eq!(length_of(&db, victim_uid, chat_id).await, 90);
 }
 
 #[tokio::test]
@@ -224,7 +261,7 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
 }
 
 /// `DaysCount` wraps a `u32`; a `grace_days` above `i32::MAX` (but still a perfectly valid `u32`,
-/// e.g. from a misconfigured `SHRINK_GRACE_DAYS`) used to get bound into the query as `.value() as
+/// e.g. from a misconfigured `DAILY_SHRINK_INACTIVITY_DAYS`) used to get bound into the query as `.value() as
 /// i32`, which silently flipped negative on overflow — turning "hasn't grown in N days" into
 /// "grown within N days" and shrinking *everyone*, including dicks grown moments ago, with no
 /// error anywhere. `DaysCount` now embeds directly (`u32` bumped to `i64`/`bigint` on the wire,

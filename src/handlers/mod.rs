@@ -34,11 +34,22 @@ pub use inline::*;
 pub use promo::*;
 pub use language::LanguageCommands;
 pub use loan::LoanCommands;
-use crate::config::MessageGroup;
+use crate::config::{AppConfig, MessageGroup};
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
+use crate::handlers::utils::SelfDestructionService;
+use crate::repo::Repositories;
+use crate::users::LanguageResolver;
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+#[derive(Clone)]
+pub struct HandlerDeps {
+    pub repos: Repositories,
+    pub config: AppConfig,
+    pub self_destruction: SelfDestructionService,
+    pub lang_resolver: LanguageResolver,
+}
 
 /// A message sender's Telegram id for `#[tracing::instrument]` span fields
 /// (`None` for messages without a sender, e.g. anonymous/channel posts).
@@ -220,12 +231,10 @@ pub mod checks {
     use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
     use teloxide::types::{Update, Message};
     use teloxide::utils::command::BotCommands;
-    use crate::config::AppConfig;
     use crate::config::MessageGroup;
     use crate::domain::primitives::LanguageCode;
     use crate::domain::primitives::chat::TelegramChatId;
-    use crate::handlers::utils::SelfDestructionService;
-    use crate::repo::Repositories;
+    use crate::handlers::HandlerDeps;
     use super::{HandlerResult, reply_html};
 
     pub fn is_group_chat(msg: Message) -> bool {
@@ -241,7 +250,9 @@ pub mod checks {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
-    pub async fn handle_not_group_chat(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
+    pub async fn handle_not_group_chat(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+        let HandlerDeps { lang_resolver, .. } = deps;
+        let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.not_group_chat", locale = &lang_code);
         reply_html!(bot, msg, answer);
         Ok(())
@@ -265,9 +276,10 @@ pub mod checks {
     async fn handle_group_account(
         bot: Bot,
         msg: Message,
-        lang_code: LanguageCode,
-        self_destruction: SelfDestructionService
+        deps: HandlerDeps,
     ) -> HandlerResult {
+        let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
+        let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.group_account", locale = &lang_code);
         reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
         Ok(())
@@ -282,7 +294,8 @@ pub mod checks {
     // No `#[autometrics]`: this returns a plain `bool` and deliberately swallows a DB error into
     // `false` (fail-open), so an error counter here would read zero exactly when the gate breaks.
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0))]
-    async fn needs_setup(msg: Message, repos: Repositories, config: AppConfig) -> bool {
+    async fn needs_setup(msg: Message, deps: HandlerDeps) -> bool {
+        let HandlerDeps { repos, config, .. } = deps;
         if !config.features.chats_merging || !msg.chat.is_group() {
             return false
         }

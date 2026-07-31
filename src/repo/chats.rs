@@ -13,6 +13,9 @@ pub struct Chat {
     pub internal_id: i64,
     pub chat_id: Option<i64>,
     pub chat_instance: Option<String>,
+    /// The bot can't post to this chat: it was kicked, blocked, muted, or the chat is gone. Set by
+    /// a failed broadcast, cleared by the next command processed in the chat.
+    pub is_unreachable: bool,
 }
 
 #[derive(Debug, derive_more::Error, derive_more::Display)]
@@ -80,7 +83,7 @@ repository!(Chats, with_feature_toggles,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_chat(&self, chat_id: ChatIdKind) -> anyhow::Result<Option<Chat>> {
-        sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
+        sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance, is_unreachable FROM Chats
                 WHERE chat_id = $1::bigint OR chat_instance = $1::text",
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
@@ -104,6 +107,20 @@ repository!(Chats, with_feature_toggles,
             .fetch_one(&self.pool)
             .await
             .context(format!("couldn't check whether the chat with id = {chat_id} is anchored"))
+    }
+,
+    /// Remembers that the bot couldn't post to this chat, so the daily shrink stops trying to
+    /// broadcast there. Cleared by [`Self::upsert_chat`] on the next command in the chat.
+    ///
+    /// Keyed by the Telegram id: that's what the broadcast holds, and a chat known only by its
+    /// `chat_instance` is never a broadcast target anyway. Updating no row is fine — the chat may
+    /// have been merged or migrated away between the shrink and the send.
+    pub async fn mark_unreachable(&self, chat_id: &TelegramChatId) -> anyhow::Result<()> {
+        sqlx::query!("UPDATE Chats SET is_unreachable = true WHERE chat_id = $1", chat_id.value())
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .context(format!("couldn't mark the chat with id = {chat_id} as unreachable"))
     }
 ,
     #[autometrics]
@@ -164,13 +181,16 @@ repository!(Chats, with_feature_toggles,
             ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.value()), None),
             ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_string())),
         };
+        let handled_in_chat = matches!(chat_id,
+            ChatIdPartiality::Both(_, ChatIdSource::Database) | ChatIdPartiality::Specific(ChatIdKind::ID(_)));
         let mut tx = self.pool.begin().await?;
-        let chats = sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance FROM Chats
+        let chats = sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance, is_unreachable FROM Chats
                 WHERE chat_id = $1 OR chat_instance = $2",
                 id, instance)
             .fetch_all(&mut *tx)
             .await
             .context(format!("couldn't find the chat with id = {chat_id}"))?;
+        let was_unreachable = chats.iter().any(|chat| chat.is_unreachable);
         let internal_id = match chats.len() {
             1 if chats[0].chat_id == id && chats[0].chat_instance == instance => Ok(chats[0].internal_id),
             1 => Self::update_chat(&mut tx, chats[0].internal_id, id, instance.as_deref()).await,
@@ -178,8 +198,22 @@ repository!(Chats, with_feature_toggles,
             2 => Self::merge_chats(&mut tx, [&chats[0], &chats[1]]).await,
             x => bail!("unexpected count of chats ({x}): {chats:?}"),
         }?;
+        if handled_in_chat && was_unreachable {
+            Self::mark_reachable(&mut tx, internal_id).await?;
+        }
         tx.commit().await?;
         Ok(InternalChatId::new(internal_id))
+    }
+,
+    /// Undoes [`Self::mark_unreachable`]. Runs inside the caller's transaction, so it can't clear
+    /// the flag for a chat whose upsert then rolls back.
+    async fn mark_reachable(tx: &mut Transaction<'_, Postgres>, internal_id: i64) -> anyhow::Result<()> {
+        log::info!("the chat with id = {internal_id} is reachable again");
+        sqlx::query!("UPDATE Chats SET is_unreachable = false WHERE id = $1", internal_id)
+            .execute(&mut **tx)
+            .await
+            .map(|_| ())
+            .context(format!("couldn't mark the chat with id = {internal_id} as reachable"))
     }
 ,
     /// Repoints a chat's row from its old (basic group) id to the new supergroup one after
@@ -623,7 +657,7 @@ struct MergedChatState<'a> {
 }
 
 #[derive(Debug, derive_more::Error)]
-struct MergeChatsError([Chat; 2], String);
+struct MergeChatsError(Box<[Chat; 2]>, String);
 
 impl std::fmt::Display for MergeChatsError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -633,7 +667,7 @@ impl std::fmt::Display for MergeChatsError {
 
 impl MergeChatsError {
     fn new(chats: &[&Chat; 2], msg: &str) -> Self {
-        Self(chats.map(Chat::to_owned), msg.to_owned())
+        Self(Box::new(chats.map(Chat::to_owned)), msg.to_owned())
     }
 }
 
@@ -673,11 +707,13 @@ mod tests {
             internal_id: 1,
             chat_id: Some(id),
             chat_instance: None,
+            is_unreachable: false,
         };
         let chat2 = Chat {
             internal_id: 2,
             chat_id: None,
             chat_instance: Some(inst.clone()),
+            is_unreachable: false,
         };
         let chats = [&chat1, &chat2];
         let res = merge_chat_objects(&chats)
@@ -698,11 +734,13 @@ mod tests {
             internal_id: 1,
             chat_id: Some(id),
             chat_instance: Some(inst.clone()),
+            is_unreachable: false,
         };
         let chat2 = Chat {
             internal_id: 2,
             chat_id: Some(id),
             chat_instance: Some(inst.clone()),
+            is_unreachable: false,
         };
         let chats = [&chat1, &chat2];
         let res = merge_chat_objects(&chats);
@@ -716,11 +754,13 @@ mod tests {
             internal_id: 1,
             chat_id: Some(123),
             chat_instance: None,
+            is_unreachable: false,
         };
         let chat2 = Chat {
             internal_id: 1,
             chat_id: None,
             chat_instance: Some("one".to_owned()),
+            is_unreachable: false,
         };
         let chats = [&chat1, &chat2];
         let res = merge_chat_objects(&chats);

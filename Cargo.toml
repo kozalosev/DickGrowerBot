@@ -14,11 +14,12 @@ license-file = "LICENSE"
 teloxide = { version = "0.17.0", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler", "throttle"] }
 rust-i18n = "4.2.1"
 # Asynchronous runtime, web server, metrics
-tokio = { version =  "1.53.1", default-features = false, features = ["rt-multi-thread", "macros"] }
+tokio = { version =  "1.53.1", default-features = false, features = ["rt-multi-thread", "macros", "signal"] }
 axum = "0.8.9"
 axum-prometheus = "0.10.0"
 prometheus = "0.14.0"
 autometrics = { version = "3.0.0", features = ["prometheus-exporter"] }
+tokio-metrics-collector = "0.3.1"
 # Logging, tracing and envs
 log = "0.4.33"
 tracing = "0.1.44"
