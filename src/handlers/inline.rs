@@ -15,8 +15,8 @@ use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
-use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
-use crate::handlers::{dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatInstanceId};
+use crate::handlers::{dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -150,10 +150,10 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
 pub async fn inline_handler(
     bot: Bot,
     query: InlineQuery,
-    repos: Repositories,
-    app_config: AppConfig,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config: app_config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
@@ -204,19 +204,19 @@ pub async fn inline_handler(
 pub async fn inline_chosen_handler(
     bot: Bot,
     result: ChosenInlineResult,
-    repos: Repositories,
-    config: AppConfig,
     incr: Incrementor,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.finished();
 
     if EXTERNAL_VARIANTS.result_ids.contains(result.result_id.as_str()) {
         return Ok(())
     }
 
-    let maybe_chat_in_sync = result.inline_message_id.as_ref()
-        .and_then(try_resolve_chat_id)
+    let maybe_chat_in_sync = result.inline_message_id.as_deref()
+        .and_then(utils::try_resolve_chat_id)
         .map(|chat_id| repos.chats.get_chat(chat_id.into()));
     if let Some(chat_in_sync_future) = maybe_chat_in_sync {
         let maybe_chat = chat_in_sync_future
@@ -248,11 +248,11 @@ pub async fn inline_chosen_handler(
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,
-    repos: Repositories,
-    config: AppConfig,
     incr: Incrementor,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     let mut answer = bot.answer_callback_query(query.id.clone());
 
     if let (Some(inline_msg_id), Some(data)) = (&query.inline_message_id, &query.data) {
@@ -325,14 +325,6 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             }
         })
         .unwrap_or(Ok(CallbackDataParseResult::Invalid))
-}
-
-#[allow(clippy::ptr_arg)]
-pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<TelegramChatId> {
-    utils::resolve_inline_message_id(msg_id)
-        .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
-        .ok()
-        .and_then(|info| info.chat_id)
 }
 
 // TODO: move to mod.rs and use in message handlers too

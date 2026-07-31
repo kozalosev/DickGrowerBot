@@ -79,6 +79,43 @@ async fn test_no_announcements() {
     assert!(announcement.is_none());
 }
 
+#[tokio::test]
+async fn test_reload() {
+    let (_container, db) = start_postgres().await;
+    create_chat(&db).await;
+    let [en, _] = get_languages();
+
+    let path = write_temp_file("max_shows: 1\ntexts:\n  en: before\n");
+    let ann_repo = repo::Announcements::new(db.clone(), config::AnnouncementsConfig::load(&path));
+
+    let announcement = ann_repo.get_new(&CHAT_ID_KIND, &en)
+        .await.expect("couldn't get the announcement before the reload");
+    assert_eq!(announcement, Some("before".to_owned()));
+
+    // "before" has already been shown once, with max_shows == 1, so a second read must yield
+    // nothing unless the reload actually replaced the config:
+    write_file(&path, "max_shows: 1\ntexts:\n  en: after\n");
+    ann_repo.reload(&path);
+
+    let announcement = ann_repo.get_new(&CHAT_ID_KIND, &en)
+        .await.expect("couldn't get the announcement after the reload");
+    assert_eq!(announcement, Some("after".to_owned()), "reload must pick up the new text");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+fn write_temp_file(content: &str) -> String {
+    let path = std::env::temp_dir()
+        .join(format!("dgb-announcements-repo-test-{}.yml", std::process::id()))
+        .to_str().expect("non-UTF-8 temp path").to_owned();
+    write_file(&path, content);
+    path
+}
+
+fn write_file(path: &str, content: &str) {
+    std::fs::write(path, content).expect("couldn't write the temp file");
+}
+
 async fn create_chat(db: &Pool<Postgres>) {
     let chat_id_part = CHAT_ID_KIND.clone().into();
     dicks::create_user_and_dick_2(db, &chat_id_part, "Ann").await;

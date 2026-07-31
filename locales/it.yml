@@ -99,7 +99,9 @@ commands:
         not_found: "➖ <b>%{name}</b>"
     errors:
       not_admin: "Questo comando può essere utilizzato solo dagli admin!"
+      bot_not_admin: "Per importare i dati da altri bot, ho bisogno anch'io dei diritti di amministratore in questa chat — altrimenti non potrò leggere i loro messaggi. Concedimi i diritti di amministratore e riprova."
       not_reply: "Devi rispondere a un messaggio inviato da uno di %{origin_bots}"
+      legacy_group: "L'importazione non funziona in questa chat — è una limitazione di Telegram: nei gruppi base (non super) un bot non può leggere i messaggi di altri bot, nemmeno da amministratore. Converti il gruppo in un supergruppo (ad esempio impostando un link pubblico nelle impostazioni del gruppo) e ripeti l'importazione.\n\nImportante: dopo la conversione, non rispondere a messaggi vecchi inviati prima della conversione — Telegram non consegna al bot questo tipo di risposte. Chiedi che la classifica venga pubblicata di nuovo e rispondi al nuovo messaggio."
       too_many_members: "L'importazione è consentita solo nei gruppi con 10 o meno membri: le classifiche dei bot concorrenti mostrano solo i primi 10, quindi importare qui sarebbe ingiusto nei confronti degli altri."
       invalid_lines:
         template: "Impossibile elaborare questo messaggio 🤔\nLe seguenti linee sono invalide:\n%{invalid_lines}"

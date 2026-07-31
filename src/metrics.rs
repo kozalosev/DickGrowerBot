@@ -3,6 +3,7 @@ use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
 use strum::IntoEnumIterator;
+use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
 use crate::domain::primitives::SupportedLanguage;
 use crate::repo::ChatMigrationOutcome;
@@ -45,6 +46,8 @@ pub static CHAT_LANGUAGE: Lazy<ChatLanguageCounters> = Lazy::new(||
     ChatLanguageCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
 pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
     SpokenLanguageCounter::new("used_language_total", "count of updates by the sender's Telegram (client) language_code, region suffix kept — an anonymous proxy for the languages the audience speaks"));
+pub static UPDATE_KIND: Lazy<UpdateKindCounter> = Lazy::new(||
+    UpdateKindCounter::new("update_kind_total", "count of all updates received from Telegram, by update kind — the total is the bot's real update rate, and the breakdown shows how much of it is traffic no handler acts on"));
 pub static SELF_DESTRUCTION: Lazy<SelfDestructionCounters> = Lazy::new(||
     SelfDestructionCounters::new("self_destruction_total", "count of the bot's own messages removed by the self-destruction feature, split by message group and outcome (deleted/failed)"));
 pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
@@ -116,6 +119,7 @@ fn force_registration() {
     Lazy::force(&CMD_LANGUAGE);
     Lazy::force(&CHAT_LANGUAGE);
     Lazy::force(&USED_LANGUAGE);
+    Lazy::force(&UPDATE_KIND);
     Lazy::force(&SELF_DESTRUCTION);
     Lazy::force(&ANNOUNCEMENT_SHOWN);
     Lazy::force(&CHAT_MIGRATION);
@@ -415,6 +419,72 @@ impl SpokenLanguageCounter {
     /// (absent or unrecognized => `unknown`). Carries no user id — anonymous.
     pub fn record(&self, code: Option<&str>) {
         self.0.counter(&[&language_label(code)]).inc()
+    }
+}
+
+/// Counts every update the bot receives, labeled by its [`UpdateKind`].
+///
+/// Unlike [`SpokenLanguageCounter`], this one also counts updates without a sender, so its sum is
+/// the honest update rate. Compare it with the `command_*_usage_total` family: the difference is
+/// the traffic no handler acts on (plain group messages, mostly).
+pub struct UpdateKindCounter(CounterVec);
+
+impl UpdateKindCounter {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["kind"]);
+        for kind in UPDATE_KIND_LABELS {
+            vec.counter(&[kind]);
+        }
+        Self(vec)
+    }
+
+    /// Record one received update of the given kind.
+    pub fn record(&self, kind: &UpdateKind) {
+        self.0.counter(&[update_kind_label(kind)]).inc()
+    }
+}
+
+/// Every label [`update_kind_label`] can return.
+const UPDATE_KIND_LABELS: [&str; 24] = [
+    "message", "edited_message", "channel_post", "edited_channel_post",
+    "business_connection", "business_message", "edited_business_message", "deleted_business_messages",
+    "message_reaction", "message_reaction_count",
+    "inline_query", "chosen_inline_result", "callback_query",
+    "shipping_query", "pre_checkout_query", "purchased_paid_media",
+    "poll", "poll_answer",
+    "my_chat_member", "chat_member", "chat_join_request",
+    "chat_boost", "removed_chat_boost",
+    "error",
+];
+
+/// The metric label of an update kind: the Telegram field name it came in under. `error` means
+/// teloxide couldn't parse the update — usually a Bot API addition we don't know yet.
+fn update_kind_label(kind: &UpdateKind) -> &'static str {
+    match kind {
+        UpdateKind::Message(_) => "message",
+        UpdateKind::EditedMessage(_) => "edited_message",
+        UpdateKind::ChannelPost(_) => "channel_post",
+        UpdateKind::EditedChannelPost(_) => "edited_channel_post",
+        UpdateKind::BusinessConnection(_) => "business_connection",
+        UpdateKind::BusinessMessage(_) => "business_message",
+        UpdateKind::EditedBusinessMessage(_) => "edited_business_message",
+        UpdateKind::DeletedBusinessMessages(_) => "deleted_business_messages",
+        UpdateKind::MessageReaction(_) => "message_reaction",
+        UpdateKind::MessageReactionCount(_) => "message_reaction_count",
+        UpdateKind::InlineQuery(_) => "inline_query",
+        UpdateKind::ChosenInlineResult(_) => "chosen_inline_result",
+        UpdateKind::CallbackQuery(_) => "callback_query",
+        UpdateKind::ShippingQuery(_) => "shipping_query",
+        UpdateKind::PreCheckoutQuery(_) => "pre_checkout_query",
+        UpdateKind::PurchasedPaidMedia(_) => "purchased_paid_media",
+        UpdateKind::Poll(_) => "poll",
+        UpdateKind::PollAnswer(_) => "poll_answer",
+        UpdateKind::MyChatMember(_) => "my_chat_member",
+        UpdateKind::ChatMember(_) => "chat_member",
+        UpdateKind::ChatJoinRequest(_) => "chat_join_request",
+        UpdateKind::ChatBoost(_) => "chat_boost",
+        UpdateKind::RemovedChatBoost(_) => "removed_chat_boost",
+        UpdateKind::Error(_) => "error",
     }
 }
 

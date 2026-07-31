@@ -1,5 +1,5 @@
+use std::sync::{Arc, RwLock};
 use anyhow::Context;
-use derive_more::Constructor;
 use sqlx::{Pool, Postgres};
 use crate::repo::{ensure_only_one_row_updated, ChatIdKind};
 use crate::config;
@@ -7,17 +7,48 @@ use crate::domain::objects::Announcement;
 use crate::domain::primitives::{Counter, LanguageCode, SupportedLanguage, TextHash};
 use crate::domain::primitives::chat::InternalChatId;
 
-#[derive(Clone, Constructor)]
+#[derive(Clone)]
 pub struct Announcements {
     pool: Pool<Postgres>,
-    announcements: config::AnnouncementsConfig,
+    /// Locked so [`Announcements::reload`] can replace it at runtime. Shared by every clone of this
+    /// repository, so one reload reaches the whole bot.
+    announcements: Arc<RwLock<config::AnnouncementsConfig>>,
 }
 
 impl Announcements {
+    pub fn new(pool: Pool<Postgres>, announcements: config::AnnouncementsConfig) -> Self {
+        Self { pool, announcements: Arc::new(RwLock::new(announcements)) }
+    }
+
+    /// Reads `path` again and replaces the announcements. A missing or broken file leaves the bot
+    /// without announcements, the same as at startup — [`config::AnnouncementsConfig::load`] logs
+    /// the reason and returns an empty config.
+    // Called only from the SIGHUP handler, which Windows doesn't have.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn reload(&self, path: &str) {
+        let fresh = config::AnnouncementsConfig::load(path);
+        let mut storage = match self.announcements.write() {
+            Ok(storage) => storage,
+            Err(_) => {
+                log::error!("the announcements lock is poisoned, skipping the reload");
+                return;
+            }
+        };
+        let count = fresh.announcements.len();
+        *storage = fresh;
+        log::info!("reloaded the announcements from {path}: {count} languages");
+    }
 
     pub async fn get_new(&self, chat_id: &ChatIdKind, lang_code: &LanguageCode) -> anyhow::Result<Option<String>> {
-        let maybe_announcement = match self.announcements.get(lang_code) {
-            Some(announcement) if self.check_conditions(chat_id, announcement, lang_code).await? => Some((*announcement.text).clone()),
+        let (announcement, max_shows) = {
+            let config = match self.announcements.read() {
+                Ok(config) => config,
+                Err(_) => return Ok(None),
+            };
+            (config.get(lang_code).cloned(), config.max_shows)
+        };
+        let maybe_announcement = match announcement {
+            Some(ann) if self.check_conditions(chat_id, &ann, max_shows, lang_code).await? => Some(ann.text.to_string()),
             Some(_) | None => None
         };
         Ok(maybe_announcement)
@@ -27,15 +58,16 @@ impl Announcements {
         &self,
         chat_id_kind: &ChatIdKind,
         announcement: &config::Announcement,
+        max_shows: Counter,
         lang_code: &LanguageCode,
     ) -> anyhow::Result<bool> {
         let res = match self.get(chat_id_kind, lang_code).await? {
-            _ if self.announcements.max_shows == Counter::literal(0) => false,
+            _ if max_shows == Counter::literal(0) => false,
             Some(entity) if entity.hash != *announcement.hash => {
                 self.update(entity.chat_id, lang_code, &announcement.hash).await?;
                 true
             }
-            Some(entity) if entity.times_shown >= self.announcements.max_shows  =>
+            Some(entity) if entity.times_shown >= max_shows =>
                 false,
             Some(entity) => {
                 self.increment_times_shown(entity.chat_id, lang_code).await?;

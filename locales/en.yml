@@ -99,7 +99,9 @@ commands:
         not_found: "➖ <b>%{name}</b>"
     errors:
       not_admin: "This command is supposed to be used by admins only!"
+      bot_not_admin: "To import data from other bots, I also need admin rights in this chat — otherwise I won't be able to read their messages. Grant me admin rights and try again."
       not_reply: "You must reply to a non-forwarded message sent by any of %{origin_bots}"
+      legacy_group: "Import doesn't work in this chat — it's a Telegram limitation: in basic (non-super) groups a bot can't read messages from other bots, even as an admin. Convert the group to a supergroup (e.g. by setting a public link in the group settings) and run the import again.\n\nImportant: after converting, don't reply to old messages sent before the conversion — Telegram won't deliver such replies to the bot at all. Ask for the leaderboard to be posted again and reply to the new message."
       too_many_members: "Import is only allowed in chats with 10 or fewer members: competitor bots' leaderboards show just the top 10, so importing here would be unfair to everyone else."
       invalid_lines:
         template: "Couldn't parse this message 🤔\nThe following lines are invalid:\n%{invalid_lines}"

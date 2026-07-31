@@ -13,7 +13,8 @@ use crate::config::AppConfig;
 use crate::domain::objects::Loan;
 use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, UserId as DomainUserId};
 use crate::domain::primitives::chat::ChatIdPartiality;
-use crate::handlers::{CallbackButton, FromRefs, HandlerImplResult, HandlerResult, reply_html, try_resolve_chat_id};
+use crate::handlers::{CallbackButton, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
+use crate::handlers::utils::try_resolve_chat_id;
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
 
@@ -28,10 +29,10 @@ pub enum LoanCommands {
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
-    repos: repo::Repositories,
-    config: AppConfig,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_LOAN_COUNTER.invoked.chat.inc();
 
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
@@ -111,10 +112,10 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,
-    repos: repo::Repositories,
-    config: AppConfig,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     let data = LoanCallbackData::parse(&query)?;
     let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
     
