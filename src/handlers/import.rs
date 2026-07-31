@@ -8,10 +8,10 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Message, UserId};
-use crate::handlers::{HandlerResult, reply_html};
+use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
 use crate::domain::objects::ExternalUser;
-use crate::domain::primitives::{LanguageCode, Length, UserId as DomainUserId, Username};
+use crate::domain::primitives::{Length, UserId as DomainUserId, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
@@ -66,7 +66,9 @@ struct ParseResult(OriginalBotKind, String);
 #[strum(serialize_all="snake_case")]
 enum BeforeImportCheckErrors {
     NotAdmin,
+    BotNotAdmin,
     NotReply,
+    LegacyGroup,
     TooManyMembers,
     Other(anyhow::Error)
 }
@@ -113,9 +115,10 @@ impl Display for InvalidLines {
 pub async fn import_cmd_handler(
     bot: Bot,
     msg: Message,
-    repos: repo::Repositories,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_IMPORT.invoked();
     let answer = match check_and_parse_message(&bot, &msg, &repos).await {
         Ok(parsed) => {
@@ -180,6 +183,7 @@ pub async fn import_cmd_handler(
             t!("commands.import.errors.not_reply", locale = &lang_code,
                 origin_bots = origin_bots).to_string()
         },
+        Err(BeforeImportCheckErrors::LegacyGroup) => t!("commands.import.errors.legacy_group", locale = &lang_code).to_string(),
         Err(e) => {
             let t_key = format!("commands.import.errors.{e}");
             t!(&t_key, locale = &lang_code).to_string()
@@ -194,16 +198,25 @@ async fn check_and_parse_message(
     msg: &Message,
     repos: &repo::Repositories,
 ) -> Result<ParseResult, BeforeImportCheckErrors> {
-    let admin_ids = bot.get_chat_administrators(msg.chat.id)
+    if msg.chat.is_group() {
+        return Err(BeforeImportCheckErrors::LegacyGroup);
+    }
+
+    let admin_ids: Vec<UserId> = bot.get_chat_administrators(msg.chat.id)
         .await?
         .into_iter()
-        .map(|m| m.user.id);
+        .map(|m| m.user.id)
+        .collect();
     let from_id = msg.from.as_ref()
         .ok_or(BeforeImportCheckErrors::Other(anyhow!("not from a user")))?
         .id;
-    let invoked_by_admin = admin_ids.into_iter().any(|id| id == from_id);
-    if !invoked_by_admin {
+    if !admin_ids.contains(&from_id) {
         return Err(BeforeImportCheckErrors::NotAdmin)
+    }
+    // Reading another bot's message only works if this bot is itself an admin
+    let bot_id = bot.get_me().await?.id;
+    if !admin_ids.contains(&bot_id) {
+        return Err(BeforeImportCheckErrors::BotNotAdmin)
     }
 
     let chat_id_kind = msg.chat.id.into();
@@ -212,15 +225,10 @@ async fn check_and_parse_message(
         return Err(BeforeImportCheckErrors::TooManyMembers)
     }
 
-    let result = msg.reply_to_message()
+    msg.reply_to_message()
         .filter(|m| m.forward_origin().is_none())
-        .and_then(check_reply_source_and_text);
-    let result = match result {
-        None => return Err(BeforeImportCheckErrors::NotReply),
-        Some(res) => res
-    };
-
-    Ok(result)
+        .and_then(check_reply_source_and_text)
+        .ok_or(BeforeImportCheckErrors::NotReply)
 }
 
 fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
@@ -255,10 +263,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .collect();
     let member_names: HashSet<_> = HashSet::from_iter(members.keys());
 
-    let top: Vec<Result<Captures, String>> = parsed.1.lines()
-        .skip_while(|s| !TOP_LINE_REGEXP.is_match(s))
-        .map(|pos| TOP_LINE_REGEXP.captures(pos).ok_or(pos.to_owned()))
-        .collect();
+    let top = parse_top_lines(&parsed.1);
     let invalid_lines: Vec<String> = top.iter()
         .filter(|pos| pos.is_err())
         .map(|pos| pos.as_ref().unwrap_err().clone())
@@ -307,6 +312,14 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
     })
 }
 
+fn parse_top_lines(text: &str) -> Vec<Result<Captures<'_>, String>> {
+    text.lines()
+        .skip_while(|s| !TOP_LINE_REGEXP.is_match(s))
+        .take_while(|s| !s.trim().is_empty())
+        .map(|pos| TOP_LINE_REGEXP.captures(pos).ok_or(pos.to_owned()))
+        .collect()
+}
+
 fn map_user(pos: Captures) -> Option<OriginalUser> {
     if let (Some(name), Some(length)) = (pos.name("name"), pos.name("length")) {
         let name = Username::new(name.as_str().to_owned());
@@ -349,5 +362,30 @@ mod tests {
 
         check("@pipisabot", OriginalBotKind::Pipisa);
         check("@kraft28_bot", OriginalBotKind::Kraft28);
+    }
+
+    #[test]
+    fn parse_top_lines_ignores_blank_lines_and_footer() {
+        let text = "Топ 10 игроков 🔝\n\n1|Leonid SadBot🍆... — 3 см.\n\n\nраздача см в канале)";
+
+        let top = parse_top_lines(text);
+
+        assert_eq!(top.len(), 1);
+        let user = map_user(top.into_iter().next().unwrap().expect("line should be valid"))
+            .expect("captures should map to a user");
+        assert_eq!(user.name.value(), "Leonid SadBot🍆");
+        assert_eq!(user.length, 3);
+    }
+
+    #[test]
+    fn parse_top_lines_reports_invalid_entry_within_the_list() {
+        let text = "Топ 10 игроков 🔝\n\n1|Leonid SadBot🍆... — 3 см.\nnot a valid line\n2|Another — 5 см.";
+
+        let top = parse_top_lines(text);
+
+        assert_eq!(top.len(), 3);
+        assert!(top[0].is_ok());
+        assert_eq!(top[1].as_ref().unwrap_err(), "not a valid line");
+        assert!(top[2].is_ok());
     }
 }

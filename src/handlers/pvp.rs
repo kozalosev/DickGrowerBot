@@ -8,9 +8,9 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
-use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackResult, HandlerResult};
+use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackResult, HandlerDeps, HandlerResult};
 use crate::{metrics, reply_html, repo};
-use crate::config::{AppConfig, BattlesFeatureToggles};
+use crate::config::BattlesFeatureToggles;
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
 use crate::domain::primitives::{Bet, LanguageCode, LengthChange, LoanPayout, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, TelegramChatId};
@@ -96,10 +96,10 @@ pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
     cmd: BattleCommands,
-    repos: Repositories,
-    config: AppConfig,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     let user = msg.from.as_ref().ok_or(anyhow!("no FROM field in the PVP command handler"))?.into();
@@ -118,7 +118,9 @@ pub async fn cmd_handler(
     Ok(())
 }
 
-pub async fn cmd_handler_no_args(bot: Bot, msg: Message, lang_code: LanguageCode) -> HandlerResult {
+pub async fn cmd_handler_no_args(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+    let HandlerDeps { lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
 
     reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
@@ -135,7 +137,9 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
     maybe_bet.is_ok()
 }
 
-pub async fn inline_handler(bot: Bot, query: InlineQuery, lang_code: LanguageCode) -> HandlerResult {
+pub async fn inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
+    let HandlerDeps { lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
     let bet = Bet::new(query.query.parse()?)
@@ -185,11 +189,11 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,
-    repos: Repositories,
-    config: AppConfig,
     mut battle_locker: LockCallbackServiceFacade,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat().id)
         .map(TelegramChatId::from)

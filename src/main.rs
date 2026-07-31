@@ -8,6 +8,7 @@ mod config;
 mod commands;
 mod users;
 mod scheduler;
+mod reload;
 
 use std::net::SocketAddr;
 use futures::future::join_all;
@@ -17,12 +18,13 @@ use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::UpdateListener;
-use crate::handlers::{checks, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
+use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
 use crate::error_handler::MetricsErrorHandler;
+use crate::repo::Repositories;
 use crate::users::LanguageService;
 
 i18n!(fallback = "en");    // load localizations with default parameters
@@ -39,10 +41,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
     let repos = repo::Repositories::new(&db_conn, &app_config);
-    let language_service = users::init_language_service(&integrations_config, repos.chats.clone()).await;
+    let language_service = users::init_language_service(&integrations_config, repos.chats.clone(),
+                                                        app_config.features.chats_merging).await;
 
     let handler = dptree::entry()
-        .map_async(|upd: Update, ls: LanguageService| async move { ls.resolve(&upd).await })
+        .map(|upd: Update, ls: LanguageService, repos: Repositories, config: config::AppConfig, self_destruction: handlers::utils::SelfDestructionService| {
+            let lang_resolver = ls.defer(upd);
+            HandlerDeps { repos, config, self_destruction, lang_resolver }
+        })
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
@@ -104,11 +110,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let webhook_url = integrations_config.webhook_url;
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    let metrics_router = metrics::init();
+    let (metrics_router, prometheus_layer) = metrics::init();
+    metrics::register_db_pool_collector(db_conn.clone());
 
     // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
     scheduler::spawn_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), app_config.clone());
+    reload::spawn_reload_on_sighup(repos.announcements.clone());
 
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
@@ -137,17 +145,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .build();
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
 
-            let srv = tokio::spawn(async move {
+            let srv = tokio::spawn(metrics::TASK_WEBHOOK_SERVER.instrument(async move {
                 let tcp_listener = tokio::net::TcpListener::bind(addr)
                     .await
                     .inspect_err(|_| stop_token.stop())?;
                 let app = axum::Router::new()
                     .merge(metrics_router)
-                    .merge(bot_router);
+                    .merge(bot_router)
+                    .layer(prometheus_layer);
                 axum::serve(tcp_listener, app)
                     .with_graceful_shutdown(stop_flag)
                     .await
-            });
+            }));
 
             let (res, _) = futures::join!(srv, bot_fut);
             res
@@ -155,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => {
             log::info!("The polling dispatcher is activating...");
 
-            let bot_fut = tokio::spawn(async move {
+            let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
                 Dispatcher::builder(bot, handler)
                     .default_handler(ignore_unknown_updates)
                     .error_handler(MetricsErrorHandler::new("An error in a handler"))
@@ -164,11 +173,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .build()
                     .dispatch()
                     .await
-            });
+            }));
 
-            let srv = tokio::spawn(async move {
+            let srv = tokio::spawn(metrics::TASK_METRICS_SERVER.instrument(async move {
                 let tcp_listener = tokio::net::TcpListener::bind(addr).await?;
-                axum::serve(tcp_listener, metrics_router)
+                axum::serve(tcp_listener, metrics_router.layer(prometheus_layer))
                     .with_graceful_shutdown(async {
                         tokio::signal::ctrl_c()
                             .await
@@ -176,7 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         log::info!("Shutdown of the metrics server")
                     })
                     .await
-            });
+            }));
 
             let (res, _) = futures::join!(srv, bot_fut);
             res

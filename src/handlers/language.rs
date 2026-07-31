@@ -9,7 +9,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdPartiality, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
-use crate::handlers::{reply_html, HandlerResult};
+use crate::handlers::{reply_html, HandlerDeps, HandlerResult};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::metrics;
@@ -36,8 +36,10 @@ pub async fn cmd_handler(
     msg: Message,
     cmd: LanguageCommands,
     language_service: LanguageService,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     let from_id = msg.from.as_ref()
         .ok_or(anyhow!("unexpected absence of a FROM field"))?
         .id;
@@ -119,8 +121,10 @@ pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,
     language_service: LanguageService,
-    lang_code: LanguageCode,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { lang_resolver, .. } = deps;
+    let lang_code = lang_resolver.execute().await;
     let data = LanguageCallbackData::parse(&query)?;
     let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;

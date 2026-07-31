@@ -4,6 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use byteorder::{LittleEndian, ReadBytesExt};
 use crate::domain::objects::InlineMessageIdInfo;
+use crate::domain::primitives::chat::TelegramChatId;
 
 impl TryFrom<&str> for InlineMessageIdInfo {
     type Error = InvalidIDFormat;
@@ -22,6 +23,15 @@ pub fn resolve_inline_message_id(inline_message_id: &str) -> anyhow::Result<Inli
         .map_err(|e: InvalidIDFormat| anyhow!(e))?;
     log::debug!("resolved InlineMessageIdInfo: {info:?}");
     Ok(info)
+}
+
+/// The chat an inline message belongs to, when it can be told at all: only supergroups and
+/// channels encode it (see [`fix_chat_id`]). Errors are logged and reported as "unknown".
+pub fn try_resolve_chat_id(msg_id: &str) -> Option<TelegramChatId> {
+    resolve_inline_message_id(msg_id)
+        .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
+        .ok()
+        .and_then(|info| info.chat_id)
 }
 
 #[derive(Debug)]
@@ -128,9 +138,24 @@ fn fix_chat_id(number: i64) -> Option<i64> {
         .flatten()
 }
 
+/// The reverse of the decoding above: an `inline_message_id` of a message posted into the given
+/// supergroup, in the ID64 layout (`dc_id`, peer id, `message_id`, `access_hash`) with the peer id
+/// negated back out of its Bot API `-100…` form. For tests that need an id the bot can resolve.
+#[cfg(test)]
+pub fn inline_message_id_of(chat_id: i64) -> String {
+    let peer_id = chat_id - SUPERGROUP_ID_SHIFT;
+    let mut bytes = Vec::with_capacity(24);
+    bytes.extend_from_slice(&1i32.to_le_bytes());       // dc_id
+    bytes.extend_from_slice(&peer_id.to_le_bytes());
+    bytes.extend_from_slice(&42i32.to_le_bytes());      // message_id
+    bytes.extend_from_slice(&7i64.to_le_bytes());       // access_hash
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::fix_chat_id;
+    use crate::domain::primitives::chat::TelegramChatId;
+    use super::{fix_chat_id, inline_message_id_of, try_resolve_chat_id};
 
     #[test]
     fn test_fix_chat_id() {
@@ -144,5 +169,13 @@ mod tests {
         assert_eq!(fix_chat_id(0), None);
         // a value too far out to shift is garbage rather than a chat
         assert_eq!(fix_chat_id(i64::MIN), None);
+    }
+
+    /// The test fixture has to agree with the decoder it feeds.
+    #[test]
+    fn test_inline_message_id_round_trip() {
+        let chat_id = -1001100294568;
+        let resolved = try_resolve_chat_id(&inline_message_id_of(chat_id));
+        assert_eq!(resolved, Some(TelegramChatId::new(chat_id)));
     }
 }

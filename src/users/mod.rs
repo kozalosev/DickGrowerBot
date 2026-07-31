@@ -4,7 +4,7 @@ pub mod mock;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-use teloxide::types::{UserId, Update};
+use teloxide::types::{UpdateKind, UserId, Update};
 use tonic::{Code, Response};
 use tonic::transport::Channel;
 use generated::user_service_client::UserServiceClient as GrpcClient;
@@ -13,6 +13,7 @@ use generated::{GetUserRequest, GetUsersRequest, UpdateUserRequest, User};
 use crate::config::IntegrationsConfig;
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
+use crate::handlers::utils::try_resolve_chat_id;
 use crate::metrics;
 use crate::repo::Chats;
 
@@ -209,6 +210,34 @@ fn most_popular_language<'a>(codes: impl Iterator<Item = &'a LanguageCode>) -> O
         .map(|(lang, _)| lang)
 }
 
+/// Chat keys to try for an update that carries no `chat` of its own — every inline invocation.
+///
+/// Such an update names its chat only indirectly: a supergroup's `chat_id` is encoded in the
+/// `inline_message_id` (and only a supergroup's — see [`try_resolve_chat_id`]), while a legacy
+/// group is known just by the `chat_instance` of a callback query. The id goes first because
+/// that's the row the chat-wide language is always written to: `/language` is a group message and
+/// its picker callback reads the chat of the message, so both know the real id, and an
+/// instance-only row left over from earlier inline use would read back no language at all.
+fn inline_chat_candidates(update: &Update, chats_merging: bool) -> Vec<ChatIdKind> {
+    let decoded = |inline_message_id: Option<&String>| chats_merging
+        .then(|| inline_message_id.map(String::as_str).and_then(try_resolve_chat_id))
+        .flatten()
+        .map(ChatIdKind::from);
+
+    match &update.kind {
+        // A callback query with a message of its own is an in-chat one: `Update::chat()` covered it.
+        UpdateKind::CallbackQuery(query) if query.message.is_none() => decoded(query.inline_message_id.as_ref())
+            .into_iter()
+            .chain([ChatIdKind::from(query.chat_instance.clone())])
+            .collect(),
+        UpdateKind::ChosenInlineResult(result) => decoded(result.inline_message_id.as_ref())
+            .into_iter()
+            .collect(),
+        // An inline query names no chat whatsoever — it only tells the *kind* of it.
+        _ => Vec::new(),
+    }
+}
+
 #[derive(Clone)]
 struct CachedLang {
     lang: Option<SupportedLanguage>,
@@ -224,6 +253,9 @@ pub struct LanguageService<C: UserServiceClient = UserServiceClientGrpc> {
     chats: Chats,
     chat_cache: Arc<Mutex<HashMap<ChatIdKind, CachedLang>>>,
     chat_ttl: Duration,
+    /// Whether the `chat_id` hidden in an `inline_message_id` may be used to name a chat —
+    /// see [`inline_chat_candidates`].
+    chats_merging: bool,
 }
 
 impl<C: UserServiceClient> LanguageService<C> {
@@ -234,31 +266,55 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// Resolves the effective language for an update: a group's stored language (when set) wins for
     /// everyone and short-circuits the user-service call; otherwise we fall back to the per-user
     /// resolution ([`resolve_language_for`]).
-    pub(crate) async fn resolve(&self, update: &Update) -> LanguageCode {
+    pub async fn resolve(&self, update: &Update) -> LanguageCode {
         // Anonymously record the sender's Telegram (client) language — our best proxy for the
         // languages the audience actually speaks, independent of any chat/personal override below.
         if let Some(user) = update.from() {
             metrics::USED_LANGUAGE.record(user.language_code.as_deref());
         }
-        if let Some(chat) = update.chat()
-            && !chat.is_private() && !chat.is_channel()
-            && let Some(lang) = self.chat_language(&chat.id.into()).await
-        {
+        if let Some(lang) = self.update_chat_language(update).await {
             return LanguageCode::new(lang.to_string());
         }
         resolve_language_for(update.from(), &self.users).await
     }
 
+    /// Wraps this update in a [`LanguageResolver`] instead of resolving its language right away:
+    /// the chat-language lookup and the user-service call only happen if some handler dptree
+    /// actually routes the update to asks for it.
+    pub fn defer(self, update: Update) -> LanguageResolver<C> {
+        metrics::UPDATE_KIND.record(&update.kind);
+        LanguageResolver { service: self, update }
+    }
+
+    /// The chat-wide language of the chat the update happened in, if the chat is known and has one.
+    ///
+    /// Inline invocations carry no chat at all, so they are looked up by the indirect keys
+    /// [`inline_chat_candidates`] digs out of them — the first key that yields a language wins.
+    async fn update_chat_language(&self, update: &Update) -> Option<SupportedLanguage> {
+        if let Some(chat) = update.chat() {
+            if chat.is_private() || chat.is_channel() {
+                return None;
+            }
+            return self.chat_language(&chat.id.into()).await;
+        }
+        for chat_id in inline_chat_candidates(update, self.chats_merging) {
+            if let Some(lang) = self.chat_language(&chat_id).await {
+                return Some(lang);
+            }
+        }
+        None
+    }
+
     /// Sets (or clears, with `None`) the chat-wide language and refreshes the local cache so this
     /// instance is immediately consistent.
-    pub(crate) async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
+    pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
         self.chats.set_chat_language(chat_id, lang).await?;
         self.chat_cache().insert(chat_id.kind(), CachedLang { lang, at: tokio::time::Instant::now() });
         Ok(())
     }
 
     /// Fetches a user from the user-service, or `Ok(None)` when the integration is disabled.
-    pub(crate) async fn user(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
+    pub async fn user(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
         match &self.users {
             UserService::Connected(client) => client.get(uid).await,
             UserService::Disabled => Ok(None),
@@ -269,7 +325,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// preference), for choosing the language of a proactive broadcast to a chat with no chat-wide
     /// override. Returns `None` when the service is disabled, none of the users are registered, or
     /// none has a language we localize — the caller then falls back to English.
-    pub(crate) async fn popular_language(&self, uids: &[UserId]) -> Option<SupportedLanguage> {
+    pub async fn popular_language(&self, uids: &[UserId]) -> Option<SupportedLanguage> {
         let UserService::Connected(client) = &self.users else { return None };
         let langs = client.get_user_languages(uids).await
             .inspect_err(|status| log::warn!("couldn't batch-fetch user languages for the tally: {status}"))
@@ -278,7 +334,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     }
 
     /// Updates a user's personal language in the user-service.
-    pub(crate) async fn set_user_language(&self, uid: UserId, code: &str) -> Result<(), tonic::Status> {
+    pub async fn set_user_language(&self, uid: UserId, code: &str) -> Result<(), tonic::Status> {
         match &self.users {
             UserService::Connected(client) => client.set_language(uid, code).await,
             UserService::Disabled => Err(tonic::Status::unavailable("user-service is disabled")),
@@ -313,13 +369,18 @@ impl<C: UserServiceClient> LanguageService<C> {
 /// Builds the [`LanguageService`], connecting to the user-service when it's configured and spawning
 /// a background task to keep the user cache tidy. Falls back to a disabled user-service (Telegram
 /// languages only) when it's not configured or unreachable — the chat-language part keeps working.
-pub async fn init_language_service(config: &IntegrationsConfig, chats: Chats) -> LanguageService<UserServiceClientGrpc> {
+pub async fn init_language_service(
+    config: &IntegrationsConfig,
+    chats: Chats,
+    chats_merging: bool,
+) -> LanguageService<UserServiceClientGrpc> {
     let users = connect_user_service(config).await;
     LanguageService {
         users,
         chats,
         chat_cache: Arc::new(Mutex::new(HashMap::new())),
         chat_ttl: Duration::from_secs(config.chat_language_cache_time_secs),
+        chats_merging,
     }
 }
 
@@ -342,14 +403,28 @@ async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserSe
 }
 
 fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_time_secs: u64) {
-    tokio::spawn(async move {
+    tokio::spawn(metrics::TASK_USER_SERVICE_CACHE_CLEANUP.instrument(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(cache_time_secs.max(1)));
         interval.tick().await; // consume the immediate first tick
         loop {
             interval.tick().await;
             client.clean_up_cache();
         }
-    });
+    }));
+}
+
+/// A `LanguageCode` not yet resolved: constructing this queries nothing, so an update matched
+/// by no handler never touches the chat-language lookup or the user-service.
+#[derive(Clone)]
+pub struct LanguageResolver<C: UserServiceClient = UserServiceClientGrpc> {
+    service: LanguageService<C>,
+    update: Update,
+}
+
+impl<C: UserServiceClient> LanguageResolver<C> {
+    pub async fn execute(&self) -> LanguageCode {
+        self.service.resolve(&self.update).await
+    }
 }
 
 /// Resolves the effective language for a single user: the preference stored in user-service (when
@@ -378,11 +453,23 @@ pub(crate) async fn resolve_language_for<C: UserServiceClient>(
 
 #[cfg(test)]
 mod test {
-    use teloxide::types::{User, UserId};
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use sqlx::{Pool, Postgres};
+    use teloxide::types::{Chat, ChatId, ChatKind, ChatPublic, ChosenInlineResult, InaccessibleMessage,
+        MaybeInaccessibleMessage, MessageId, PublicChatKind, PublicChatSupergroup, Update, UpdateId,
+        UpdateKind, User, UserId};
     use crate::domain::primitives::{LanguageCode, SupportedLanguage};
+    use crate::config::FeatureToggles;
+    use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
+    use crate::handlers::utils::callbacks::build_callback_query;
+    use crate::handlers::utils::inline_message_id_of;
+    use crate::repo::Chats;
+    use crate::repo::test::start_postgres;
     use crate::users::generated::{User as ServiceUser, user::Options};
     use crate::users::mock::UserServiceClientMock;
-    use super::{most_popular_language, resolve_language_for, UserService, UserServiceClient};
+    use super::{inline_chat_candidates, most_popular_language, resolve_language_for, LanguageService, UserService, UserServiceClient};
 
     fn service_user(id: i64, language_code: Option<&str>) -> ServiceUser {
         ServiceUser {
@@ -429,6 +516,80 @@ mod test {
         assert!(!found.contains_key(&UserId(4)));
     }
 
+    fn inline_callback_update(inline_message_id: Option<String>, chat_instance: &str) -> Update {
+        let mut query = build_callback_query("whatever".to_owned());
+        query.inline_message_id = inline_message_id;
+        query.chat_instance = chat_instance.to_owned();
+        Update { id: UpdateId(0), kind: UpdateKind::CallbackQuery(query) }
+    }
+
+    fn chosen_result_update(inline_message_id: Option<String>) -> Update {
+        let result = ChosenInlineResult {
+            result_id: "grow".to_owned(),
+            from: tg_user(1, None),
+            location: None,
+            inline_message_id,
+            query: String::new(),
+        };
+        Update { id: UpdateId(0), kind: UpdateKind::ChosenInlineResult(result) }
+    }
+
+    #[test]
+    fn inline_candidates_try_the_decoded_chat_id_first() {
+        let chat_id = -1001100294568i64;
+        let update = inline_callback_update(Some(inline_message_id_of(chat_id)), "-987654321");
+        let candidates = inline_chat_candidates(&update, true);
+        assert_eq!(candidates, vec![
+            ChatIdKind::ID(TelegramChatId::new(chat_id)),
+            ChatIdKind::Instance(TelegramChatInstanceId::new("-987654321".to_owned())),
+        ]);
+    }
+
+    #[test]
+    fn inline_candidates_fall_back_to_the_chat_instance() {
+        let chat_id = -1001100294568i64;
+        let instance = ChatIdKind::Instance(TelegramChatInstanceId::new("-987654321".to_owned()));
+
+        // Merging off: the id encoded in the inline_message_id must not be used at all.
+        let update = inline_callback_update(Some(inline_message_id_of(chat_id)), "-987654321");
+        assert_eq!(inline_chat_candidates(&update, false), vec![instance.clone()]);
+
+        // A legacy group's inline_message_id encodes no chat, and there may be none at all.
+        let undecodable = inline_callback_update(Some("not-an-inline-message-id".to_owned()), "-987654321");
+        assert_eq!(inline_chat_candidates(&undecodable, true), vec![instance.clone()]);
+        let no_id = inline_callback_update(None, "-987654321");
+        assert_eq!(inline_chat_candidates(&no_id, true), vec![instance]);
+    }
+
+    #[test]
+    fn inline_candidates_of_a_chosen_result_and_of_updates_with_a_chat() {
+        let chat_id = -1001100294568i64;
+        let update = chosen_result_update(Some(inline_message_id_of(chat_id)));
+        assert_eq!(inline_chat_candidates(&update, true), vec![ChatIdKind::ID(TelegramChatId::new(chat_id))]);
+        // Nothing to fall back to: a chosen result carries no chat_instance.
+        assert!(inline_chat_candidates(&chosen_result_update(None), true).is_empty());
+        assert!(inline_chat_candidates(&update, false).is_empty());
+
+        // A callback query with a message of its own is resolved by `Update::chat()` instead.
+        let mut query = build_callback_query("whatever".to_owned());
+        query.chat_instance = "-987654321".to_owned();
+        query.message = Some(MaybeInaccessibleMessage::Inaccessible(InaccessibleMessage {
+            chat: Chat {
+                id: ChatId(chat_id),
+                kind: ChatKind::Public(ChatPublic {
+                    title: None,
+                    kind: PublicChatKind::Supergroup(PublicChatSupergroup {
+                        username: None,
+                        is_forum: false,
+                    }),
+                }),
+            },
+            message_id: MessageId(42),
+        }));
+        let in_chat = Update { id: UpdateId(0), kind: UpdateKind::CallbackQuery(query) };
+        assert!(inline_chat_candidates(&in_chat, true).is_empty());
+    }
+
     fn tg_user(id: u64, language_code: Option<&str>) -> User {
         User {
             id: UserId(id),
@@ -440,6 +601,82 @@ mod test {
             is_premium: false,
             added_to_attachment_menu: false,
         }
+    }
+
+    /// A supergroup the bot knows by both of its keys — the state an inline invocation has to be
+    /// resolved from.
+    const SUPERGROUP_ID: i64 = -1001100294568;
+    const CHAT_INSTANCE: &str = "-987654321";
+
+    async fn language_service_of(db: Pool<Postgres>, chats_merging: bool) -> LanguageService<UserServiceClientMock> {
+        // The repo's own toggle stays on regardless: it's what makes the row keep *both* keys, which
+        // is the state to resolve from. The argument is the service's own gate on the decoding.
+        let chats = Chats::new(db, FeatureToggles { chats_merging: true, ..Default::default() });
+        let full = ChatIdFull {
+            id: TelegramChatId::new(SUPERGROUP_ID),
+            instance: TelegramChatInstanceId::new(CHAT_INSTANCE.to_owned()),
+        };
+        chats.set_chat_language(&full.to_partiality(ChatIdSource::Database), Some(SupportedLanguage::RU))
+            .await.expect("couldn't set the chat language");
+
+        LanguageService {
+            users: UserServiceClientMock::new(),
+            chats,
+            chat_cache: Arc::new(Mutex::new(HashMap::new())),
+            chat_ttl: Duration::from_secs(60),
+            chats_merging,
+        }
+    }
+
+    /// The regression of #138: an inline invocation carries no chat, so the chat-wide language used
+    /// to be ignored and everyone got their own. Both keys of the chat must lead to it — and only
+    /// a chat we can actually find speaks for its members.
+    #[tokio::test]
+    async fn chat_language_wins_for_inline_updates() {
+        let (_container, db) = start_postgres().await;
+        let ls = language_service_of(db.clone(), true).await;
+        let en_user = tg_user(1, Some("en"));
+
+        // By the chat id decoded out of the inline_message_id...
+        let mut update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
+        update.kind = with_sender(update.kind, en_user.clone());
+        assert_eq!(ls.resolve(&update).await.to_string(), "ru");
+
+        let chosen = chosen_result_update(Some(inline_message_id_of(SUPERGROUP_ID)));
+        assert_eq!(ls.resolve(&chosen).await.to_string(), "ru");
+
+        // ...and, with the decoding off, by the chat_instance alone.
+        let ls = language_service_of(db, false).await;
+        let mut update = inline_callback_update(None, CHAT_INSTANCE);
+        update.kind = with_sender(update.kind, en_user.clone());
+        assert_eq!(ls.resolve(&update).await.to_string(), "ru");
+
+        // A chat we know nothing about has no language to impose, so the sender's own wins.
+        let mut unknown = inline_callback_update(None, "another-chat-instance");
+        unknown.kind = with_sender(unknown.kind, en_user);
+        assert_eq!(ls.resolve(&unknown).await.to_string(), "en");
+    }
+
+    /// Replaces the sender of a callback query, so the fallback resolves to a known language.
+    fn with_sender(kind: UpdateKind, user: User) -> UpdateKind {
+        let UpdateKind::CallbackQuery(mut query) = kind else { panic!("a callback query is expected") };
+        query.from = user;
+        UpdateKind::CallbackQuery(query)
+    }
+
+    /// The point of `defer`: constructing a resolver must not touch the database, and only
+    /// `execute` actually resolves (and, in doing so, populates the chat-language cache).
+    #[tokio::test]
+    async fn a_resolver_queries_nothing_until_executed() {
+        let (_container, db) = start_postgres().await;
+        let ls = language_service_of(db, true).await;
+        let update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
+
+        let resolver = ls.clone().defer(update);
+        assert!(ls.chat_cache().is_empty());
+
+        assert_eq!(resolver.execute().await.to_string(), "ru");
+        assert!(!ls.chat_cache().is_empty());
     }
 
     #[tokio::test]

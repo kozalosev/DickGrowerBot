@@ -4,7 +4,7 @@ use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
 use crate::config::self_destruction::*;
-use crate::config::shrink::StaleDicksShrinkingConfig;
+use crate::config::shrink::DailyShrinkConfig;
 use crate::domain::primitives::{Bet, DaysCount, Limit, Ratio};
 
 #[derive(Clone)]
@@ -16,7 +16,7 @@ pub struct AppConfig {
     pub loan_payout_ratio: Ratio,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
     pub pvp_default_bet: Bet,
-    pub stale_dicks_shrinking: StaleDicksShrinkingConfig,
+    pub daily_shrink: DailyShrinkConfig,
     pub announcements: AnnouncementsConfig,
     pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
@@ -44,11 +44,11 @@ impl AppConfig {
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
         let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
         let most_popular_language_enabled = get_env_value_or_default("MOST_POPULAR_LANGUAGE_ENABLED", true);
-        let hide_inactive_zero_length_from_top = get_env_value_or_default("HIDE_INACTIVE_ZERO_LENGTH_FROM_TOP_ENABLED", true);
-        let stale_dicks_shrinking = StaleDicksShrinkingConfig {
-            ratio: get_env_value_or_default("SHRINK_RATIO", Ratio::literal(0.0)),
-            grace_period_days: get_env_value_or_default("SHRINK_GRACE_DAYS", DaysCount::new(7)),
-            ramp_up_days: get_env_value_or_default("SHRINK_RAMP_UP_DAYS", DaysCount::new(7)),
+        let hide_inactive_zero_length_from_top = get_env_value_or_default("HIDE_INACTIVE_ZERO_LENGTH_FROM_TOP", true);
+        let daily_shrink = DailyShrinkConfig {
+            ratio: get_env_value_or_default("DAILY_SHRINK_RATIO", Ratio::literal(0.0)),
+            inactivity_days: get_env_value_or_default("DAILY_SHRINK_INACTIVITY_DAYS", DaysCount::new(7)),
+            ramp_up_days: get_env_value_or_default("DAILY_SHRINK_RAMP_UP_DAYS", DaysCount::new(7)),
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
         let self_destruction = SelfDestructionConfig {
@@ -77,7 +77,7 @@ impl AppConfig {
             loan_payout_ratio,
             dod_rich_exclusion_ratio,
             pvp_default_bet,
-            stale_dicks_shrinking,
+            daily_shrink,
             announcements: AnnouncementsConfig::load(&announcements_file),
             self_destruction,
             command_toggles: Default::default(),
