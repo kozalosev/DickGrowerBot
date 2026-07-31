@@ -38,7 +38,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
     let repos = repo::Repositories::new(&db_conn, &app_config);
-    let language_service = users::init_language_service(&integrations_config, repos.chats.clone()).await;
+    let language_service = users::init_language_service(&integrations_config, repos.chats.clone(),
+                                                        app_config.features.chats_merging).await;
 
     let handler = dptree::entry()
         .map_async(|upd: Update, ls: LanguageService| async move { ls.resolve(&upd).await })

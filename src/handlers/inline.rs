@@ -15,7 +15,7 @@ use teloxide::types::ParseMode::Html;
 use crate::config::AppConfig;
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
-use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatInstanceId};
 use crate::handlers::{dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
@@ -215,8 +215,8 @@ pub async fn inline_chosen_handler(
         return Ok(())
     }
 
-    let maybe_chat_in_sync = result.inline_message_id.as_ref()
-        .and_then(try_resolve_chat_id)
+    let maybe_chat_in_sync = result.inline_message_id.as_deref()
+        .and_then(utils::try_resolve_chat_id)
         .map(|chat_id| repos.chats.get_chat(chat_id.into()));
     if let Some(chat_in_sync_future) = maybe_chat_in_sync {
         let maybe_chat = chat_in_sync_future
@@ -325,14 +325,6 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             }
         })
         .unwrap_or(Ok(CallbackDataParseResult::Invalid))
-}
-
-#[allow(clippy::ptr_arg)]
-pub(crate) fn try_resolve_chat_id(msg_id: &String) -> Option<TelegramChatId> {
-    utils::resolve_inline_message_id(msg_id)
-        .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
-        .ok()
-        .and_then(|info| info.chat_id)
 }
 
 // TODO: move to mod.rs and use in message handlers too

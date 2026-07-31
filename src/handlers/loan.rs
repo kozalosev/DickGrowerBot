@@ -13,7 +13,8 @@ use crate::config::AppConfig;
 use crate::domain::objects::Loan;
 use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, UserId as DomainUserId};
 use crate::domain::primitives::chat::ChatIdPartiality;
-use crate::handlers::{CallbackButton, FromRefs, HandlerImplResult, HandlerResult, reply_html, try_resolve_chat_id};
+use crate::handlers::{CallbackButton, FromRefs, HandlerImplResult, HandlerResult, reply_html};
+use crate::handlers::utils::try_resolve_chat_id;
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder};
 
