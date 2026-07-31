@@ -256,10 +256,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .collect();
     let member_names: HashSet<_> = HashSet::from_iter(members.keys());
 
-    let top: Vec<Result<Captures, String>> = parsed.1.lines()
-        .skip_while(|s| !TOP_LINE_REGEXP.is_match(s))
-        .map(|pos| TOP_LINE_REGEXP.captures(pos).ok_or(pos.to_owned()))
-        .collect();
+    let top = parse_top_lines(&parsed.1);
     let invalid_lines: Vec<String> = top.iter()
         .filter(|pos| pos.is_err())
         .map(|pos| pos.as_ref().unwrap_err().clone())
@@ -308,6 +305,14 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
     })
 }
 
+fn parse_top_lines(text: &str) -> Vec<Result<Captures<'_>, String>> {
+    text.lines()
+        .skip_while(|s| !TOP_LINE_REGEXP.is_match(s))
+        .take_while(|s| !s.trim().is_empty())
+        .map(|pos| TOP_LINE_REGEXP.captures(pos).ok_or(pos.to_owned()))
+        .collect()
+}
+
 fn map_user(pos: Captures) -> Option<OriginalUser> {
     if let (Some(name), Some(length)) = (pos.name("name"), pos.name("length")) {
         let name = Username::new(name.as_str().to_owned());
@@ -350,5 +355,30 @@ mod tests {
 
         check("@pipisabot", OriginalBotKind::Pipisa);
         check("@kraft28_bot", OriginalBotKind::Kraft28);
+    }
+
+    #[test]
+    fn parse_top_lines_ignores_blank_lines_and_footer() {
+        let text = "Топ 10 игроков 🔝\n\n1|Leonid SadBot🍆... — 3 см.\n\n\nраздача см в канале)";
+
+        let top = parse_top_lines(text);
+
+        assert_eq!(top.len(), 1);
+        let user = map_user(top.into_iter().next().unwrap().expect("line should be valid"))
+            .expect("captures should map to a user");
+        assert_eq!(user.name.value(), "Leonid SadBot🍆");
+        assert_eq!(user.length, 3);
+    }
+
+    #[test]
+    fn parse_top_lines_reports_invalid_entry_within_the_list() {
+        let text = "Топ 10 игроков 🔝\n\n1|Leonid SadBot🍆... — 3 см.\nnot a valid line\n2|Another — 5 см.";
+
+        let top = parse_top_lines(text);
+
+        assert_eq!(top.len(), 3);
+        assert!(top[0].is_ok());
+        assert_eq!(top[1].as_ref().unwrap_err(), "not a valid line");
+        assert!(top[2].is_ok());
     }
 }
