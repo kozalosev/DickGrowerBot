@@ -66,7 +66,9 @@ struct ParseResult(OriginalBotKind, String);
 #[strum(serialize_all="snake_case")]
 enum BeforeImportCheckErrors {
     NotAdmin,
+    BotNotAdmin,
     NotReply,
+    LegacyGroup,
     TooManyMembers,
     Other(anyhow::Error)
 }
@@ -181,6 +183,7 @@ pub async fn import_cmd_handler(
             t!("commands.import.errors.not_reply", locale = &lang_code,
                 origin_bots = origin_bots).to_string()
         },
+        Err(BeforeImportCheckErrors::LegacyGroup) => t!("commands.import.errors.legacy_group", locale = &lang_code).to_string(),
         Err(e) => {
             let t_key = format!("commands.import.errors.{e}");
             t!(&t_key, locale = &lang_code).to_string()
@@ -195,16 +198,25 @@ async fn check_and_parse_message(
     msg: &Message,
     repos: &repo::Repositories,
 ) -> Result<ParseResult, BeforeImportCheckErrors> {
-    let admin_ids = bot.get_chat_administrators(msg.chat.id)
+    if msg.chat.is_group() {
+        return Err(BeforeImportCheckErrors::LegacyGroup);
+    }
+
+    let admin_ids: Vec<UserId> = bot.get_chat_administrators(msg.chat.id)
         .await?
         .into_iter()
-        .map(|m| m.user.id);
+        .map(|m| m.user.id)
+        .collect();
     let from_id = msg.from.as_ref()
         .ok_or(BeforeImportCheckErrors::Other(anyhow!("not from a user")))?
         .id;
-    let invoked_by_admin = admin_ids.into_iter().any(|id| id == from_id);
-    if !invoked_by_admin {
+    if !admin_ids.contains(&from_id) {
         return Err(BeforeImportCheckErrors::NotAdmin)
+    }
+    // Reading another bot's message only works if this bot is itself an admin
+    let bot_id = bot.get_me().await?.id;
+    if !admin_ids.contains(&bot_id) {
+        return Err(BeforeImportCheckErrors::BotNotAdmin)
     }
 
     let chat_id_kind = msg.chat.id.into();
@@ -213,15 +225,10 @@ async fn check_and_parse_message(
         return Err(BeforeImportCheckErrors::TooManyMembers)
     }
 
-    let result = msg.reply_to_message()
+    msg.reply_to_message()
         .filter(|m| m.forward_origin().is_none())
-        .and_then(check_reply_source_and_text);
-    let result = match result {
-        None => return Err(BeforeImportCheckErrors::NotReply),
-        Some(res) => res
-    };
-
-    Ok(result)
+        .and_then(check_reply_source_and_text)
+        .ok_or(BeforeImportCheckErrors::NotReply)
 }
 
 fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
