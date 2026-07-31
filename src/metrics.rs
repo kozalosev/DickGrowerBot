@@ -570,16 +570,16 @@ impl DailyShrinkCounters {
         let runs = CounterVec::new("daily_shrink_run_total",
             "count of daily shrink runs by outcome: succeeded when dicks were shrunk, empty when there was nothing to shrink today, failed when the shrinking statement itself errored", &["outcome"]);
         let victims = CounterVec::new("daily_shrink_victims_total",
-            "count of dicks shrunk, by how their owners get to hear about it: broadcast when their chat can be messaged, inline_only when it can't and the shrinks command is the only way to see it", &["delivery"]);
+            "count of dicks shrunk, by how their owners get to hear about it: broadcast when their chat can be messaged, inline_only when it can't and the shrinks command is the only way to see it, unreachable when the bot can't post to their chat anymore", &["delivery"]);
         let broadcasts = CounterVec::new("daily_shrink_broadcast_total",
-            "count of per-chat shrink summaries by outcome: sent, or failed when Telegram rejected the message (one sample per chat, not per victim)", &["outcome"]);
+            "count of per-chat shrink summaries by outcome: sent, failed when Telegram rejected the message, unreachable when it rejected it because the bot can't post to that chat at all (which marks the chat), and skipped for chats already marked and not tried again (one sample per chat, not per victim)", &["outcome"]);
         for outcome in ["succeeded", "empty", "failed"] {
             runs.counter(&[outcome]);
         }
-        for delivery in ["broadcast", "inline_only"] {
+        for delivery in ["broadcast", "inline_only", "unreachable"] {
             victims.counter(&[delivery]);
         }
-        for outcome in ["sent", "failed"] {
+        for outcome in ["sent", "failed", "unreachable", "skipped"] {
             broadcasts.counter(&[outcome]);
         }
         Self { runs, victims, broadcasts }
@@ -610,14 +610,34 @@ impl DailyShrinkCounters {
         self.victims.counter(&["inline_only"]).inc_by(count)
     }
 
+    /// `count` dicks shrunk in chats the bot can't post to anymore. They get no summary message
+    /// either, until someone brings the bot back and runs a command there.
+    pub fn victims_unreachable(&self, count: u64) {
+        self.victims.counter(&["unreachable"]).inc_by(count)
+    }
+
     /// One chat's summary delivered.
     pub fn broadcast_sent(&self) {
         self.broadcasts.counter(&["sent"]).inc()
     }
 
     /// One chat's summary was not delivered. Its members can still use the shrinks command.
+    ///
+    /// A transient failure: the same chat is tried again tomorrow. Watch this one — it used to
+    /// carry the permanent failures too, which kept it growing forever.
     pub fn broadcast_failed(&self) {
         self.broadcasts.counter(&["failed"]).inc()
+    }
+
+    /// One chat's summary was rejected because the bot can't post there at all, so the chat has
+    /// just been marked and won't be tried again until it comes back.
+    pub fn broadcast_unreachable(&self) {
+        self.broadcasts.counter(&["unreachable"]).inc()
+    }
+
+    /// `count` chats weren't even tried: they had already been marked unreachable.
+    pub fn broadcast_skipped(&self, count: u64) {
+        self.broadcasts.counter(&["skipped"]).inc_by(count)
     }
 }
 
@@ -673,8 +693,8 @@ mod tests {
 
         let expected = [
             ("daily_shrink_run_total", "outcome", ["succeeded", "empty", "failed"].as_slice()),
-            ("daily_shrink_victims_total", "delivery", ["broadcast", "inline_only"].as_slice()),
-            ("daily_shrink_broadcast_total", "outcome", ["sent", "failed"].as_slice()),
+            ("daily_shrink_victims_total", "delivery", ["broadcast", "inline_only", "unreachable"].as_slice()),
+            ("daily_shrink_broadcast_total", "outcome", ["sent", "failed", "unreachable", "skipped"].as_slice()),
         ];
         for (metric, label, values) in expected {
             for value in values {

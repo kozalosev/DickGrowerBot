@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id as internal_id, chat_id, chat_instance FROM Chats\n                WHERE chat_id = $1 OR chat_instance = $2",
+  "query": "SELECT id as internal_id, chat_id, chat_instance, is_unreachable FROM Chats\n                WHERE chat_id = $1 OR chat_instance = $2",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,17 @@
             "name": "chat_instance"
           }
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "is_unreachable",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "chats",
+            "name": "is_unreachable"
+          }
+        }
       }
     ],
     "parameters": {
@@ -46,8 +57,9 @@
     "nullable": [
       false,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "2baab3914bbd97a350269ad329c241748d7c38b168e3d1628f5e5103953dbd86"
+  "hash": "b2ad16b985676402ca415bd95195aec9844839ea8951dedd1bdfa3921d474302"
 }

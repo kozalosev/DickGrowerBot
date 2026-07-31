@@ -1,7 +1,7 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, SupportedLanguage};
 use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
-use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
 use crate::repo::test::{CHAT_ID, start_postgres, UID, USER_ID};
@@ -86,6 +86,56 @@ async fn is_anchored() {
     chats.upsert_chat(&full.to_partiality(Default::default()))
         .await.expect("couldn't anchor the chat");
     assert!(chats.is_anchored(&id).await.expect("couldn't check an anchored chat"));
+}
+
+/// A failed broadcast marks the chat; the next command in it clears the mark. Nothing else does —
+/// an inline query carries no `chat_id`, so it's no proof the bot is back in the chat.
+#[tokio::test]
+async fn unreachable_flag_lifecycle() {
+    let (_container, db) = start_postgres().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let id = TelegramChatId::new(CHAT_ID);
+    let instance = TelegramChatInstanceId::of("instance");
+    let full = ChatIdFull { id, instance: instance.clone() };
+
+    // Marking a chat the bot has never seen doesn't create it and isn't an error.
+    chats.mark_unreachable(&id)
+        .await.expect("couldn't mark an unknown chat");
+    let chat = chats.get_chat(id.into())
+        .await.expect("couldn't fetch an unknown chat");
+    assert!(chat.is_none());
+
+    chats.upsert_chat(&ChatIdPartiality::Specific(id.into()))
+        .await.expect("couldn't create a chat");
+    let chat = chats.get_chat(id.into())
+        .await.expect("couldn't fetch a fresh chat")
+        .expect("the chat should exist");
+    assert!(!chat.is_unreachable, "a fresh chat is reachable");
+
+    chats.mark_unreachable(&id)
+        .await.expect("couldn't mark the chat");
+    let chat = chats.get_chat(id.into())
+        .await.expect("couldn't fetch a marked chat")
+        .expect("the chat should exist");
+    assert!(chat.is_unreachable);
+
+    // An inline query knows the instance only, so it lands in a row of its own and leaves the
+    // marked one as it is.
+    chats.upsert_chat(&full.clone().to_partiality(ChatIdSource::InlineQuery))
+        .await.expect("couldn't upsert by the instance");
+    let chat = chats.get_chat(id.into())
+        .await.expect("couldn't fetch after an inline query")
+        .expect("the chat should exist");
+    assert!(chat.is_unreachable, "an inline query is no proof the bot is back");
+
+    // A command in the chat is. It also merges the two rows into one, which must keep the mark off.
+    chats.upsert_chat(&full.to_partiality(ChatIdSource::Database))
+        .await.expect("couldn't upsert by the chat_id");
+    let chat = chats.get_chat(id.into())
+        .await.expect("couldn't fetch after a command")
+        .expect("the chat should exist");
+    assert!(!chat.is_unreachable, "a command in the chat clears the mark");
+    assert_eq!(chat.chat_instance, Some(instance.to_string()), "the rows should have been merged");
 }
 
 #[tokio::test]
