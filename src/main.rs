@@ -17,7 +17,7 @@ use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
-use teloxide::update_listeners::UpdateListener;
+use teloxide::update_listeners::{polling_default, UpdateListener};
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
@@ -165,13 +165,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("The polling dispatcher is activating...");
 
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
+                let listener = polling_default(bot.clone()).await;
+                let listener_error_handler = MetricsErrorHandler::new("An error from the update listener");
                 Dispatcher::builder(bot, handler)
                     .default_handler(ignore_unknown_updates)
                     .error_handler(MetricsErrorHandler::new("An error in a handler"))
                     .dependencies(deps)
                     .enable_ctrlc_handler()
                     .build()
-                    .dispatch()
+                    .dispatch_with_listener(listener, listener_error_handler)
                     .await
             }));
 
