@@ -8,11 +8,10 @@ use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup}
 use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Length, Offset, Page, UserId, Username};
 use crate::domain::primitives::chat::ChatIdKind;
-use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerResult};
+use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerDeps, HandlerResult};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::repo::{AdjacentDates, RecentShrink, Repositories, ShrinkEvent};
-use crate::users::LanguageResolver;
 
 pub(crate) struct ShrinksPage {
     pub lines: String,
@@ -205,10 +204,9 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 pub async fn callback_handler(
     bot: Bot,
     q: CallbackQuery,
-    config: AppConfig,
-    repos: Repositories,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.daily_shrink.enabled() {

@@ -17,11 +17,12 @@ use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::UpdateListener;
-use crate::handlers::{checks, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
+use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
+use crate::repo::Repositories;
 use crate::users::LanguageService;
 
 i18n!(fallback = "en");    // load localizations with default parameters
@@ -42,7 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                         app_config.features.chats_merging).await;
 
     let handler = dptree::entry()
-        .map(|upd: Update, ls: LanguageService| ls.defer(upd))
+        .map(|upd: Update, ls: LanguageService, repos: Repositories, config: config::AppConfig, self_destruction: handlers::utils::SelfDestructionService| {
+            let lang_resolver = ls.defer(upd);
+            HandlerDeps { repos, config, self_destruction, lang_resolver }
+        })
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))

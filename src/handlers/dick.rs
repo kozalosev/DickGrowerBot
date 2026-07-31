@@ -12,9 +12,8 @@ use crate::{metrics, reply_html, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
-use crate::handlers::{answer_callback_feature_disabled, HandlerResult, TaggedReply, reply_html, utils};
-use crate::handlers::utils::{callbacks, Incrementor, SelfDestructionService};
-use crate::users::LanguageResolver;
+use crate::handlers::{answer_callback_feature_disabled, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::utils::{callbacks, Incrementor};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
@@ -32,12 +31,10 @@ pub async fn dick_cmd_handler(
     bot: Bot,
     msg: Message,
     cmd: DickCommands,
-    repos: repo::Repositories,
     incr: Incrementor,
-    config: AppConfig,
-    lang_resolver: LanguageResolver,
-    self_destruction: SelfDestructionService,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let chat_id = msg.chat.id.into();
@@ -208,10 +205,9 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
 pub async fn page_callback_handler(
     bot: Bot,
     q: CallbackQuery,
-    config: AppConfig,
-    repos: repo::Repositories,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {

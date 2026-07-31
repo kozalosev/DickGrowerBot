@@ -29,11 +29,10 @@ use teloxide::types::{ChatMemberUpdated, ChatMigration, InlineKeyboardButton, In
 use crate::config::AppConfig;
 use crate::domain::primitives::LanguageCode;
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
-use crate::handlers::HandlerResult;
+use crate::handlers::{HandlerDeps, HandlerResult};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::metrics;
-use crate::repo::{ChatMigrationOutcome, Repositories};
-use crate::users::LanguageResolver;
+use crate::repo::ChatMigrationOutcome;
 
 #[derive(Display)]
 #[display("activate")]
@@ -98,9 +97,9 @@ pub fn migration_filter(msg: Message) -> bool {
 pub async fn migration_handler(
     bot: Bot,
     msg: Message,
-    repos: Repositories,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     // `From` is the announcement that lands in the new supergroup, which is where the members
     // now are — the old group is left behind, so only this side is worth answering, and picking
@@ -149,7 +148,8 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     SetupCallbackData::check_prefix(query)
 }
 
-pub async fn callback_handler(bot: Bot, query: CallbackQuery, repos: Repositories) -> HandlerResult {
+pub async fn callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
+    let HandlerDeps { repos, .. } = deps;
     SetupCallbackData::parse(&query)?;
     let lang_code = LanguageCode::from_user(&query.from);
 

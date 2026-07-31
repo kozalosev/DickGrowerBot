@@ -16,12 +16,11 @@ use crate::config::AppConfig;
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatInstanceId};
-use crate::handlers::{dick, dod, FromRefs, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
+use crate::handlers::{dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
 use crate::repo::{NoChatIdError, Repositories};
-use crate::users::LanguageResolver;
 
 #[derive(Debug, strum_macros::Display, EnumIter, EnumString)]
 #[strum(serialize_all = "snake_case")]
@@ -151,10 +150,9 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
 pub async fn inline_handler(
     bot: Bot,
     query: InlineQuery,
-    repos: Repositories,
-    app_config: AppConfig,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config: app_config, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
@@ -206,11 +204,10 @@ pub async fn inline_handler(
 pub async fn inline_chosen_handler(
     bot: Bot,
     result: ChosenInlineResult,
-    repos: Repositories,
-    config: AppConfig,
     incr: Incrementor,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.finished();
 
@@ -251,11 +248,10 @@ pub async fn inline_chosen_handler(
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,
-    repos: Repositories,
-    config: AppConfig,
     incr: Incrementor,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let mut answer = bot.answer_callback_query(query.id.clone());
 

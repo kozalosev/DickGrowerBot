@@ -8,11 +8,10 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, User};
-use crate::handlers::{HandlerResult, reply_html};
+use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
 use crate::domain::primitives::{LanguageCode, PromoCode, UserId};
 use crate::repo::ActivationError;
-use crate::users::LanguageResolver;
 
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
 
@@ -42,9 +41,9 @@ pub async fn promo_cmd_handler(
     msg: Message,
     cmd: PromoCommands,
     dialogue: PromoCodeDialogue,
-    repos: repo::Repositories,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_PROMO.invoked_by_command.inc();
     let user = msg.from.as_ref().ok_or("no from user")?;
@@ -68,9 +67,9 @@ pub async fn promo_requested_handler(
     bot: Bot,
     msg: Message,
     dialogue: PromoCodeDialogue,
-    repos: repo::Repositories,
-    lang_resolver: LanguageResolver,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let answer = match msg.text() {
         Some(code) => {
@@ -91,7 +90,8 @@ pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
     PROMO_CODE_FORMAT_REGEXP.is_match(&query)
 }
 
-pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, lang_resolver: LanguageResolver) -> HandlerResult {
+pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
+    let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 

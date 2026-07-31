@@ -9,9 +9,8 @@ use crate::{metrics, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::LanguageCode;
-use crate::handlers::{FromRefs, HandlerResult, TaggedReply, reply_html, utils};
-use crate::handlers::utils::{Incrementor, SelfDestructionService};
-use crate::users::LanguageResolver;
+use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::utils::Incrementor;
 
 const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
 
@@ -26,12 +25,10 @@ pub enum DickOfDayCommands {
 pub async fn dod_cmd_handler(
     bot: Bot,
     msg: Message,
-    cfg: AppConfig,
-    repos: repo::Repositories,
     incr: Incrementor,
-    lang_resolver: LanguageResolver,
-    self_destruction: SelfDestructionService,
+    deps: HandlerDeps,
 ) -> HandlerResult {
+    let HandlerDeps { repos, config: cfg, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_DOD_COUNTER.chat.inc();
     let from = msg.from.as_ref().ok_or(anyhow!("unexpected absence of a FROM field"))?;
