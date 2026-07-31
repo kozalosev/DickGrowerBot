@@ -13,6 +13,7 @@ use generated::{GetUserRequest, GetUsersRequest, UpdateUserRequest, User};
 use crate::config::IntegrationsConfig;
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
+use crate::handlers::setup;
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::metrics;
 use crate::repo::Chats;
@@ -267,6 +268,12 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// everyone and short-circuits the user-service call; otherwise we fall back to the per-user
     /// resolution ([`resolve_language_for`]).
     pub(crate) async fn resolve(&self, update: &Update) -> LanguageCode {
+        metrics::UPDATE_KIND.record(&update.kind);
+        // Most of what Telegram sends us is group chatter no handler will touch. Resolving a
+        // language for it would query the database and the user-service for nothing.
+        if is_ignored_group_message(update) {
+            return LanguageCode::from_maybe_user(update.from());
+        }
         // Anonymously record the sender's Telegram (client) language — our best proxy for the
         // languages the audience actually speaks, independent of any chat/personal override below.
         if let Some(user) = update.from() {
@@ -403,6 +410,29 @@ fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_time_secs: u64) {
             client.clean_up_cache();
         }
     }));
+}
+
+/// Whether the update is a plain message in a group that no branch of the dispatcher can handle,
+/// so resolving its language would be pure waste. Such messages are the bulk of what Telegram
+/// sends a bot that sits in many groups (see the `update_kind_total` metric).
+///
+/// Every group branch of the handler tree in `main.rs` needs either a command, a migration service
+/// message, or a non-group chat, so the three checks below cover them all. The bare dialogue
+/// branch is not an exception: its storage is keyed by chat, and only `promo_cmd_handler` — which
+/// sits behind `checks::is_not_group_chat` — can move a chat into `PromoCommandState::Requested`,
+/// so a group is always in the `Start` state.
+///
+/// **Keep this in sync with the handler tree.** A new branch that handles plain group messages
+/// must be excluded here, or it will get the sender's Telegram language instead of the chat-wide
+/// one.
+fn is_ignored_group_message(update: &Update) -> bool {
+    let UpdateKind::Message(msg) = &update.kind else { return false };
+    let is_group = update.chat()
+        .is_some_and(|chat| !chat.is_private() && !chat.is_channel());
+    // Looser than teloxide's command parsing on purpose: anything command-shaped gets resolved.
+    let looks_like_command = msg.text().or(msg.caption())
+        .is_some_and(|text| text.starts_with('/'));
+    is_group && !looks_like_command && !setup::is_migration(msg)
 }
 
 /// Resolves the effective language for a single user: the preference stored in user-service (when
@@ -640,6 +670,45 @@ mod test {
         let UpdateKind::CallbackQuery(mut query) = kind else { panic!("a callback query is expected") };
         query.from = user;
         UpdateKind::CallbackQuery(query)
+    }
+
+    /// A message in the known supergroup, from a user whose Telegram language is English.
+    /// `extra` adds fields to the message object (a text, a service field, …).
+    fn group_message_update(extra: &str) -> Update {
+        let json = format!(r#"{{
+            "update_id": 0,
+            "message": {{
+                "message_id": 1,
+                "date": 1700000000,
+                "chat": {{ "id": {SUPERGROUP_ID}, "type": "supergroup", "title": "test" }},
+                "from": {{ "id": 1, "is_bot": false, "first_name": "tester", "language_code": "en" }},
+                {extra}
+            }}
+        }}"#);
+        serde_json::from_str(&json).expect("couldn't build the update")
+    }
+
+    /// Chatter in a group reaches no endpoint, so it must not cost a chat-language lookup — while
+    /// everything the dispatcher can act on still gets the chat-wide language.
+    #[tokio::test]
+    async fn only_actionable_group_messages_are_resolved() {
+        let (_container, db) = start_postgres().await;
+        let ls = language_service_of(db, true).await;
+
+        let chatter = group_message_update(r#""text": "hello everyone""#);
+        let lang = ls.resolve(&chatter).await;
+        assert_eq!(lang.to_string(), "en", "chatter must fall back to the sender's language");
+        assert!(ls.chat_cache().is_empty(), "a skipped update must not read the chat language");
+
+        // A command in the same chat is resolved as usual: the chat-wide language wins.
+        let command = group_message_update(r#""text": "/grow""#);
+        let lang = ls.resolve(&command).await;
+        assert_eq!(lang.to_string(), "ru");
+
+        // So is a migration service message — `migration_handler` answers it.
+        let migration = group_message_update(r#""migrate_from_chat_id": -1001100294560"#);
+        let lang = ls.resolve(&migration).await;
+        assert_eq!(lang.to_string(), "ru");
     }
 
     #[tokio::test]

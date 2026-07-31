@@ -91,6 +91,11 @@ pub async fn added_to_legacy_group_handler(bot: Bot, upd: ChatMemberUpdated) -> 
 /// enough to repoint the chat; the other then finds nothing left to do.
 #[inline]
 pub fn migration_filter(msg: Message) -> bool {
+    is_migration(&msg)
+}
+
+#[inline]
+pub fn is_migration(msg: &Message) -> bool {
     msg.chat_migration().is_some()
 }
 
