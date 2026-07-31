@@ -55,6 +55,8 @@ pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
 pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
+pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
+    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/other) — a spike of connect/timeout is the DPI-stalling signal"));
 
 pub static DB_POOL_CONNECTIONS_OPENED: Lazy<Counter> = Lazy::new(||
     Counter::new("db_pool_connections_opened_total", "count of new physical connections opened by the sqlx pool"));
@@ -124,6 +126,7 @@ fn force_registration() {
     Lazy::force(&ANNOUNCEMENT_SHOWN);
     Lazy::force(&CHAT_MIGRATION);
     Lazy::force(&DAILY_SHRINK);
+    Lazy::force(&TELEGRAM_REQUEST_ERRORS);
 
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
@@ -519,7 +522,6 @@ pub struct AnnouncementCounter(CounterVec);
 impl AnnouncementCounter {
     fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["language"]);
-        // Pre-create every language's series so they all appear in /metrics even at zero.
         for lang in SupportedLanguage::ALL {
             vec.counter(&[&lang.to_string()]);
         }
@@ -638,6 +640,29 @@ impl DailyShrinkCounters {
     /// `count` chats weren't even tried: they had already been marked unreachable.
     pub fn broadcast_skipped(&self, count: u64) {
         self.broadcasts.counter(&["skipped"]).inc_by(count)
+    }
+}
+
+/// Counts failed requests to the Telegram Bot API, labeled by `kind`:
+/// * `connect` (the connection couldn't be established — includes connect timeouts, the DPI/ТСПУ signal),
+/// * `timeout` (a read/total timeout after connecting),
+/// * `network` (other network/IO errors),
+/// * `api` (a legitimate Telegram API error — the network was fine),
+/// * `other` (anything else).
+pub struct TelegramRequestErrorCounters(CounterVec);
+
+impl TelegramRequestErrorCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["kind"]);
+        for kind in ["connect", "timeout", "network", "api", "other"] {
+            vec.counter(&[kind]);
+        }
+        Self(vec)
+    }
+
+    /// Records one failed Telegram API request of the given `kind` (see the type docs).
+    pub fn record(&self, kind: &str) {
+        self.0.counter(&[kind]).inc()
     }
 }
 

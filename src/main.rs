@@ -1,4 +1,5 @@
 mod domain;
+mod error_handler;
 mod handlers;
 mod repo;
 mod help;
@@ -16,12 +17,13 @@ use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
 use teloxide::dptree::deps;
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
-use teloxide::update_listeners::UpdateListener;
+use teloxide::update_listeners::{polling_default, UpdateListener};
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
+use crate::error_handler::MetricsErrorHandler;
 use crate::repo::Repositories;
 use crate::users::LanguageService;
 
@@ -79,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
 
-    let bot = Bot::from_env();
+    let bot = config::BotConfig::build_bot()?;
     bot.delete_webhook().await?;
 
     // The personal /language relies on the user-service; when it's unavailable, hide /language from
@@ -138,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let error_handler = LoggingErrorHandler::with_custom_text("An error from the update listener");
             let mut dispatcher = Dispatcher::builder(bot, handler)
                 .default_handler(ignore_unknown_updates)
+                .error_handler(MetricsErrorHandler::new("An error in a handler"))
                 .dependencies(deps)
                 .build();
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
@@ -162,12 +165,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("The polling dispatcher is activating...");
 
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
+                let listener = polling_default(bot.clone()).await;
+                let listener_error_handler = MetricsErrorHandler::new("An error from the update listener");
                 Dispatcher::builder(bot, handler)
                     .default_handler(ignore_unknown_updates)
+                    .error_handler(MetricsErrorHandler::new("An error in a handler"))
                     .dependencies(deps)
                     .enable_ctrlc_handler()
                     .build()
-                    .dispatch()
+                    .dispatch_with_listener(listener, listener_error_handler)
                     .await
             }));
 
