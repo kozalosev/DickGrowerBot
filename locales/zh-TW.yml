@@ -99,8 +99,12 @@ commands:
     request: "輸入神秘代碼："
     success:
       template: "你已成功啟用此神秘代碼！%{ending}"
-      singular: "你的老二在一個聊天中增長了 <b>%{growth}</b> 公分。"
-      plural: "你的老二在 <b>%{affected_chats}</b> 個聊天中增長了 <b>%{growth}</b> 公分！"
+      grown:
+        singular: "你的老二在一個聊天中增長了 <b>%{growth}</b> 公分。"
+        plural: "你的老二在 <b>%{affected_chats}</b> 個聊天中增長了 <b>%{growth}</b> 公分！"
+      shrunk:
+        singular: "你的老二在一個聊天中縮短了 <b>%{growth}</b> 公分。"
+        plural: "你的老二在 <b>%{affected_chats}</b> 個聊天中縮短了 <b>%{growth}</b> 公分！"
     errors:
       no_activations_left: "你輸入了無效的神秘代碼 😞"
       already_activated: "神秘代碼已經啟用過了 🤨"

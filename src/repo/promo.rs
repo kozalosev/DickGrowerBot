@@ -1,14 +1,14 @@
 use std::fmt::Debug;
 use anyhow::{anyhow, Context};
 use sqlx::{FromRow, Postgres};
-use crate::domain::primitives::{LengthIncrement, UserId};
+use crate::domain::primitives::{LengthChange, UserId};
 use crate::repository;
 
 const PROMOCODE_ACTIVATIONS_PK: &str = "promo_code_activations_pkey";
 
 pub struct ActivationResult {
     pub chats_affected: u64,
-    pub bonus_length: LengthIncrement,
+    pub bonus_length: LengthChange,
 }
 
 #[derive(Debug, strum_macros::Display)]
@@ -29,7 +29,7 @@ impl <T: Into<anyhow::Error>> From<T> for ActivationError {
 #[cfg(test)]
 pub struct PromoCodeParams {
     pub code: String,
-    pub bonus_length: u32,
+    pub bonus_length: i32,
     pub capacity: u32,
 }
 
@@ -43,7 +43,7 @@ repository!(Promo,
     #[cfg(test)]
     pub async fn create(&self, p: PromoCodeParams) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Promo_Codes (code, bonus_length, capacity) VALUES ($1, $2, $3)",
-                p.code, p.bonus_length as i32, p.capacity as i32)
+                p.code, p.bonus_length, p.capacity as i32)
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -55,8 +55,9 @@ repository!(Promo,
         let PromoCodeInfo { found_code, bonus_length } = Self::find_code_length_and_decr_capacity(&mut tx, code)
             .await?
             .ok_or(ActivationError::NoActivationsLeft)?;
-        // the column stays INT4 in the database (promo bonuses are small); the domain type is built at this boundary
-        let bonus = LengthIncrement::new(bonus_length.into())?;
+        // the column stays INT4 in the database (promo bonuses are small); the domain type is built at this boundary.
+        // The value may be negative: such a promo code shrinks the dick instead of growing it.
+        let bonus = LengthChange::signed(bonus_length.into());
         let chats_affected = Self::grow_dicks(&mut tx, user_id, bonus_length).await?;
         if chats_affected < 1 {
             return Err(ActivationError::NoDicks)

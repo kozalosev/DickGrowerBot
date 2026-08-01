@@ -111,8 +111,12 @@ commands:
     request: "输入神秘代码："
     success:
       template: "你已成功激活此神秘代码！%{ending}"
-      singular: "你的丁丁在一个聊天中增长了 <b>%{growth}</b> 厘米。"
-      plural: "你的丁丁在 <b>%{affected_chats}</b> 个聊天中增长了 <b>%{growth}</b> 厘米！"
+      grown:
+        singular: "你的丁丁在一个聊天中增长了 <b>%{growth}</b> 厘米。"
+        plural: "你的丁丁在 <b>%{affected_chats}</b> 个聊天中增长了 <b>%{growth}</b> 厘米！"
+      shrunk:
+        singular: "你的丁丁在一个聊天中缩短了 <b>%{growth}</b> 厘米。"
+        plural: "你的丁丁在 <b>%{affected_chats}</b> 个聊天中缩短了 <b>%{growth}</b> 厘米！"
     errors:
       no_activations_left: "你输入了无效的神秘代码 😞"
       already_activated: "神秘代码已经激活过了 🤨"

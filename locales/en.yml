@@ -111,8 +111,12 @@ commands:
     request: "Enter a promo code:"
     success:
       template: "You has activated this promo code successfully! %{ending}"
-      singular: "Your dick has grown by <b>%{growth}</b> cm in one chat."
-      plural: "Your dick has grown by <b>%{growth}</b> cm in <b>%{affected_chats}</b> chats!"
+      grown:
+        singular: "Your dick has grown by <b>%{growth}</b> cm in one chat."
+        plural: "Your dick has grown by <b>%{growth}</b> cm in <b>%{affected_chats}</b> chats!"
+      shrunk:
+        singular: "Your dick has shrunk by <b>%{growth}</b> cm in one chat."
+        plural: "Your dick has shrunk by <b>%{growth}</b> cm in <b>%{affected_chats}</b> chats!"
     errors:
       no_activations_left: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
       already_activated: "It seems you already used this promocode earlier 🤨"
