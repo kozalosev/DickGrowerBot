@@ -14,10 +14,13 @@ use std::net::SocketAddr;
 use futures::future::join_all;
 use rust_i18n::i18n;
 use teloxide::dispatching::dialogue::InMemStorage;
+use teloxide::dispatching::DpHandlerDescription;
 use teloxide::prelude::*;
-use teloxide::dptree::deps;
+use teloxide::dptree::{deps, HandlerDescription};
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::{polling_default, UpdateListener};
+use config::AppConfig;
+use handlers::utils::SelfDestructionService;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
@@ -36,16 +39,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     pretty_env_logger::init();
 
-    let app_config = config::AppConfig::from_env();
+    let app_config = AppConfig::from_env();
     let database_config = config::DatabaseConfig::from_env()?;
     let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
-    let repos = repo::Repositories::new(&db_conn, &app_config);
+    let repos = Repositories::new(&db_conn, &app_config);
     let language_service = users::init_language_service(&integrations_config, repos.chats.clone(),
                                                         app_config.features.chats_merging).await;
 
-    let handler = dptree::entry()
-        .map(|upd: Update, ls: LanguageService, repos: Repositories, config: config::AppConfig, self_destruction: handlers::utils::SelfDestructionService| {
+    let handler = dptree::map_with_description(
+        DpHandlerDescription::entry(),
+        |upd: Update, ls: LanguageService, repos: Repositories, config: AppConfig, self_destruction: SelfDestructionService| {
             let lang_resolver = ls.defer(upd);
             HandlerDeps { repos, config, self_destruction, lang_resolver }
         })
@@ -106,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let help_context = config::build_context_for_help_messages(me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
-    let self_destruction = handlers::utils::SelfDestructionService::new(app_config.self_destruction);
+    let self_destruction = SelfDestructionService::new(app_config.self_destruction);
 
     let webhook_url = integrations_config.webhook_url;
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
