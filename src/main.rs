@@ -1,3 +1,8 @@
+// `#[tracing::instrument]` and `#[autometrics]` each wrap an async fn's body in another future, and
+// the generic handlers in `handlers::language` nest deeply enough that computing their layout
+// overflows the default limit of 128 — but only in release, where the layouts are actually built.
+#![recursion_limit = "256"]
+
 mod domain;
 mod error_handler;
 mod handlers;
