@@ -1,6 +1,6 @@
 use chrono::Utc;
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::Length;
+use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode};
 use crate::repo;
 use crate::repo::PromoCodeParams;
 use crate::repo::test::{start_postgres, USER_ID};
@@ -19,16 +19,16 @@ async fn activate() {
 
     let promo = repo::Promo::new(db.clone());
     promo.create(PromoCodeParams{
-        code: PROMO_CODE.to_owned(),
-        bonus_length: PROMO_BONUS,
-        capacity: 1,
+        code: PromoCode::of(PROMO_CODE),
+        bonus_length: PromoBonus::new(PROMO_BONUS),
+        capacity: PromoCapacity::literal(1),
     }).await.expect("couldn't create a promo code");
 
     create_user(&db).await;
     create_dick(&db).await;
     let res = promo.activate(USER_ID, PROMO_CODE_UPPERCASE)
         .await.expect("couldn't activate the promo code");
-    assert_eq!(res.chats_affected, 1);
+    assert!(res.chats_affected.single());
     assert_eq!(res.bonus_length.value(), i64::from(PROMO_BONUS));
 
     check_dick(&db, Length::new(PROMO_BONUS.into())).await;
@@ -44,16 +44,16 @@ async fn activate_with_negative_bonus() {
 
     let promo = repo::Promo::new(db.clone());
     promo.create(PromoCodeParams{
-        code: PENALTY_PROMO_CODE.to_owned(),
-        bonus_length: PENALTY_PROMO_BONUS,
-        capacity: 1,
+        code: PromoCode::of(PENALTY_PROMO_CODE),
+        bonus_length: PromoBonus::new(PENALTY_PROMO_BONUS),
+        capacity: PromoCapacity::literal(1),
     }).await.expect("couldn't create a promo code");
 
     create_user(&db).await;
     create_dick(&db).await;
     let res = promo.activate(USER_ID, PENALTY_PROMO_CODE)
         .await.expect("couldn't activate the promo code");
-    assert_eq!(res.chats_affected, 1);
+    assert!(res.chats_affected.single());
     assert_eq!(res.bonus_length.value(), i64::from(PENALTY_PROMO_BONUS));
 
     check_dick(&db, Length::new(PENALTY_PROMO_BONUS.into())).await;

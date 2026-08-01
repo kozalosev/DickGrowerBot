@@ -16,9 +16,26 @@ struct BattlesCount(u32);
 struct WinStreak(u16);
 
 // u64 has no signed Postgres-representable "bump" type (see SqlxMode in domain_types_macro), so
-// this one stays a Rust-only value — can't be bound into a query directly.
+// these ones stay Rust-only values — can't be bound into a query directly.
 #[domain_type(number)]
 struct Position(u64);
+
+#[domain_type(number)]
+struct AffectedRows(u64);
+
+impl AffectedRows {
+    pub fn zero(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn single(&self) -> bool {
+        self.0 == 1
+    }
+
+    pub fn several(&self) -> bool {
+        self.0 > 1
+    }
+}
 
 #[cfg(test)]
 mod deserialize_tests {
