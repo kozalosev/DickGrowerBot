@@ -29,7 +29,7 @@ pub enum DickCommands {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn dick_cmd_handler(
     bot: Bot,
     msg: Message,
@@ -206,7 +206,7 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn page_callback_handler(
     bot: Bot,
     q: CallbackQuery,

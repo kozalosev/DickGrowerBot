@@ -26,6 +26,7 @@ impl Announcements {
     /// the reason and returns an empty config.
     // Called only from the SIGHUP handler, which Windows doesn't have.
     #[cfg_attr(not(unix), allow(dead_code))]
+    #[tracing::instrument(skip_all, fields(path = %path))]
     pub fn reload(&self, path: &str) {
         let fresh = config::AnnouncementsConfig::load(path);
         let mut storage = match self.announcements.write() {

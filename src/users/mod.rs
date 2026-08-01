@@ -272,7 +272,10 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// Resolves the effective language for an update: a group's stored language (when set) wins for
     /// everyone and short-circuits the user-service call; otherwise we fall back to the per-user
     /// resolution ([`resolve_language_for`]).
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip_all, fields(
+        chat_id = ?update.chat().map(|c| c.id.0),
+        uid = ?update.from().map(|u| u.id.0),
+    ))]
     pub async fn resolve(&self, update: &Update) -> LanguageCode {
         // Anonymously record the sender's Telegram (client) language — our best proxy for the
         // languages the audience actually speaks, independent of any chat/personal override below.
@@ -297,6 +300,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     ///
     /// Inline invocations carry no chat at all, so they are looked up by the indirect keys
     /// [`inline_chat_candidates`] digs out of them — the first key that yields a language wins.
+    #[tracing::instrument(skip_all, fields(chat_id = ?update.chat().map(|c| c.id.0)))]
     async fn update_chat_language(&self, update: &Update) -> Option<SupportedLanguage> {
         if let Some(chat) = update.chat() {
             if chat.is_private() || chat.is_channel() {
@@ -435,7 +439,9 @@ pub struct LanguageResolver<C: UserServiceClient = UserServiceClientGrpc> {
 
 impl<C: UserServiceClient> LanguageResolver<C> {
     pub async fn execute(&self) -> LanguageCode {
-        self.service.resolve(&self.update).await
+        let lang_code = self.service.resolve(&self.update).await;
+        tracing::Span::current().record("lang_code", tracing::field::display(&lang_code));
+        lang_code
     }
 }
 
@@ -443,6 +449,7 @@ impl<C: UserServiceClient> LanguageResolver<C> {
 /// the service is connected and the user is registered) takes precedence over the Telegram-provided
 /// `language_code`; otherwise it falls back to the stateless [`LanguageCode::from_maybe_user`]. The
 /// chat-wide override is handled one level up, in [`LanguageService::resolve`].
+#[tracing::instrument(skip_all, fields(uid = ?user.map(|u| u.id.0)))]
 pub(crate) async fn resolve_language_for<C: UserServiceClient>(
     user: Option<&teloxide::types::User>,
     svc: &UserService<C>,
@@ -674,6 +681,63 @@ mod test {
         let UpdateKind::CallbackQuery(mut query) = kind else { panic!("a callback query is expected") };
         query.from = user;
         UpdateKind::CallbackQuery(query)
+    }
+
+    /// `execute` has no span of its own on purpose, so the language it resolves is recorded onto
+    /// the *caller's* span — that's how handlers get a `lang_code` field they can't fill in
+    /// themselves (they only learn the language inside their own body). Guards the pairing between
+    /// `LanguageResolver::execute` and the `lang_code = tracing::field::Empty` the handlers declare.
+    #[tokio::test]
+    async fn execute_records_the_language_on_the_callers_span() {
+        use std::sync::Arc;
+        use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
+        use tracing::field::{Field, Visit};
+
+        /// Captures `lang_code` values *together with the span they landed on*. The id matters: a
+        /// captor that only checked "was the value recorded somewhere" would still pass if the
+        /// field landed on any other span (an own span of `execute`, say) instead of the caller's.
+        #[derive(Clone, Default)]
+        struct Captor(Arc<Mutex<Vec<(u64, String)>>>);
+
+        /// Visits one span's record call; `id` is the span being recorded into.
+        struct FieldVisitor<'a>(&'a Captor, u64);
+
+        impl Visit for FieldVisitor<'_> {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "lang_code" {
+                    self.0.0.lock().unwrap().push((self.1, format!("{value:?}")));
+                }
+            }
+        }
+
+        impl<S: tracing::Subscriber> Layer<S> for Captor {
+            fn on_record(&self, id: &tracing::span::Id, values: &tracing::span::Record<'_>, _: Context<'_, S>) {
+                values.record(&mut FieldVisitor(self, id.into_u64()));
+            }
+        }
+
+        let (_container, db) = start_postgres().await;
+        let ls = language_service_of(db, true).await;
+        let update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
+        let resolver = ls.defer(update);
+
+        let captor = Captor::default();
+        let subscriber = tracing_subscriber::registry().with(captor.clone());
+        let _guard = tracing::subscriber::set_default(subscriber);
+        // Stands in for a handler span: declares the field, never fills it in itself. `.instrument`
+        // is how `#[tracing::instrument]` enters an async fn's span, so this matches the real call.
+        let handler_span = tracing::info_span!("handler", lang_code = tracing::field::Empty);
+        let handler_id = handler_span.id().expect("the handler span should be enabled").into_u64();
+        let lang = tracing::Instrument::instrument(resolver.execute(), handler_span).await;
+
+        assert_eq!(lang.to_string(), "ru");
+        let recorded = captor.0.lock().unwrap().clone();
+        let on_handler_span: Vec<_> = recorded.iter()
+            .filter(|(id, _)| *id == handler_id)
+            .map(|(_, value)| value.clone())
+            .collect();
+        assert_eq!(on_handler_span, vec!["ru".to_owned()],
+            "the caller's own span never got the lang_code; all records: {recorded:?}");
     }
 
     /// The point of `defer`: constructing a resolver must not touch the database, and only

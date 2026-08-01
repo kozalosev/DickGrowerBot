@@ -98,7 +98,7 @@ pub fn migration_filter(msg: Message) -> bool {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, lang_code = tracing::field::Empty))]
 pub async fn migration_handler(
     bot: Bot,
     msg: Message,

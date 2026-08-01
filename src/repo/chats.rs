@@ -115,6 +115,8 @@ repository!(Chats, with_feature_toggles,
     /// Keyed by the Telegram id: that's what the broadcast holds, and a chat known only by its
     /// `chat_instance` is never a broadcast target anyway. Updating no row is fine — the chat may
     /// have been merged or migrated away between the shrink and the send.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn mark_unreachable(&self, chat_id: &TelegramChatId) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Chats SET is_unreachable = true WHERE chat_id = $1", chat_id.value())
             .execute(&self.pool)
@@ -207,6 +209,8 @@ repository!(Chats, with_feature_toggles,
 ,
     /// Undoes [`Self::mark_unreachable`]. Runs inside the caller's transaction, so it can't clear
     /// the flag for a chat whose upsert then rolls back.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id))]
     async fn mark_reachable(tx: &mut Transaction<'_, Postgres>, internal_id: i64) -> anyhow::Result<()> {
         log::info!("the chat with id = {internal_id} is reachable again");
         sqlx::query!("UPDATE Chats SET is_unreachable = false WHERE id = $1", internal_id)

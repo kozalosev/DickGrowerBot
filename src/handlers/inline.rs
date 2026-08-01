@@ -149,7 +149,7 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
 ]));
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_handler(
     bot: Bot,
     query: InlineQuery,
@@ -205,7 +205,7 @@ pub async fn inline_handler(
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_chosen_handler(
     bot: Bot,
     result: ChosenInlineResult,
@@ -251,7 +251,7 @@ pub async fn inline_chosen_handler(
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,

@@ -87,6 +87,7 @@ pub async fn run_daily_shrink(
 ///
 /// Marking is best-effort on purpose: a chat that stays unmarked is merely retried tomorrow,
 /// and one broken chat must not abort the rest of the broadcast.
+#[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
 async fn handle_broadcast_error(repos: &Repositories, chat_id: TelegramChatId, err: anyhow::Error) {
     if !is_chat_unreachable(&err) {
         metrics::DAILY_SHRINK.broadcast_failed();
@@ -176,6 +177,7 @@ async fn broadcast_shrink(
 
 /// Picks the language for a chat's broadcast: the chat-wide override wins; otherwise, when the
 /// `getMany` toggle is on, the most popular language among the chat's players; English otherwise.
+#[tracing::instrument(skip_all, fields(chat_id = %chat))]
 async fn resolve_broadcast_language(
     repos: &Repositories,
     language_service: &LanguageService,

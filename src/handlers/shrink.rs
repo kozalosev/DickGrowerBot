@@ -203,7 +203,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = %lang_code))]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn callback_handler(
     bot: Bot,
     q: CallbackQuery,

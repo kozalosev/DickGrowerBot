@@ -249,7 +249,7 @@ pub mod checks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     pub async fn handle_not_group_chat(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
         let HandlerDeps { lang_resolver, .. } = deps;
         let lang_code = lang_resolver.execute().await;
@@ -272,7 +272,7 @@ pub mod checks {
     }
 
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = %lang_code))]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     async fn handle_group_account(
         bot: Bot,
         msg: Message,
