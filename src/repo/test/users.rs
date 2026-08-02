@@ -13,7 +13,7 @@ async fn create_or_update() {
     let (_container, db) = start_postgres().await;
     let users = repo::Users::new(db.clone());
 
-    let members = users.get_all().await
+    let members = users.get_all_users().await
         .expect("couldn't fetch the empty list of members");
     assert_eq!(members.len(), 0);
 
@@ -21,7 +21,7 @@ async fn create_or_update() {
         .expect("creation failed");
     check_user_with_name(&u, NAME);
 
-    let members = users.get_all().await
+    let members = users.get_all_users().await
         .expect("couldn't fetch the list of members after creation");
     check_member_with_name(&members, NAME);
 
@@ -31,7 +31,7 @@ async fn create_or_update() {
         .expect("creation failed");
     check_user_with_name(&u, NEW_NAME);
 
-    let members = users.get_all().await
+    let members = users.get_all_users().await
         .expect("couldn't fetch the list of members after update");
     check_member_with_name(&members, NEW_NAME);
 }

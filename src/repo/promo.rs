@@ -44,7 +44,7 @@ struct PromoCodeInfo {
 
 repository!(Promo,
     #[cfg(test)]
-    pub async fn create(&self, p: PromoCodeParams) -> anyhow::Result<()> {
+    pub async fn create_promo_code(&self, p: PromoCodeParams) -> anyhow::Result<()> {
         sqlx::query!("INSERT INTO Promo_Codes (code, bonus_length, capacity) VALUES ($1, $2, $3)",
                 p.code as PromoCode, p.bonus_length as PromoBonus, p.capacity as PromoCapacity)
             .execute(&self.pool)

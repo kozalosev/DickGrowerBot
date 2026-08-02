@@ -65,10 +65,10 @@ impl Announcements {
         max_shows: Counter,
         lang_code: &LanguageCode,
     ) -> anyhow::Result<bool> {
-        let res = match self.get(chat_id_kind, lang_code).await? {
+        let res = match self.get_announcement(chat_id_kind, lang_code).await? {
             _ if max_shows == Counter::literal(0) => false,
             Some(entity) if entity.hash != *announcement.hash => {
-                self.update(entity.chat_id, lang_code, &announcement.hash).await?;
+                self.update_announcement(entity.chat_id, lang_code, &announcement.hash).await?;
                 true
             }
             Some(entity) if entity.times_shown >= max_shows =>
@@ -78,7 +78,7 @@ impl Announcements {
                 true
             }
             None => {
-                self.create(chat_id_kind, lang_code, &announcement.hash).await?;
+                self.create_announcement(chat_id_kind, lang_code, &announcement.hash).await?;
                 true
             }
         };
@@ -87,7 +87,7 @@ impl Announcements {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id_kind, lang_code = %lang_code))]
-    async fn get(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode) -> anyhow::Result<Option<Announcement>> {
+    async fn get_announcement(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode) -> anyhow::Result<Option<Announcement>> {
         sqlx::query_as!(Announcement,
             r#"SELECT chat_id AS "chat_id: InternalChatId", hash, times_shown AS "times_shown: Counter" FROM Announcements
                 WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text)
@@ -100,7 +100,7 @@ impl Announcements {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id_kind, lang_code = %lang_code))]
-    async fn create(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
+    async fn create_announcement(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
         sqlx::query!(
             "INSERT INTO Announcements (chat_id, language, hash, times_shown) VALUES (
                 (SELECT id FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text),
@@ -127,7 +127,7 @@ impl Announcements {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, lang_code = %lang_code))]
-    async fn update(&self, chat_id: InternalChatId, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
+    async fn update_announcement(&self, chat_id: InternalChatId, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET hash = $3, times_shown = 1 WHERE chat_id = $1 AND language = $2",
                 chat_id as InternalChatId, lang_code.to_supported_language() as SupportedLanguage, hash as &TextHash)
             .execute(&self.pool)

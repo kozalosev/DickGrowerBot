@@ -18,7 +18,7 @@ async fn activate() {
     let (_container, db) = start_postgres().await;
 
     let promo = repo::Promo::new(db.clone());
-    promo.create(PromoCodeParams{
+    promo.create_promo_code(PromoCodeParams{
         code: PromoCode::of(PROMO_CODE),
         bonus_length: PromoBonus::new(PROMO_BONUS),
         capacity: PromoCapacity::literal(1),
@@ -43,7 +43,7 @@ async fn activate_with_negative_bonus() {
     let (_container, db) = start_postgres().await;
 
     let promo = repo::Promo::new(db.clone());
-    promo.create(PromoCodeParams{
+    promo.create_promo_code(PromoCodeParams{
         code: PromoCode::of(PENALTY_PROMO_CODE),
         bonus_length: PromoBonus::new(PENALTY_PROMO_BONUS),
         capacity: PromoCapacity::literal(1),

@@ -362,7 +362,7 @@ pub mod checks {
 
         #[autometrics]
         #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
-        pub async fn handle_not_group_chat(bot: Bot, query: InlineQuery) -> HandlerResult {
+        pub async fn handle_not_group_chat_inline(bot: Bot, query: InlineQuery) -> HandlerResult {
             bot.answer_inline_query(query.id, vec![])
                 .is_personal(true)
                 .cache_time(1)

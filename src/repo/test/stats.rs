@@ -19,7 +19,7 @@ async fn test_all() {
     let uid = USER_ID;
     create_user(&db).await;
 
-    let stats = personal_stats.get(uid).await
+    let stats = personal_stats.get_personal_stats(uid).await
         .expect("couldn't fetch the empty stats");
     assert_eq!(stats.chats, 0);
     assert_eq!(stats.max_length, 0);
@@ -30,7 +30,7 @@ async fn test_all() {
     dicks.create_or_grow(uid, &ChatIdPartiality::Specific(chat_id_2.clone()), increment_of(20)).await
         .expect("couldn't grow the dick in the second chat");
 
-    let stats = personal_stats.get(uid).await
+    let stats = personal_stats.get_personal_stats(uid).await
         .expect("couldn't fetch the non-null stats");
     assert_eq!(stats.chats, 2);
     assert_eq!(stats.max_length, 20);
@@ -44,7 +44,7 @@ async fn test_all() {
         .expect("couldn't shrink the dick in the first chat");
     dicks.create_or_grow(uid, &ChatIdPartiality::Specific(chat_id_2), increment_of(-40)).await
         .expect("couldn't shrink the dick in the second chat");
-    let stats = personal_stats.get(uid).await
+    let stats = personal_stats.get_personal_stats(uid).await
         .expect("couldn't fetch the stats with negative lengths");
     assert_eq!(stats.max_length, -10);
     assert_eq!(stats.total_length, -30);

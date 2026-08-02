@@ -127,7 +127,7 @@ repository!(Users,
 ,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = user_id.value()))]
-    pub async fn get(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
+    pub async fn get_user(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users WHERE uid = $1"#, user_id as UserId)
             .fetch_optional(&self.pool)
             .await
@@ -135,7 +135,7 @@ repository!(Users,
     }
 ,
     #[cfg(test)]
-    pub async fn get_all(&self) -> anyhow::Result<Vec<User>> {
+    pub async fn get_all_users(&self) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users"#)
             .fetch_all(&self.pool)
             .await

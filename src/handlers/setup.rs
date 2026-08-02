@@ -155,7 +155,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0))]
-pub async fn callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn setup_callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, .. } = deps;
     SetupCallbackData::parse(&query)?;
     let lang_code = LanguageCode::from_user(&query.from);
