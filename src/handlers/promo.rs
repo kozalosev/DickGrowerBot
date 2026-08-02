@@ -10,7 +10,7 @@ use teloxide::prelude::{Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, User};
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::primitives::{LanguageCode, PromoCode, UserId};
+use crate::domain::primitives::{AffectedRows, LanguageCode, PromoCode, UserId};
 use crate::repo::ActivationError;
 
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
@@ -122,15 +122,17 @@ pub(crate) async fn promo_activation_impl(
     let answer = match promo_repo.activate(UserId::from(user), promo_code).await {
         Ok(res) => {
             metrics::CMD_PROMO.finished.inc();
-            let suffix = if res.chats_affected > 1 {
+            let plurality = if res.chats_affected.several() {
                 "plural"
             } else {
                 "singular"
             };
+            let bonus = res.bonus_length.value();
+            let direction = if bonus.is_negative() { "shrunk" } else { "grown" };
             let chats_in_russian = get_chats_in_russian(res.chats_affected);
             t!("commands.promo.success.template", locale = &lang_code,
-                ending = t!(&format!("commands.promo.success.{suffix}"), locale = &lang_code,
-                    growth = res.bonus_length, affected_chats = res.chats_affected,
+                ending = t!(&format!("commands.promo.success.{direction}.{plurality}"), locale = &lang_code,
+                    growth = bonus.unsigned_abs(), affected_chats = res.chats_affected,
                     word_chats = chats_in_russian))
                 .to_string()
         },
@@ -146,10 +148,11 @@ pub(crate) async fn promo_activation_impl(
     Ok(answer)
 }
 
-fn get_chats_in_russian(count: u64) -> String {
-    match count {
-        1 => "чате",
-        _ => "чатах"
+fn get_chats_in_russian(count: AffectedRows) -> String {
+    if count.single() {
+        "чате"
+    } else {
+        "чатах"
     }.to_owned()
 }
 

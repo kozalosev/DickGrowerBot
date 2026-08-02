@@ -111,8 +111,12 @@ commands:
     request: "Inserisci un codice promozionale:"
     success:
       template: "Hai attivato questo codice promozionale con successo! %{ending}"
-      singular: "Il tuo pene è cresciuto di <b>%{growth}</b> cm in un gruppo."
-      plural: "Il tuo pene è cresciuto di <b>%{growth}</b> cm in <b>%{affected_chats}</b> gruppi!"
+      grown:
+        singular: "Il tuo pene è cresciuto di <b>%{growth}</b> cm in un gruppo."
+        plural: "Il tuo pene è cresciuto di <b>%{growth}</b> cm in <b>%{affected_chats}</b> gruppi!"
+      shrunk:
+        singular: "Il tuo pene si è ridotto di <b>%{growth}</b> cm in un gruppo."
+        plural: "Il tuo pene si è ridotto di <b>%{growth}</b> cm in <b>%{affected_chats}</b> gruppi!"
     errors:
       no_activations_left: "Mi dispiace ma questo codice promozionale non esiste o è scaduto 😞"
       already_activated: "Sembra che tu abbia già utilizzato questo codice promozionale 🤨"

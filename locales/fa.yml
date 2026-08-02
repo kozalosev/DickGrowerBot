@@ -111,8 +111,12 @@ commands:
     request: "یه کد تخفیف وارد کن:"  
     success:  
       template: "کد تخفیف با موفقیت فعال شد! %{ending}"  
-      singular: "کیرت تو یه چت <b>%{growth}</b> سانت رشد کرد."  
-      plural: "کیرت تو <b>%{affected_chats}</b> چت، <b>%{growth}</b> سانت رشد کرد!"  
+      grown:
+        singular: "کیرت تو یه چت <b>%{growth}</b> سانت رشد کرد."
+        plural: "کیرت تو <b>%{affected_chats}</b> چت، <b>%{growth}</b> سانت رشد کرد!"
+      shrunk:
+        singular: "کیرت تو یه چت <b>%{growth}</b> سانت کوچیک شد."
+        plural: "کیرت تو <b>%{affected_chats}</b> چت، <b>%{growth}</b> سانت کوچیک شد!"
     errors:  
       no_activations_left: "متأسفم، ولی این کد تخفیف یا وجود نداره، یا منقضی شده، یا ظرفیتش پر شده 😞"  
       already_activated: "به نظر میاد قبلاً از این کد استفاده کردی 🤨"  
