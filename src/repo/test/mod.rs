@@ -21,6 +21,9 @@ use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::ChatIdKind;
 
+/// Put on every container the tests start; `task test:clean` removes the leftovers by it.
+pub const TEST_CONTAINER_LABEL: &str = "dickgrowerbot.test";
+
 const POSTGRES_USER: &str = "test";
 const POSTGRES_PASSWORD: &str = "test_pw";
 const POSTGRES_DB: &str = "test_db";
@@ -42,6 +45,9 @@ pub async fn start_postgres() -> (ContainerAsync<GenericImage>, Pool<Postgres>) 
         .with_env_var("POSTGRES_USER", POSTGRES_USER)
         .with_env_var("POSTGRES_PASSWORD", POSTGRES_PASSWORD)
         .with_env_var("POSTGRES_DB", POSTGRES_DB)
+        // Marks the container as ours, so `task test:clean` can find the ones an interrupted run
+        // left behind without touching anything else running on the machine.
+        .with_label(TEST_CONTAINER_LABEL, "true")
         .start()
         .await
         .expect("couldn't start Postgres database");

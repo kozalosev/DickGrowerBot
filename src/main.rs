@@ -17,7 +17,6 @@ mod scheduler;
 mod reload;
 
 use std::net::SocketAddr;
-use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use futures::future::join_all;
 use rust_i18n::i18n;
 use teloxide::dispatching::dialogue::InMemStorage;
@@ -44,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     dotenvy::dotenv()?;
 
-    let tracer_provider = observability::init_tracing()?;
+    let telemetry = observability::init_tracing()?;
     autometrics::prometheus_exporter::init();
 
     let app_config = AppConfig::from_env();
@@ -144,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let join_result = match webhook_url {
         Some(url) => {
-            log::info!("Setting a webhook: {url}");
+            tracing::info!(url = %url, "setting a webhook");
 
             let (mut listener, stop_flag, bot_router) = axum_to_router(bot.clone(), Options::new(addr, url)).await?;
             let stop_token = listener.stop_token();
@@ -164,9 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let app = axum::Router::new()
                     .merge(metrics_router)
                     .merge(bot_router)
-                    .layer(prometheus_layer)
-                    .layer(OtelInResponseLayer)
-                    .layer(OtelAxumLayer::default());
+                    .layer(prometheus_layer);
                 axum::serve(tcp_listener, app)
                     .with_graceful_shutdown(stop_flag)
                     .await
@@ -176,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             res
         }
         None => {
-            log::info!("The polling dispatcher is activating...");
+            tracing::info!("the polling dispatcher is activating");
 
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
                 let listener = polling_default(bot.clone()).await;
@@ -198,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tokio::signal::ctrl_c()
                             .await
                             .expect("failed to install CTRL+C signal handler");
-                        log::info!("Shutdown of the metrics server")
+                        tracing::info!("shutting the metrics server down")
                     })
                     .await
             }));
@@ -208,6 +205,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    tracer_provider.shutdown()?;
+    telemetry.shutdown()?;
     join_result?.map_err(Into::into)
 }

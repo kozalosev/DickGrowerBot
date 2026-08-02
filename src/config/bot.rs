@@ -55,7 +55,7 @@ fn read_optional_secs(key: &str) -> Option<Duration> {
         .ok()
         .filter(|value| !value.is_empty())
         .and_then(|value| value.parse::<u64>()
-            .inspect_err(|e| log::warn!("invalid value of the {key} environment variable: {e}"))
+            .inspect_err(|e| tracing::warn!(key = %key, error = %e, "invalid value of an environment variable"))
             .ok())
         .map(Duration::from_secs)
 }

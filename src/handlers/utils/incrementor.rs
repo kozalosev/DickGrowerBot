@@ -160,7 +160,7 @@ impl Incrementor {
         let current_length = match self.dicks.fetch_length(dick.0, &dick.1).await {
             Ok(length) => length,
             Err(e) => {
-                log::error!("couldn't fetch the length of a dick: {e}");
+                tracing::error!(error = %e, "couldn't fetch the length of a dick");
                 return base_increment.only()
             }
         };
@@ -183,11 +183,11 @@ impl Incrementor {
         }
 
         let total = (base + additional_change)
-            .inspect_err(|e| log::error!("overflow on increment calculation for {dick}: {e}"))
+            .inspect_err(|e| tracing::error!(dick = %dick, error = %e, "an overflow in the increment calculation"))
             .unwrap_or(base);
 
         if base == total && !additional_change.is_zero() {
-            log::info!("The following perks affected the calculation: {by_perks:?}");
+            tracing::info!(perks = ?by_perks, "some perks affected the calculation");
             by_perks.clear();
         }
 

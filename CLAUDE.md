@@ -33,6 +33,23 @@ cargo sqlx prepare -- --tests
 docker-compose up
 ```
 
+### Adding a new environment variable
+
+**Reading the variable in `config/` is only the first of six places.** A variable that works locally
+and is silently missing in production has been shipped more than once, because the container passes
+through an explicit list. Every new variable goes into **all** of these:
+
+1. `src/config/` — where it is read;
+2. `.env.example` — commented out, with both the `localhost` and the in-Docker form when the value
+   is a host;
+3. `docker-compose.yml` — the `environment:` list of the `DickGrowerBot` service. **Missing it here
+   means the variable never reaches the container**, no matter what `.env` says;
+4. `Dockerfile` — the `ARG` list at the bottom. It changes nothing at runtime (`ARG` is build-time
+   only), but the list is kept complete as the inventory of what the image understands;
+5. `README.md` and this file — what it does and what happens when it is unset;
+6. the server-configs repo — `DickGrowerBot/docker-compose.yml` (the same `environment:` list) and
+   `DickGrowerBot/.env.sops` (the value itself, through `make secret-edit`).
+
 ### Required environment variables (`.env`)
 
 ```
@@ -59,25 +76,49 @@ reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read
 ### Observability / tracing
 
 Logging and tracing go through `tracing` (initialized in `src/observability.rs` via
-`observability::init_tracing()` in `main.rs`). The existing `log::*` calls are captured
-automatically by the `tracing-log` bridge, so both console output and OpenTelemetry spans
-share one pipeline.
+`observability::init_tracing()` in `main.rs`). The bot logs with `tracing::{info,warn,error,debug}!`
+only; the `log::*` records of the libraries (teloxide, sqlx, reqwest) are captured by the
+`tracing-log` bridge, so everything shares one pipeline.
 
 ```
-RUST_LOG=info                                  # console verbosity (EnvFilter)
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # OTLP/gRPC exporter; unset => export disabled (console-only)
+RUST_LOG=info                                      # verbosity of the console and of the export
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # spans, OTLP/gRPC; unset => spans are not exported
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:9428/insert/opentelemetry/v1/logs  # log records, OTLP/HTTP
 ```
+
+The console layer is **always** on and is the fallback: `docker logs` and journald keep working, and
+it is what remains when the collector can't be reached. The two signals need two variables because
+they go to different places and speak different protocols — the spans to Jaeger/Tempo over gRPC, the
+records to VictoriaLogs over HTTP (the full URL, path included). The logs endpoint is always passed
+to the exporter explicitly; left to itself it would fall back to the traces one and post log records
+to the tracing backend.
 
 Spans are exported over OTLP/gRPC (batch) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the
-service name is the crate name (`dick-grower-bot`). Inbound webhook requests (axum) and
-outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context propagates
-to the user-service. `docker-compose.yml` bundles an **optional** Jaeger all-in-one, gated behind
-the `tracing` Compose profile. The `infra`/`infra:full` tasks start it (they name it, activating the
-profile) and `docker-compose.override.yml` publishes its ports to `localhost` (UI
-`http://localhost:16686`, OTLP `localhost:4317`) for the local-binary flow. For `task up` (skips the
-override) enable it with `COMPOSE_PROFILES=tracing`; there it's network-internal and the in-Docker
-bot reaches it at `jaeger:4317`. (`user-service` is likewise optional, behind the `user-service`
-profile.)
+service name is the crate name (`dick-grower-bot`). A trace of an update is rooted at the handler
+that processes it; outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context
+propagates to the user-service.
+
+The HTTP server has **no** OpenTelemetry layer, on purpose: its only two routes are the webhook and
+`/metrics`, and neither is worth a span. The webhook handler merely parses the update and puts it
+into the dispatcher's queue — the work happens in another task, which the HTTP span can't reach
+(teloxide passes the update through a plain channel, so the context is lost there anyway) — and
+`/metrics` is Prometheus scraping us. The rate and the latency of both come from `axum-prometheus`.
+If a route worth tracing ever appears, add `axum-tracing-opentelemetry` back for it.
+
+The exported records carry the `trace_id`/`span_id` of the span they were written in — the SDK puts
+them there, which is why the console lines have no ids: without the infrastructure there is nothing
+to match them against. Records of the exporter's own stack (`opentelemetry`, `hyper`, `h2`, `tower`,
+`reqwest`) are never exported: the exporter logs while it sends, and those records would be sent
+again. `observability::tests` covers the whole path against a VictoriaLogs container.
+
+`docker-compose.yml` bundles an **optional** observability stack — Jaeger for the spans,
+VictoriaLogs for the records — gated behind the `tracing` Compose profile. The `infra`/`infra:full`
+tasks start both (they name them, activating the profile) and `docker-compose.override.yml`
+publishes their ports to `localhost` for the local-binary flow: Jaeger UI `http://localhost:16686`,
+OTLP `localhost:4317`, VictoriaLogs UI `http://localhost:9428/select/vmui/` and ingestion on the
+same port. For `task up` (skips the override) enable it with `COMPOSE_PROFILES=tracing`; there they
+are network-internal and the in-Docker bot reaches them at `jaeger:4317` and `victoria-logs:9428`.
+(`user-service` is likewise optional, behind the `user-service` profile.)
 
 Aggregate function-level metrics (request rate / error rate / latency histograms) come from
 [`autometrics`](https://docs.rs/autometrics): handlers and query-executing repo methods carry
@@ -171,6 +212,43 @@ Repositories are grouped in a `Repositories` struct and injected into handlers v
 Runtime features are gated by environment variables parsed in `config/`. Check `config/` for the list of flags.
 
 ## Code Style
+
+- **A log message is a constant; the values are fields.** Use `tracing::{debug,info,warn,error}!`
+  (never `log::*`) and keep the message text free of interpolated values, so that repeated events
+  group together in the log database. Messages are lower-case and have no trailing dots. Pass the
+  error of a failed operation as an `error` field — `tracing-opentelemetry` turns it into an
+  exception event on the span, which is how a failure becomes visible in the trace. Don't repeat
+  what the span already carries: an instrumented function's `chat_id`/`uid`/`lang_code` are printed
+  with every line anyway.
+
+  ```rust
+  // ❌ the values are baked into the text, the message is unique every time
+  tracing::warn!("daily shrink: couldn't notify chat {chat_id}: {err:#}");
+
+  // ✅ constant message, values as fields (chat_id comes from the span)
+  tracing::warn!(error = format!("{err:#}"), "couldn't notify the chat about the shrinks");
+  ```
+
+  Use `%value` for `Display`, `?value` for `Debug`, and `format!("{e:#}")` for an `anyhow` error
+  whose whole chain is worth keeping on one line.
+
+- **A comment describes the code, never the change.** Write comments in short, plain English: what
+  the code does, and why if that isn't obvious. Never mention a change, a diff, an issue number, or
+  the previous version ("one statement instead of a transaction", "renamed from…"). The same goes
+  for what is deliberately *absent*: removed code leaves no comment behind, so no "no X here on
+  purpose", "X was removed because…", "bring X back if…". All of that belongs in the commit message.
+  If the reasoning is worth keeping, put it in `CLAUDE.md` or `README.md`. When nothing non-obvious
+  is left to say, write no comment at all.
+
+  ```rust
+  // ❌ only makes sense to someone reading the diff
+  // No OpenTelemetry layer here on purpose. It used to trace the webhook, but those spans were
+  // empty, so it was removed — bring `axum-tracing-opentelemetry` back if a real route appears.
+  let app = axum::Router::new().merge(bot_router);
+
+  // ✅ no comment; the reason lives in the "Observability / tracing" section above
+  let app = axum::Router::new().merge(bot_router);
+  ```
 
 - **Prefer domain-type wrappers over raw primitives for long-living, meaningful values.** Config
   fields, struct fields, and public function parameters/returns that carry a domain concept (a count

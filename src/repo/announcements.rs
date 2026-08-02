@@ -32,13 +32,13 @@ impl Announcements {
         let mut storage = match self.announcements.write() {
             Ok(storage) => storage,
             Err(_) => {
-                log::error!("the announcements lock is poisoned, skipping the reload");
+                tracing::error!("the announcements lock is poisoned, skipping the reload");
                 return;
             }
         };
         let count = fresh.announcements.len();
         *storage = fresh;
-        log::info!("reloaded the announcements from {path}: {count} languages");
+        tracing::info!(path = %path, languages = count, "reloaded the announcements");
     }
 
     #[autometrics]

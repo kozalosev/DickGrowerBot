@@ -19,7 +19,7 @@ pub fn spawn_daily_shrink(
     config: AppConfig,
 ) {
     if !config.daily_shrink.enabled() {
-        log::info!("the daily shrink is disabled (set DAILY_SHRINK_RATIO and DAILY_SHRINK_INACTIVITY_DAYS to enable it)");
+        tracing::info!("the daily shrink is disabled (set DAILY_SHRINK_RATIO and DAILY_SHRINK_INACTIVITY_DAYS to enable it)");
         return;
     }
     tokio::spawn(metrics::TASK_DAILY_SHRINK.instrument(async move {
@@ -32,19 +32,19 @@ pub fn spawn_daily_shrink(
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and
         // aborts on Stale_Dick_Shrinks' primary key, rolling the length change back with it.
         if get_env_value_or_default("DAILY_SHRINK_RUN_ON_STARTUP", false) {
-            log::warn!("DAILY_SHRINK_RUN_ON_STARTUP is set — running the daily shrink right now");
+            tracing::warn!(variable = "DAILY_SHRINK_RUN_ON_STARTUP", "the variable is set, running the daily shrink right now");
             run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())
-                .await.unwrap_or_else(|e| log::error!("the daily shrink run failed: {e:#}"))
+                .await.unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
         }
         loop {
             let Some(till_next_day) = duration_till_next_day().and_then(|d| d.to_std().ok()) else {
-                log::error!("couldn't compute a valid duration till the next UTC midnight, stopping the daily shrink scheduler");
+                tracing::error!("couldn't compute a valid duration till the next UTC midnight, stopping the daily shrink scheduler");
                 return;
             };
             tokio::time::sleep(till_next_day).await;
 
             run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())
-                .await.unwrap_or_else(|e| log::error!("the daily shrink run failed: {e:#}"))
+                .await.unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
         }
     }));
 }

@@ -29,7 +29,7 @@ pub async fn set_my_commands(
     // Regional variants (e.g. "zh-TW") are rejected, so skip them here — they still
     // apply to all other localized messages, just not the command menu.
     if lang_code.contains('-') {
-        log::info!("Skipping command registration for regional locale variant {lang_code}");
+        tracing::info!(lang_code = %lang_code, "skipping the command registration of a regional locale variant");
         return Ok(());
     }
     let personal_commands = vec![
@@ -86,7 +86,7 @@ async fn set_commands(
             cmd
         })
         .collect();
-    log::info!("Registering commands for scope {scope:?}: {commands:?}");
+    tracing::info!(scope = ?scope, commands = ?commands, "registering the commands");
     let mut request = bot.set_my_commands(commands);
     request.language_code.replace(lang_code.to_owned());
     request.scope.replace(scope);

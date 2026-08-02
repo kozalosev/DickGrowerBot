@@ -147,7 +147,7 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't get the language of the chat with id = {chat_id}"))?
             .flatten()
             .and_then(|code| SupportedLanguage::from_str(&code)
-                .map_err(|_| log::warn!("unknown chat language {code:?} stored for {chat_id}"))
+                .map_err(|_| tracing::warn!(code = ?code, "an unknown language is stored for the chat"))
                 .ok())
             .map(Ok)
             .transpose()
@@ -212,7 +212,7 @@ repository!(Chats, with_feature_toggles,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id))]
     async fn mark_reachable(tx: &mut Transaction<'_, Postgres>, internal_id: i64) -> anyhow::Result<()> {
-        log::info!("the chat with id = {internal_id} is reachable again");
+        tracing::info!("the chat is reachable again");
         sqlx::query!("UPDATE Chats SET is_unreachable = false WHERE id = $1", internal_id)
             .execute(&mut **tx)
             .await
@@ -258,7 +258,7 @@ repository!(Chats, with_feature_toggles,
                     .context(format!("couldn't check whether the chat had already been migrated to {new}"))?;
                 return Ok(match migrated {
                     Some(instance) => {
-                        log::debug!("the chat migrated from {old} to {new} had already been repointed");
+                        tracing::debug!("the migrated chat had already been repointed");
                         ChatMigrationOutcome::of_migrated(instance.as_deref())
                     }
                     None => ChatMigrationOutcome::Untraceable
@@ -282,11 +282,11 @@ repository!(Chats, with_feature_toggles,
                     .and_then(ensure_only_one_row_updated)
                     .context(format!("couldn't migrate the chat with id = {old_internal_id} from {old} to {new}"))?;
                 Self::journal_migration(&mut tx, old_internal_id, old, old_instance.as_deref(), new).await?;
-                log::info!("migrated the chat with id = {old_internal_id} from {old} to {new}");
+                tracing::info!(internal_id = old_internal_id, "migrated the chat");
                 ChatMigrationOutcome::of_migrated(old_instance.as_deref())
             }
             Some(id) if id == old_internal_id => {
-                log::debug!("the chat with id = {old_internal_id} has already been migrated to {new}");
+                tracing::debug!(internal_id = old_internal_id, "the chat has already been migrated");
                 ChatMigrationOutcome::of_migrated(old_instance.as_deref())
             }
             // Two rows for what is one and the same chat. Folding them together would mean moving
@@ -294,9 +294,8 @@ repository!(Chats, with_feature_toggles,
             // updates outright — too destructive to attempt blindly for a case Telegram shouldn't
             // produce. Left for manual resolution instead.
             Some(id) => {
-                log::error!("couldn't migrate the chat from {old} to {new}: \
-                    the target id is already taken by the chat with id = {id} (the old one has id = {old_internal_id}); \
-                    the two rows have to be merged manually");
+                tracing::error!(internal_id = old_internal_id, conflicting_internal_id = id,
+                    "couldn't migrate the chat: the new id is already taken by another chat, the two rows have to be merged manually");
                 ChatMigrationOutcome::Conflict
             }
         };
@@ -338,7 +337,7 @@ repository!(Chats, with_feature_toggles,
         chat_id: Option<i64>,
         chat_instance: Option<&str>,
     ) -> anyhow::Result<i64> {
-        log::info!("creating a chat with chat_id = {chat_id:?} and chat_instance = {chat_instance:?}");
+        tracing::info!("creating a chat");
         sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
                 chat_id, chat_instance)
             .fetch_one(&mut **tx)
@@ -354,7 +353,7 @@ repository!(Chats, with_feature_toggles,
         chat_id: Option<i64>,
         chat_instance: Option<&str>,
     ) -> anyhow::Result<i64> {
-        log::debug!("updating the chat with id = {internal_id}, chat_id = {chat_id:?}, and chat_instance = {chat_instance:?}");
+        tracing::debug!("updating the chat");
         sqlx::query!("UPDATE Chats SET chat_id = coalesce($2, chat_id), chat_instance = coalesce($3, chat_instance) WHERE id = $1",
                 internal_id, chat_id, chat_instance)
             .execute(&mut **tx)
@@ -386,10 +385,8 @@ repository!(Chats, with_feature_toggles,
         let shrinks = Self::move_shrinks(tx, main_id, deleted_id).await?;
         let migrations = Self::move_chat_migrations(tx, main_id, deleted_id).await?;
 
-        log::info!("moved rows from the chat with id = {deleted_id} to {main_id}: \
-            loans: {loans}, battle stats: {battle_stats}, announcements: {announcements}, \
-            imports: {imports}, dicks of the day: {dod}, shrinks: {shrinks}, \
-            migrations: {migrations}");
+        tracing::info!(loans, battle_stats, announcements, imports, dod, shrinks, migrations,
+            "moved the rows of the deleted chat to the main one");
         Ok(())
     }
 ,
@@ -625,7 +622,7 @@ repository!(Chats, with_feature_toggles,
             .await
             .context(format!("couldn't delete dicks from the old chat with id = {}", state.deleted.0))?
             .rows_affected();
-        log::info!("merging chats: {chats:?}, updated dicks: {updated_dicks}, deleted: {deleted_dicks}");
+        tracing::info!(updated_dicks, deleted_dicks, "merging the chats");
         Self::move_dependent_rows(tx,
             InternalChatId::new(state.main.internal_id),
             InternalChatId::new(state.deleted.0)

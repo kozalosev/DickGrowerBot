@@ -38,7 +38,7 @@ pub async fn run_daily_shrink(
         .inspect_err(|_| metrics::DAILY_SHRINK.run_failed())?;
     if events.is_empty() {
         metrics::DAILY_SHRINK.run_empty();
-        log::info!("daily shrink: nothing to shrink today");
+        tracing::info!("nothing to shrink today");
         return Ok(());
     }
     metrics::DAILY_SHRINK.run_succeeded();
@@ -69,8 +69,8 @@ pub async fn run_daily_shrink(
     metrics::DAILY_SHRINK.victims_inline_only(total - to_broadcast_count - unreachable_victims_count);
     metrics::DAILY_SHRINK.broadcast_skipped(unreachable_victims_count_by_chat.len() as u64);
     if !unreachable_victims_count_by_chat.is_empty() {
-        log::info!("daily shrink: skipped {} unreachable chat(s) with {unreachable_victims_count} victim(s)",
-            unreachable_victims_count_by_chat.len());
+        tracing::info!(chats = unreachable_victims_count_by_chat.len(), victims = unreachable_victims_count,
+            "skipped the unreachable chats");
     }
 
     for (chat_id, victims) in by_chat {
@@ -91,14 +91,14 @@ pub async fn run_daily_shrink(
 async fn handle_broadcast_error(repos: &Repositories, chat_id: TelegramChatId, err: anyhow::Error) {
     if !is_chat_unreachable(&err) {
         metrics::DAILY_SHRINK.broadcast_failed();
-        log::warn!("daily shrink: couldn't notify chat {chat_id}: {err:#}");
+        tracing::warn!(error = format!("{err:#}"), "couldn't notify the chat about the shrinks");
         return;
     }
     metrics::DAILY_SHRINK.broadcast_unreachable();
-    log::info!("daily shrink: the chat {chat_id} is unreachable, skipping it from now on: {err:#}");
+    tracing::info!(error = format!("{err:#}"), "the chat is unreachable, skipping it from now on");
     repos.chats.mark_unreachable(&chat_id)
         .await
-        .unwrap_or_else(|e| log::warn!("daily shrink: couldn't mark the chat {chat_id} as unreachable: {e:#}"));
+        .unwrap_or_else(|e| tracing::warn!(error = format!("{e:#}"), "couldn't mark the chat as unreachable"));
 }
 
 /// The three errors teloxide has no variant for, in the wording Telegram actually sends. The first
@@ -187,12 +187,12 @@ async fn resolve_broadcast_language(
     match repos.chats.get_chat_language(chat).await {
         Ok(Some(lang)) => return lang,
         Ok(None) => {}
-        Err(e) => log::warn!("daily shrink: couldn't read the language of {chat}: {e:#}"),
+        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the language of the chat"),
     }
 
     if config.features.most_popular_language_enabled {
         let uids: Vec<TeloxideUserId> = repos.dicks.get_player_uids(chat).await
-            .inspect_err(|e| log::warn!("daily shrink: couldn't list players of {chat}: {e:#}"))
+            .inspect_err(|e| tracing::warn!(error = format!("{e:#}"), "couldn't list the players of the chat"))
             .unwrap_or_default()
             .into_iter()
             .map(Into::into)

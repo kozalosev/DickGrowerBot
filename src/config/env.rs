@@ -22,12 +22,12 @@ where
 {
     std::env::var(key)
         .map_err(|e| {
-            log::warn!("no value was found for an optional environment variable {key}, using the default value {default}");
+            tracing::warn!(key = %key, default = %default, "no value was found for an optional environment variable, using the default");
             anyhow!(e)
         })
         .and_then(|v| v.parse()
             .map_err(|e: E| {
-                log::warn!("invalid value of the {key} environment variable, using the default value {default}");
+                tracing::warn!(key = %key, default = %default, "invalid value of an environment variable, using the default");
                 anyhow!(e)
             }))
         .unwrap_or(default)
@@ -51,6 +51,6 @@ pub(super) fn get_optional_env_minutes(key: &str) -> Duration {
 pub(super) fn get_optional_env_ratio(key: &str) -> Option<Ratio> {
     let value = get_env_value_or_default(key, -1.0);
     Ratio::new(value)
-        .inspect_err(|_| log::warn!("{key} is disabled due to the invalid value: {value}"))
+        .inspect_err(|_| tracing::warn!(key = %key, value = %value, "the feature is disabled because of an invalid value"))
         .ok()
 }

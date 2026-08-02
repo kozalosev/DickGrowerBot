@@ -9,3 +9,6 @@ services:
     ports:
       - "4317:4317"   # OTLP gRPC
       - "16686:16686" # Jaeger UI
+  victoria-logs:
+    ports:
+      - "9428:9428"   # OTLP/HTTP ingestion and the UI at /select/vmui/

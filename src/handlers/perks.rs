@@ -63,7 +63,7 @@ impl Perk for LoanPayoutPerk {
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange {
         let maybe_loan_components = self.loans.get_active_loan(dick_id.0, &dick_id.1)
             .await
-            .inspect_err(|e| log::error!("couldn't check if a perk is active: {e}"))
+            .inspect_err(|e| tracing::error!(error = %e, "couldn't check whether a perk is active"))
             .ok()
             .flatten()
             .map(|loan| (loan.debt, loan.payout_ratio));
@@ -84,13 +84,13 @@ impl Perk for LoanPayoutPerk {
             .map_err(anyhow::Error::from)
             .and_then(|v| LoanPayout::new(v).map_err(anyhow::Error::from))
             .unwrap_or_else(|e| {
-                log::error!("loan payout ({payout_value}) for ({dick_id}) is invalid: {e}");
+                tracing::error!(payout = payout_value, dick_id = %dick_id, error = %e, "the loan payout is invalid");
                 LoanPayout::literal(0)
             });
         match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
             Ok(()) => AdditionalChange(LengthChange::signed(-i64::from(payout.value()))),
             Err(e) => {
-                log::error!("couldn't pay {payout} cm for the loan ({dick_id}): {e}");
+                tracing::error!(payout = %payout, dick_id = %dick_id, error = %e, "couldn't pay for the loan");
                 AdditionalChange::zero()
             }
         }

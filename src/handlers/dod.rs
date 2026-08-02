@@ -83,8 +83,8 @@ pub(crate) async fn dick_of_day_impl(
                     (text, MessageGroup::Event)
                 },
                 Ok(None) => {
-                    log::error!("there was an attempt to set a non-existent dick as a winner (UserID={}, ChatId={})",
-                        winner.uid, chat_id);
+                    tracing::error!(uid = %winner.uid, chat_id = %chat_id,
+                        "there was an attempt to set a non-existent dick as a winner");
                     let text = t!("commands.dod.no_candidates", locale = &lang_code).to_string();
                     (text, MessageGroup::Notice)
                 }

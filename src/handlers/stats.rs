@@ -43,7 +43,7 @@ pub async fn cmd_handler(
 
         reply_html_ephemeral!(bot, msg, answer, self_destruction, Report, &lang_code);
     } else {
-        log::info!("ignoring the /stats command since it's disabled");
+        tracing::info!("ignoring the /stats command since it's disabled");
     }
     Ok(())
 }

@@ -24,20 +24,20 @@ impl AnnouncementsConfig {
         let content = match std::fs::read_to_string(path) {
             Ok(content) => content,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                log::info!("no announcements file at {path}, announcements are disabled");
+                tracing::info!(path = %path, "no announcements file, the announcements are disabled");
                 return Self::default()
             }
             Err(e) => {
-                log::warn!("couldn't read the announcements file at {path}: {e}");
+                tracing::warn!(path = %path, error = %e, "couldn't read the announcements file");
                 return Self::default()
             }
         };
         let file: AnnouncementsFile = serde_saphyr::from_str(&content)
-            .inspect_err(|e| log::warn!("couldn't parse the announcements file at path {path}: {e}"))
+            .inspect_err(|e| tracing::warn!(path = %path, error = %e, "couldn't parse the announcements file"))
             .unwrap_or_default();
         let base: HashMap<SupportedLanguage, Announcement> = file.texts.into_iter()
             .filter_map(|(code, text)| SupportedLanguage::from_str(&code)
-                .inspect_err(|_| log::warn!("unknown language code '{code}' in the announcements file, skipping"))
+                .inspect_err(|_| tracing::warn!(code = %code, "skipping an unknown language code of the announcements file"))
                 .ok().zip(Announcement::new(text.trim().to_owned())))
             .collect();
         let announcements = Self::apply_fallback(base, file.fallback);
@@ -65,7 +65,7 @@ impl AnnouncementsConfig {
             for target_code in target_codes {
                 match SupportedLanguage::from_str(&target_code) {
                     Ok(target) => { announcements.entry(target).or_insert_with(|| source_ann.clone()); }
-                    Err(_) => log::warn!("unknown fallback target language '{target_code}' in the announcements file, skipping"),
+                    Err(_) => tracing::warn!(code = %target_code, "skipping an unknown fallback target language of the announcements file"),
                 }
             }
         }

@@ -60,24 +60,29 @@ impl SelfDestructionService {
         let message_id = msg.id;
         let warning = self.config.warning;
         let lang_code = lang_code.clone();
-        log::debug!("self-destruction: scheduling deletion of {group} message {message_id} in chat {chat_id} in {delay:?}");
+        tracing::debug!(group = %group, message_id = %message_id, chat_id = %chat_id, delay = ?delay,
+            "scheduling the self-destruction of a message");
         tokio::spawn(metrics::TASK_SELF_DESTRUCTION.instrument(async move {
             tokio::time::sleep(delay).await;
 
             if !warning.is_zero() {
                 let notice = t!("self_destruction.warning", locale = &lang_code, seconds = warning.as_secs());
-                log::debug!("self-destruction: warning before deleting {group} message {message_id} in chat {chat_id}");
+                tracing::debug!(group = %group, message_id = %message_id, chat_id = %chat_id,
+                    "warning before the self-destruction of a message");
                 if let Err(e) = bot.edit_message_text(chat_id, message_id, notice).parse_mode(Html).await {
-                    log::warn!("self-destruction: couldn't edit {group} message {message_id} in chat {chat_id}: {e}");
+                    tracing::warn!(group = %group, message_id = %message_id, chat_id = %chat_id, error = %e,
+                        "couldn't edit the message with the warning");
                 }
                 tokio::time::sleep(warning).await;
             }
 
-            log::debug!("self-destruction: sending delete request for {group} message {message_id} in chat {chat_id}");
+            tracing::debug!(group = %group, message_id = %message_id, chat_id = %chat_id,
+                "deleting the self-destructing message");
             match bot.delete_message(chat_id, message_id).await {
                 Ok(_) => metrics::SELF_DESTRUCTION.record(&group.to_string(), true),
                 Err(e) => {
-                    log::warn!("self-destruction: couldn't delete {group} message {message_id} in chat {chat_id}: {e}");
+                    tracing::warn!(group = %group, message_id = %message_id, chat_id = %chat_id, error = %e,
+                        "couldn't delete the self-destructing message");
                     metrics::SELF_DESTRUCTION.record(&group.to_string(), false);
                 }
             }

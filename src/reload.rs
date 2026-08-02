@@ -20,11 +20,11 @@ pub fn spawn_reload_on_sighup(announcements: Announcements) {
         let mut hangups = match signal(SignalKind::hangup()) {
             Ok(hangups) => hangups,
             Err(e) => {
-                log::error!("couldn't listen for SIGHUP, the announcements will only change on a restart: {e}");
+                tracing::error!(error = %e, "couldn't listen for SIGHUP, the announcements will only change on a restart");
                 return
             }
         };
-        log::info!("send SIGHUP to reload the announcements from {path}");
+        tracing::info!(path = %path, "send SIGHUP to reload the announcements");
         while hangups.recv().await.is_some() {
             announcements.reload(&path);
         }
@@ -34,5 +34,5 @@ pub fn spawn_reload_on_sighup(announcements: Announcements) {
 /// Windows has no SIGHUP, and the bot only runs there for development.
 #[cfg(not(unix))]
 pub fn spawn_reload_on_sighup(_announcements: Announcements) {
-    log::info!("this platform has no SIGHUP, the announcements will only change on a restart");
+    tracing::info!("this platform has no SIGHUP, the announcements will only change on a restart");
 }

@@ -21,14 +21,13 @@ prometheus = "0.14.0"
 autometrics = { version = "3.0.0", features = ["prometheus-exporter"] }
 tokio-metrics-collector = "0.3.1"
 # Logging, tracing and envs
-log = "0.4.33"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
 tracing-opentelemetry = "0.33.0"
 opentelemetry = "0.32.0"
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic"] }
-axum-tracing-opentelemetry = "0.38.0"
+opentelemetry-appender-tracing = "0.32.0"
 tonic-tracing-opentelemetry = "0.38.0"
 tower = "0.5.3"
 dotenvy = "0.15.7"
