@@ -69,9 +69,25 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # OTLP/gRPC exporter; unset =
 ```
 
 Spans are exported over OTLP/gRPC (batch) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the
-service name is the crate name (`dick-grower-bot`). Inbound webhook requests (axum) and
-outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context propagates
-to the user-service. `docker-compose.yml` bundles an **optional** Jaeger all-in-one, gated behind
+service name is the crate name (`dick-grower-bot`). A trace of an update is rooted at the handler
+that processes it; outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context
+propagates to the user-service.
+
+The HTTP server has **no** OpenTelemetry layer, on purpose: its only two routes are the webhook and
+`/metrics`, and neither is worth a span. The webhook handler merely parses the update and puts it
+into the dispatcher's queue — the work happens in another task, which the HTTP span can't reach
+(teloxide passes the update through a plain channel, so the context is lost there anyway) — and
+`/metrics` is Prometheus scraping us. The rate and the latency of both come from `axum-prometheus`.
+If a route worth tracing ever appears, add `axum-tracing-opentelemetry` back for it.
+
+Every console line written inside a span ends with `trace_id=<32 hex> span_id=<16 hex>`, added by
+the `WithTraceIds` formatter in `observability.rs`, so a log line can be traced back to its span in
+Tempo/Jaeger (Grafana's log data sources turn that pattern into a link on their own). Note that the
+formatter can't use `Span::current()`: `tracing` hands out a no-op dispatcher inside a subscriber's
+own callbacks, so the dispatcher is captured right after `try_init` and the ids are resolved through
+`tracing_opentelemetry::get_otel_context`.
+
+`docker-compose.yml` bundles an **optional** Jaeger all-in-one, gated behind
 the `tracing` Compose profile. The `infra`/`infra:full` tasks start it (they name it, activating the
 profile) and `docker-compose.override.yml` publishes its ports to `localhost` (UI
 `http://localhost:16686`, OTLP `localhost:4317`) for the local-binary flow. For `task up` (skips the
@@ -171,6 +187,24 @@ Repositories are grouped in a `Repositories` struct and injected into handlers v
 Runtime features are gated by environment variables parsed in `config/`. Check `config/` for the list of flags.
 
 ## Code Style
+
+- **A comment describes the code, never the change.** Write comments in short, plain English: what
+  the code does, and why if that isn't obvious. Never mention a change, a diff, an issue number, or
+  the previous version ("one statement instead of a transaction", "renamed from…"). The same goes
+  for what is deliberately *absent*: removed code leaves no comment behind, so no "no X here on
+  purpose", "X was removed because…", "bring X back if…". All of that belongs in the commit message.
+  If the reasoning is worth keeping, put it in `CLAUDE.md` or `README.md`. When nothing non-obvious
+  is left to say, write no comment at all.
+
+  ```rust
+  // ❌ only makes sense to someone reading the diff
+  // No OpenTelemetry layer here on purpose. It used to trace the webhook, but those spans were
+  // empty, so it was removed — bring `axum-tracing-opentelemetry` back if a real route appears.
+  let app = axum::Router::new().merge(bot_router);
+
+  // ✅ no comment; the reason lives in the "Observability / tracing" section above
+  let app = axum::Router::new().merge(bot_router);
+  ```
 
 - **Prefer domain-type wrappers over raw primitives for long-living, meaningful values.** Config
   fields, struct fields, and public function parameters/returns that carry a domain concept (a count

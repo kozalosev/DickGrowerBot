@@ -109,9 +109,15 @@ forwards its ports to `localhost` — so in the local-binary dev flow the UI is 
 full-stack-in-Docker flow (`task up`, which skips the override), enable it with
 `COMPOSE_PROFILES=tracing`; there it stays on the Compose network and the in-Docker bot reaches it
 at `jaeger:4317`. Set `OTEL_EXPORTER_OTLP_ENDPOINT` accordingly (`http://localhost:4317` for a local
-binary, `http://jaeger:4317` in Docker); leaving it unset keeps console-only logging. Inbound webhook
-requests and outbound user-service (gRPC) calls are auto-instrumented, and the trace context
-propagates into the user-service.
+binary, `http://jaeger:4317` in Docker); leaving it unset keeps console-only logging. The trace of an
+update is rooted at the handler that processes it, not at the HTTP request that brought it in: the
+webhook handler only parses the update and hands it to the dispatcher, so an HTTP span would be
+empty. Outbound user-service (gRPC) calls are auto-instrumented, and the trace context propagates
+into the user-service.
+
+Log lines written inside a span end with `trace_id=… span_id=…`, which is how a line in the log can
+be matched with its trace (Grafana links the two automatically when its log data source is
+configured to look for that pattern).
 
 Independently of tracing, the `/metrics` endpoint (port `8080`) exposes Prometheus metrics: HTTP
 metrics from `axum-prometheus`, the bot's own domain counters, and per-function request/error/latency
