@@ -5,13 +5,11 @@ use crate::{config, repo};
 use crate::domain::primitives::{Length, LengthChange, LoanPayout, Ratio};
 
 pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>> {
-    let help_pussies_coef = Ratio::new(config::get_env_value_or_default("HELP_PUSSIES_COEF", 0.0))
-        .unwrap_or(Ratio::literal(0.0));
     let loans = repo::Loans::new(pool.clone(), cfg);
-    
+
     vec![
         Box::new(HelpPussiesPerk {
-            coefficient: help_pussies_coef,
+            coefficient: cfg.incrementor.perks.help_pussies_ratio,
         }),
         Box::new(LoanPayoutPerk { loans })
     ]

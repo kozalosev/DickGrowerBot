@@ -8,23 +8,16 @@ use num_traits::PrimInt;
 use rand::distr::uniform::SampleUniform;
 use rand::RngExt;
 use rust_i18n::t;
-use crate::{config, repo};
+use crate::repo;
+use crate::config::IncrementorConfig;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::{DaysCount, Length, LengthChange, Ratio, SignedLengthChange, UserId};
 
 #[derive(Clone)]
 pub struct Incrementor {
-    config: Config,
+    config: IncrementorConfig,
     perks: Vec<Arc<dyn Perk>>,
     dicks: repo::Dicks,
-}
-
-#[derive(Clone)]
-pub struct Config {
-    growth_range: RangeInclusive<i16>,
-    grow_shrink_ratio: Ratio,
-    newcomers_grace_days: DaysCount,
-    dod_bonus_range: RangeInclusive<u8>,
 }
 
 #[async_trait]
@@ -33,8 +26,7 @@ pub trait Perk: Send + Sync + Downcast {
     async fn apply(&self, dick_id: &DickId, change_intent: ChangeIntent) -> AdditionalChange;
 
     fn enabled(&self) -> bool {
-        let env_key = format!("DISABLE_{}", self.name().to_uppercase().replace('-', "_"));
-        !config::get_env_value_or_default(&env_key, false)
+        true
     }
 }
 impl_downcast!(Perk);
@@ -78,45 +70,23 @@ impl BaseIncrement {
     }
 }
 
-impl Config {
-    pub fn growth_range_min(&self) -> i16 {
-        self.growth_range.clone()
-            .min()
-            .unwrap_or(0)
-    }
-
-    pub fn growth_range_max(&self) -> i16 {
-        self.growth_range.clone()
-            .max()
-            .unwrap_or(0)
-    }
-}
-
 impl Incrementor {
-    pub fn from_env(dicks: &repo::Dicks, perks: Vec<Box<dyn Perk>>) -> Self {
-        let growth_range_min = config::get_env_value_or_default("GROWTH_MIN", -5);
-        let growth_range_max = config::get_env_value_or_default("GROWTH_MAX", 10);
-        let dod_max_bonus = config::get_env_value_or_default("GROWTH_DOD_BONUS_MAX", 5);
-        
-        let perks = perks
+    pub fn new(config: IncrementorConfig, dicks: &repo::Dicks, perks: Vec<Box<dyn Perk>>) -> Self {
+        let (enabled, disabled): (Vec<_>, Vec<_>) = perks
             .into_iter()
-            .filter(|perk| perk.enabled())
-            .map(Arc::from)
-            .collect();
+            .partition(|perk| perk.enabled() && config.perks.enabled(perk.name()));
+        let enabled_names: Vec<&str> = enabled.iter().map(|perk| perk.name()).collect();
+        let disabled_names: Vec<&str> = disabled.iter().map(|perk| perk.name()).collect();
+        tracing::info!(enabled = ?enabled_names, disabled = ?disabled_names, "perks are configured");
 
         Self {
-            config: Config {
-                growth_range: growth_range_min..=growth_range_max,
-                grow_shrink_ratio: config::get_env_value_or_default("GROW_SHRINK_RATIO", Ratio::literal(0.5)),
-                newcomers_grace_days: config::get_env_value_or_default("NEWCOMERS_GRACE_DAYS", DaysCount::new(7)),
-                dod_bonus_range: 1..=dod_max_bonus,
-            },
-            perks,
+            config,
+            perks: enabled.into_iter().map(Arc::from).collect(),
             dicks: dicks.clone(),
         }
     }
 
-    pub fn get_config(&self) -> Config {
+    pub fn get_config(&self) -> IncrementorConfig {
         self.config.clone()
     }
 
@@ -281,8 +251,9 @@ mod test_incrementor {
 
     use async_trait::async_trait;
     use futures::future::join_all;
+    use crate::config::IncrementorConfig;
     use crate::domain::primitives::{DaysCount, LengthChange, Ratio};
-    use crate::handlers::utils::{AdditionalChange, ChangeIntent, Config, DickId, Incrementor, Perk};
+    use crate::handlers::utils::{AdditionalChange, ChangeIntent, DickId, Incrementor, Perk};
     use crate::repo;
     use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
 
@@ -291,11 +262,12 @@ mod test_incrementor {
         let (_container, db) = start_postgres().await;
         let dicks = repo::Dicks::new(db.clone(), Default::default());
         let incr = Incrementor {
-            config: Config {
+            config: IncrementorConfig {
                 growth_range: -1..=1,
                 grow_shrink_ratio: Ratio::literal(0.5),
                 newcomers_grace_days: DaysCount::new(1),
                 dod_bonus_range: 1..=2,
+                perks: Default::default(),
             },
             dicks,
             perks: Vec::default()

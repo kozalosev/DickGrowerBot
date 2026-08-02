@@ -5,6 +5,7 @@ use crate::config::toggles::*;
 use crate::config::announcements::*;
 use crate::config::self_destruction::*;
 use crate::config::shrink::DailyShrinkConfig;
+use crate::config::incrementor::IncrementorConfig;
 use crate::domain::primitives::{Bet, DaysCount, Limit, Ratio};
 
 #[derive(Clone)]
@@ -16,6 +17,7 @@ pub struct AppConfig {
     pub loan_payout_ratio: Ratio,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
     pub pvp_default_bet: Bet,
+    pub incrementor: IncrementorConfig,
     pub daily_shrink: DailyShrinkConfig,
     pub announcements: AnnouncementsConfig,
     pub self_destruction: SelfDestructionConfig,
@@ -77,6 +79,7 @@ impl AppConfig {
             loan_payout_ratio,
             dod_rich_exclusion_ratio,
             pvp_default_bet,
+            incrementor: IncrementorConfig::from_env(),
             daily_shrink,
             announcements: AnnouncementsConfig::load(&announcements_file),
             self_destruction,
