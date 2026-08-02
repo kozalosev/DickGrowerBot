@@ -59,14 +59,22 @@ reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read
 ### Observability / tracing
 
 Logging and tracing go through `tracing` (initialized in `src/observability.rs` via
-`observability::init_tracing()` in `main.rs`). The existing `log::*` calls are captured
-automatically by the `tracing-log` bridge, so both console output and OpenTelemetry spans
-share one pipeline.
+`observability::init_tracing()` in `main.rs`). The bot logs with `tracing::{info,warn,error,debug}!`
+only; the `log::*` records of the libraries (teloxide, sqlx, reqwest) are captured by the
+`tracing-log` bridge, so everything shares one pipeline.
 
 ```
-RUST_LOG=info                                  # console verbosity (EnvFilter)
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # OTLP/gRPC exporter; unset => export disabled (console-only)
+RUST_LOG=info                                      # verbosity of the console and of the export
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # spans, OTLP/gRPC; unset => spans are not exported
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:9428/insert/opentelemetry/v1/logs  # log records, OTLP/HTTP
 ```
+
+The console layer is **always** on and is the fallback: `docker logs` and journald keep working, and
+it is what remains when the collector can't be reached. The two signals need two variables because
+they go to different places and speak different protocols — the spans to Jaeger/Tempo over gRPC, the
+records to VictoriaLogs over HTTP (the full URL, path included). The logs endpoint is always passed
+to the exporter explicitly; left to itself it would fall back to the traces one and post log records
+to the tracing backend.
 
 Spans are exported over OTLP/gRPC (batch) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the
 service name is the crate name (`dick-grower-bot`). A trace of an update is rooted at the handler
@@ -80,20 +88,20 @@ into the dispatcher's queue — the work happens in another task, which the HTTP
 `/metrics` is Prometheus scraping us. The rate and the latency of both come from `axum-prometheus`.
 If a route worth tracing ever appears, add `axum-tracing-opentelemetry` back for it.
 
-Every console line written inside a span ends with `trace_id=<32 hex> span_id=<16 hex>`, added by
-the `WithTraceIds` formatter in `observability.rs`, so a log line can be traced back to its span in
-Tempo/Jaeger (Grafana's log data sources turn that pattern into a link on their own). Note that the
-formatter can't use `Span::current()`: `tracing` hands out a no-op dispatcher inside a subscriber's
-own callbacks, so the dispatcher is captured right after `try_init` and the ids are resolved through
-`tracing_opentelemetry::get_otel_context`.
+The exported records carry the `trace_id`/`span_id` of the span they were written in — the SDK puts
+them there, which is why the console lines have no ids: without the infrastructure there is nothing
+to match them against. Records of the exporter's own stack (`opentelemetry`, `hyper`, `h2`, `tower`,
+`reqwest`) are never exported: the exporter logs while it sends, and those records would be sent
+again. `observability::tests` covers the whole path against a VictoriaLogs container.
 
-`docker-compose.yml` bundles an **optional** Jaeger all-in-one, gated behind
-the `tracing` Compose profile. The `infra`/`infra:full` tasks start it (they name it, activating the
-profile) and `docker-compose.override.yml` publishes its ports to `localhost` (UI
-`http://localhost:16686`, OTLP `localhost:4317`) for the local-binary flow. For `task up` (skips the
-override) enable it with `COMPOSE_PROFILES=tracing`; there it's network-internal and the in-Docker
-bot reaches it at `jaeger:4317`. (`user-service` is likewise optional, behind the `user-service`
-profile.)
+`docker-compose.yml` bundles an **optional** observability stack — Jaeger for the spans,
+VictoriaLogs for the records — gated behind the `tracing` Compose profile. The `infra`/`infra:full`
+tasks start both (they name them, activating the profile) and `docker-compose.override.yml`
+publishes their ports to `localhost` for the local-binary flow: Jaeger UI `http://localhost:16686`,
+OTLP `localhost:4317`, VictoriaLogs UI `http://localhost:9428/select/vmui/` and ingestion on the
+same port. For `task up` (skips the override) enable it with `COMPOSE_PROFILES=tracing`; there they
+are network-internal and the in-Docker bot reaches them at `jaeger:4317` and `victoria-logs:9428`.
+(`user-service` is likewise optional, behind the `user-service` profile.)
 
 Aggregate function-level metrics (request rate / error rate / latency histograms) come from
 [`autometrics`](https://docs.rs/autometrics): handlers and query-executing repo methods carry
@@ -187,6 +195,25 @@ Repositories are grouped in a `Repositories` struct and injected into handlers v
 Runtime features are gated by environment variables parsed in `config/`. Check `config/` for the list of flags.
 
 ## Code Style
+
+- **A log message is a constant; the values are fields.** Use `tracing::{debug,info,warn,error}!`
+  (never `log::*`) and keep the message text free of interpolated values, so that repeated events
+  group together in the log database. Messages are lower-case and have no trailing dots. Pass the
+  error of a failed operation as an `error` field — `tracing-opentelemetry` turns it into an
+  exception event on the span, which is how a failure becomes visible in the trace. Don't repeat
+  what the span already carries: an instrumented function's `chat_id`/`uid`/`lang_code` are printed
+  with every line anyway.
+
+  ```rust
+  // ❌ the values are baked into the text, the message is unique every time
+  tracing::warn!("daily shrink: couldn't notify chat {chat_id}: {err:#}");
+
+  // ✅ constant message, values as fields (chat_id comes from the span)
+  tracing::warn!(error = format!("{err:#}"), "couldn't notify the chat about the shrinks");
+  ```
+
+  Use `%value` for `Display`, `?value` for `Debug`, and `format!("{e:#}")` for an `anyhow` error
+  whose whole chain is worth keeping on one line.
 
 - **A comment describes the code, never the change.** Write comments in short, plain English: what
   the code does, and why if that isn't obvious. Never mention a change, a diff, an issue number, or

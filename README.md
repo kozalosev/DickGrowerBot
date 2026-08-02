@@ -96,28 +96,36 @@ which is the opposite of the `localhost` values `.env.example` ships for the loc
 
 ### Tracing / observability
 
-The bot logs and traces through [`tracing`](https://docs.rs/tracing). Setting
-`OTEL_EXPORTER_OTLP_ENDPOINT` enables OpenTelemetry export over OTLP/gRPC; leaving it unset
-keeps console-only logging (handy for local development). `RUST_LOG` controls console
-verbosity as usual.
+The bot logs and traces through [`tracing`](https://docs.rs/tracing), with structured fields: a log
+message is a constant and the values around it (`chat_id`, `uid`, `error`, …) are separate fields,
+so the log database can filter and count them instead of matching text. `RUST_LOG` controls the
+verbosity, of both the console and the export.
 
-`docker-compose.yml` bundles an **optional** [Jaeger](https://www.jaegertracing.io/) all-in-one
-container, gated behind the `tracing` Compose profile. The `task infra`/`infra:full` tasks start it
-automatically (they name it, which activates its profile), and `docker-compose.override.yml`
-forwards its ports to `localhost` — so in the local-binary dev flow the UI is at
-[`http://localhost:16686`](http://localhost:16686) and OTLP at `localhost:4317`. For the
+Console output is always on — it is the fallback when the observability stack is not configured or
+cannot be reached. Two more variables send the data to that stack, each optional and independent:
+
+* `OTEL_EXPORTER_OTLP_ENDPOINT` — the **spans**, over OTLP/gRPC;
+* `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` — the **log records**, over OTLP/HTTP (the full URL, path
+  included). The exported records carry the trace and span ids of the span they were written in, put
+  there by the SDK, so a log line and a trace can be matched.
+
+`docker-compose.yml` bundles an **optional** observability stack, gated behind the `tracing` Compose
+profile: [Jaeger](https://www.jaegertracing.io/) all-in-one for the spans and
+[VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) for the records. The
+`task infra`/`infra:full` tasks start both automatically (they name them, which activates the
+profile), and `docker-compose.override.yml` forwards their ports to `localhost` — so in the
+local-binary dev flow the Jaeger UI is at [`http://localhost:16686`](http://localhost:16686), OTLP
+at `localhost:4317`, and the VictoriaLogs UI at
+[`http://localhost:9428/select/vmui/`](http://localhost:9428/select/vmui/). For the
 full-stack-in-Docker flow (`task up`, which skips the override), enable it with
-`COMPOSE_PROFILES=tracing`; there it stays on the Compose network and the in-Docker bot reaches it
-at `jaeger:4317`. Set `OTEL_EXPORTER_OTLP_ENDPOINT` accordingly (`http://localhost:4317` for a local
-binary, `http://jaeger:4317` in Docker); leaving it unset keeps console-only logging. The trace of an
-update is rooted at the handler that processes it, not at the HTTP request that brought it in: the
-webhook handler only parses the update and hands it to the dispatcher, so an HTTP span would be
-empty. Outbound user-service (gRPC) calls are auto-instrumented, and the trace context propagates
-into the user-service.
+`COMPOSE_PROFILES=tracing`; there they stay on the Compose network and the in-Docker bot reaches
+them at `jaeger:4317` and `victoria-logs:9428`. Set the two variables accordingly — see
+`.env.example`, which ships both forms commented out.
 
-Log lines written inside a span end with `trace_id=… span_id=…`, which is how a line in the log can
-be matched with its trace (Grafana links the two automatically when its log data source is
-configured to look for that pattern).
+The trace of an update is rooted at the handler that processes it, not at the HTTP request that
+brought it in: the webhook handler only parses the update and hands it to the dispatcher, so an HTTP
+span would be empty. Outbound user-service (gRPC) calls are auto-instrumented, and the trace context
+propagates into the user-service.
 
 Independently of tracing, the `/metrics` endpoint (port `8080`) exposes Prometheus metrics: HTTP
 metrics from `axum-prometheus`, the bot's own domain counters, and per-function request/error/latency

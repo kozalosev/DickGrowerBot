@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::error::Error;
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
-use opentelemetry_otlp::{LogExporter, SpanExporter, WithExportConfig};
+use opentelemetry_otlp::{LogExporter, SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::filter::{filter_fn, FilterExt};
@@ -120,10 +121,17 @@ fn build_tracer_provider() -> Result<SdkTracerProvider, Box<dyn Error>> {
 
 /// The endpoint is always passed explicitly: left to itself, the exporter would fall back to
 /// `OTEL_EXPORTER_OTLP_ENDPOINT` and send the log records to the tracing backend.
+///
+/// `VL-Stream-Fields` is read by VictoriaLogs and tells it which fields identify a log stream. Left
+/// alone, it takes every resource attribute, and the SDK puts the name of the event — which is the
+/// file and the line it was written at — among them. That would make a stream per log statement,
+/// and a new set of them after every edit of the source. Other backends ignore the header.
 fn build_logger_provider(endpoint: String) -> Result<SdkLoggerProvider, Box<dyn Error>> {
+    let headers = HashMap::from([("VL-Stream-Fields".to_owned(), "service.name".to_owned())]);
     let otlp_exporter = LogExporter::builder()
         .with_http()
         .with_endpoint(endpoint)
+        .with_headers(headers)
         .build()?;
     Ok(SdkLoggerProvider::builder()
         .with_batch_exporter(otlp_exporter)
@@ -186,6 +194,10 @@ mod tests {
         assert!(logs.contains("a message from the test"), "the record is missing from:\n{logs}");
         assert!(logs.contains(&trace_id), "the trace id {trace_id} is missing from:\n{logs}");
         assert!(logs.contains("-100500"), "the chat_id field is missing from:\n{logs}");
+        assert!(logs.contains(r#""severity_text":"INFO""#), "the level is missing from:\n{logs}");
+        // The service alone identifies the stream; see `build_logger_provider`.
+        assert!(logs.contains(r#""_stream":"{service.name=\"dick-grower-bot\"}""#),
+            "unexpected stream fields in:\n{logs}");
     }
 
     async fn start_victoria_logs() -> (ContainerAsync<GenericImage>, String) {
