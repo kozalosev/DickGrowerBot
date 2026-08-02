@@ -105,6 +105,11 @@ pub fn register_db_pool_collector(pool: sqlx::Pool<sqlx::Postgres>) {
 
 /// The counters are registered on the first dereference of their `Lazy` statics, so all of them
 /// must be forced here to make even never incremented counters appear in the `/metrics` output.
+///
+/// The `TASK_*` monitors are the exception: each of them registers itself when its task is first
+/// spawned, so `/metrics` lists only the tasks this process actually runs. The webhook server and
+/// the polling dispatcher are never both in use, and the user-service cache cleanup runs only when
+/// the integration is enabled.
 fn force_registration() {
     Lazy::force(&INLINE_COUNTER);
     Lazy::force(&CMD_START_COUNTER);
@@ -133,13 +138,6 @@ fn force_registration() {
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
     Lazy::force(&DB_POOL_CONNECTION_AGE_SECONDS);
-
-    Lazy::force(&TASK_WEBHOOK_SERVER);
-    Lazy::force(&TASK_POLLING_DISPATCHER);
-    Lazy::force(&TASK_METRICS_SERVER);
-    Lazy::force(&TASK_DAILY_SHRINK);
-    Lazy::force(&TASK_SELF_DESTRUCTION);
-    Lazy::force(&TASK_USER_SERVICE_CACHE_CLEANUP);
 }
 
 static TASK_COLLECTOR_REGISTERED: Lazy<()> = Lazy::new(|| {
@@ -750,6 +748,18 @@ mod tests {
         ] {
             assert!(rendered.contains(series), "{series} is missing from:\n{rendered}");
         }
+    }
+
+    /// A task monitor belongs to `/metrics` only when its task runs in this process. The dashboards
+    /// would otherwise show flat lines for the half of the pair that is never used: the polling
+    /// dispatcher under a webhook, or the webhook server while polling.
+    #[test]
+    fn a_task_that_was_never_spawned_is_not_exported() {
+        Lazy::force(&TASK_DAILY_SHRINK);
+        let rendered = render_metrics();
+
+        assert!(rendered.contains("task=\"daily_shrink\""), "the collector is not registered at all:\n{rendered}");
+        assert!(!rendered.contains("task=\"polling_dispatcher\""), "an unused task is exported:\n{rendered}");
     }
 
     #[test]
