@@ -295,25 +295,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axum-tracing-opentelemetry"
-version = "0.38.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c938150bbecf4b43a24964bea0780f99d538b6654455e45b1784d410f122822"
-dependencies = [
- "axum",
- "futures-core",
- "futures-util",
- "http",
- "opentelemetry 0.32.0",
- "opentelemetry-semantic-conventions",
- "pin-project-lite",
- "tower",
- "tracing",
- "tracing-opentelemetry",
- "tracing-opentelemetry-instrumentation-sdk",
-]
-
-[[package]]
 name = "base62"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -825,7 +806,6 @@ dependencies = [
  "autometrics",
  "axum",
  "axum-prometheus",
- "axum-tracing-opentelemetry",
  "base64 0.23.0",
  "byteorder",
  "chrono",

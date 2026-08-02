@@ -17,7 +17,6 @@ mod scheduler;
 mod reload;
 
 use std::net::SocketAddr;
-use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use futures::future::join_all;
 use rust_i18n::i18n;
 use teloxide::dispatching::dialogue::InMemStorage;
@@ -164,9 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let app = axum::Router::new()
                     .merge(metrics_router)
                     .merge(bot_router)
-                    .layer(prometheus_layer)
-                    .layer(OtelInResponseLayer)
-                    .layer(OtelAxumLayer::default());
+                    .layer(prometheus_layer);
                 axum::serve(tcp_listener, app)
                     .with_graceful_shutdown(stop_flag)
                     .await
