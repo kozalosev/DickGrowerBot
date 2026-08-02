@@ -167,7 +167,7 @@ pub async fn callback_handler(
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let unable_to_delete_message = bot.delete_message(chat_id, message_id).await
-                        .inspect_err(|e| log::error!("Unable to delete a loan request message: {e}"))
+                        .inspect_err(|e| tracing::error!(error = %e, "couldn't delete the loan request message"))
                         .is_err();
                     if unable_to_delete_message {
                         bot.edit_message_text(chat_id, message_id, updated_text).await?;

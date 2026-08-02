@@ -17,9 +17,9 @@ const SERVICE_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// Initialize tracing subscriber, optionally with OpenTelemetry OTLP export.
 ///
-/// Bridges the existing `log::*` calls (both ours and from libraries like teloxide) into the
-/// tracing pipeline via `tracing_subscriber`'s built-in `tracing-log` feature (installed inside
-/// `try_init`), so no `env_logger`/`pretty_env_logger` init is needed anymore.
+/// The `log::*` records of the libraries (teloxide, sqlx, reqwest) are bridged into the tracing
+/// pipeline by `tracing_subscriber`'s built-in `tracing-log` feature, installed inside `try_init`,
+/// so they end up in the same output as our own events.
 ///
 /// Configuration via environment variables:
 /// - `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP endpoint. If unset, OTLP export is

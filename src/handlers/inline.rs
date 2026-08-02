@@ -228,7 +228,7 @@ pub async fn inline_chosen_handler(
             .map_ok(|res| res.filter(|c| c.chat_id.is_some() && c.chat_instance.is_some()))
             .await?;
         if let Some(chat) = maybe_chat {
-            log::debug!("[inline_chosen_handler] chat: {chat:?}, user_id: {}", result.from.id);
+            tracing::debug!(chat = ?chat, uid = result.from.id.0, "handling a chosen inline result");
 
             let cmd = InlineCommand::from_str(&result.result_id)
                 .context(format!("couldn't parse inline command '{}'", result.result_id))?;
@@ -272,12 +272,12 @@ pub async fn callback_handler(
                 }.to_partiality(ChatIdSource::InlineQuery),
                 Ok(InlineMessageIdInfo { chat_id: None, .. }) => query.chat_instance.clone().into(),
                 Err(err) => {
-                    log::error!("callback_handler couldn't resolve an inline_message_id: {err}");
+                    tracing::error!(error = %err, "couldn't resolve the inline_message_id");
                     query.chat_instance.clone().into()
                 }
             })
             .unwrap_or(query.chat_instance.clone().into());
-        log::debug!("[callback_handler] chat_id: {chat_id:?}, user_id: {}", query.from.id);
+        tracing::debug!(chat_id = ?chat_id, uid = query.from.id.0, "handling a callback query");
 
         let parse_res = parse_callback_data(data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
@@ -294,7 +294,7 @@ pub async fn callback_handler(
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",
                 Ok(CallbackDataParseResult::Invalid) => "invalid_data",
                 Err(e) => {
-                    log::error!("unknown callback data: {e}");
+                    tracing::error!(error = %e, "unknown callback data");
                     "unknown_data"
                 }
                 Ok(CallbackDataParseResult::Ok(_)) => panic!("unexpected CallbackDataParseResult::Ok(_)")
@@ -326,7 +326,7 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             if uid == user_id.0.to_string() {
                 InlineCommand::from_str(data)
                     .map(CallbackDataParseResult::Ok)
-                    .inspect_err(|err| log::error!("couldn't parse callback data '{data}': {err}"))
+                    .inspect_err(|err| tracing::error!(data = %data, error = %err, "couldn't parse the callback data"))
             } else {
                 Ok(CallbackDataParseResult::AnotherUser)
             }
@@ -337,6 +337,6 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
 // TODO: move to mod.rs and use in message handlers too
 fn log_text_if_unknown_api_error(text: &str, err: &RequestError) {
     if let RequestError::Api(ApiError::Unknown(_)) = err {
-        log::error!("Couldn't send an answer: {text}")
+        tracing::error!(text = %text, "couldn't send an answer")
     }
 }

@@ -88,7 +88,8 @@ impl CallbackResult {
 
                     let edit_req_resp = edit_req.await;
                     if let Err(err) = edit_req_resp {
-                        log::error!("couldn't edit the message ({}:{}): {}", message.chat().id, message.id(), err);
+                        tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = %err,
+                            "couldn't edit the message");
                         Err(err)?;
                     }
                 } else if let Some(inline_message_id) = callback_query.inline_message_id {
@@ -98,7 +99,8 @@ impl CallbackResult {
 
                     let edit_req_resp = edit_req.await;
                     if let Err(err) = edit_req_resp {
-                        log::error!("couldn't edit the message ({}): {}", inline_message_id, err);
+                        tracing::error!(inline_message_id = %inline_message_id, error = %err,
+                            "couldn't edit the inline message");
                         Err(err)?;
                     }
                 };
@@ -301,7 +303,7 @@ pub mod checks {
         }
         repos.chats.is_anchored(&TelegramChatId::from(msg.chat.id))
             .await
-            .inspect_err(|e| log::error!("couldn't check whether the chat is anchored: {e}"))
+            .inspect_err(|e| tracing::error!(error = %e, "couldn't check whether the chat is anchored"))
             .map(bool::not)
             // on a DB error, let the command through rather than locking the chat out
             .unwrap_or(false)

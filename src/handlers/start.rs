@@ -27,7 +27,7 @@ pub async fn start_cmd_handler(
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let answer = if msg.from.as_ref().is_none() {
-        log::warn!("The /start command was invoked without a FROM field for message: {:?}", msg);
+        tracing::warn!(message = ?msg, "the /start command was invoked without a FROM field");
         help.get_help_message(&lang_code).to_owned()
     } else {
         match cmd {

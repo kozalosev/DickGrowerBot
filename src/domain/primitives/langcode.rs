@@ -95,7 +95,7 @@ impl LanguageCode {
     fn get_language_code_or_log_if_missing(user: &User) -> Option<&String> {
         user.language_code.as_ref()
             .or_else(|| {
-                log::debug!("no language_code for {}, using the default", user.id);
+                tracing::debug!(uid = %user.id, "the user has no language_code, using the default");
                 None
             })
     }

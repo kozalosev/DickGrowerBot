@@ -18,10 +18,10 @@ impl TryFrom<&str> for InlineMessageIdInfo {
 }
 
 pub fn resolve_inline_message_id(inline_message_id: &str) -> anyhow::Result<InlineMessageIdInfo> {
-    log::debug!("inline_message_id: {inline_message_id}");
+    tracing::debug!(inline_message_id = %inline_message_id, "resolving an inline_message_id");
     let info = inline_message_id.try_into()
         .map_err(|e: InvalidIDFormat| anyhow!(e))?;
-    log::debug!("resolved InlineMessageIdInfo: {info:?}");
+    tracing::debug!(info = ?info, "resolved an inline_message_id");
     Ok(info)
 }
 
@@ -29,7 +29,7 @@ pub fn resolve_inline_message_id(inline_message_id: &str) -> anyhow::Result<Inli
 /// channels encode it (see [`fix_chat_id`]). Errors are logged and reported as "unknown".
 pub fn try_resolve_chat_id(msg_id: &str) -> Option<TelegramChatId> {
     resolve_inline_message_id(msg_id)
-        .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
+        .inspect_err(|e| tracing::error!(error = %e, "couldn't resolve the inline_message_id"))
         .ok()
         .and_then(|info| info.chat_id)
 }

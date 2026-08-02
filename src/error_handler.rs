@@ -28,7 +28,7 @@ impl ErrorHandler<Box<dyn Error + Send + Sync>> for MetricsErrorHandler {
         if let Some(request_error) = error.downcast_ref::<RequestError>() {
             TELEGRAM_REQUEST_ERRORS.record(classify(request_error));
         }
-        log::error!("{}: {:?}", self.text, error);
+        tracing::error!(context = %self.text, error = ?error, "an error reached the error handler");
         Box::pin(async {})
     }
 }
@@ -36,7 +36,7 @@ impl ErrorHandler<Box<dyn Error + Send + Sync>> for MetricsErrorHandler {
 impl ErrorHandler<RequestError> for MetricsErrorHandler {
     fn handle_error(self: Arc<Self>, error: RequestError) -> BoxFuture<'static, ()> {
         TELEGRAM_REQUEST_ERRORS.record(classify(&error));
-        log::error!("{}: {:?}", self.text, error);
+        tracing::error!(context = %self.text, error = ?error, "an error reached the error handler");
         Box::pin(async {})
     }
 }

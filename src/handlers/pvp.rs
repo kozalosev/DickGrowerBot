@@ -169,7 +169,7 @@ pub(super) fn build_inline_keyboard_article_result(
     name: &Username,
     bet: Bet,
 ) -> InlineQueryResult {
-    log::debug!("Starting a PvP for {uid} (bet = {bet})...");
+    tracing::debug!(uid = %uid, bet = %bet, "building an inline PvP offer");
 
     let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
     let text = t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet);
@@ -212,7 +212,7 @@ pub async fn callback_handler(
             .then_some(query.inline_message_id.as_ref())
             .flatten()
             .and_then(|msg_id| utils::resolve_inline_message_id(msg_id)
-                .inspect_err(|e| log::error!("couldn't resolve inline_message_id: {e}"))
+                .inspect_err(|e| tracing::error!(error = %e, "couldn't resolve the inline_message_id"))
                 .ok()
             )
             .and_then(|info| info.chat_id)
@@ -292,7 +292,7 @@ pub(crate) async fn pvp_impl_start(
     bet: Bet,
 ) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
-    log::debug!("Starting a PvP for {} in the chat with id = {} (bet = {bet}, enough = {enough})...", initiator.uid, p.chat_id);
+    tracing::debug!(uid = %initiator.uid, chat_id = %p.chat_id, bet = %bet, enough, "starting a PvP");
 
     let data = if enough {
         let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).to_string();
@@ -321,8 +321,8 @@ async fn pvp_impl_attack(
     );
     let (enough_initiator, enough_acceptor) = (enough_initiator?, enough_acceptor?);
 
-    log::debug!("Executing the battle: chat_id = {}, initiator = {initiator} (enough = {enough_initiator}), acceptor = {} (enough = {enough_acceptor}), bet = {bet}...",
-        p.chat_id, acceptor.uid);
+    tracing::debug!(chat_id = %p.chat_id, initiator = %initiator, acceptor = %acceptor.uid,
+        enough_initiator, enough_acceptor, bet = %bet, "executing the battle");
 
     let result = if enough_initiator && enough_acceptor {
         let acceptor_uid = acceptor.clone().into();
@@ -330,7 +330,7 @@ async fn pvp_impl_attack(
         let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
 
         let battle_stats = p.repos.pvp_stats.send_battle_result(&p.chat_id.kind(), winner, loser, bet).await
-            .inspect_err(|e| log::error!("couldn't send users' battle statistics for winner ({}) and loser ({}): {}", winner, loser, e))
+            .inspect_err(|e| tracing::error!(winner = %winner, loser = %loser, error = %e, "couldn't send the battle statistics"))
             .ok()
             .filter(|_| p.features.show_stats)
             .map(|BattleStats { winner: winner_stats, loser: loser_stats }| {
@@ -349,7 +349,7 @@ async fn pvp_impl_attack(
             .unwrap_or_default();
         
         let (winner_res, withheld_part) = pay_for_loan_if_needed(&p, winner, bet).await
-            .inspect_err(|e| log::error!("couldn't pay for a loan from a battle award: {e}"))
+            .inspect_err(|e| tracing::error!(error = %e, "couldn't pay for a loan from a battle award"))
             .ok().flatten()
             .filter(|(_, withheld)| *withheld > 0)
             .map(|(res, withheld)| {

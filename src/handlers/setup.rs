@@ -131,13 +131,13 @@ pub async fn migration_handler(
     // can tell "the inline half is gone" from "nobody ever played here", hence the careful wording.
     let lost_text_key = match outcome {
         ChatMigrationOutcome::Untraceable => {
-            log::warn!("the chat migrated from {old} to {new} was unknown by its old id; \
-                anything it had under a chat_instance is now unreachable");
+            tracing::warn!(old = %old, new = %new,
+                "the migrated chat was unknown by its old id, anything it had under a chat_instance is now unreachable");
             Some("migration.lost")
         }
         ChatMigrationOutcome::MigratedUnanchored => {
-            log::warn!("the chat migrated from {old} to {new} had never been anchored; \
-                anything it played through inline mode is now unreachable");
+            tracing::warn!(old = %old, new = %new,
+                "the migrated chat had never been anchored, anything it played through inline mode is now unreachable");
             Some("migration.lost_inline")
         }
         _ => None
@@ -168,7 +168,7 @@ pub async fn callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps)
         id: TelegramChatId::from(message.chat().id),
         instance: TelegramChatInstanceId::new(query.chat_instance.clone()),
     };
-    log::info!("anchoring the chat: {chat_id}");
+    tracing::info!(chat_id = %chat_id, "anchoring the chat");
     repos.chats.upsert_chat(&chat_id.to_partiality(ChatIdSource::default())).await?;
 
     bot.edit_message_text(message.chat().id, message.id(),

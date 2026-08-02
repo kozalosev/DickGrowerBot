@@ -165,7 +165,7 @@ pub async fn import_cmd_handler(
                         .join("\n\n")
                 }
                 Err(e) => if let Some(InvalidLines(lines)) = e.downcast_ref() {
-                    log::error!("Invalid lines: {lines:?}");
+                    tracing::error!(lines = ?lines, "invalid lines in the imported message");
                     let invalid_lines = lines.iter()
                         .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
                             line = line))
@@ -243,7 +243,7 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
         .filter(|name| ORIGINAL_BOT_USERNAMES.contains(&name.as_ref()))
         .and_then(|name| {
             let name = name.as_str().try_into()
-                .map_err(|name| log::error!("couldn't convert name: {name}"))
+                .map_err(|name| tracing::error!(name = %name, "couldn't convert the name"))
                 .ok();
             if let (Some(name), Some(text)) = (name, reply.text()) {
                 Some(ParseResult(name, text.to_owned()))

@@ -53,12 +53,12 @@ pub struct CachedEnvToggles {
 
 impl CachedEnvToggles {
     pub fn enabled(&self, key: &str) -> bool {
-        log::debug!("trying to take a read lock for key '{key}'...");
+        tracing::debug!(key = %key, "taking a read lock");
         let maybe_enabled = self.map.read().expect(CACHED_ENV_TOGGLES_POISONED_MSG).get(key).copied();
         // maybe_enabled is required to drop the read lock
         maybe_enabled.unwrap_or_else(|| {
             let enabled = Self::enabled_in_env(key);
-            log::debug!("trying to take a write lock for key '{key}'...");
+            tracing::debug!(key = %key, "taking a write lock");
             self.map.write().expect(CACHED_ENV_TOGGLES_POISONED_MSG)
                 .insert(key.to_owned(), enabled);
             enabled

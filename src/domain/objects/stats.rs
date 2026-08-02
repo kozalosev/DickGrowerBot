@@ -54,7 +54,7 @@ fn win_rate_percentage(battles_won: BattlesCount, battles_total: BattlesCount) -
         Ok(ratio) => Percentage::from(ratio),
         Err(e) => {
             // battles_won > battles_total can only mean corrupted stats; don't crash the handler
-            log::error!("invalid win rate ({battles_won}/{battles_total}): {e}");
+            tracing::error!(battles_won = %battles_won, battles_total = %battles_total, error = %e, "an invalid win rate");
             Percentage::literal(100)
         }
     }

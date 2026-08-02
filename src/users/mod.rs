@@ -342,7 +342,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     pub async fn popular_language(&self, uids: &[UserId]) -> Option<SupportedLanguage> {
         let UserService::Connected(client) = &self.users else { return None };
         let langs = client.get_user_languages(uids).await
-            .inspect_err(|status| log::warn!("couldn't batch-fetch user languages for the tally: {status}"))
+            .inspect_err(|status| tracing::warn!(error = %status, "couldn't batch-fetch the user languages for the tally"))
             .ok()?;
         most_popular_language(langs.values())
     }
@@ -374,7 +374,7 @@ impl<C: UserServiceClient> LanguageService<C> {
         metrics::CHAT_LANGUAGE.db_query();
         let lang = self.chats.get_chat_language(chat_id).await
             .unwrap_or_else(|e| {
-                log::warn!("couldn't fetch the language of {chat_id}: {e:#}");
+                tracing::warn!(error = format!("{e:#}"), "couldn't fetch the language of the chat");
                 None
             });
         self.chat_cache().insert(chat_id.clone(), CachedLang { lang, at: now });
@@ -402,17 +402,17 @@ pub async fn init_language_service(
 
 async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserServiceClientGrpc> {
     let Some(cfg) = config.user_service.as_ref() else {
-        log::warn!("user-service integration is disabled (GRPC_ADDR_USER_SERVICE is not set)");
+        tracing::warn!("the user-service integration is disabled (GRPC_ADDR_USER_SERVICE is not set)");
         return UserService::Disabled;
     };
     match UserServiceClientGrpc::connect(cfg.address.clone(), cfg.cache_time_secs, cfg.timeout_secs).await {
         Ok(client) => {
-            log::info!("connected to user-service at {}", cfg.address);
+            tracing::info!(address = %cfg.address, "connected to the user-service");
             spawn_cache_cleanup(client.clone(), cfg.cache_time_secs);
             UserService::Connected(client)
         }
         Err(e) => {
-            log::error!("couldn't connect to user-service: {e:#}");
+            tracing::error!(error = format!("{e:#}"), "couldn't connect to the user-service");
             UserService::Disabled
         }
     }
@@ -464,7 +464,7 @@ pub(crate) async fn resolve_language_for<C: UserServiceClient>(
                 }
             }
             Ok(None) => {}
-            Err(status) => log::warn!("couldn't fetch the language of {}: {status}", user.id),
+            Err(status) => tracing::warn!(uid = user.id.0, error = %status, "couldn't fetch the language of the user"),
         }
     }
     LanguageCode::from_maybe_user(user)

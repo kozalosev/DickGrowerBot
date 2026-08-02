@@ -143,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let join_result = match webhook_url {
         Some(url) => {
-            log::info!("Setting a webhook: {url}");
+            tracing::info!(url = %url, "setting a webhook");
 
             let (mut listener, stop_flag, bot_router) = axum_to_router(bot.clone(), Options::new(addr, url)).await?;
             let stop_token = listener.stop_token();
@@ -173,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             res
         }
         None => {
-            log::info!("The polling dispatcher is activating...");
+            tracing::info!("The polling dispatcher is activating...");
 
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
                 let listener = polling_default(bot.clone()).await;
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tokio::signal::ctrl_c()
                             .await
                             .expect("failed to install CTRL+C signal handler");
-                        log::info!("Shutdown of the metrics server")
+                        tracing::info!("Shutdown of the metrics server")
                     })
                     .await
             }));

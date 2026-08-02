@@ -25,10 +25,10 @@ pub enum LockCallbackServiceFacade {
 impl LockCallbackServiceFacade {
     pub fn from_config(features: FeatureToggles) -> Self {
         if features.pvp.callback_locks {
-            log::info!("LockCallbackService: in-memory");
+            tracing::info!(implementation = "in-memory", "the callback lock service is enabled");
             Self::InMemory(InMemoryLockCallbackService::default())
         } else {
-            log::info!("LockCallbackService: none");
+            tracing::info!(implementation = "none", "the callback lock service is disabled");
             Self::NoOp
         }
     }
@@ -62,7 +62,7 @@ impl LockCallbackServiceImplTrait for InMemoryLockCallbackService {
     {
         let key = callback_data.to_string();
         if self.inner_set.contains(&key, &self.inner_set.guard()) {
-            log::debug!("double attack on: {key}");
+            tracing::debug!(key = %key, "a double attack was blocked");
             None
         } else {
             self.inner_set.insert(key.clone(), &self.inner_set.guard());
@@ -82,14 +82,14 @@ impl InMemorySetGuard {
     pub fn new(set_ref: &Arc<HashSet<String>>, key: String) -> Self {
         let set_ref = Arc::clone(set_ref);
         let guard = Self { set_ref, key };
-        log::debug!("taking a lock guard: {guard}");
+        tracing::debug!(guard = %guard, "taking a lock guard");
         guard
     }
 }
 
 impl Drop for InMemorySetGuard {
     fn drop(&mut self) {
-        log::debug!("dropping the lock guard: {self}");
+        tracing::debug!(guard = %self, "dropping the lock guard");
         self.set_ref.remove(&self.key, &self.set_ref.guard());
     }
 }
