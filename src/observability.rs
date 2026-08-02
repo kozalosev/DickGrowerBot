@@ -165,10 +165,9 @@ mod tests {
     const VICTORIA_LOGS_PORT: u16 = 9428;
     const INGESTION_PATH: &str = "/insert/opentelemetry/v1/logs";
 
-    /// The record must carry the ids of the span it was written in, put there by the SDK — that is
-    /// the reason the bot has no formatter of its own for them anymore. Everything here is the real
-    /// pipeline: the tracing bridge, the OTLP/HTTP exporter, and the same log database the server
-    /// runs. The fields must survive as fields, not as text inside the message.
+    /// The record must carry the ids of the span it was written in, put there by the SDK. Everything
+    /// here is the real pipeline: the tracing bridge, the OTLP/HTTP exporter, and the same log database
+    /// the server runs. The fields must survive as fields, not as text inside the message.
     #[tokio::test]
     async fn an_exported_record_carries_the_trace_id_and_the_fields() {
         let (_container, base_url) = start_victoria_logs().await;
@@ -229,12 +228,8 @@ mod tests {
         let client = reqwest::Client::new();
         for _ in 0..50 {
             let body = client.get(format!("{base_url}/select/logsql/query?query=*"))
-                .send()
-                .await
-                .expect("couldn't query VictoriaLogs")
-                .text()
-                .await
-                .expect("couldn't read the answer of VictoriaLogs");
+                .send().await.expect("couldn't query VictoriaLogs")
+                .text().await.expect("couldn't read the answer of VictoriaLogs");
             if !body.trim().is_empty() {
                 return body;
             }

@@ -33,6 +33,23 @@ cargo sqlx prepare -- --tests
 docker-compose up
 ```
 
+### Adding a new environment variable
+
+**Reading the variable in `config/` is only the first of six places.** A variable that works locally
+and is silently missing in production has been shipped more than once, because the container passes
+through an explicit list. Every new variable goes into **all** of these:
+
+1. `src/config/` — where it is read;
+2. `.env.example` — commented out, with both the `localhost` and the in-Docker form when the value
+   is a host;
+3. `docker-compose.yml` — the `environment:` list of the `DickGrowerBot` service. **Missing it here
+   means the variable never reaches the container**, no matter what `.env` says;
+4. `Dockerfile` — the `ARG` list at the bottom. It changes nothing at runtime (`ARG` is build-time
+   only), but the list is kept complete as the inventory of what the image understands;
+5. `README.md` and this file — what it does and what happens when it is unset;
+6. the server-configs repo — `DickGrowerBot/docker-compose.yml` (the same `environment:` list) and
+   `DickGrowerBot/.env.sops` (the value itself, through `make secret-edit`).
+
 ### Required environment variables (`.env`)
 
 ```
