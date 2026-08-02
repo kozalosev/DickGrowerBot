@@ -52,6 +52,14 @@ tasks:
     cmds:
       - docker compose stop postgres user-service jaeger victoria-logs
 
+  test:clean:
+    desc: Remove the containers left behind by interrupted test runs.
+    cmds:
+      # The tests label every container they start (see repo::test::TEST_CONTAINER_LABEL); a run
+      # that is killed keeps its Postgres alive, holding a port and a few hundred megabytes. The
+      # label is what keeps this from touching the infra containers, which use the same images.
+      - docker ps -aq --filter label=dickgrowerbot.test=true | xargs -r docker rm -fv
+
   migrate:
     desc: Apply pending database migrations to the bot database (requires sqlx-cli).
     cmds:

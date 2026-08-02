@@ -125,9 +125,18 @@ fn build_tracer_provider() -> Result<SdkTracerProvider, Box<dyn Error>> {
 /// `VL-Stream-Fields` is read by VictoriaLogs and tells it which fields identify a log stream. Left
 /// alone, it takes every resource attribute, and the SDK puts the name of the event — which is the
 /// file and the line it was written at — among them. That would make a stream per log statement,
-/// and a new set of them after every edit of the source. Other backends ignore the header.
+/// and a new set of them after every edit of the source.
+///
+/// `VL-Msg-Field` names the fields to take the message from, the first non-empty one winning. Not
+/// every event has a message: sqlx logs a finished query as fields only, with the statement in
+/// `summary`, and such a record would be stored as "missing _msg field" otherwise.
+///
+/// Other backends ignore both headers.
 fn build_logger_provider(endpoint: String) -> Result<SdkLoggerProvider, Box<dyn Error>> {
-    let headers = HashMap::from([("VL-Stream-Fields".to_owned(), "service.name".to_owned())]);
+    let headers = HashMap::from([
+        ("VL-Stream-Fields".to_owned(), "service.name".to_owned()),
+        ("VL-Msg-Field".to_owned(), "_msg,summary".to_owned()),
+    ]);
     let otlp_exporter = LogExporter::builder()
         .with_http()
         .with_endpoint(endpoint)
@@ -155,7 +164,7 @@ fn resource() -> Resource {
 mod tests {
     use std::time::Duration;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
-    use testcontainers::{ContainerAsync, GenericImage};
+    use testcontainers::{ContainerAsync, GenericImage, ImageExt};
     use testcontainers::core::{IntoContainerPort, WaitFor};
     use testcontainers::runners::AsyncRunner;
     use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -184,6 +193,8 @@ mod tests {
             let span = tracing::info_span!("a_handler");
             let _entered = span.enter();
             tracing::info!(chat_id = -100500, "a message from the test");
+            // The shape sqlx logs a finished query in: fields only, no message.
+            tracing::info!(summary = "SELECT Dicks …", rows_returned = 1);
             span.context().span().span_context().trace_id().to_string()
         });
         logger_provider.force_flush()
@@ -194,6 +205,8 @@ mod tests {
         assert!(logs.contains(&trace_id), "the trace id {trace_id} is missing from:\n{logs}");
         assert!(logs.contains("-100500"), "the chat_id field is missing from:\n{logs}");
         assert!(logs.contains(r#""severity_text":"INFO""#), "the level is missing from:\n{logs}");
+        // A record without a message takes it from `summary`; see `build_logger_provider`.
+        assert!(logs.contains(r#""_msg":"SELECT Dicks …""#), "the fallback message is missing from:\n{logs}");
         // The service alone identifies the stream; see `build_logger_provider`.
         assert!(logs.contains(r#""_stream":"{service.name=\"dick-grower-bot\"}""#),
             "unexpected stream fields in:\n{logs}");
@@ -203,6 +216,7 @@ mod tests {
         let container = GenericImage::new("victoriametrics/victoria-logs", "latest")
             .with_exposed_port(VICTORIA_LOGS_PORT.tcp())
             .with_wait_for(WaitFor::millis(500))
+            .with_label(crate::repo::test::TEST_CONTAINER_LABEL, "true")
             .start()
             .await
             .expect("couldn't start VictoriaLogs");
