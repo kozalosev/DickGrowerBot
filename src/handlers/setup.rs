@@ -19,6 +19,7 @@
 //! the two ids up.
 
 use anyhow::anyhow;
+use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -80,6 +81,8 @@ pub fn added_to_legacy_group_filter(upd: ChatMemberUpdated, config: AppConfig) -
         && !upd.old_chat_member.is_present()
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = upd.chat.id.0, uid = upd.from.id.0))]
 pub async fn added_to_legacy_group_handler(bot: Bot, upd: ChatMemberUpdated) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&upd.from);
     send_setup_message(&bot, upd.chat.id, &lang_code).await?;
@@ -94,6 +97,8 @@ pub fn migration_filter(msg: Message) -> bool {
     msg.chat_migration().is_some()
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, lang_code = tracing::field::Empty))]
 pub async fn migration_handler(
     bot: Bot,
     msg: Message,
@@ -148,6 +153,8 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     SetupCallbackData::check_prefix(query)
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0))]
 pub async fn callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, .. } = deps;
     SetupCallbackData::parse(&query)?;

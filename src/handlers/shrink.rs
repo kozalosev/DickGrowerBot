@@ -1,5 +1,6 @@
 
 use anyhow::anyhow;
+use autometrics::autometrics;
 use chrono::NaiveDate;
 use derive_more::Display;
 use rust_i18n::t;
@@ -201,6 +202,8 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     ShrinkCallbackData::check_prefix(query)
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn callback_handler(
     bot: Bot,
     q: CallbackQuery,

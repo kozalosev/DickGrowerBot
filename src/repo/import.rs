@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::Context;
 use teloxide::types::ChatId;
 use crate::domain::objects::ExternalUser;
@@ -5,6 +6,8 @@ use crate::domain::primitives::{Length, UserId};
 use crate::repository;
 
 repository!(Import,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = chat_id.0))]
     pub async fn get_imported_users(&self, chat_id: ChatId) -> anyhow::Result<Vec<ExternalUser>> {
         sqlx::query_as!(ExternalUser,
                 r#"SELECT uid AS "uid: UserId", original_length AS "length: Length" FROM Imports WHERE chat_id = $1"#,
@@ -14,6 +17,8 @@ repository!(Import,
             .context(format!("couldn't get imported users of {chat_id}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = chat_id.0))]
     pub async fn import(&self, chat_id: ChatId, users: &[ExternalUser]) -> anyhow::Result<()> {
         let (uids, lengths): (Vec<UserId>, Vec<Length>) = users.iter()
             .map(|user| (user.uid, user.length))

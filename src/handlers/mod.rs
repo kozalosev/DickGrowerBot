@@ -51,6 +51,18 @@ pub struct HandlerDeps {
     pub lang_resolver: LanguageResolver,
 }
 
+/// A message sender's Telegram id for `#[tracing::instrument]` span fields
+/// (`None` for messages without a sender, e.g. anonymous/channel posts).
+pub(crate) fn msg_user_id(msg: &Message) -> Option<u64> {
+    msg.from.as_ref().map(|u| u.id.0)
+}
+
+/// The chat id a callback query originated from, when its message is still accessible —
+/// for `#[tracing::instrument]` span fields.
+pub(crate) fn cq_chat_id(query: &CallbackQuery) -> Option<i64> {
+    query.message.as_ref().map(|m| m.chat().id.0)
+}
+
 /// A reply text tagged with its self-destruction [`MessageGroup`](MessageGroup), so the caller
 /// knows whether (and how soon) to schedule it for deletion — for commands whose reply may be
 /// either a permanent event or an ephemeral status.
@@ -212,6 +224,7 @@ pub(crate) async fn answer_callback_feature_disabled(
 }
 
 pub mod checks {
+    use autometrics::autometrics;
     use std::ops::Not;
     use rust_i18n::t;
     use teloxide::Bot;
@@ -235,6 +248,8 @@ pub mod checks {
         !is_group_chat(msg)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     pub async fn handle_not_group_chat(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
         let HandlerDeps { lang_resolver, .. } = deps;
         let lang_code = lang_resolver.execute().await;
@@ -256,6 +271,8 @@ pub mod checks {
         teloxide::dptree::filter(is_group_account).endpoint(handle_group_account)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     async fn handle_group_account(
         bot: Bot,
         msg: Message,
@@ -274,6 +291,9 @@ pub mod checks {
     ///
     /// Only relevant when `chats_merging` is on: with it off, inline and command invocations are
     /// deliberately kept in separate rows, so there is nothing to pair up and nothing to gate.
+    // No `#[autometrics]`: this returns a plain `bool` and deliberately swallows a DB error into
+    // `false` (fail-open), so an error counter here would read zero exactly when the gate breaks.
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0))]
     async fn needs_setup(msg: Message, deps: HandlerDeps) -> bool {
         let HandlerDeps { repos, config, .. } = deps;
         if !config.features.chats_merging || !msg.chat.is_group() {
@@ -296,6 +316,8 @@ pub mod checks {
         teloxide::dptree::filter_async(needs_setup).endpoint(handle_needs_setup)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg)))]
     async fn handle_needs_setup(bot: Bot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         super::setup::send_setup_message(&bot, msg.chat.id, &lang_code).await?;
@@ -319,6 +341,7 @@ pub mod checks {
     }
 
     pub mod inline {
+        use autometrics::autometrics;
         use teloxide::Bot;
         use teloxide::payloads::AnswerInlineQuerySetters;
         use teloxide::prelude::{InlineQuery, Requester};
@@ -335,6 +358,8 @@ pub mod checks {
             !is_group_chat(query)
         }
 
+        #[autometrics]
+        #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
         pub async fn handle_not_group_chat(bot: Bot, query: InlineQuery) -> HandlerResult {
             bot.answer_inline_query(query.id, vec![])
                 .is_personal(true)

@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::fmt::Debug;
 use anyhow::{anyhow, Context};
 use sqlx::{FromRow, Postgres};
@@ -51,6 +52,8 @@ repository!(Promo,
         Ok(())
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), code = %code))]
     pub async fn activate(&self, user_id: UserId, code: &str) -> Result<ActivationResult, ActivationError> {
         let mut tx = self.pool.begin().await?;
 
@@ -82,6 +85,8 @@ repository!(Promo,
         Ok(ActivationResult{ chats_affected, bonus_length: bonus })
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(code = %code))]
     async fn find_code_length_and_decr_capacity(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         code: &str,
@@ -99,6 +104,8 @@ repository!(Promo,
             .context(format!("couldn't find a promo code length of {code}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), bonus = bonus.value()))]
     async fn grow_dicks(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         user_id: UserId,
@@ -113,6 +120,8 @@ repository!(Promo,
         Ok(AffectedRows::new(rows_affected))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), code = %code, affected_chats = affected_chats.value()))]
     async fn add_activation(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         uid: UserId,

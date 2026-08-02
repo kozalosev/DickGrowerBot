@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::fmt::Formatter;
 use std::str::FromStr;
 use anyhow::{bail, Context};
@@ -79,6 +80,8 @@ impl TryInto<ChatIdPartiality> for Chat {
 }
 
 repository!(Chats, with_feature_toggles,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_chat(&self, chat_id: ChatIdKind) -> anyhow::Result<Option<Chat>> {
         sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance, is_unreachable FROM Chats
                 WHERE chat_id = $1::bigint OR chat_instance = $1::text",
@@ -95,6 +98,8 @@ repository!(Chats, with_feature_toggles,
     /// Only meaningful for legacy (basic) groups: their `inline_message_id` doesn't encode the
     /// chat, so the pairing can't be recovered later and has to be captured up front by a tap
     /// on an in-chat button (see the `setup` callback).
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn is_anchored(&self, chat_id: &TelegramChatId) -> anyhow::Result<bool> {
         sqlx::query_scalar!(r#"SELECT EXISTS(SELECT 1 FROM Chats
                 WHERE chat_id = $1 AND chat_instance IS NOT NULL) AS "exists!""#,
@@ -110,6 +115,8 @@ repository!(Chats, with_feature_toggles,
     /// Keyed by the Telegram id: that's what the broadcast holds, and a chat known only by its
     /// `chat_instance` is never a broadcast target anyway. Updating no row is fine — the chat may
     /// have been merged or migrated away between the shrink and the send.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn mark_unreachable(&self, chat_id: &TelegramChatId) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Chats SET is_unreachable = true WHERE chat_id = $1", chat_id.value())
             .execute(&self.pool)
@@ -118,6 +125,8 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't mark the chat with id = {chat_id} as unreachable"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<InternalChatId, SearchError<ChatIdKind>> {
         self.get_chat(chat_id.clone()).await
             .map_err(SearchError::Internal)?
@@ -126,6 +135,8 @@ repository!(Chats, with_feature_toggles,
             .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_chat_language(&self, chat_id: &ChatIdKind) -> anyhow::Result<Option<SupportedLanguage>> {
         sqlx::query_scalar!(
                 "SELECT settings->>'language' FROM Chats
@@ -142,6 +153,8 @@ repository!(Chats, with_feature_toggles,
             .transpose()
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, lang = ?lang))]
     pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
         let internal_id = self.upsert_chat(chat_id).await?;
         match lang {
@@ -160,6 +173,8 @@ repository!(Chats, with_feature_toggles,
         Ok(())
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<InternalChatId> {
         let (id, instance) = match chat_id {
             ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.value()), Some(full.instance.to_string())),
@@ -194,6 +209,8 @@ repository!(Chats, with_feature_toggles,
 ,
     /// Undoes [`Self::mark_unreachable`]. Runs inside the caller's transaction, so it can't clear
     /// the flag for a chat whose upsert then rolls back.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id))]
     async fn mark_reachable(tx: &mut Transaction<'_, Postgres>, internal_id: i64) -> anyhow::Result<()> {
         log::info!("the chat with id = {internal_id} is reachable again");
         sqlx::query!("UPDATE Chats SET is_unreachable = false WHERE id = $1", internal_id)
@@ -215,6 +232,8 @@ repository!(Chats, with_feature_toggles,
     /// the committed version and finds the chat no longer known by its old id. That looks exactly
     /// like a chat we never knew, which is why the outcome is decided by looking under the new id
     /// as well — the loser of the race has to report success, not loss.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(old = %old, new = %new))]
     pub async fn migrate_chat_id(
         &self,
         old: &TelegramChatId,
@@ -292,6 +311,8 @@ repository!(Chats, with_feature_toggles,
     /// `old_chat_instance` is whatever the row held, which is `NULL` for a chat that was never
     /// anchored. A chat migrates once, so an existing record means the journal is being written
     /// twice for one event and the first one stands.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id, old = %old, new = %new))]
     async fn journal_migration(
         tx: &mut Transaction<'_, Postgres>,
         internal_id: i64,
@@ -310,6 +331,8 @@ repository!(Chats, with_feature_toggles,
         Ok(())
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = ?chat_id, chat_instance = ?chat_instance))]
     async fn create_chat(
         tx: &mut Transaction<'_, Postgres>,
         chat_id: Option<i64>,
@@ -323,6 +346,8 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't create a chat with chat_id = {chat_id:?} or chat_instance = {chat_instance:?}"))
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id, chat_id = ?chat_id, chat_instance = ?chat_instance))]
     async fn update_chat(
         tx: &mut Transaction<'_, Postgres>,
         internal_id: i64,
@@ -346,6 +371,8 @@ repository!(Chats, with_feature_toggles,
     /// silently throws the statistics away.
     /// Every step reports how many rows it carried over, purely for the log line. They all write
     /// through the same transaction, so they run one after another rather than concurrently.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_dependent_rows(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -367,6 +394,8 @@ repository!(Chats, with_feature_toggles,
     }
 ,
     /// Nothing constrains `(uid, chat_id)` here, so the loans can just be repointed.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_loans(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -382,6 +411,8 @@ repository!(Chats, with_feature_toggles,
 ,
     /// `(uid, chat_id)` is a primary key, so a user present in both chats needs their counters
     /// folded together instead of one row simply landing on top of the other.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_battle_stats(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -411,6 +442,8 @@ repository!(Chats, with_feature_toggles,
 ,
     /// Keyed by `(chat_id, language)`; the shown counters add up when both chats saw the same
     /// announcement.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_announcements(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -435,6 +468,8 @@ repository!(Chats, with_feature_toggles,
 ,
     /// Keyed by `(chat_id, uid)`; an import already done in the main chat wins, so that a merge
     /// can't be used to import a second time.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_imports(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -463,6 +498,8 @@ repository!(Chats, with_feature_toggles,
     /// past win with today's, so it has to be muted for the move. The ACCESS EXCLUSIVE lock that
     /// takes lasts until the transaction ends — acceptable for something that happens once in a
     /// chat's lifetime. An early return rolls the muting back along with everything else.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_dicks_of_the_day(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -497,6 +534,8 @@ repository!(Chats, with_feature_toggles,
     /// migration is only ever journaled for a row known by its `chat_id` — but the journal points
     /// at `Chats(id)` without an `ON DELETE`, so it has to be carried over rather than assumed
     /// absent.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_chat_migrations(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -525,6 +564,8 @@ repository!(Chats, with_feature_toggles,
     /// The table forbids updates outright, and `ON CONFLICT DO UPDATE` fires `BEFORE UPDATE`
     /// triggers, so summing is only possible with the trigger muted — see
     /// [`Self::move_dicks_of_the_day`] for what that costs.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_shrinks(
         tx: &mut Transaction<'_, Postgres>,
         main_id: InternalChatId,
@@ -555,6 +596,8 @@ repository!(Chats, with_feature_toggles,
         Ok(moved)
     }
 ,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_a = chats[0].internal_id, chat_b = chats[1].internal_id))]
     async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<i64> {
         let state = merge_chat_objects(&chats)?;
         // Moving the dicks over rather than summing into the surviving rows: a user who only ever

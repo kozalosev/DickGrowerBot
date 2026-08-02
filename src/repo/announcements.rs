@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::sync::{Arc, RwLock};
 use anyhow::Context;
 use sqlx::{Pool, Postgres};
@@ -25,6 +26,7 @@ impl Announcements {
     /// the reason and returns an empty config.
     // Called only from the SIGHUP handler, which Windows doesn't have.
     #[cfg_attr(not(unix), allow(dead_code))]
+    #[tracing::instrument(skip_all, fields(path = %path))]
     pub fn reload(&self, path: &str) {
         let fresh = config::AnnouncementsConfig::load(path);
         let mut storage = match self.announcements.write() {
@@ -39,6 +41,8 @@ impl Announcements {
         log::info!("reloaded the announcements from {path}: {count} languages");
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, lang_code = %lang_code))]
     pub async fn get_new(&self, chat_id: &ChatIdKind, lang_code: &LanguageCode) -> anyhow::Result<Option<String>> {
         let (announcement, max_shows) = {
             let config = match self.announcements.read() {
@@ -81,6 +85,8 @@ impl Announcements {
         Ok(res)
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_kind, lang_code = %lang_code))]
     async fn get(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode) -> anyhow::Result<Option<Announcement>> {
         sqlx::query_as!(Announcement,
             r#"SELECT chat_id AS "chat_id: InternalChatId", hash, times_shown AS "times_shown: Counter" FROM Announcements
@@ -92,6 +98,8 @@ impl Announcements {
             .context(format!("couldn't get the announcement for {chat_id_kind}, {lang_code:?}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id_kind, lang_code = %lang_code))]
     async fn create(&self, chat_id_kind: &ChatIdKind, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
         sqlx::query!(
             "INSERT INTO Announcements (chat_id, language, hash, times_shown) VALUES (
@@ -105,6 +113,8 @@ impl Announcements {
             .context(format!("couldn't create the announcement for {chat_id_kind}, {lang_code:?}, {hash:?}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, lang_code = %lang_code))]
     async fn increment_times_shown(&self, chat_id: InternalChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET times_shown = times_shown + 1 WHERE chat_id = $1 AND language::text = $2",
                 chat_id as InternalChatId, lang_code as &LanguageCode)
@@ -115,6 +125,8 @@ impl Announcements {
             .context(format!("couldn't increment shown times for {chat_id:?}, {lang_code:?}"))
     }
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, lang_code = %lang_code))]
     async fn update(&self, chat_id: InternalChatId, lang_code: &LanguageCode, hash: &TextHash) -> anyhow::Result<()> {
         sqlx::query!("UPDATE Announcements SET hash = $3, times_shown = 1 WHERE chat_id = $1 AND language = $2",
                 chat_id as InternalChatId, lang_code.to_supported_language() as SupportedLanguage, hash as &TextHash)

@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use anyhow::{anyhow, bail};
@@ -112,6 +113,8 @@ impl Display for InvalidLines {
     }
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn import_cmd_handler(
     bot: Bot,
     msg: Message,
@@ -193,6 +196,8 @@ pub async fn import_cmd_handler(
     Ok(())
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(msg)))]
 async fn check_and_parse_message(
     bot: &Bot,
     msg: &Message,
@@ -248,6 +253,8 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
         })
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = chat_id.0))]
 async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseResult) -> anyhow::Result<ImportResult> {
     let chat_id_kind = chat_id.into();
     let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)

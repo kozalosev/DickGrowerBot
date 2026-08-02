@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use anyhow::Context;
 use chrono::NaiveDate;
 use crate::domain::primitives::{DaysCount, Length, Limit, Offset, Ratio, UserId, Username};
@@ -45,6 +46,8 @@ repository!(Shrinks,
     /// the full `ratio` once a dick has been overdue for `ramp_up_days` days (and staying there
     /// afterwards) — so neglect is punished gradually rather than with one abrupt cut the moment
     /// the grace period lapses. `ramp_up_days <= 1` reproduces the old instant-full-ratio behavior.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(ratio = %ratio, grace_days = %grace_days, ramp_up_days = %ramp_up_days))]
     pub async fn perform_daily_shrink(
         &self,
         ratio: Ratio,
@@ -83,6 +86,8 @@ repository!(Shrinks,
             .context("couldn't perform the daily shrink")
     },
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, date = %date, offset = %offset, limit = %limit))]
     pub async fn get_shrinks_for_date(
         &self,
         chat_id: &ChatIdKind,
@@ -107,6 +112,8 @@ repository!(Shrinks,
             .context(format!("couldn't fetch shrinks of {chat_id} for {date}"))
     },
 
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_latest_shrink_date(
         &self,
         chat_id: &ChatIdKind,
@@ -124,6 +131,8 @@ repository!(Shrinks,
 
     /// Nearest older and newer dates with logged shrinks. Two scalar lookups rather than a date
     /// list, so day-navigation stays constant-work however deep the history goes.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, date = %date))]
     pub async fn get_adjacent_shrink_dates(
         &self,
         chat_id: &ChatIdKind,

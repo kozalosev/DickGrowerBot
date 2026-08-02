@@ -1,3 +1,4 @@
+use autometrics::autometrics;
 use std::fmt;
 use anyhow::anyhow;
 use rust_i18n::t;
@@ -31,6 +32,8 @@ impl LanguageCommands {
     }
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn cmd_handler(
     bot: Bot,
     msg: Message,
@@ -54,6 +57,8 @@ pub async fn cmd_handler(
     }
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = from_id.0, lang_code = %lang_code))]
 async fn handle_personal_language(
     bot: Bot,
     msg: Message,
@@ -80,6 +85,8 @@ async fn handle_personal_language(
     Ok(())
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = from_id.0, lang_code = %lang_code))]
 async fn handle_chat_language(
     bot: Bot,
     msg: Message,
@@ -107,6 +114,8 @@ async fn handle_chat_language(
     Ok(())
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = user_id.0))]
 async fn is_chat_admin(bot: &Bot, msg: &Message, user_id: UserId) -> anyhow::Result<bool> {
     let admins = bot.get_chat_administrators(msg.chat.id).await?;
     Ok(admins.into_iter().any(|member| member.user.id == user_id))
@@ -117,6 +126,8 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     LanguageCallbackData::check_prefix(query)
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn callback_handler(
     bot: Bot,
     query: CallbackQuery,
@@ -155,6 +166,8 @@ pub async fn callback_handler(
     Ok(())
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(uid = uid.0, lang = %lang))]
 async fn apply_user_language<C: UserServiceClient>(
     ls: &LanguageService<C>,
     uid: UserId,
@@ -173,6 +186,8 @@ async fn apply_user_language<C: UserServiceClient>(
     Ok(text)
 }
 
+#[autometrics]
+#[tracing::instrument(skip_all, fields(chat_id = %chat_id, lang = ?selection))]
 async fn apply_chat_language<C: UserServiceClient>(
     ls: &LanguageService<C>,
     chat_id: &ChatIdPartiality,

@@ -428,13 +428,13 @@ impl SplitChat {
     }
 }
 
+/// `CASCADE` so the cleanup doesn't have to enumerate every table that references `Chats` — the
+/// list keeps growing (loans, battle stats, announcements, shrinks, migrations), and truncating
+/// `Chats` without them fails on the foreign keys anyway.
 async fn clear_dicks_and_chats(db: &Pool<Postgres>) {
-    sqlx::query!("DELETE FROM Dicks")
+    sqlx::query!("TRUNCATE Dicks, Chats CASCADE")
         .execute(db)
-        .await.expect("couldn't delete dicks");
-    sqlx::query!("DELETE FROM Chats")
-        .execute(db)
-        .await.expect("couldn't delete chats");
+        .await.expect("couldn't clear dicks and chats");
 }
 
 async fn old_chat_id_new_instance(chats: &repo::Chats, full: ChatIdFull) {
