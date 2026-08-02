@@ -136,6 +136,28 @@ services:
       - tracing-network
     logging:
       driver: local
+  # VictoriaLogs — receives the bot's log records over OTLP/HTTP and serves the UI to query them
+  # (the same database the server runs, so local behaviour matches production). It sits behind the
+  # same `tracing` profile as Jaeger, so one switch starts the whole observability stack. Records
+  # are exported only when OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is set (see .env).
+  victoria-logs:
+    image: victoriametrics/victoria-logs:latest
+    container_name: dickgrowerbot-victoria-logs
+    profiles: ["tracing"]
+    restart: unless-stopped
+    command:
+      - '--storageDataPath=/storage'
+      - '--httpListenAddr=:9428'
+    volumes:
+      - victoria-logs-data:/storage
+    expose:
+      - 9428   # OTLP/HTTP ingestion and the UI
+    networks:
+      - tracing-network
+    logging:
+      driver: local
+volumes:
+  victoria-logs-data:
 networks:
   postgres-network:
     driver: bridge

@@ -66,7 +66,9 @@ pub fn init_tracing() -> Result<Telemetry, Box<dyn Error>> {
         .with_tracer(tracer_provider.tracer(SERVICE_NAME))
         .with_filter(otel_filter);
 
-    let logger_provider = build_logger_provider()?;
+    let logger_provider = endpoint(LOGS_ENDPOINT_VAR)
+        .map(build_logger_provider)
+        .transpose()?;
     let logs_layer = logger_provider.as_ref().map(|provider| {
         let filter = EnvFilter::from_default_env()
             .and(filter_fn(|metadata| !NEVER_EXPORTED_TARGETS.iter()
@@ -118,19 +120,15 @@ fn build_tracer_provider() -> Result<SdkTracerProvider, Box<dyn Error>> {
 
 /// The endpoint is always passed explicitly: left to itself, the exporter would fall back to
 /// `OTEL_EXPORTER_OTLP_ENDPOINT` and send the log records to the tracing backend.
-fn build_logger_provider() -> Result<Option<SdkLoggerProvider>, Box<dyn Error>> {
-    let Some(endpoint) = endpoint(LOGS_ENDPOINT_VAR) else {
-        return Ok(None);
-    };
-
+fn build_logger_provider(endpoint: String) -> Result<SdkLoggerProvider, Box<dyn Error>> {
     let otlp_exporter = LogExporter::builder()
         .with_http()
         .with_endpoint(endpoint)
         .build()?;
-    Ok(Some(SdkLoggerProvider::builder()
+    Ok(SdkLoggerProvider::builder()
         .with_batch_exporter(otlp_exporter)
         .with_resource(resource())
-        .build()))
+        .build())
 }
 
 fn endpoint(variable: &str) -> Option<String> {
@@ -143,4 +141,93 @@ fn resource() -> Resource {
     Resource::builder()
         .with_service_name(SERVICE_NAME.to_owned())
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use opentelemetry::trace::{TraceContextExt, TracerProvider};
+    use testcontainers::{ContainerAsync, GenericImage};
+    use testcontainers::core::{IntoContainerPort, WaitFor};
+    use testcontainers::runners::AsyncRunner;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    use tracing_subscriber::layer::SubscriberExt;
+    use super::*;
+
+    const VICTORIA_LOGS_PORT: u16 = 9428;
+    const INGESTION_PATH: &str = "/insert/opentelemetry/v1/logs";
+
+    /// The record must carry the ids of the span it was written in, put there by the SDK — that is
+    /// the reason the bot has no formatter of its own for them anymore. Everything here is the real
+    /// pipeline: the tracing bridge, the OTLP/HTTP exporter, and the same log database the server
+    /// runs. The fields must survive as fields, not as text inside the message.
+    #[tokio::test]
+    async fn an_exported_record_carries_the_trace_id_and_the_fields() {
+        let (_container, base_url) = start_victoria_logs().await;
+        let logger_provider = build_logger_provider(format!("{base_url}{INGESTION_PATH}"))
+            .expect("couldn't build the logger provider");
+
+        // No exporter: the spans are needed for their ids only, not for what they are.
+        let tracer_provider = SdkTracerProvider::builder().build();
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")))
+            .with(OpenTelemetryTracingBridge::new(&logger_provider));
+
+        let trace_id = tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("a_handler");
+            let _entered = span.enter();
+            tracing::info!(chat_id = -100500, "a message from the test");
+            span.context().span().span_context().trace_id().to_string()
+        });
+        logger_provider.force_flush()
+            .expect("couldn't flush the log records");
+
+        let logs = query_logs(&base_url).await;
+        assert!(logs.contains("a message from the test"), "the record is missing from:\n{logs}");
+        assert!(logs.contains(&trace_id), "the trace id {trace_id} is missing from:\n{logs}");
+        assert!(logs.contains("-100500"), "the chat_id field is missing from:\n{logs}");
+    }
+
+    async fn start_victoria_logs() -> (ContainerAsync<GenericImage>, String) {
+        let container = GenericImage::new("victoriametrics/victoria-logs", "latest")
+            .with_exposed_port(VICTORIA_LOGS_PORT.tcp())
+            .with_wait_for(WaitFor::millis(500))
+            .start()
+            .await
+            .expect("couldn't start VictoriaLogs");
+        let port = container.get_host_port_ipv4(VICTORIA_LOGS_PORT)
+            .await
+            .expect("couldn't fetch the port of VictoriaLogs");
+        let base_url = format!("http://localhost:{port}");
+
+        // The container is up before the HTTP server inside it is.
+        let client = reqwest::Client::new();
+        for _ in 0..50 {
+            let response = client.get(format!("{base_url}/health")).send().await;
+            if response.is_ok_and(|r| r.status().is_success()) {
+                return (container, base_url);
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        panic!("VictoriaLogs didn't become healthy in time");
+    }
+
+    /// Everything stored, as JSON lines. Ingestion is asynchronous, hence the retries.
+    async fn query_logs(base_url: &str) -> String {
+        let client = reqwest::Client::new();
+        for _ in 0..50 {
+            let body = client.get(format!("{base_url}/select/logsql/query?query=*"))
+                .send()
+                .await
+                .expect("couldn't query VictoriaLogs")
+                .text()
+                .await
+                .expect("couldn't read the answer of VictoriaLogs");
+            if !body.trim().is_empty() {
+                return body;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        panic!("nothing was stored in VictoriaLogs in time");
+    }
 }
