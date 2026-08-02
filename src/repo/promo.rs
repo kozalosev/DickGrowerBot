@@ -105,7 +105,7 @@ repository!(Promo,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = user_id.value(), bonus = bonus))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), bonus = bonus.value()))]
     async fn grow_dicks(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         user_id: UserId,
@@ -121,7 +121,7 @@ repository!(Promo,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = uid.value(), code = %code, affected_chats = affected_chats))]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), code = %code, affected_chats = affected_chats.value()))]
     async fn add_activation(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         uid: UserId,
