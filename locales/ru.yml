@@ -111,8 +111,12 @@ commands:
     request: "Введи промокод:"
     success:
       template: "Промокод успешно активирован! %{ending}"
-      singular: "Твой писюн вырос на <b>%{growth}</b> см в одном чате."
-      plural: "Твой писюн вырос на <b>%{growth}</b> см в <b>%{affected_chats}</b> %{word_chats}."
+      grown:
+        singular: "Твой писюн вырос на <b>%{growth}</b> см в одном чате."
+        plural: "Твой писюн вырос на <b>%{growth}</b> см в <b>%{affected_chats}</b> %{word_chats}."
+      shrunk:
+        singular: "Твой писюн скукожился на <b>%{growth}</b> см в одном чате."
+        plural: "Твой писюн скукожился на <b>%{growth}</b> см в <b>%{affected_chats}</b> %{word_chats}."
     errors:
       no_activations_left: "Мне очень жаль, но кажется, что либо этого промокода никогда не существовало, либо он истёк, либо все активации уже были использованы 😞"
       already_activated: "Кажется, ты уже использовал данный промокод ранее 🤨"
