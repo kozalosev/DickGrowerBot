@@ -32,7 +32,7 @@ pub fn spawn_daily_shrink(
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and
         // aborts on Stale_Dick_Shrinks' primary key, rolling the length change back with it.
         if get_env_value_or_default("DAILY_SHRINK_RUN_ON_STARTUP", false) {
-            tracing::warn!("DAILY_SHRINK_RUN_ON_STARTUP is set — running the daily shrink right now");
+            tracing::warn!(variable = "DAILY_SHRINK_RUN_ON_STARTUP", "the variable is set, running the daily shrink right now");
             run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())
                 .await.unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
         }

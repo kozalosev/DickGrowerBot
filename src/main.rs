@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     dotenvy::dotenv()?;
 
-    let tracer_provider = observability::init_tracing()?;
+    let telemetry = observability::init_tracing()?;
     autometrics::prometheus_exporter::init();
 
     let app_config = AppConfig::from_env();
@@ -173,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             res
         }
         None => {
-            tracing::info!("The polling dispatcher is activating...");
+            tracing::info!("the polling dispatcher is activating");
 
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
                 let listener = polling_default(bot.clone()).await;
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tokio::signal::ctrl_c()
                             .await
                             .expect("failed to install CTRL+C signal handler");
-                        tracing::info!("Shutdown of the metrics server")
+                        tracing::info!("shutting the metrics server down")
                     })
                     .await
             }));
@@ -205,6 +205,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    tracer_provider.shutdown()?;
+    telemetry.shutdown()?;
     join_result?.map_err(Into::into)
 }

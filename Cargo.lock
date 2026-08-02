@@ -819,6 +819,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "opentelemetry 0.32.0",
+ "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk 0.32.1",
  "prometheus",
@@ -2195,6 +2196,18 @@ dependencies = [
  "pin-project-lite",
  "thiserror 2.0.19",
  "tracing",
+]
+
+[[package]]
+name = "opentelemetry-appender-tracing"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c0080f0dc1d7c786f467cd85a4e395fcab11ee852004f39a29a18ab7c25d837"
+dependencies = [
+ "opentelemetry 0.32.0",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]
