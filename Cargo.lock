@@ -810,6 +810,7 @@ dependencies = [
  "rust-i18n",
  "serde",
  "serde-saphyr 1.0.0-rc.1",
+ "serde_json",
  "sha2 0.11.0",
  "sqlx",
  "strum",

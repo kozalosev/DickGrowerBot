@@ -6,6 +6,7 @@ use crate::config::{get_env_value_or_default, AppConfig};
 use crate::handlers::utils::date::duration_till_next_day;
 use crate::metrics;
 use crate::repo::Repositories;
+use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
 use shrink::run_daily_shrink;
 
@@ -16,6 +17,7 @@ pub fn spawn_daily_shrink(
     bot: Bot,
     repos: Repositories,
     language_service: LanguageService,
+    topics: TopicPolicy,
     config: AppConfig,
 ) {
     if !config.daily_shrink.enabled() {
@@ -28,13 +30,19 @@ pub fn spawn_daily_shrink(
         // plain `Bot`. The adapter's queue lives in memory only: a restart mid-broadcast drops the
         // notifications still pending, and there's no resume.
         let bot = Throttle::new_spawn(bot, Limits::default());
+        // A failed run is logged and forgotten: the next midnight tries again, and one bad day
+        // must not stop the scheduler for good.
+        let run = || async {
+            run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), topics.clone(), config.clone())
+                .await
+                .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
+        };
         // Puts the feature into effect at once instead of hours later. Re-running the same day is
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and
         // aborts on Stale_Dick_Shrinks' primary key, rolling the length change back with it.
         if get_env_value_or_default("DAILY_SHRINK_RUN_ON_STARTUP", false) {
             tracing::warn!(variable = "DAILY_SHRINK_RUN_ON_STARTUP", "the variable is set, running the daily shrink right now");
-            run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())
-                .await.unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
+            run().await;
         }
         loop {
             let Some(till_next_day) = duration_till_next_day().and_then(|d| d.to_std().ok()) else {
@@ -43,8 +51,7 @@ pub fn spawn_daily_shrink(
             };
             tokio::time::sleep(till_next_day).await;
 
-            run_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), config.clone())
-                .await.unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
+            run().await;
         }
     }));
 }

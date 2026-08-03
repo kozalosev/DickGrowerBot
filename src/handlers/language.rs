@@ -1,17 +1,16 @@
 use autometrics::autometrics;
-use std::fmt;
 use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::{CallbackQuery, Message, Requester, UserId};
+use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdPartiality, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::handlers::{reply_html, HandlerDeps, HandlerResult};
-use crate::handlers::utils::callbacks;
+use crate::handlers::utils::{callbacks, is_chat_admin};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::metrics;
 use crate::users::{LanguageService, UserServiceClient};
@@ -112,13 +111,6 @@ async fn handle_chat_language(
         reply_html!(bot, msg, t!("commands.language.errors.unsupported", locale = lang_code));
     }
     Ok(())
-}
-
-#[autometrics]
-#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = user_id.0))]
-async fn is_chat_admin(bot: &Bot, msg: &Message, user_id: UserId) -> anyhow::Result<bool> {
-    let admins = bot.get_chat_administrators(msg.chat.id).await?;
-    Ok(admins.into_iter().any(|member| member.user.id == user_id))
 }
 
 #[inline]
@@ -227,17 +219,21 @@ fn parse_language_arg(arg: &str) -> Option<SupportedLanguage> {
         .or_else(|| LanguageCode::new(arg.to_owned()).as_supported_language())
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, derive_more::Display)]
 #[cfg_attr(test, derive(Debug))]
 enum LanguageScope {
+    #[display("u")]
     User,
+    #[display("c")]
     Chat,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, derive_more::Display)]
 enum LanguageSelection {
     /// Revert to per-user resolution (chat scope only).
+    #[display("auto")]
     Auto,
+    #[display("{_0}")]
     Set(SupportedLanguage),
 }
 
@@ -253,24 +249,12 @@ impl LanguageSelection {
 /// Callback payload of the language picker. The wire format is `lang:<u|c>:<uid>:<code|auto>`:
 /// `scope` distinguishes the personal (`u`) from the chat-wide (`c`) setting, `uid` is the invoker
 /// (checked on press), and the selection is either a language code or `auto` (chat reset).
+#[derive(derive_more::Display)]
+#[display("{scope}:{uid}:{selection}")]
 pub struct LanguageCallbackData {
     scope: LanguageScope,
     uid: UserId,
     selection: LanguageSelection,
-}
-
-impl fmt::Display for LanguageCallbackData {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let scope = match self.scope {
-            LanguageScope::User => "u",
-            LanguageScope::Chat => "c",
-        };
-        let selection = match self.selection {
-            LanguageSelection::Auto => "auto".to_owned(),
-            LanguageSelection::Set(lang) => lang.to_string(),
-        };
-        write!(f, "{scope}:{}:{selection}", self.uid)
-    }
 }
 
 impl CallbackDataWithPrefix for LanguageCallbackData {

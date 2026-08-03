@@ -15,6 +15,7 @@ pub mod perks;
 pub mod loan;
 pub mod stats;
 pub mod setup;
+pub mod topics;
 
 use derive_more::Constructor;
 use rust_i18n::t;
@@ -36,6 +37,7 @@ pub use inline::*;
 pub use promo::*;
 pub use language::LanguageCommands;
 pub use loan::LoanCommands;
+pub use topics::TopicsCommands;
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
@@ -246,15 +248,19 @@ pub mod checks {
     use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
     use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
     use teloxide::requests::Requester;
-    use teloxide::types::{InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, Update, UpdateKind};
+    use teloxide::types::{CallbackQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Me, Message, Update, UpdateKind};
     use teloxide::utils::command::BotCommands;
     use crate::bans::BanList;
+    use crate::commands::COMMAND_NAMES;
     use crate::config::MessageGroup;
     use crate::domain::primitives::{LanguageCode, UserId};
-    use crate::domain::primitives::chat::TelegramChatId;
+    use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
     use crate::handlers::HandlerDeps;
+    use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
+    use crate::handlers::utils::is_forum;
     use crate::metrics;
-    use super::{BAN_DATE_FORMAT, HandlerResult, reply_html};
+    use crate::topics::TopicPolicy;
+    use super::{reply_html, topics, HandlerResult, BAN_DATE_FORMAT};
 
     pub fn is_group_chat(msg: Message) -> bool {
         if msg.chat.is_private() || msg.chat.is_channel() {
@@ -343,6 +349,99 @@ pub mod checks {
         Ok(())
     }
     
+    /// Whether this message is a command addressed to *us*, in a chat where topics can restrict it.
+    ///
+    /// Three things keep it narrow. Ordinary messages are left alone — a notice on every message of
+    /// a forbidden topic would be far noisier than the bot the setting was meant to quiet. Only a
+    /// real forum is gated: a supergroup linked to a channel puts a `message_thread_id` on the
+    /// messages of a discussion thread too, which has nothing to do with topics. And a group tends
+    /// to hold several bots, so a command has to be ours before we answer for it — by name
+    /// ([`COMMAND_NAMES`]) and, when Telegram's menu appended one, by the `@username` too.
+    ///
+    /// `/topics` is *not* exempted here. It is a branch of its own above this gate, so its messages
+    /// never reach the predicate.
+    fn is_gated_by_topic(msg: &Message, me: &Me) -> bool {
+        if !is_forum(&msg.chat) {
+            return false
+        }
+        let Some(command) = msg.text().or_else(|| msg.caption())
+            .and_then(|text| text.split_whitespace().next())
+            .and_then(|word| word.strip_prefix('/'))
+        else {
+            return false
+        };
+        let (name, addressee) = command.split_once('@')
+            .map_or((command, None), |(name, at)| (name, Some(at)));
+        if addressee.is_some_and(|at| !at.eq_ignore_ascii_case(me.username())) {
+            return false
+        }
+        COMMAND_NAMES.contains(&name.to_lowercase())
+    }
+
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, topic_id = %TopicId::from(msg.thread_id)))]
+    pub async fn is_forbidden_topic(msg: Message, me: Me, topics: TopicPolicy) -> bool {
+        is_gated_by_topic(&msg, &me)
+            && !topics.allows(&msg.chat.id.into(), msg.thread_id.into()).await
+    }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
+    pub async fn handle_forbidden_topic(
+        bot: Bot,
+        msg: Message,
+        deps: HandlerDeps,
+    ) -> HandlerResult {
+        let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
+        metrics::TOPIC_RESTRICTED.inc();
+
+        let lang_code = lang_resolver.execute().await;
+        let answer = t!("errors.forbidden_topic", locale = &lang_code);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
+        Ok(())
+    }
+
+    /// The chat and the topic a button press must be judged by, or `None` when there is nothing to
+    /// judge: the picker's own buttons (exempt for the reason `/topics` is — they are the way back
+    /// out), a message too old for Telegram to still attach, or a chat that is not a forum.
+    fn callback_topic(query: &CallbackQuery) -> Option<(ChatIdKind, TopicId)> {
+        let is_picker = query.data.as_deref()
+            .is_some_and(|data| data.starts_with(topics::TopicsCallbackData::prefix()));
+        if is_picker {
+            return None
+        }
+        let msg = query.message.as_ref()?.regular_message()?;
+        is_forum(&msg.chat)
+            .then(|| (msg.chat.id.into(), msg.thread_id.into()))
+    }
+
+    /// The same gate for the buttons. A keyboard outlives the message it came with, so one sent
+    /// before the restriction — or in a topic dropped since — would otherwise keep working and let
+    /// the whole game be played from a topic the chat keeps the bot out of.
+    pub async fn is_forbidden_topic_callback(query: CallbackQuery, topics: TopicPolicy) -> bool {
+        let Some((chat_id, topic)) = callback_topic(&query) else {
+            return false
+        };
+        !topics.allows(&chat_id, topic).await
+    }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
+    pub async fn handle_forbidden_topic_callback(
+        bot: Bot,
+        query: CallbackQuery,
+        deps: HandlerDeps,
+    ) -> HandlerResult {
+        let HandlerDeps { lang_resolver, .. } = deps;
+        metrics::TOPIC_RESTRICTED.inc();
+
+        let lang_code = lang_resolver.execute().await;
+        bot.answer_callback_query(query.id)
+            .show_alert(true)
+            .text(t!("errors.forbidden_topic_callback", locale = &lang_code))
+            .await?;
+        Ok(())
+    }
+
     fn banned_until(upd: &Update, ban_list: BanList) -> Option<DateTime<Utc>> {
         upd.from()
            .map(UserId::from)
@@ -406,6 +505,137 @@ pub mod checks {
             .filter(is_group_chat)
             .branch(reject_group_accounts())
             .branch(require_anchored_group())
+    }
+
+    #[cfg(test)]
+    mod test {
+        use teloxide::types::{CallbackQuery, Me, Message};
+        use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
+        use super::{callback_topic, is_gated_by_topic};
+
+        /// A message of the given text, in a supergroup that either is a forum or isn't. Built
+        /// from JSON because a `Message` has far more fields than a test wants to name.
+        fn message(text: &str, is_forum: bool, thread_id: Option<i32>) -> Message {
+            let thread = thread_id
+                .map(|id| format!(r#""message_thread_id":{id},"is_topic_message":true,"#))
+                .unwrap_or_default();
+            let json = format!(r#"{{
+                "chat": {{"id":-1001847508954,"is_forum":{is_forum},"title":"chat","type":"supergroup"}},
+                "date": 1675229140,
+                "from": {{"first_name":"tester","id":1253681278,"is_bot":false}},
+                {thread}"message_id": 5,
+                "text": "{text}"
+            }}"#);
+            serde_json::from_str(&json).expect("couldn't build the message")
+        }
+
+        /// The bot the commands are addressed to in the tests below.
+        fn me() -> Me {
+            let json = r#"{
+                "id": 42, "is_bot": true, "first_name": "Dick Grower", "username": "DickGrowerBot",
+                "can_join_groups": true, "can_read_all_group_messages": false,
+                "supports_inline_queries": true, "can_connect_to_business_account": false,
+                "has_main_web_app": false
+            }"#;
+            serde_json::from_str(json).expect("couldn't build the bot's own user")
+        }
+
+        #[test]
+        fn test_our_command_in_a_forum_is_gated() {
+            assert!(is_gated_by_topic(&message("/grow", true, Some(42)), &me()));
+            // the General topic carries no thread id of its own
+            assert!(is_gated_by_topic(&message("/grow", true, None), &me()));
+            assert!(is_gated_by_topic(&message("/grow@DickGrowerBot arg", true, Some(42)), &me()));
+            // Telegram's menu is not consistent about the case of the username it appends
+            assert!(is_gated_by_topic(&message("/grow@dickgrowerbot", true, Some(42)), &me()));
+        }
+
+        /// A group usually holds several bots. Answering for a command aimed at one of them would
+        /// be noise from a bot that was just told to be quieter, so the addressee is checked.
+        #[test]
+        fn test_another_bots_command_is_not_gated() {
+            assert!(!is_gated_by_topic(&message("/grow@SomeOtherBot", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(&message("/start@SomeOtherBot", true, Some(42)), &me()));
+        }
+
+        /// Same reasoning for a bare command we simply don't have: it belongs to someone else.
+        #[test]
+        fn test_a_command_we_dont_have_is_not_gated() {
+            assert!(!is_gated_by_topic(&message("/roll 2d6", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(&message("/", true, Some(42)), &me()));
+        }
+
+        /// Every message of a forbidden topic would otherwise get a notice, which is noisier than
+        /// the bot the setting was meant to quiet.
+        #[test]
+        fn test_an_ordinary_message_is_not_gated() {
+            assert!(!is_gated_by_topic(&message("hello", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(&message("not a /grow", true, Some(42)), &me()));
+        }
+
+        /// A supergroup linked to a channel puts a thread id on discussion-thread messages too,
+        /// and those aren't topics.
+        #[test]
+        fn test_a_non_forum_is_never_gated() {
+            assert!(!is_gated_by_topic(&message("/grow", false, Some(42)), &me()));
+            assert!(!is_gated_by_topic(&message("/grow", false, None), &me()));
+        }
+
+        /// `/topics` is not exempted here: it is a branch of its own above this gate, so a
+        /// `/topics` message never reaches the predicate at all. This pins that down — if the
+        /// branch is ever moved below the gate, the reminder is right here.
+        #[test]
+        fn test_the_topics_command_is_exempted_by_the_branch_order_only() {
+            assert!(is_gated_by_topic(&message("/topics", true, Some(42)), &me()));
+        }
+
+        fn callback(data: &str, message: Option<Message>) -> CallbackQuery {
+            let message = message
+                .map(|msg| serde_json::to_string(&msg).expect("couldn't serialize the message"))
+                .unwrap_or_else(|| "null".to_owned());
+            let json = format!(r#"{{
+                "id": "1",
+                "from": {{"first_name":"tester","id":1253681278,"is_bot":false}},
+                "chat_instance": "1",
+                "data": "{data}",
+                "message": {message}
+            }}"#);
+            serde_json::from_str(&json).expect("couldn't build the callback query")
+        }
+
+        #[test]
+        fn test_a_button_in_a_forum_is_judged_by_its_topic() {
+            let query = callback("pvp:1:2", Some(message("/pvp", true, Some(42))));
+            let topic = callback_topic(&query);
+            assert_eq!(topic, Some((ChatIdKind::ID(TelegramChatId::new(-1001847508954)), TopicId::new(42))));
+
+            // the General topic carries no thread id of its own
+            let query = callback("pvp:1:2", Some(message("/pvp", true, None)));
+            let topic = callback_topic(&query).map(|(_, topic)| topic);
+            assert_eq!(topic, Some(TopicId::GENERAL));
+        }
+
+        /// The picker's buttons are the way back out of a restriction, so they are never judged
+        /// by it — pressing one inside a forbidden topic has to keep working.
+        #[test]
+        fn test_the_pickers_own_buttons_are_never_judged() {
+            let query = callback("topics:1:0:all", Some(message("/topics", true, Some(42))));
+            assert_eq!(callback_topic(&query), None);
+        }
+
+        #[test]
+        fn test_a_button_outside_a_forum_is_never_judged() {
+            let query = callback("pvp:1:2", Some(message("/pvp", false, Some(42))));
+            assert_eq!(callback_topic(&query), None);
+        }
+
+        /// An inline message, or one too old for Telegram to attach, leaves nothing to judge by —
+        /// no chat kind and no topic — so the gate has to let it through rather than guess.
+        #[test]
+        fn test_a_button_without_a_message_is_never_judged() {
+            let query = callback("pvp:1:2", None);
+            assert_eq!(callback_topic(&query), None);
+        }
     }
 
     pub mod inline {

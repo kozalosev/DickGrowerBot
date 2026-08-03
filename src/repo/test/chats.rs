@@ -1,6 +1,6 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, SupportedLanguage};
-use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
+use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
@@ -38,6 +38,147 @@ async fn chat_language_roundtrip() {
     let lang = chats.get_chat_language(&kind)
         .await.expect("couldn't read the language");
     assert_eq!(lang, None);
+}
+
+#[tokio::test]
+async fn allowed_topics_roundtrip() {
+    let db = fresh_db().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let partiality = ChatIdPartiality::Specific(ChatIdKind::ID(TelegramChatId::new(CHAT_ID)));
+    let kind = partiality.kind();
+    let general = TopicId::GENERAL;
+    let games = TopicId::new(42);
+
+    // A chat that never touched the setting works everywhere.
+    let topics = chats.get_allowed_topics(&kind)
+        .await.expect("couldn't read the topics");
+    assert!(topics.is_unrestricted());
+
+    // The first allowed topic is what restricts the chat.
+    chats.allow_topic(&partiality, games)
+        .await.expect("couldn't allow the topic");
+    let topics = chats.get_allowed_topics(&kind)
+        .await.expect("couldn't read the topics");
+    assert!(!topics.is_unrestricted());
+    assert!(topics.allows(games));
+    assert!(!topics.allows(general));
+
+    // The second one is added to the first, not put in its place.
+    chats.allow_topic(&partiality, general)
+        .await.expect("couldn't allow the second topic");
+    let topics = chats.get_allowed_topics(&kind)
+        .await.expect("couldn't read the topics");
+    assert_eq!(topics.count(), 2);
+    assert_eq!(topics.primary(), Some(general));
+
+    // The set doesn't grow when a topic is allowed twice.
+    chats.allow_topic(&partiality, games)
+        .await.expect("couldn't allow the same topic again");
+    let topics = chats.get_allowed_topics(&kind)
+        .await.expect("couldn't read the topics");
+    assert_eq!(topics.count(), 2);
+
+    chats.forbid_topic(&partiality, general)
+        .await.expect("couldn't forbid the topic");
+    let topics = chats.get_allowed_topics(&kind)
+        .await.expect("couldn't read the topics");
+    assert_eq!(topics.count(), 1);
+    assert!(topics.allows(games));
+
+    // Forbidding the last one leaves the bot working everywhere, not nowhere.
+    chats.forbid_topic(&partiality, games)
+        .await.expect("couldn't forbid the last topic");
+    let topics = chats.get_allowed_topics(&kind)
+        .await.expect("couldn't read the topics");
+    assert!(topics.is_unrestricted());
+
+    // And so does dropping the restriction outright.
+    chats.allow_topic(&partiality, games)
+        .await.expect("couldn't allow the topic again");
+    chats.allow_all_topics(&partiality)
+        .await.expect("couldn't allow all the topics");
+    let topics = chats.get_allowed_topics(&kind)
+        .await.expect("couldn't read the topics");
+    assert!(topics.is_unrestricted());
+}
+
+/// Both settings live in the same jsonb column, so each one's writes must leave the other alone.
+///
+/// Every write is followed by reading *both* back: a write that wipes its neighbour has to be
+/// caught at the step that did it, not several steps later when it's no longer clear which one
+/// was to blame.
+#[tokio::test]
+async fn allowed_topics_and_language_are_independent() {
+    let db = fresh_db().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let partiality = ChatIdPartiality::Specific(ChatIdKind::ID(TelegramChatId::new(CHAT_ID)));
+    let kind = partiality.kind();
+    let general = TopicId::GENERAL;
+    let games = TopicId::new(42);
+
+    async fn assert_settings(
+        chats: &repo::Chats,
+        kind: &ChatIdKind,
+        expected_lang: Option<SupportedLanguage>,
+        expected_topics: &[TopicId],
+        step: &str,
+    ) {
+        let lang = chats.get_chat_language(kind)
+            .await.expect("couldn't read the language");
+        assert_eq!(lang, expected_lang, "the language is wrong after {step}");
+
+        let topics = chats.get_allowed_topics(kind)
+            .await.expect("couldn't read the topics");
+        // The count pins the set down together with the checks below: `allows` is true for every
+        // topic of an unrestricted chat, so on its own it would pass on a wiped restriction.
+        assert_eq!(topics.count(), expected_topics.len(), "the topic count is wrong after {step}");
+        for topic in expected_topics {
+            assert!(topics.allows(*topic), "the topic {topic} is missing after {step}");
+        }
+    }
+
+    chats.set_chat_language(&partiality, Some(SupportedLanguage::RU))
+        .await.expect("couldn't set the language");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[], "setting the language").await;
+
+    chats.allow_topic(&partiality, games)
+        .await.expect("couldn't allow the topic");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], "allowing the first topic").await;
+
+    chats.allow_topic(&partiality, general)
+        .await.expect("couldn't allow the second topic");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[general, games], "allowing the second topic").await;
+
+    // The language changing under an established restriction is the direction the topics have to
+    // survive; the first write above only proved the empty case.
+    chats.set_chat_language(&partiality, Some(SupportedLanguage::ZH))
+        .await.expect("couldn't overwrite the language");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::ZH), &[general, games], "overwriting the language").await;
+
+    chats.forbid_topic(&partiality, general)
+        .await.expect("couldn't forbid the topic");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::ZH), &[games], "forbidding a topic").await;
+
+    // Clearing removes the key rather than nulling it, which is the write most likely to take the
+    // whole `settings` object down with it.
+    chats.set_chat_language(&partiality, None)
+        .await.expect("couldn't clear the language");
+    assert_settings(&chats, &kind, None, &[games], "clearing the language").await;
+
+    chats.allow_all_topics(&partiality)
+        .await.expect("couldn't allow all the topics");
+    assert_settings(&chats, &kind, None, &[], "allowing all the topics").await;
+
+    // And the same pair of clearing writes in the opposite order.
+    chats.allow_topic(&partiality, games)
+        .await.expect("couldn't allow the topic again");
+    chats.set_chat_language(&partiality, Some(SupportedLanguage::RU))
+        .await.expect("couldn't set the language again");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], "restoring both settings").await;
+
+    chats.allow_all_topics(&partiality)
+        .await.expect("couldn't allow all the topics again");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[], "dropping the restriction").await;
 }
 
 #[tokio::test]

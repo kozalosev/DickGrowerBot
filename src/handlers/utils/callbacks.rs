@@ -148,6 +148,32 @@ pub async fn edit_message_text(
     Ok(())
 }
 
+/// Like [`edit_message_text`], but also replaces the keyboard and renders the text as HTML —
+/// for a message whose buttons change along with what they say.
+pub async fn edit_message_text_with_keyboard(
+    bot: &Bot,
+    params: EditMessageReqParamsKind,
+    text: impl Into<String>,
+    keyboard: Option<InlineKeyboardMarkup>,
+) -> Result<(), teloxide::RequestError> {
+    let text = text.into();
+    match params {
+        EditMessageReqParamsKind::Chat(chat_id, message_id) => {
+            let mut req = bot.edit_message_text(chat_id, message_id, text);
+            req.parse_mode.replace(ParseMode::Html);
+            req.reply_markup = keyboard;
+            req.await?;
+        }
+        EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
+            let mut req = bot.edit_message_text_inline(inline_message_id, text);
+            req.parse_mode.replace(ParseMode::Html);
+            req.reply_markup = keyboard;
+            req.await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn answer_and_edit_page(
     bot: &Bot,
     q: &CallbackQuery,

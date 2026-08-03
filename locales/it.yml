@@ -15,6 +15,20 @@ commands:
       success: "Fatto! Ora rispondo a tutti in questa chat nella lingua selezionata."
       reset: "Fatto! La lingua della chat è stata azzerata — risponderò di nuovo a ciascuno nella propria lingua."
       auto_button: "🌐 Auto (lingua di ciascuno)"
+  topics:
+    description: "Choose the topics the bot works in"
+    state:
+      unrestricted: "I work in <b>every topic</b> of this chat."
+      allowed_here: "I work <b>in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+      forbidden_here: "I <b>don't work in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+    buttons:
+      only_here: "🔒 Work in this topic only"
+      allow_here: "✅ Allow in this topic"
+      forbid_here: "🚫 Forbid in this topic"
+      allow_everywhere: "🌍 Allow in all topics"
+    errors:
+      not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
+      admins_only: "Only chat administrators can choose the topics I work in."
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
   support:
@@ -166,6 +180,8 @@ migration:
   lost: "Questo gruppo è appena diventato un supergruppo, e Telegram gli ha dato un'identità del tutto nuova — non riesco più a riconoscerlo come il gruppo che conoscevo.\n\nSe qualcuno ha giocato qui in modalità inline, quella storia purtroppo non è più raggiungibile e i punteggi ripartono da zero. Se nessuno l'ha fatto, non si è perso nulla. D'ora in poi tutto funziona come al solito, e non può più succedere. 🍆"
   lost_inline: "Questo gruppo è appena diventato un supergruppo. Tutto ciò che è stato giocato con i comandi è arrivato insieme a lui ed è al sicuro.\n\nI risultati della modalità inline, invece, non erano mai stati legati a questo gruppo — sarebbe servito premere il tasto di attivazione prima del passaggio. Purtroppo ora non sono più raggiungibili. Se nessuno ha giocato qui in modalità inline, non si è perso nulla. D'ora in poi tutto funziona come al solito. 🍆"
 errors:
+  forbidden_topic_callback: "I don't work in this topic."
+  forbidden_topic: "I don't work in this topic. An administrator can change that with /topics."
   not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
   group_account: "Non puoi giocare per conto di un gruppo o canale — disattiva la modalità anonima e riprova!"
   feature_disabled: "Questa funzione non è al momento disponibile."
