@@ -8,7 +8,7 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
-use teloxide::types::{ChatId, Message, UserId};
+use teloxide::types::{ChatId, Me, Message, UserId};
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
 use crate::domain::objects::ExternalUser;
@@ -117,13 +117,14 @@ impl Display for InvalidLines {
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn import_cmd_handler(
     bot: Bot,
+    bot_info: Me,
     msg: Message,
     deps: HandlerDeps,
 ) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_IMPORT.invoked();
-    let answer = match check_and_parse_message(&bot, &msg, &repos).await {
+    let answer = match check_and_parse_message(&bot, bot_info.id, &msg, &repos).await {
         Ok(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {
                 Ok(r) => {
@@ -200,6 +201,7 @@ pub async fn import_cmd_handler(
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(msg)))]
 async fn check_and_parse_message(
     bot: &Bot,
+    bot_id: UserId,
     msg: &Message,
     repos: &repo::Repositories,
 ) -> Result<ParseResult, BeforeImportCheckErrors> {
@@ -219,7 +221,6 @@ async fn check_and_parse_message(
         return Err(BeforeImportCheckErrors::NotAdmin)
     }
     // Reading another bot's message only works if this bot is itself an admin
-    let bot_id = bot.get_me().await?.id;
     if !admin_ids.contains(&bot_id) {
         return Err(BeforeImportCheckErrors::BotNotAdmin)
     }
