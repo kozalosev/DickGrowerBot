@@ -3,14 +3,14 @@ use crate::domain::objects::User;
 use crate::domain::primitives::{DaysCount, LengthChange, Ratio, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID, USER_ID};
+use crate::repo::test::{CHAT_ID, NAME, fresh_db, UID, USER_ID};
 use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
 #[tokio::test]
 async fn create_or_update() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let users = repo::Users::new(db.clone());
 
     let members = users.get_all_users().await
@@ -38,7 +38,7 @@ async fn create_or_update() {
 
 #[tokio::test]
 async fn get_chat_members() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let users = repo::Users::new(db.clone());
 
     let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
@@ -95,13 +95,13 @@ macro_rules! base_checks {
 
 #[tokio::test]
 async fn get_random_active_member() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     base_checks!(db, get_random_active_member, INACTIVITY_DAYS);
 }
 
 #[tokio::test]
 async fn get_random_active_poor_member() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let ratio = Ratio::new(0.9).unwrap();
     base_checks!(db, get_random_active_poor_member, ratio, INACTIVITY_DAYS);
 
@@ -119,7 +119,7 @@ async fn get_random_active_poor_member() {
 
 #[tokio::test]
 async fn get_random_active_member_with_poor_in_priority() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     base_checks!(db, get_random_active_member_with_poor_in_priority, INACTIVITY_DAYS);
 
     // Create members with well-separated lengths (a negative one included) and check that the

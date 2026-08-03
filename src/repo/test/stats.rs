@@ -1,7 +1,7 @@
 use crate::domain::primitives::LengthChange;
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{CHAT_ID, start_postgres, USER_ID};
+use crate::repo::test::{CHAT_ID, fresh_db, USER_ID};
 use crate::repo::test::dicks::create_user;
 
 fn increment_of(value: i64) -> LengthChange {
@@ -10,7 +10,7 @@ fn increment_of(value: i64) -> LengthChange {
 
 #[tokio::test]
 async fn test_all() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let personal_stats = repo::PersonalStatsRepo::new(db.clone());
     let dicks = repo::Dicks::new(db.clone(), Default::default());
 

@@ -4,7 +4,7 @@ use crate::domain::objects::ExternalUser;
 use crate::domain::primitives::{Length, LengthChange, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, start_postgres, UID, USER_ID};
+use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, fresh_db, UID, USER_ID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user, create_user_and_dick_2};
 
 /// A chat the import is not asked about, used to check it stays untouched.
@@ -12,7 +12,7 @@ const OTHER_CHAT_ID: i64 = -11111;
 
 #[tokio::test]
 async fn test_all() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let import = repo::Import::new(db.clone());
     let chat_id = ChatId(CHAT_ID);
 
@@ -45,7 +45,7 @@ mod import_semantics {
     /// not move at all — that is what the join to Chats is for.
     #[tokio::test]
     async fn every_dick_grows_by_its_own_length() {
-        let (_container, db) = start_postgres().await;
+        let db = fresh_db().await;
         let import = repo::Import::new(db.clone());
         let dicks = repo::Dicks::new(db.clone(), Default::default());
         let uid2 = UserId::literal(UID + 1);
@@ -88,7 +88,7 @@ mod import_semantics {
     /// old code leaned on the transaction to undo the INSERT; now the single statement must do it.
     #[tokio::test]
     async fn a_rejected_second_import_changes_nothing() {
-        let (_container, db) = start_postgres().await;
+        let db = fresh_db().await;
         let import = repo::Import::new(db.clone());
 
         create_user(&db).await;

@@ -392,27 +392,33 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Tests against the database
 
-Starting a container costs seconds, creating a database inside a running one costs milliseconds, so
-a test file shares **one** container and gives every test a **fresh database** of its own. See
-`src/repo/test/bans.rs`:
+The whole test binary shares **one** Postgres container, and every test takes a **database of its
+own** out of it:
 
 ```rust
-static POSTGRES: SharedPostgresCell = SharedPostgresCell::new();
-
-async fn fresh_db() -> (Arc<SharedPostgres>, Pool<Postgres>) {
-    let postgres = POSTGRES.get().await;
-    let db = postgres.fresh_db().await;
-    (postgres, db)
-}
+let db = fresh_db().await;
 ```
 
-The handle must stay alive for the whole test (`let (_postgres, db) = fresh_db().await;`).
-`SharedPostgresCell` holds a `Weak`, not a `OnceCell`, on purpose: a `static` is never dropped, so a
-`OnceCell` would leave a Postgres running after every test run. With the `Weak`, the container stops
-as soon as the last test using it finishes.
+That is the entire API (`src/repo/test/mod.rs`). Three things make it work, and each of them is
+load-bearing:
 
-The older `start_postgres()` — one container per test — still works and the files that have not been
-converted yet keep using it.
+* **A runtime of its own.** Every `#[tokio::test]` builds a runtime and tears it down when the test
+  ends, and a sqlx pool dies with the runtime that created it — sharing a pool between tests fails
+  with *"a Tokio 1.x context was found, but it is being shutdown"* as soon as the first test
+  finishes. So the container and its maintenance pool live on a `static RUNTIME`, and `fresh_db`
+  reaches them with `RUNTIME.spawn(...)`. Not `block_on`, which panics inside a runtime. The
+  per-test pool is built on the test's own runtime and dies with it, which is fine.
+* **A template database.** The migrations run once per run into `test_template`; each test's
+  database is `CREATE DATABASE … TEMPLATE test_template`, which is far cheaper than replaying every
+  migration 54 times.
+* **A reused container.** It is marked `ReuseDirective::Always` and deliberately outlives the run,
+  so the next run finds it instead of paying the startup again. It is *only* removed by
+  `task test:clean`. Its databases are named `test_run<pid>_<n>` and the ones left by earlier runs
+  are dropped at startup — one test binary at a time is assumed, which is how `cargo test` runs.
+
+This replaced one container per test: ~35s for the suite instead of ~75s. Don't reintroduce a
+per-test or per-file container, and don't put the shared pool in a plain `static` without the
+runtime — both were tried and both fail in the ways described above.
 
 ## DB Migrations
 

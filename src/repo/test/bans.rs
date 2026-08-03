@@ -1,17 +1,7 @@
-use std::sync::Arc;
 use sqlx::{AssertSqlSafe, Pool, Postgres};
 use crate::handlers::banned_until_of;
 use crate::repo;
-use crate::repo::test::{SharedPostgres, SharedPostgresCell, CHAT_ID, NAME, UID, USER_ID};
-
-/// One container for the whole file; every test still gets a database of its own.
-static POSTGRES: SharedPostgresCell = SharedPostgresCell::new();
-
-async fn fresh_db() -> (Arc<SharedPostgres>, Pool<Postgres>) {
-    let postgres = POSTGRES.get().await;
-    let db = postgres.fresh_db().await;
-    (postgres, db)
-}
+use crate::repo::test::{fresh_db, CHAT_ID, NAME, UID, USER_ID};
 
 /// Every table `erase_user` must clear, as `(table, uid column)`. The guard test below fails when a
 /// new one appears in the schema, because then the function needs a new DELETE too.
@@ -27,7 +17,7 @@ const TABLES_WITH_USER_ROWS: [(&str, &str); 7] = [
 
 #[tokio::test]
 async fn erase_user_deletes_everything_and_bans() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
     fill_all_tables(&db).await;
 
     for (table, uid_field) in TABLES_WITH_USER_ROWS {
@@ -57,7 +47,7 @@ async fn erase_user_deletes_everything_and_bans() {
 /// rows of an erased user. This test is what notices.
 #[tokio::test]
 async fn erase_user_covers_every_table_with_a_uid() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
 
     let found = sqlx::query!(
         r#"SELECT table_name AS "table_name!", column_name AS "column_name!"
@@ -82,7 +72,7 @@ async fn erase_user_covers_every_table_with_a_uid() {
 
 #[tokio::test]
 async fn ban_and_unban() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
     let users = repo::Users::new(db.clone());
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
@@ -105,7 +95,7 @@ async fn ban_and_unban() {
 
 #[tokio::test]
 async fn get_banned_skips_expired_bans() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
     let users = repo::Users::new(db.clone());
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
@@ -121,7 +111,7 @@ async fn get_banned_skips_expired_bans() {
 
 #[tokio::test]
 async fn a_banned_user_cannot_be_upserted() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
     let users = repo::Users::new(db.clone());
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
@@ -142,7 +132,7 @@ async fn a_banned_user_cannot_be_upserted() {
 
 #[tokio::test]
 async fn the_admin_functions_still_work_on_a_banned_user() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
     let users = repo::Users::new(db.clone());
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
@@ -159,7 +149,7 @@ async fn the_admin_functions_still_work_on_a_banned_user() {
 
 #[tokio::test]
 async fn an_expired_ban_lets_the_user_be_upserted_again() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
     let users = repo::Users::new(db.clone());
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
@@ -174,7 +164,7 @@ async fn an_expired_ban_lets_the_user_be_upserted_again() {
 
 #[tokio::test]
 async fn erase_user_rejects_an_unknown_uid() {
-    let (_postgres, db) = fresh_db().await;
+    let db = fresh_db().await;
 
     let result = sqlx::query!("SELECT erase_user($1, 90)", UID)
         .execute(&db)

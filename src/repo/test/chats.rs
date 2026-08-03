@@ -4,12 +4,12 @@ use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
-use crate::repo::test::{CHAT_ID, start_postgres, UID, USER_ID};
+use crate::repo::test::{CHAT_ID, fresh_db, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
 
 #[tokio::test]
 async fn chat_language_roundtrip() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let chats = repo::Chats::new(db.clone(), Default::default());
     let partiality = ChatIdPartiality::Specific(ChatIdKind::ID(TelegramChatId::new(CHAT_ID)));
     let kind = partiality.kind();
@@ -42,7 +42,7 @@ async fn chat_language_roundtrip() {
 
 #[tokio::test]
 async fn upsert_chat() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     create_user(&db).await;
 
     sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
@@ -66,7 +66,7 @@ async fn upsert_chat() {
 
 #[tokio::test]
 async fn is_anchored() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let chats = repo::Chats::new(db.clone(), Default::default());
     let id = TelegramChatId::new(CHAT_ID);
 
@@ -92,7 +92,7 @@ async fn is_anchored() {
 /// an inline query carries no `chat_id`, so it's no proof the bot is back in the chat.
 #[tokio::test]
 async fn unreachable_flag_lifecycle() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let chats = repo::Chats::new(db.clone(), Default::default());
     let id = TelegramChatId::new(CHAT_ID);
     let instance = TelegramChatInstanceId::of("instance");
@@ -140,7 +140,7 @@ async fn unreachable_flag_lifecycle() {
 
 #[tokio::test]
 async fn migrate_chat_id() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     create_user(&db).await;
 
     let chats = repo::Chats::new(db.clone(), Default::default());
@@ -203,7 +203,7 @@ async fn migrate_chat_id() {
 /// and that row simply moves to the new id.
 #[tokio::test]
 async fn migrate_anchored_chat_id() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let chats = repo::Chats::new(db.clone(), Default::default());
     let (old, new) = (TelegramChatId::new(CHAT_ID), TelegramChatId::new(-1001234567890));
 
@@ -229,7 +229,7 @@ async fn migrate_anchored_chat_id() {
 /// a `NOT NULL` foreign key. The same goes for every other table referencing `Chats(id)`.
 #[tokio::test]
 async fn merge_moves_dependent_rows() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let chat = SplitChat::create(&db).await;
 
     chat.add_loan().await;
@@ -255,7 +255,7 @@ async fn merge_moves_dependent_rows() {
 
 #[tokio::test]
 async fn merge_keeps_dicks_from_both_chats() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let chat = SplitChat::create(&db).await;
     // a second user who only ever played through inline mode
     sqlx::query!("INSERT INTO Users (uid, name) VALUES ($1, 'other')", UID + 1)

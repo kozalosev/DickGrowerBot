@@ -485,7 +485,7 @@ mod test {
     use crate::handlers::utils::callbacks::build_callback_query;
     use crate::handlers::utils::inline_message_id_of;
     use crate::repo::Chats;
-    use crate::repo::test::start_postgres;
+    use crate::repo::test::fresh_db;
     use crate::users::generated::{User as ServiceUser, user::Options};
     use crate::users::mock::UserServiceClientMock;
     use super::{inline_chat_candidates, most_popular_language, resolve_language_for, LanguageService, UserService, UserServiceClient};
@@ -653,7 +653,7 @@ mod test {
     /// a chat we can actually find speaks for its members.
     #[tokio::test]
     async fn chat_language_wins_for_inline_updates() {
-        let (_container, db) = start_postgres().await;
+        let db = fresh_db().await;
         let ls = language_service_of(db.clone(), true).await;
         let en_user = tg_user(1, Some("en"));
 
@@ -717,7 +717,7 @@ mod test {
             }
         }
 
-        let (_container, db) = start_postgres().await;
+        let db = fresh_db().await;
         let ls = language_service_of(db, true).await;
         let update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
         let resolver = ls.defer(update);
@@ -745,7 +745,7 @@ mod test {
     /// `execute` actually resolves (and, in doing so, populates the chat-language cache).
     #[tokio::test]
     async fn a_resolver_queries_nothing_until_executed() {
-        let (_container, db) = start_postgres().await;
+        let db = fresh_db().await;
         let ls = language_service_of(db, true).await;
         let update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
 
