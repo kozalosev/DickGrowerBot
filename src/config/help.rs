@@ -6,7 +6,7 @@ use crate::handlers::utils::Incrementor;
 use crate::help;
 
 pub fn build_context_for_help_messages(
-    me: Me,
+    me: &Me,
     incr: &Incrementor,
     competitor_bots: &[&str],
 ) -> anyhow::Result<help::Context> {

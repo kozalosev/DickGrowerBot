@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
 use anyhow::anyhow;
+use crate::domain::primitives::chat::TelegramChatId;
 use crate::domain::primitives::Ratio;
 
 pub(super) fn get_env_mandatory_value<T, E>(key: &str) -> anyhow::Result<T>
@@ -53,4 +54,14 @@ pub(super) fn get_optional_env_ratio(key: &str) -> Option<Ratio> {
     Ratio::new(value)
         .inspect_err(|_| tracing::warn!(key = %key, value = %value, "the feature is disabled because of an invalid value"))
         .ok()
+}
+
+pub(super) fn get_chat_id(key: &str) -> Option<TelegramChatId> {
+    std::env::var(key)
+        .ok()
+        .filter(|id| !id.is_empty())
+        .and_then(|id| id.parse::<i64>()
+             .inspect_err(|e| tracing::warn!(key = %key, error = %e, "chat_id is not a number"))
+             .ok())
+        .map(TelegramChatId::new)
 }

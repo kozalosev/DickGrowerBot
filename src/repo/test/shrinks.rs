@@ -2,7 +2,7 @@ use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio, UserId, Username};
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
-use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, NAME, start_postgres, UID, USER_ID};
+use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, NAME, fresh_db, UID, USER_ID};
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
 
@@ -87,7 +87,7 @@ async fn length_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i64 
 
 #[tokio::test]
 async fn test_perform_daily_shrink() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -148,7 +148,7 @@ async fn test_perform_daily_shrink() {
 /// needs the flag to know that.
 #[tokio::test]
 async fn test_perform_daily_shrink_reports_unreachable_chats() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -182,7 +182,7 @@ async fn test_perform_daily_shrink_reports_unreachable_chats() {
 
 #[tokio::test]
 async fn test_perform_daily_shrink_ramps_up_the_ratio() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -233,7 +233,7 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
 /// terminal step directly: a 1 cm dick with a tiny ratio still loses exactly 1 cm, landing on 0.
 #[tokio::test]
 async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -270,7 +270,7 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
 /// not silently wrong. Nothing gets shrunk on this call, so it's a safe failure mode too.
 #[tokio::test]
 async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wrapping() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -296,7 +296,7 @@ async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wra
 
 #[tokio::test]
 async fn test_get_shrinks_for_date_only_returns_that_day() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -331,7 +331,7 @@ async fn test_get_shrinks_for_date_only_returns_that_day() {
 /// skipped between page 0 and page 1.
 #[tokio::test]
 async fn test_get_shrinks_for_date_pages() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -371,7 +371,7 @@ async fn test_get_shrinks_for_date_pages() {
 
 #[tokio::test]
 async fn test_get_latest_shrink_date_returns_none_without_history() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -391,7 +391,7 @@ async fn test_get_latest_shrink_date_returns_none_without_history() {
 /// middle date, including the `None` case at each end.
 #[tokio::test]
 async fn test_get_latest_and_adjacent_shrink_dates() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let shrinks = repo::Shrinks::new(db.clone());
     let users = repo::Users::new(db.clone());
@@ -438,7 +438,7 @@ async fn test_get_latest_and_adjacent_shrink_dates() {
 
 #[tokio::test]
 async fn test_get_player_uids() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let users = repo::Users::new(db.clone());
 

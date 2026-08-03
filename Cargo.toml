@@ -11,7 +11,7 @@ license-file = "LICENSE"
 
 [dependencies]
 # Telegram Bot framework and localization library
-teloxide = { version = "0.17.0", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler", "throttle"] }
+teloxide = { git = "https://github.com/kozalosev/teloxide.git", branch = "feature/request-observer", default-features = false, features = ["macros", "webhooks-axum", "rustls", "ctrlc_handler", "throttle"] }
 rust-i18n = "4.2.1"
 # Asynchronous runtime, web server, metrics
 tokio = { version =  "1.53.1", default-features = false, features = ["rt-multi-thread", "macros", "signal"] }
@@ -70,7 +70,7 @@ domain_types = { version = "0.1.0", path = "domain_types" }
 domain_types_macro = { version = "0.1.0", path = "domain_types_macro" }
 
 [dev-dependencies]
-testcontainers = "0.27.3"
+testcontainers = { version = "0.27.3", features = ["reusable-containers"] }
 
 [build-dependencies]
 tonic-prost-build = "0.14"

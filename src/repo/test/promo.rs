@@ -3,7 +3,7 @@ use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode};
 use crate::repo;
 use crate::repo::PromoCodeParams;
-use crate::repo::test::{start_postgres, USER_ID};
+use crate::repo::test::{fresh_db, USER_ID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user};
 
 const PROMO_CODE: &str = "test10";
@@ -15,10 +15,10 @@ const PENALTY_PROMO_BONUS: i32 = -30;
 
 #[tokio::test]
 async fn activate() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
 
     let promo = repo::Promo::new(db.clone());
-    promo.create(PromoCodeParams{
+    promo.create_promo_code(PromoCodeParams{
         code: PromoCode::of(PROMO_CODE),
         bonus_length: PromoBonus::new(PROMO_BONUS),
         capacity: PromoCapacity::literal(1),
@@ -40,10 +40,10 @@ async fn activate() {
 
 #[tokio::test]
 async fn activate_with_negative_bonus() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
 
     let promo = repo::Promo::new(db.clone());
-    promo.create(PromoCodeParams{
+    promo.create_promo_code(PromoCodeParams{
         code: PromoCode::of(PENALTY_PROMO_CODE),
         bonus_length: PromoBonus::new(PENALTY_PROMO_BONUS),
         capacity: PromoCapacity::literal(1),

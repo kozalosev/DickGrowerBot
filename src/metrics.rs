@@ -20,6 +20,10 @@ pub static CMD_HELP_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_help_usage_total", "count of /help invocations"));
 pub static CMD_PRIVACY_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_privacy_usage_total", "count of /privacy invocations"));
+pub static CMD_SUPPORT_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_support_usage_total", "count of /support invocations"));
+pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
+    Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
 pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_grow_usage_total", "count of /grow invocations"));
 pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
@@ -57,6 +61,9 @@ pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
 pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
     TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/other) — a spike of connect/timeout is the DPI-stalling signal"));
+pub static TELEGRAM_REQUEST_DURATION: Lazy<TelegramRequestDuration> = Lazy::new(||
+    TelegramRequestDuration::new("telegram_request_duration_seconds",
+        "how long a request to the Telegram Bot API took, by method and outcome — the failed ones are measured too, so that a timeout (the slowest case there is) is not missing from the histogram"));
 
 pub static DB_POOL_CONNECTIONS_OPENED: Lazy<Counter> = Lazy::new(||
     Counter::new("db_pool_connections_opened_total", "count of new physical connections opened by the sqlx pool"));
@@ -115,6 +122,8 @@ fn force_registration() {
     Lazy::force(&CMD_START_COUNTER);
     Lazy::force(&CMD_HELP_COUNTER);
     Lazy::force(&CMD_PRIVACY_COUNTER);
+    Lazy::force(&CMD_SUPPORT_COUNTER);
+    Lazy::force(&BANNED_UPDATES_BLOCKED);
     Lazy::force(&CMD_GROW_COUNTER);
     Lazy::force(&CMD_TOP_COUNTER);
     Lazy::force(&CMD_LOAN_COUNTER);
@@ -134,6 +143,7 @@ fn force_registration() {
     Lazy::force(&CHAT_MIGRATION);
     Lazy::force(&DAILY_SHRINK);
     Lazy::force(&TELEGRAM_REQUEST_ERRORS);
+    Lazy::force(&TELEGRAM_REQUEST_DURATION);
 
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
@@ -200,6 +210,7 @@ impl prometheus::core::Collector for DbPoolCollector {
 pub struct Counter(IntCounter);
 pub struct CounterVec(IntCounterVec);
 pub struct Histogram(prometheus::Histogram);
+pub struct HistogramVec(prometheus::HistogramVec);
 
 pub struct ComplexCommandCounters {
     invoked: Counter,
@@ -265,6 +276,23 @@ impl Histogram {
 
     pub fn observe(&self, value: f64) {
         self.0.observe(value)
+    }
+}
+
+impl HistogramVec {
+    fn new(name: &str, help: &str, labels: &[&str], buckets: &[f64]) -> Self {
+        let inner = prometheus::HistogramVec::new(
+            prometheus::HistogramOpts::new(name, help).buckets(buckets.to_vec()), labels)
+            .unwrap_or_else(|e| panic!("unable to create the {name} histogram vec: {e}"));
+        REGISTRY.register(Box::new(inner.clone()))
+            .unwrap_or_else(|e| panic!("unable to register the {name} histogram vec: {e}"));
+        Self(inner)
+    }
+
+    /// Records an observation on the child histogram identified by these label values, given in
+    /// the same order as the labels passed to [`HistogramVec::new`].
+    fn observe(&self, label_values: &[&str], value: f64) {
+        self.0.with_label_values(label_values).observe(value)
     }
 }
 
@@ -666,6 +694,27 @@ impl TelegramRequestErrorCounters {
     }
 }
 
+/// The latency of the Telegram Bot API, labeled by the method called and by how the request ended
+/// (`ok`, or the same kinds [`TelegramRequestErrorCounters`] uses for the failures).
+///
+/// The buckets go up to well past the bot's own request timeout: the interesting samples are the
+/// slow ones, and a request that is about to time out has to land in a bucket of its own rather
+/// than in `+Inf` together with everything else.
+pub struct TelegramRequestDuration(HistogramVec);
+
+impl TelegramRequestDuration {
+    fn new(name: &str, help: &str) -> Self {
+        Self(HistogramVec::new(name, help, &["method", "outcome"],
+            &[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 17.0, 30.0]))
+    }
+
+    /// Records one finished Telegram API request. `method` is the payload name teloxide reports
+    /// (e.g. `SendMessage`), a set fixed by the library, so the label stays bounded.
+    pub fn record(&self, method: &str, outcome: &str, seconds: f64) {
+        self.0.observe(&[method, outcome], seconds)
+    }
+}
+
 /// The sender's Telegram `language_code`, kept whole (region suffix included) and lowercased
 /// (`"zh-TW"` → `"zh-tw"`, `"EN-us"` → `"en-us"`); anything absent or not shaped like a language
 /// tag becomes `"unknown"` (keeps the metric's label cardinality bounded).
@@ -677,23 +726,24 @@ fn language_label(code: Option<&str>) -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
+/// The `/metrics` body, as the endpoint would render our own registry. Shared with the tests of
+/// the modules that record into it.
+#[cfg(test)]
+pub(crate) fn render_metrics() -> String {
+    let mut buffer = vec![];
+    TextEncoder::new().encode(&REGISTRY.gather(), &mut buffer)
+        .expect("couldn't encode the metrics");
+    String::from_utf8(buffer)
+        .expect("the metrics buffer is not valid UTF-8")
+}
+
 #[cfg(test)]
 mod tests {
     use once_cell::sync::Lazy;
-    use prometheus::{Encoder, TextEncoder};
     use strum::IntoEnumIterator;
     use crate::repo::ChatMigrationOutcome;
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-        DB_POOL_CONNECTION_AGE_SECONDS, TASK_DAILY_SHRINK, language_label, REGISTRY};
-
-    /// The `/metrics` body, as the endpoint would render our own registry.
-    fn render_metrics() -> String {
-        let mut buffer = vec![];
-        TextEncoder::new().encode(&REGISTRY.gather(), &mut buffer)
-            .expect("couldn't encode the metrics");
-        String::from_utf8(buffer)
-            .expect("the metrics buffer is not valid UTF-8")
-    }
+                DB_POOL_CONNECTION_AGE_SECONDS, TASK_DAILY_SHRINK, language_label, render_metrics};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.

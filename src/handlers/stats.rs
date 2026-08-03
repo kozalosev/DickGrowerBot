@@ -20,7 +20,7 @@ pub enum StatsCommands {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
-pub async fn cmd_handler(
+pub async fn stats_cmd_handler(
     bot: Bot,
     msg: Message,
     deps: HandlerDeps,
@@ -53,7 +53,7 @@ async fn personal_stats_impl(
     from_refs: FromRefs<'_>,
     lang_code: &LanguageCode,
 ) -> anyhow::Result<String> {
-    repos.personal_stats.get(UserId::from(from_refs.0)).await
+    repos.personal_stats.get_personal_stats(UserId::from(from_refs.0)).await
         .map(|stats| t!("commands.stats.personal", locale = lang_code,
             chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).to_string())
 }

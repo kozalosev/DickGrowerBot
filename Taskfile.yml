@@ -53,11 +53,13 @@ tasks:
       - docker compose stop postgres user-service jaeger victoria-logs
 
   test:clean:
-    desc: Remove the containers left behind by interrupted test runs.
+    desc: Remove the Postgres container the tests reuse between runs.
     cmds:
-      # The tests label every container they start (see repo::test::TEST_CONTAINER_LABEL); a run
-      # that is killed keeps its Postgres alive, holding a port and a few hundred megabytes. The
-      # label is what keeps this from touching the infra containers, which use the same images.
+      # The tests share one container and keep it running on purpose, so that the next run reuses
+      # it instead of paying the startup again (see repo::test::SharedPostgres) — this task is the
+      # only thing that removes it. Worth running when it holds a port you need, or after changing
+      # how the container itself is built. The label keeps this from touching the infra
+      # containers, which use the same images.
       - docker ps -aq --filter label=dickgrowerbot.test=true | xargs -r docker rm -fv
 
   migrate:

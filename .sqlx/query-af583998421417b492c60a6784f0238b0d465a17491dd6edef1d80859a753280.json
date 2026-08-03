@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Imports (chat_id, uid, original_length) VALUES ($1, $2, 7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "af583998421417b492c60a6784f0238b0d465a17491dd6edef1d80859a753280"
+}

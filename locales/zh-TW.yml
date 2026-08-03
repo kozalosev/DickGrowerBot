@@ -13,6 +13,13 @@ commands:
       success: "完成！現在我會用這種語言回覆本群所有人。"
       reset: "完成！群組語言已清除 —— 我會重新依每個人自己的語言回覆。"
       auto_button: "🌐 自動（各自的語言）"
+  support:
+    description: "聯絡機器人主人"
+    request: "請寫下你的留言，我會轉交給我的主人。發送任意指令即可取消。"
+    sent: "留言已發送。主人會在私聊中回覆你。"
+    cancelled: "請求已取消。"
+    too_often: "你剛剛已經發過留言了，請等一分鐘再發。"
+    disabled: "此功能目前無法使用。"
   grow:
     result: "你的老二已經<b>%{incr} 公分</b> %{event}，現在長度為<b>%{length} 公分</b>。"
     direction:
@@ -150,5 +157,7 @@ errors:
   not_group_chat: "此機器人僅在群聊中執行任務！"
   group_account: "不能以群組或頻道的身份遊玩——請關閉匿名模式後重試！"
   feature_disabled: "此功能當前暫時禁用。"
+  banned: "你在 %{date} 之前無法遊玩。如果你認為這是誤判，請用 /support 聯絡我們。"
+  banned_inline_title: "你已被封鎖"
 self_destruction:
   warning: "🧹 <i>為保持群聊整潔，此訊息將在 <b>%{seconds}</b> 秒後刪除……</i>"

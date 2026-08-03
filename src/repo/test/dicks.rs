@@ -4,7 +4,7 @@ use crate::config::FeatureToggles;
 use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
-use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, get_chat_id_and_dicks, NAME, start_postgres, UID, USER_ID};
+use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, get_chat_id_and_dicks, NAME, fresh_db, UID, USER_ID};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
@@ -34,7 +34,7 @@ async fn seed_stale_zero_length_dick(db: &Pool<Postgres>, internal_chat_id: i64,
 
 #[tokio::test]
 async fn test_all() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     create_user(&db).await;
 
@@ -64,7 +64,7 @@ async fn test_all() {
 
 #[tokio::test]
 async fn test_all_with_top_pagination_disabled() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = {
         let features = FeatureToggles {
             top_unlimited: false,
@@ -100,7 +100,7 @@ async fn test_all_with_top_pagination_disabled() {
 
 #[tokio::test]
 async fn test_top_page() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = CHAT_ID_KIND;
     let chat_id_partiality = chat_id.clone().into();
@@ -127,7 +127,7 @@ async fn test_top_page() {
 
 #[tokio::test]
 async fn test_hide_inactive_zero_length_from_top() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default()); // toggle is on by default in tests
     let users = repo::Users::new(db.clone());
     let chat_id = CHAT_ID_KIND;
@@ -164,7 +164,7 @@ async fn test_hide_inactive_zero_length_from_top() {
 
 #[tokio::test]
 async fn test_hide_inactive_zero_length_from_top_disabled() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = {
         let features = FeatureToggles {
             hide_inactive_zero_length_from_top: false,
@@ -194,7 +194,7 @@ async fn test_hide_inactive_zero_length_from_top_disabled() {
 
 #[tokio::test]
 async fn test_pvp() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = CHAT_ID_KIND;
     let chat_id_part: &ChatIdPartiality = &chat_id.clone().into();

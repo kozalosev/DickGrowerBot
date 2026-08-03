@@ -1,6 +1,6 @@
 use autometrics::autometrics;
 use anyhow::Context;
-use crate::domain::objects::User;
+use crate::domain::objects::{BannedUser, User};
 use crate::domain::primitives::{DaysCount, Ratio, UserId, Username};
 use crate::repo::ChatIdKind;
 use crate::repository;
@@ -127,15 +127,28 @@ repository!(Users,
 ,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = user_id.value()))]
-    pub async fn get(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
+    pub async fn get_user(&self, user_id: UserId) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users WHERE uid = $1"#, user_id as UserId)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a user with id = {user_id}"))
     }
 ,
+    /// Every user whose ban is still running. The list is tiny, so the bot keeps the whole of it
+    /// in memory instead of asking the database about each user separately.
+    #[autometrics]
+    #[tracing::instrument(skip_all)]
+    pub async fn get_banned(&self) -> anyhow::Result<Vec<BannedUser>> {
+        sqlx::query_as!(BannedUser,
+            r#"SELECT uid AS "uid: UserId", banned_until AS "banned_until!"
+                FROM Users WHERE banned_until > current_timestamp"#)
+            .fetch_all(&self.pool)
+            .await
+            .context("couldn't get the list of banned users")
+    }
+,
     #[cfg(test)]
-    pub async fn get_all(&self) -> anyhow::Result<Vec<User>> {
+    pub async fn get_all_users(&self) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users"#)
             .fetch_all(&self.pool)
             .await

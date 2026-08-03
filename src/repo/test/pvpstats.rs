@@ -3,11 +3,11 @@ use crate::domain::primitives::{Bet, UserId};
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::repo;
 use crate::repo::test::dicks::{create_dick, create_user, create_user_and_dick_2};
-use crate::repo::test::{start_postgres, CHAT_ID_KIND, UID, USER_ID};
+use crate::repo::test::{fresh_db, CHAT_ID_KIND, UID, USER_ID};
 
 #[tokio::test]
 async fn test_all() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let pvp_stats = repo::BattleStatsRepo::new(db.clone(), Default::default());
 
     let chat_id = CHAT_ID_KIND;

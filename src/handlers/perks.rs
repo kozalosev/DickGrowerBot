@@ -101,7 +101,7 @@ mod test {
     use crate::handlers::utils::{ChangeIntent, DickId, Perk};
     use crate::{config, repo};
     use crate::domain::primitives::{Debt, Length, LengthChange, LengthIncrement, Ratio, SignedLengthChange};
-    use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
+    use crate::repo::test::{CHAT_ID_KIND, fresh_db, USER_ID};
 
     #[tokio::test]
     async fn test_help_pussies() {
@@ -124,7 +124,7 @@ mod test {
 
     #[tokio::test]
     async fn test_loan_payout() {
-        let (_container, db) = start_postgres().await;
+        let db = fresh_db().await;
         let loans = {
             let cfg = config::AppConfig {
                 loan_payout_ratio: Ratio::literal(0.1),

@@ -53,6 +53,8 @@ services:
       - MSG_SELFDESTRUCT_WARNING_SECONDS
       - BOT_HTTP_CONNECT_TIMEOUT_SECS
       - BOT_HTTP_TIMEOUT_SECS
+      - SUPPORT_CHAT_ID
+      - BAN_LIST_REFRESH_SECS
     expose:
       - 8080
     volumes:

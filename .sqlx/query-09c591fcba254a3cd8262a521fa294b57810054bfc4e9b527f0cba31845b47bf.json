@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT table_name AS \"table_name!\", column_name AS \"column_name!\"\n            FROM information_schema.columns\n            WHERE table_schema = 'public'\n              AND table_name <> 'users'\n              AND column_name IN ('uid', 'winner_uid')\n            ORDER BY table_name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "table_name!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "information_schema.columns",
+            "name": "table_name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "column_name!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "information_schema.columns",
+            "name": "column_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "09c591fcba254a3cd8262a521fa294b57810054bfc4e9b527f0cba31845b47bf"
+}

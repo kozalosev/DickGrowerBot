@@ -74,7 +74,7 @@ impl Loans {
             return Ok(BorrowResult::NotEligible)
         }
 
-        match get_active_loan(&mut tx, user_id, chat_internal_id).await? {
+        match get_active_loan_in_tx(&mut tx, user_id, chat_internal_id).await? {
             Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, value, self.payout_ratio).await?,
             None => create_loan(&mut tx, chat_internal_id, user_id, value, self.payout_ratio).await?
         };
@@ -117,7 +117,7 @@ async fn fetch_length_locked(
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_internal_id))]
-async fn get_active_loan(
+async fn get_active_loan_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     uid: UserId,
     chat_internal_id: InternalChatId,

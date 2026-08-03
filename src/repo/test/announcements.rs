@@ -4,11 +4,11 @@ use crate::{config, repo};
 use crate::config::Announcement;
 use crate::domain::primitives::{Counter, LanguageCode, SupportedLanguage};
 use crate::domain::primitives::SupportedLanguage::{EN, RU};
-use crate::repo::test::{dicks, start_postgres, CHAT_ID_KIND};
+use crate::repo::test::{dicks, fresh_db, CHAT_ID_KIND};
 
 #[tokio::test]
 async fn test_configured() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     create_chat(&db).await;
 
     // test creation and update
@@ -50,7 +50,7 @@ async fn test_configured_impl(db: &Pool<Postgres>, attempt: u8) {
 
 #[tokio::test]
 async fn test_no_announcements() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let [en, _] = get_languages();
     create_chat(&db).await;
 
@@ -81,7 +81,7 @@ async fn test_no_announcements() {
 
 #[tokio::test]
 async fn test_reload() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     create_chat(&db).await;
     let [en, _] = get_languages();
 

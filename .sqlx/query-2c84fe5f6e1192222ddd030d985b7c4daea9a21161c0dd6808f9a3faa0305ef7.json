@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT erase_user($1, 90)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "erase_user",
+        "type_info": "Void",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2c84fe5f6e1192222ddd030d985b7c4daea9a21161c0dd6808f9a3faa0305ef7"
+}

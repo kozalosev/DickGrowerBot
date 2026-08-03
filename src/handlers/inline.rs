@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
-use teloxide::{ApiError, Bot, RequestError};
+use teloxide::Bot;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
@@ -17,7 +17,7 @@ use crate::config::AppConfig;
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatInstanceId};
-use crate::handlers::{dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
+use crate::handlers::{banned_until_of, dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -160,7 +160,17 @@ pub async fn inline_handler(
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
-    repos.users.create_or_update(DomainUserId::from(&query.from), &name).await?;
+    match repos.users.create_or_update(DomainUserId::from(&query.from), &name).await {
+        Ok(_) => {},
+        Err(e) if banned_until_of(&e).is_some() => {
+            bot.answer_inline_query(query.id, vec![])
+                .is_personal(true)
+                .cache_time(1)
+                .await?;
+            return Ok(())
+        },
+        Err(e) => return Err(e.into()),
+    }
 
     let uid = query.from.id.0;
     let btn_label = t!("inline.results.button", locale = &lang_code);
@@ -238,12 +248,11 @@ pub async fn inline_chosen_handler(
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
-            let mut request = bot.edit_message_text_inline(inline_message_id, &inline_result.text);
+            let mut request = bot.edit_message_text_inline(inline_message_id, inline_result.text);
             request.reply_markup = inline_result.keyboard;
             request.parse_mode.replace(Html);
             request.disable_web_page_preview.replace(true);
-            request.await
-                .inspect_err(|e| log_text_if_unknown_api_error(&inline_result.text, e))?;
+            request.await?;
         }
     }
 
@@ -252,7 +261,7 @@ pub async fn inline_chosen_handler(
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn callback_handler(
+pub async fn inline_callback_handler(
     bot: Bot,
     query: CallbackQuery,
     incr: Incrementor,
@@ -283,12 +292,11 @@ pub async fn callback_handler(
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
-            let mut edit = bot.edit_message_text_inline(inline_msg_id, &inline_result.text);
+            let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
             edit.disable_web_page_preview.replace(true);
-            edit.await
-                .inspect_err(|e| log_text_if_unknown_api_error(&inline_result.text, e))?;
+            edit.await?;
         } else {
             let key = match parse_res {
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",
@@ -332,11 +340,4 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             }
         })
         .unwrap_or(Ok(CallbackDataParseResult::Invalid))
-}
-
-// TODO: move to mod.rs and use in message handlers too
-fn log_text_if_unknown_api_error(text: &str, err: &RequestError) {
-    if let RequestError::Api(ApiError::Unknown(_)) = err {
-        tracing::error!(text = %text, "couldn't send an answer")
-    }
 }

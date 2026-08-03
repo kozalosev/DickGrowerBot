@@ -3,11 +3,11 @@ use crate::{config, repo};
 use crate::domain::primitives::{Debt, LoanPayout, Ratio, UserId};
 use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
-use crate::repo::test::{CHAT_ID, NAME, start_postgres, UID, USER_ID, CHAT_ID_KIND};
+use crate::repo::test::{CHAT_ID, NAME, fresh_db, UID, USER_ID, CHAT_ID_KIND};
 
 #[tokio::test]
 async fn test_all() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
     let payout_ratio = Ratio::literal(0.1);
 
     create_user(&db).await;
@@ -89,7 +89,7 @@ async fn test_all() {
 
 #[tokio::test]
 async fn test_borrow_without_dick() {
-    let (_container, db) = start_postgres().await;
+    let db = fresh_db().await;
 
     create_user(&db).await;
     create_dick(&db).await; // to create a chat

@@ -59,6 +59,12 @@ mod test {
     use crate::domain::primitives::Username;
 
     #[test]
+    fn test_username_escaped() {
+        let username = Username::from("<3 Tom & Jerry >_<");
+        assert_eq!(username.escaped(), "\u{200E}&lt;3 Tom &amp; Jerry &gt;_&lt;\u{200E}");
+    }
+
+    #[test]
     fn test_username_value_with_at_sign() {
         let result = "@test";
         for variant in ["test", "@test"] {

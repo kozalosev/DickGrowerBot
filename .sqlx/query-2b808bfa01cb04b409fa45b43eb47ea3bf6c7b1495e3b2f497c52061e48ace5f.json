@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uid AS \"uid: UserId\", banned_until AS \"banned_until!\"\n                FROM Users WHERE banned_until > current_timestamp",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid: UserId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "uid"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "banned_until!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "banned_until"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "2b808bfa01cb04b409fa45b43eb47ea3bf6c7b1495e3b2f497c52061e48ace5f"
+}

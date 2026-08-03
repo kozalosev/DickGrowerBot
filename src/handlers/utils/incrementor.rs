@@ -255,11 +255,11 @@ mod test_incrementor {
     use crate::domain::primitives::{DaysCount, LengthChange, Ratio};
     use crate::handlers::utils::{AdditionalChange, ChangeIntent, DickId, Incrementor, Perk};
     use crate::repo;
-    use crate::repo::test::{CHAT_ID_KIND, start_postgres, USER_ID};
+    use crate::repo::test::{CHAT_ID_KIND, fresh_db, USER_ID};
 
     #[tokio::test]
     async fn test_incrementor() {
-        let (_container, db) = start_postgres().await;
+        let db = fresh_db().await;
         let dicks = repo::Dicks::new(db.clone(), Default::default());
         let incr = Incrementor {
             config: IncrementorConfig {

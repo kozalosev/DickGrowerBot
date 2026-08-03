@@ -16,6 +16,9 @@ cargo build --release
 # Run tests (requires Docker — testcontainers spins up a throwaway Postgres)
 cargo test
 
+# Remove the containers an interrupted test run left behind
+task test:clean
+
 # Run a single test (substring-matches the test name)
 cargo test test_name_substring
 
@@ -73,6 +76,40 @@ Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are 
 reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read only by the stock
 `Bot::from_env()` client (i.e. when both timeouts are unset).
 
+### Optional: /support and user bans
+
+```
+SUPPORT_CHAT_ID=-1001234567890  # where /support relays messages; unset => command hidden and disabled
+BAN_LIST_REFRESH_SECS=900       # how often the in-memory ban list is re-read from the DB
+```
+
+`Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
+only from outside the bot, with the SQL functions of migration 35 (`erase_user`, `ban_user`,
+`unban_user`) — there is no self-service delete command, and there must not be one: a deletion
+request is answered by hand. `erase_user` deletes every row the user owns but **keeps** the `Users`
+row (empty name, reset `created_at`, future `banned_until`), which is why none of the missing
+`ON DELETE CASCADE` foreign keys matter.
+
+Because the ban is written straight into the database, the bot polls for it: `bans::BanList` keeps
+the whole (tiny) list in memory, refreshes it on a timer and on SIGHUP.
+
+That list is only how fast a banned user sees the polite message — **the enforcement is migration
+36**, a `BEFORE UPDATE` trigger on `Users` that refuses any statement touching a banned user's row
+unless the statement changes `banned_until` itself (which is how the three admin functions pass).
+It sits on `Users` rather than `Dicks` for three reasons: the check is free there (`banned_until` is
+on the row being updated, so there is nothing to look up), `Users` has exactly one production write
+(`create_or_update`, `src/repo/users.rs:13`) and nothing bulk, and a trigger on `Dicks` would fire
+during the chat merge's bulk insert (`src/repo/chats.rs:609`) and abort the whole merge. The error
+carries SQLSTATE `GD3E1` (`handlers::BANNED_SQL_CODE`) with the ban's end date as its message, which
+both call sites turn back into the `errors.banned` notice.
+
+`checks::reject_banned_users()` sits in the middle of the dispatcher tree in `main.rs`. The order
+there is load-bearing: **nothing above the gate may write a row for its sender.** Only `/help`,
+`/privacy` and `/support` qualify. `/start` does not — a promo deeplink activates a code — and
+neither does `/language`, which writes to user-service. The gate is an `Update`-level filter rather
+than a `Message` one because the inline handler upserts a `Users` row too, and that upsert would
+restore an erased name.
+
 ### Observability / tracing
 
 Logging and tracing go through `tracing` (initialized in `src/observability.rs` via
@@ -126,6 +163,32 @@ Aggregate function-level metrics (request rate / error rate / latency histograms
 in `main.rs` (`autometrics::prometheus_exporter::init()`) and its output is appended to the
 existing `/metrics` endpoint in `src/metrics.rs`, alongside the `axum-prometheus` and custom
 counters — all scraped by Prometheus from the same port `8080` `/metrics` route.
+
+### Observing the Telegram Bot API calls
+
+The outgoing requests are watched by `TelegramObserver` (`src/telegram_observer.rs`), attached to
+the bot in `config/bot.rs`. It implements `RequestObserver`, a hook **our teloxide fork** adds to
+`Bot` (branch `feature/request-observer`, `crates/teloxide-core/src/observer.rs`) — the `teloxide`
+dependency in `Cargo.toml` points at that branch, and the hook is meant to be contributed upstream.
+
+Each request produces three things:
+
+* `telegram_request_duration_seconds{method,outcome}` — how long the call took. The failed calls
+  are measured too, so a timeout (the slowest case there is) is in the histogram rather than
+  missing from it. `outcome` is `ok` or one of the kinds `telegram_request_errors_total` uses; both
+  come from the same `error_handler::classify`, so the two metrics always agree.
+* a `telegram_request` client span, so a slow API call is a child span of the handler's trace
+  instead of an unattributed gap inside it.
+* when the API answers with `ApiError::Unknown` — its way of saying it disliked the payload without
+  saying which part — an `error` record carrying the serialized request body. That is the only way
+  to find out which entity or which over-long text was rejected.
+
+The observer sits *below* the adaptors, so the time `Throttle` holds a request back is not counted
+as request time. A multipart request (the file-uploading methods) is a stream by then and has no
+body to log; it is still measured.
+
+Changing any of this means updating the Grafana dashboard in the server-configs repo, next to the
+"Telegram API request errors by kind" panel.
 
 ### Optional: user-service integration
 
@@ -326,6 +389,36 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
   A `match` is still the right tool when a branch needs `return`/`continue`, guards
   (`Err(e) if …`), or more than two outcomes.
+
+## Tests against the database
+
+The whole test binary shares **one** Postgres container, and every test takes a **database of its
+own** out of it:
+
+```rust
+let db = fresh_db().await;
+```
+
+That is the entire API (`src/repo/test/mod.rs`). Three things make it work, and each of them is
+load-bearing:
+
+* **A runtime of its own.** Every `#[tokio::test]` builds a runtime and tears it down when the test
+  ends, and a sqlx pool dies with the runtime that created it — sharing a pool between tests fails
+  with *"a Tokio 1.x context was found, but it is being shutdown"* as soon as the first test
+  finishes. So the container and its maintenance pool live on a `static RUNTIME`, and `fresh_db`
+  reaches them with `RUNTIME.spawn(...)`. Not `block_on`, which panics inside a runtime. The
+  per-test pool is built on the test's own runtime and dies with it, which is fine.
+* **A template database.** The migrations run once per run into `test_template`; each test's
+  database is `CREATE DATABASE … TEMPLATE test_template`, which is far cheaper than replaying every
+  migration 54 times.
+* **A reused container.** It is marked `ReuseDirective::Always` and deliberately outlives the run,
+  so the next run finds it instead of paying the startup again. It is *only* removed by
+  `task test:clean`. Its databases are named `test_run<pid>_<n>` and the ones left by earlier runs
+  are dropped at startup — one test binary at a time is assumed, which is how `cargo test` runs.
+
+This replaced one container per test: ~35s for the suite instead of ~75s. Don't reintroduce a
+per-test or per-file container, and don't put the shared pool in a plain `static` without the
+runtime — both were tried and both fail in the ways described above.
 
 ## DB Migrations
 

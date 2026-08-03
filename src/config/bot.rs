@@ -1,5 +1,6 @@
 use std::time::Duration;
 use teloxide::Bot;
+use crate::telegram_observer::TelegramObserver;
 
 const ENV_CONNECT_TIMEOUT_SECS: &str = "BOT_HTTP_CONNECT_TIMEOUT_SECS";
 const ENV_TIMEOUT_SECS: &str = "BOT_HTTP_TIMEOUT_SECS";
@@ -31,20 +32,22 @@ impl BotConfig {
     /// configured accordingly.
     pub fn build_bot() -> anyhow::Result<Bot> {
         let cfg = Self::from_env();
-        if cfg.connect_timeout.is_none() && cfg.timeout.is_none() {
+        let bot = if cfg.connect_timeout.is_none() && cfg.timeout.is_none() {
             // Nothing to configure => keep teloxide's stock client (it also honors TELOXIDE_PROXY).
-            return Ok(Bot::from_env());
-        }
-        // `default_reqwest_settings()` returns teloxide's own reqwest builder (5s connect, 17s
-        // total, tcp_nodelay); we override only the timeouts that were explicitly configured.
-        let mut builder = teloxide::net::default_reqwest_settings();
-        if let Some(connect_timeout) = cfg.connect_timeout {
-            builder = builder.connect_timeout(connect_timeout);
-        }
-        if let Some(timeout) = cfg.timeout {
-            builder = builder.timeout(timeout);
-        }
-        Ok(Bot::from_env_with_client(builder.build()?))
+            Bot::from_env()
+        } else {
+            // `default_reqwest_settings()` returns teloxide's own reqwest builder (5s connect, 17s
+            // total, tcp_nodelay); we override only the timeouts that were explicitly configured.
+            let mut builder = teloxide::net::default_reqwest_settings();
+            if let Some(connect_timeout) = cfg.connect_timeout {
+                builder = builder.connect_timeout(connect_timeout);
+            }
+            if let Some(timeout) = cfg.timeout {
+                builder = builder.timeout(timeout);
+            }
+            Bot::from_env_with_client(builder.build()?)
+        };
+        Ok(bot.set_observer(TelegramObserver))
     }
 }
 

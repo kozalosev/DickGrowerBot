@@ -13,8 +13,10 @@ mod config;
 mod commands;
 mod users;
 mod observability;
+mod telegram_observer;
 mod scheduler;
 mod reload;
+mod bans;
 
 use std::net::SocketAddr;
 use futures::future::join_all;
@@ -26,8 +28,9 @@ use teloxide::dptree::{deps, HandlerDescription};
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::{polling_default, UpdateListener};
 use config::AppConfig;
+use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
-use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands};
+use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
 use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
@@ -53,6 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repos = Repositories::new(&db_conn, &app_config);
     let language_service = users::init_language_service(&integrations_config, repos.chats.clone(),
                                                         app_config.features.chats_merging).await;
+    let ban_list = bans::BanList::load(repos.users.clone()).await;
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
@@ -61,36 +65,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             HandlerDeps { repos, config, self_destruction, lang_resolver }
         })
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
-        .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
-        .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::cmd_handler))
+        .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, InMemStorage<SupportCommandState>, SupportCommandState>()
+            .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
+        .branch(Update::filter_message().enter_dialogue::<Message, InMemStorage<SupportCommandState>, SupportCommandState>()
+            .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler)))
+        // Everything above the ban gate must not write a single row for the sender: a banned user
+        // may still read the policy and reach the owner, but must not come back into the database.
+        // /start writes too — it activates a promo code from a deeplink — so it goes below.
+        .branch(dptree::filter(checks::is_banned).endpoint(checks::handle_banned))
+        .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
+        .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::language_cmd_handler))
         .branch(checks::group_command::<DickCommands>().endpoint(handlers::dick_cmd_handler))
         .branch(checks::group_command::<DickOfDayCommands>().endpoint(handlers::dod_cmd_handler))
-        .branch(checks::group_command::<BattleCommands>().endpoint(handlers::pvp::cmd_handler))
-        .branch(checks::group_command::<BattleCommandsNoArgs>().endpoint(handlers::pvp::cmd_handler_no_args))
-        .branch(checks::group_command::<LoanCommands>().endpoint(handlers::loan::cmd_handler))
+        .branch(checks::group_command::<BattleCommands>().endpoint(handlers::pvp::pvp_cmd_handler))
+        .branch(checks::group_command::<BattleCommandsNoArgs>().endpoint(handlers::pvp::pvp_cmd_handler_no_args))
+        .branch(checks::group_command::<LoanCommands>().endpoint(handlers::loan::loan_cmd_handler))
         .branch(checks::group_command::<ImportCommands>().endpoint(handlers::import_cmd_handler))
-        .branch(Update::filter_message().filter_command::<StatsCommands>().branch(checks::require_anchored_group()).endpoint(handlers::stats::cmd_handler))
+        .branch(Update::filter_message().filter_command::<StatsCommands>().branch(checks::require_anchored_group()).endpoint(handlers::stats::stats_cmd_handler))
         .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, InMemStorage<PromoCommandState>, PromoCommandState>()
             .branch(dptree::case![PromoCommandState::Start].endpoint(handlers::promo_cmd_handler)))
         .branch(Update::filter_message().enter_dialogue::<Message, InMemStorage<PromoCommandState>, PromoCommandState>()
             .branch(dptree::case![PromoCommandState::Requested].endpoint(handlers::promo_requested_handler)))
         .branch(Update::filter_message().filter(checks::is_not_group_chat).endpoint(checks::handle_not_group_chat))
-        .branch(Update::filter_inline_query().filter(checks::inline::is_group_chat).filter(handlers::pvp::inline_filter).endpoint(handlers::pvp::inline_handler))
+        .branch(Update::filter_inline_query().filter(checks::inline::is_group_chat).filter(handlers::pvp::inline_filter).endpoint(handlers::pvp::pvp_inline_handler))
         .branch(Update::filter_inline_query().filter(handlers::promo_inline_filter).endpoint(handlers::promo_inline_handler))
         .branch(Update::filter_inline_query().filter(checks::inline::is_group_chat).endpoint(handlers::inline_handler))
-        .branch(Update::filter_inline_query().filter(checks::inline::is_not_group_chat).endpoint(checks::inline::handle_not_group_chat))
-        .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::inline_chosen_handler))
+        .branch(Update::filter_inline_query().filter(checks::inline::is_not_group_chat).endpoint(checks::inline::handle_not_group_chat_inline))
+        .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::pvp_inline_chosen_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
         .branch(Update::filter_my_chat_member().filter(handlers::setup::added_to_legacy_group_filter).endpoint(handlers::setup::added_to_legacy_group_handler))
-        .branch(Update::filter_callback_query().filter(handlers::setup::callback_filter).endpoint(handlers::setup::callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::setup::callback_filter).endpoint(handlers::setup::setup_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))
-        .branch(Update::filter_callback_query().filter(handlers::shrink::callback_filter).endpoint(handlers::shrink::callback_handler))
-        .branch(Update::filter_callback_query().filter(handlers::pvp::callback_filter).endpoint(handlers::pvp::callback_handler))
-        .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::callback_handler))
-        .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::callback_handler))
-        .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
+        .branch(Update::filter_callback_query().filter(handlers::shrink::callback_filter).endpoint(handlers::shrink::shrink_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::pvp::callback_filter).endpoint(handlers::pvp::pvp_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::loan_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::language_callback_handler))
+        .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
     let bot = config::BotConfig::build_bot()?;
     bot.delete_webhook().await?;
@@ -100,6 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command_toggles = commands::CommandToggles {
         env: app_config.command_toggles.clone(),
         personal_language_enabled: language_service.user_service_enabled(),
+        support_enabled: app_config.support_chat_id.is_some(),
     };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
@@ -114,10 +127,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let me = bot.get_me().await?;
     let perks = handlers::perks::all(&db_conn, &app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(), &repos.dicks, perks);
-    let help_context = config::build_context_for_help_messages(me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
+    let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
     let self_destruction = SelfDestructionService::new(app_config.self_destruction);
+    let support_service = SupportService::new(app_config.support_chat_id);
 
     let webhook_url = integrations_config.webhook_url;
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
@@ -127,10 +141,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
     scheduler::spawn_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), app_config.clone());
-    reload::spawn_reload_on_sighup(repos.announcements.clone());
+    reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
+    ban_list.spawn_refresh_task(app_config.ban_list_refresh_secs);
 
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![
+        me,
         repos,
         incrementor,
         app_config,
@@ -138,7 +154,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         battle_locker,
         language_service,
         self_destruction,
-        InMemStorage::<PromoCommandState>::new()
+        support_service,
+        ban_list,
+        InMemStorage::<PromoCommandState>::new(),
+        InMemStorage::<SupportCommandState>::new()
     ];
 
     let join_result = match webhook_url {

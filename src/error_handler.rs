@@ -44,7 +44,7 @@ impl ErrorHandler<RequestError> for MetricsErrorHandler {
 /// Classifies a [`RequestError`] into a low-cardinality metric label. Connection-phase failures are
 /// checked before the timeout branch because a connect timeout satisfies both `is_connect()` and
 /// `is_timeout()`, and we want it labeled `connect`.
-fn classify(error: &RequestError) -> &'static str {
+pub fn classify(error: &RequestError) -> &'static str {
     match error {
         RequestError::Network(e) if e.is_connect() => "connect",
         RequestError::Network(e) if e.is_timeout() => "timeout",

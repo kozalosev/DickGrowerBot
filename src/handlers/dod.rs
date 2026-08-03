@@ -9,7 +9,7 @@ use teloxide::types::{LinkPreviewOptions, Message};
 use crate::{metrics, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::GrowthResult;
-use crate::domain::primitives::LanguageCode;
+use crate::domain::primitives::{LanguageCode, Username};
 use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::Incrementor;
 
@@ -92,7 +92,8 @@ pub(crate) async fn dick_of_day_impl(
                     match e.downcast::<sqlx::Error>()? {
                         sqlx::Error::Database(e)
                         if e.code() == Some(Cow::Borrowed(DOD_ALREADY_CHOSEN_SQL_CODE)) => {
-                            let text = t!("commands.dod.already_chosen", locale = &lang_code, name = e.message()).to_string();
+                            let name = Username::new(e.message().to_owned()).escaped();
+                            let text = t!("commands.dod.already_chosen", locale = &lang_code, name = name).to_string();
                             (text, MessageGroup::Notice)
                         }
                         e => Err(e)?
