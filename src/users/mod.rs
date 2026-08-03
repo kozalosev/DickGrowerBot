@@ -600,6 +600,7 @@ mod test {
                     kind: PublicChatKind::Supergroup(PublicChatSupergroup {
                         username: None,
                         is_forum: false,
+                        is_direct_messages: false,
                     }),
                 }),
             },

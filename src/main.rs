@@ -13,6 +13,7 @@ mod config;
 mod commands;
 mod users;
 mod observability;
+mod telegram_observer;
 mod scheduler;
 mod reload;
 mod bans;

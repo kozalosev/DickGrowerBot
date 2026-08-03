@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
-use teloxide::{ApiError, Bot, RequestError};
+use teloxide::Bot;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
@@ -248,12 +248,11 @@ pub async fn inline_chosen_handler(
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
-            let mut request = bot.edit_message_text_inline(inline_message_id, &inline_result.text);
+            let mut request = bot.edit_message_text_inline(inline_message_id, inline_result.text);
             request.reply_markup = inline_result.keyboard;
             request.parse_mode.replace(Html);
             request.disable_web_page_preview.replace(true);
-            request.await
-                .inspect_err(|e| log_text_if_unknown_api_error(&inline_result.text, e))?;
+            request.await?;
         }
     }
 
@@ -293,12 +292,11 @@ pub async fn inline_callback_handler(
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
-            let mut edit = bot.edit_message_text_inline(inline_msg_id, &inline_result.text);
+            let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
             edit.disable_web_page_preview.replace(true);
-            edit.await
-                .inspect_err(|e| log_text_if_unknown_api_error(&inline_result.text, e))?;
+            edit.await?;
         } else {
             let key = match parse_res {
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",
@@ -342,11 +340,4 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             }
         })
         .unwrap_or(Ok(CallbackDataParseResult::Invalid))
-}
-
-// TODO: move to mod.rs and use in message handlers too
-fn log_text_if_unknown_api_error(text: &str, err: &RequestError) {
-    if let RequestError::Api(ApiError::Unknown(_)) = err {
-        tracing::error!(text = %text, "couldn't send an answer")
-    }
 }

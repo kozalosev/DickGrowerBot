@@ -164,6 +164,32 @@ in `main.rs` (`autometrics::prometheus_exporter::init()`) and its output is appe
 existing `/metrics` endpoint in `src/metrics.rs`, alongside the `axum-prometheus` and custom
 counters — all scraped by Prometheus from the same port `8080` `/metrics` route.
 
+### Observing the Telegram Bot API calls
+
+The outgoing requests are watched by `TelegramObserver` (`src/telegram_observer.rs`), attached to
+the bot in `config/bot.rs`. It implements `RequestObserver`, a hook **our teloxide fork** adds to
+`Bot` (branch `feature/request-observer`, `crates/teloxide-core/src/observer.rs`) — the `teloxide`
+dependency in `Cargo.toml` points at that branch, and the hook is meant to be contributed upstream.
+
+Each request produces three things:
+
+* `telegram_request_duration_seconds{method,outcome}` — how long the call took. The failed calls
+  are measured too, so a timeout (the slowest case there is) is in the histogram rather than
+  missing from it. `outcome` is `ok` or one of the kinds `telegram_request_errors_total` uses; both
+  come from the same `error_handler::classify`, so the two metrics always agree.
+* a `telegram_request` client span, so a slow API call is a child span of the handler's trace
+  instead of an unattributed gap inside it.
+* when the API answers with `ApiError::Unknown` — its way of saying it disliked the payload without
+  saying which part — an `error` record carrying the serialized request body. That is the only way
+  to find out which entity or which over-long text was rejected.
+
+The observer sits *below* the adaptors, so the time `Throttle` holds a request back is not counted
+as request time. A multipart request (the file-uploading methods) is a stream by then and has no
+body to log; it is still measured.
+
+Changing any of this means updating the Grafana dashboard in the server-configs repo, next to the
+"Telegram API request errors by kind" panel.
+
 ### Optional: user-service integration
 
 The bot can integrate with the [user-service](https://github.com/Kozalo-Blog/user-service)
