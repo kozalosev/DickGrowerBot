@@ -15,6 +15,20 @@ commands:
       success: "完成！现在我会用这种语言回复本群所有人。"
       reset: "完成！群聊语言已清除 —— 我会重新按每个人自己的语言回复。"
       auto_button: "🌐 自动（各自的语言）"
+  topics:
+    description: "Choose the topics the bot works in"
+    state:
+      unrestricted: "I work in <b>every topic</b> of this chat."
+      allowed_here: "I work <b>in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+      forbidden_here: "I <b>don't work in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+    buttons:
+      only_here: "🔒 Work in this topic only"
+      allow_here: "✅ Allow in this topic"
+      forbid_here: "🚫 Forbid in this topic"
+      allow_everywhere: "🌍 Allow in all topics"
+    errors:
+      not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
+      admins_only: "Only chat administrators can choose the topics I work in."
   privacy:
     description: "存储数据说明详见隐私政策，"
   support:
@@ -166,6 +180,8 @@ migration:
   lost: "本群刚刚升级为超级群组，Telegram 为它分配了全新的标识——我已经无法把它认作原来的那个群了。\n\n如果之前有人在这里通过内联模式游玩，那些记录很遗憾已经无法找回，成绩将从头开始。如果没有人玩过，那就什么也没丢。从现在起一切照常运作，而且这种情况不会再发生了。🍆"
   lost_inline: "本群刚刚升级为超级群组。通过命令游玩的一切都随之迁移过来了，完好无损。\n\n但内联模式的结果从未与本群绑定——那需要在升级之前点击激活按钮。它们很遗憾已经无法找回。如果没有人在这里通过内联模式游玩，那就什么也没丢。从现在起一切照常运作。🍆"
 errors:
+  forbidden_topic_callback: "I don't work in this topic."
+  forbidden_topic: "I don't work in this topic. An administrator can change that with /topics."
   not_group_chat: "此机器人仅在群聊中执行任务！"
   group_account: "不能以群组或频道的身份游玩——请关闭匿名模式后重试！"
   feature_disabled: "此功能当前暂时禁用。"

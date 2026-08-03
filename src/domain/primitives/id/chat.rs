@@ -1,4 +1,4 @@
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, MessageId, ThreadId};
 use domain_types_macro::domain_type;
 use crate::*;
 
@@ -9,6 +9,36 @@ id! {
 
 #[domain_type]
 struct TelegramChatInstanceId(String);
+
+/// A forum topic of a supergroup, identified by the message that created it.
+///
+/// Telegram omits `message_thread_id` for the General topic, so [`TopicId::GENERAL`] stands for
+/// its absence.
+#[domain_type]
+struct TopicId(i32);
+
+impl TopicId {
+    /// The topic every forum has and no one created — the one Telegram reports as no topic at all.
+    pub const GENERAL: Self = Self(0);
+}
+
+impl From<ThreadId> for TopicId {
+    fn from(thread_id: ThreadId) -> Self {
+        Self(thread_id.0.0)
+    }
+}
+
+impl From<Option<ThreadId>> for TopicId {
+    fn from(thread_id: Option<ThreadId>) -> Self {
+        thread_id.map(Self::from).unwrap_or(Self::GENERAL)
+    }
+}
+
+impl From<TopicId> for ThreadId {
+    fn from(topic_id: TopicId) -> Self {
+        Self(MessageId(topic_id.value()))
+    }
+}
 
 impl From<ChatId> for TelegramChatId {
     fn from(chat_id: ChatId) -> Self {

@@ -7,11 +7,13 @@ const ENV_GRPC_ADDR_USER_SERVICE: &str = "GRPC_ADDR_USER_SERVICE";
 const ENV_USER_CACHE_TIME_SECS: &str = "USER_CACHE_TIME_SECS";
 const ENV_USER_SERVICE_TIMEOUT_SECS: &str = "USER_SERVICE_TIMEOUT_SECS";
 const ENV_CHAT_LANGUAGE_CACHE_TIME_SECS: &str = "CHAT_LANGUAGE_CACHE_TIME_SECS";
+const ENV_CHAT_TOPICS_CACHE_TIME_SECS: &str = "CHAT_TOPICS_CACHE_TIME_SECS";
 
 const DEFAULT_USER_CACHE_TIME_SECS: u64 = 360;
 const DEFAULT_USER_SERVICE_TIMEOUT_SECS: u64 = 5;
 // We own this data (it lives in our own DB), so a rather aggressive TTL is fine.
 const DEFAULT_CHAT_LANGUAGE_CACHE_TIME_SECS: u64 = 3600;
+const DEFAULT_CHAT_TOPICS_CACHE_TIME_SECS: u64 = 3600;
 
 /// Configuration for connections to external services.
 #[derive(Clone)]
@@ -23,6 +25,9 @@ pub struct IntegrationsConfig {
     /// TTL of the per-chat language cache. Independent of the user-service — the chat-wide
     /// language works even when that integration is disabled.
     pub chat_language_cache_time_secs: u64,
+    /// TTL of the per-chat allowed-topics cache. The setting's own writes refresh it, so this
+    /// only bounds how long another instance's change goes unnoticed.
+    pub chat_topics_cache_time_secs: u64,
 }
 
 #[derive(Clone)]
@@ -41,6 +46,8 @@ impl IntegrationsConfig {
             user_service: read_user_service_config(),
             chat_language_cache_time_secs: get_env_value_or_default(
                 ENV_CHAT_LANGUAGE_CACHE_TIME_SECS, DEFAULT_CHAT_LANGUAGE_CACHE_TIME_SECS),
+            chat_topics_cache_time_secs: get_env_value_or_default(
+                ENV_CHAT_TOPICS_CACHE_TIME_SECS, DEFAULT_CHAT_TOPICS_CACHE_TIME_SECS),
         })
     }
 }

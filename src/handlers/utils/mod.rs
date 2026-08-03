@@ -8,8 +8,33 @@ pub use tghack::*;
 pub use incrementor::*;
 pub use self_destruction::*;
 
-use teloxide::types::User;
+use teloxide::Bot;
+use teloxide::prelude::{Requester, UserId};
+use teloxide::types::{Chat, ChatKind, Message, PublicChatKind, User};
 use crate::domain::primitives::Username;
+
+/// Whether the chat is a forum, i.e. a supergroup with topics turned on.
+///
+/// Worth asking before reading a message's `thread_id`: an ordinary supergroup linked to a
+/// channel puts one on the messages of a discussion thread too, and those aren't topics.
+pub fn is_forum(chat: &Chat) -> bool {
+    match &chat.kind {
+        ChatKind::Public(public) => match &public.kind {
+            PublicChatKind::Supergroup(supergroup) => supergroup.is_forum,
+            _ => false,
+        },
+        ChatKind::Private(_) => false,
+    }
+}
+
+/// Whether the user may change a chat-wide setting. Asked again on every button press: the
+/// callback's owner check only proves who invoked the picker, and rights can be taken away
+/// between the message and the tap.
+#[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = user_id.0))]
+pub async fn is_chat_admin(bot: &Bot, msg: &Message, user_id: UserId) -> anyhow::Result<bool> {
+    let admins = bot.get_chat_administrators(msg.chat.id).await?;
+    Ok(admins.into_iter().any(|member| member.user.id == user_id))
+}
 
 pub fn get_full_name(user: &User) -> Username {
     let name = user.last_name.as_ref()

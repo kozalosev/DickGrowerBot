@@ -14,6 +14,7 @@ use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::handlers::shrink::{build_shrink_keyboard, render_shrinks_page, ShrinkView};
 use crate::metrics;
 use crate::repo::{Repositories, ShrinkEvent};
+use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
 
 /// Runs the daily shrink: applies the decay in one DB statement, then broadcasts a per-chat summary
@@ -26,6 +27,7 @@ pub async fn run_daily_shrink(
     bot: Throttle<Bot>,
     repos: Repositories,
     language_service: LanguageService,
+    topics: TopicPolicy,
     config: AppConfig,
 ) -> anyhow::Result<()> {
     let events = repos.shrinks
@@ -73,8 +75,11 @@ pub async fn run_daily_shrink(
             "skipped the unreachable chats");
     }
 
+    let deps = BroadcastDeps {
+        bot: &bot, repos: &repos, language_service: &language_service, topics: &topics, config: &config,
+    };
     for (chat_id, victims) in by_chat {
-        match broadcast_shrink(&bot, &repos, &language_service, &config, chat_id, today, &victims).await {
+        match broadcast_shrink(&deps, chat_id, today, &victims).await {
             Ok(_) => metrics::DAILY_SHRINK.broadcast_sent(),
             Err(e) => handle_broadcast_error(&repos, chat_id, e).await,
         }
@@ -146,16 +151,14 @@ fn is_chat_unreachable(err: &anyhow::Error) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = %chat_id, date = %date, victims = victims.len()))]
 async fn broadcast_shrink(
-    bot: &Throttle<Bot>,
-    repos: &Repositories,
-    language_service: &LanguageService,
-    config: &AppConfig,
+    deps: &BroadcastDeps<'_>,
     chat_id: TelegramChatId,
     date: chrono::NaiveDate,
     victims: &[ShrinkEvent],
 ) -> anyhow::Result<()> {
+    let BroadcastDeps { bot, config, topics, .. } = deps;
     let chat = ChatIdKind::from(chat_id);
-    let lang = resolve_broadcast_language(repos, language_service, config, &chat).await;
+    let lang = resolve_broadcast_language(deps, &chat).await;
     let lang_code = LanguageCode::new(lang.to_string());
 
     let has_more_pages = victims.len() > config.top_limit.value() as usize;
@@ -171,19 +174,30 @@ async fn broadcast_shrink(
     if let Some(keyboard) = keyboard {
         request = request.reply_markup(ReplyMarkup::InlineKeyboard(keyboard));
     }
+    // Nothing is being replied to here, so the topic has to be named outright. Left to itself the
+    // message would go to General — which a forum that keeps the bot elsewhere may well have
+    // closed, and posting into a closed topic is refused.
+    if let Some(topic) = topics.allowed(&chat).await.primary() {
+        request = request.message_thread_id(topic.into());
+    }
     request.await?;
     Ok(())
+}
+
+/// The services every chat's broadcast needs, bundled so the per-chat calls stay readable.
+struct BroadcastDeps<'a> {
+    bot: &'a Throttle<Bot>,
+    repos: &'a Repositories,
+    language_service: &'a LanguageService,
+    topics: &'a TopicPolicy,
+    config: &'a AppConfig,
 }
 
 /// Picks the language for a chat's broadcast: the chat-wide override wins; otherwise, when the
 /// `getMany` toggle is on, the most popular language among the chat's players; English otherwise.
 #[tracing::instrument(skip_all, fields(chat_id = %chat))]
-async fn resolve_broadcast_language(
-    repos: &Repositories,
-    language_service: &LanguageService,
-    config: &AppConfig,
-    chat: &ChatIdKind,
-) -> SupportedLanguage {
+async fn resolve_broadcast_language(deps: &BroadcastDeps<'_>, chat: &ChatIdKind) -> SupportedLanguage {
+    let BroadcastDeps { repos, language_service, config, .. } = deps;
     match repos.chats.get_chat_language(chat).await {
         Ok(Some(lang)) => return lang,
         Ok(None) => {}

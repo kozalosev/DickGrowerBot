@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Chats SET settings = settings - 'topics' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "55c7dcb915a5f1a3d2c4eeceae128b70cc66aec80253a0fe0610ed2fdff85409"
+}

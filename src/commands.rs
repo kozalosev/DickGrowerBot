@@ -1,13 +1,43 @@
+use std::collections::HashSet;
 use futures::future::join_all;
+use once_cell::sync::Lazy;
 use rust_i18n::t;
 use teloxide::{Bot, RequestError};
 use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
 use crate::config::CachedEnvToggles;
-use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommands, SupportCommands};
-use crate::handlers::pvp::BattleCommands;
+use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
+use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
+
+/// The name of every command the bot answers, without the leading slash and lowercased — the
+/// aliases hidden from the menu included, since the bot answers those too.
+///
+/// Built from the same `bot_commands()` the menu is built from, so a command added there is
+/// covered here as well. It exists for the topic gate: in a group with several bots most `/…`
+/// messages are addressed to someone else, and a gate that judged them all would answer for them.
+pub static COMMAND_NAMES: Lazy<HashSet<String>> = Lazy::new(|| {
+    [
+        StartCommands::bot_commands(),
+        HelpCommands::bot_commands(),
+        PrivacyCommands::bot_commands(),
+        PromoCommands::bot_commands(),
+        SupportCommands::bot_commands(),
+        StatsCommands::bot_commands(),
+        LanguageCommands::bot_commands(),
+        TopicsCommands::bot_commands(),
+        DickCommands::bot_commands(),
+        DickOfDayCommands::bot_commands(),
+        BattleCommands::bot_commands(),
+        BattleCommandsNoArgs::bot_commands(),
+        LoanCommands::bot_commands(),
+        ImportCommands::bot_commands(),
+    ].concat()
+        .into_iter()
+        .map(|cmd| cmd.command.trim_start_matches('/').to_lowercase())
+        .collect()
+});
 
 /// Everything that decides which commands land in the Bot API menu, assembled in `main`. It bundles
 /// the per-command env gate ([`CachedEnvToggles`]) with the runtime-derived switches that depend on
@@ -51,10 +81,12 @@ pub async fn set_my_commands(
         LoanCommands::bot_commands(),
         StatsCommands::bot_commands(),
     ];
-    // The chat-wide /language is admin-only, so it lives in the admin scope, not the group scope.
+    // The chat-wide /language and /topics are admin-only, so they live in the admin scope,
+    // not the group one.
     let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),
         LanguageCommands::bot_commands(),
+        TopicsCommands::bot_commands(),
     ]].concat();
 
     let requests = vec![

@@ -15,6 +15,20 @@ commands:
       success: "Done! Everyone in this chat will now see me in the selected language."
       reset: "Done! The chat language was cleared — everyone will see me in their own language again."
       auto_button: "🌐 Auto (each user's own)"
+  topics:
+    description: "Choose the topics the bot works in"
+    state:
+      unrestricted: "I work in <b>every topic</b> of this chat."
+      allowed_here: "I work <b>in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+      forbidden_here: "I <b>don't work in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+    buttons:
+      only_here: "🔒 Work in this topic only"
+      allow_here: "✅ Allow in this topic"
+      forbid_here: "🚫 Forbid in this topic"
+      allow_everywhere: "🌍 Allow in all topics"
+    errors:
+      not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
+      admins_only: "Only chat administrators can choose the topics I work in."
   privacy:
     description: "Privacy Policy detailing what data we store"
   support:
@@ -166,6 +180,8 @@ migration:
   lost: "This group has just become a supergroup, and Telegram has given it an entirely new identity — I can no longer recognize it as the group I used to know.\n\nIf anyone played here through inline mode, that history is sadly out of reach now and the scores start over. If nobody did, nothing was lost. From here on everything works as usual — and it won't happen again. 🍆"
   lost_inline: "This group has just become a supergroup. Everything played through the commands came across with it and is safe.\n\nThe results from inline mode, though, never got tied to this group — that needed the activation button pressed before the upgrade. They are sadly out of reach now. If nobody played through inline mode here, nothing was lost. From here on everything works as usual. 🍆"
 errors:
+  forbidden_topic_callback: "I don't work in this topic."
+  forbidden_topic: "I don't work in this topic. An administrator can change that with /topics."
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"
   feature_disabled: "This feature is currently temporarily disabled."

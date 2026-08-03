@@ -17,6 +17,7 @@ mod telegram_observer;
 mod scheduler;
 mod reload;
 mod bans;
+mod topics;
 
 use std::net::SocketAddr;
 use futures::future::join_all;
@@ -31,7 +32,7 @@ use config::AppConfig;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
-use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands};
+use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
@@ -57,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let language_service = users::init_language_service(&integrations_config, repos.chats.clone(),
                                                         app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;
+    let topic_policy = topics::TopicPolicy::new(&integrations_config, repos.chats.clone());
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
@@ -65,6 +67,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             HandlerDeps { repos, config, self_destruction, lang_resolver }
         })
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
+        // /topics goes above the gate it configures, or a chat could lock itself out of its own
+        // setting. Being a branch of its own, it needs no exemption inside the gate: this one
+        // matches first, and only what falls through reaches the gate below.
+        .branch(Update::filter_message().filter_command::<TopicsCommands>().endpoint(handlers::topics::topics_cmd_handler))
+        // Above everything a forum chat may have been told to keep out of its other topics, and
+        // safe to put there for the same reason the ban gate is where it is: it writes nothing.
+        .branch(Update::filter_message().filter(checks::is_group_chat).filter_async(checks::is_forbidden_topic).endpoint(checks::handle_forbidden_topic))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
         .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, InMemStorage<SupportCommandState>, SupportCommandState>()
@@ -96,12 +105,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::pvp_inline_chosen_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
         .branch(Update::filter_my_chat_member().filter(handlers::setup::added_to_legacy_group_filter).endpoint(handlers::setup::added_to_legacy_group_handler))
+        // The buttons need the same gate as the commands: a keyboard outlives the message it came
+        // with, and the restriction may well be younger than both.
+        .branch(Update::filter_callback_query().filter_async(checks::is_forbidden_topic_callback).endpoint(checks::handle_forbidden_topic_callback))
         .branch(Update::filter_callback_query().filter(handlers::setup::callback_filter).endpoint(handlers::setup::setup_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::page_callback_filter).endpoint(handlers::page_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::shrink::callback_filter).endpoint(handlers::shrink::shrink_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::pvp::callback_filter).endpoint(handlers::pvp::pvp_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::loan_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::language_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::topics::callback_filter).endpoint(handlers::topics::topics_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
     let bot = config::BotConfig::build_bot()?;
@@ -140,7 +153,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
-    scheduler::spawn_daily_shrink(bot.clone(), repos.clone(), language_service.clone(), app_config.clone());
+    scheduler::spawn_daily_shrink(bot.clone(), repos.clone(), language_service.clone(),
+                                  topic_policy.clone(), app_config.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
     ban_list.spawn_refresh_task(app_config.ban_list_refresh_secs);
 
@@ -156,6 +170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         self_destruction,
         support_service,
         ban_list,
+        topic_policy,
         InMemStorage::<PromoCommandState>::new(),
         InMemStorage::<SupportCommandState>::new()
     ];

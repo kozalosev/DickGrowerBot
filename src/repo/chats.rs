@@ -3,8 +3,9 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use anyhow::{bail, Context};
 use sqlx::{Postgres, Transaction};
+use crate::domain::objects::AllowedTopics;
 use crate::domain::primitives::SupportedLanguage;
-use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::repo::ensure_only_one_row_updated;
 use crate::repository;
 
@@ -43,6 +44,27 @@ pub enum ChatMigrationOutcome {
     /// Both ids already have a row of their own. Nothing is lost, but the chat's state is split in
     /// two and only a human can decide how to fold it together.
     Conflict,
+}
+
+/// Reads the `topics` object of `Chats.settings` — an id-keyed set, `{"<topic id>": true}`. Only
+/// the keys carry meaning; the values exist because an object is what merges and deletes cleanly
+/// in one statement (see [`Chats::allow_topic`]).
+///
+/// A key that isn't a topic id is skipped: nothing but this module writes there, but a hand-edited
+/// row must not take the whole restriction down with it.
+fn parse_allowed_topics(value: sqlx::types::JsonValue) -> AllowedTopics {
+    let sqlx::types::JsonValue::Object(entries) = value else {
+        tracing::warn!(value = ?value, "the allowed topics of a chat are not an object");
+        return AllowedTopics::default()
+    };
+    let topics = entries.into_iter()
+        .map(|(id, _)| id)
+        .filter_map(|id| id.parse::<i32>()
+            .inspect_err(|_| tracing::warn!(topic_id = %id, "an unparsable topic id is stored for the chat"))
+            .map(TopicId::new)
+            .ok())
+        .collect();
+    AllowedTopics::new(topics)
 }
 
 impl ChatMigrationOutcome {
@@ -170,6 +192,75 @@ repository!(Chats, with_feature_toggles,
                 .await
                 .context(format!("couldn't clear the language of the chat {chat_id}"))?,
         };
+        Ok(())
+    }
+,
+    /// The forum topics the chat lets the bot work in. An empty [`AllowedTopics`] means the chat
+    /// never restricted anything, which is the default.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn get_allowed_topics(&self, chat_id: &ChatIdKind) -> anyhow::Result<AllowedTopics> {
+        let topics = sqlx::query_scalar!(
+                "SELECT settings->'topics' FROM Chats
+                    WHERE chat_id = $1::bigint OR chat_instance = $1::text",
+                chat_id.value() as String)
+            .fetch_optional(&self.pool)
+            .await
+            .context(format!("couldn't get the allowed topics of the chat with id = {chat_id}"))?
+            .flatten();
+        Ok(topics.map(parse_allowed_topics).unwrap_or_default())
+    }
+,
+    /// Lets the bot work in one more topic. The first call on a chat turns the bot from working
+    /// everywhere into working in this topic only.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, topic_id = %topic_id))]
+    pub async fn allow_topic(&self, chat_id: &ChatIdPartiality, topic_id: TopicId) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        // Merging into the existing object rather than reading it first keeps two admins pressing
+        // the buttons at once from overwriting each other.
+        sqlx::query!(
+                "UPDATE Chats SET settings = jsonb_set(settings, '{topics}',
+                    COALESCE(settings->'topics', '{}'::jsonb) || jsonb_build_object($2::text, true))
+                    WHERE id = $1",
+                internal_id as InternalChatId, topic_id.value().to_string())
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't allow the topic {topic_id} of the chat {chat_id}"))?;
+        Ok(())
+    }
+,
+    /// Stops the bot from working in a topic. Removing the last one leaves the chat unrestricted
+    /// rather than one where the bot works nowhere.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, topic_id = %topic_id))]
+    pub async fn forbid_topic(&self, chat_id: &ChatIdPartiality, topic_id: TopicId) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        // The parentheses are load-bearing: `-` binds tighter than `->`, so without them the
+        // key would be subtracted from the path instead of from the object it points at.
+        sqlx::query!(
+                "UPDATE Chats SET settings = CASE
+                    WHEN (settings->'topics') - $2::text = '{}'::jsonb THEN settings - 'topics'
+                    ELSE jsonb_set(settings, '{topics}', (settings->'topics') - $2::text)
+                    END
+                    WHERE id = $1 AND settings->'topics' IS NOT NULL",
+                internal_id as InternalChatId, topic_id.value().to_string())
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't forbid the topic {topic_id} of the chat {chat_id}"))?;
+        Ok(())
+    }
+,
+    /// Drops the restriction: the bot works in every topic again.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn allow_all_topics(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        sqlx::query!("UPDATE Chats SET settings = settings - 'topics' WHERE id = $1",
+                internal_id as InternalChatId)
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't allow all the topics of the chat {chat_id}"))?;
         Ok(())
     }
 ,

@@ -30,7 +30,8 @@ Features
 * Prometheus-like metrics, including per-function request/error/latency metrics via [autometrics](https://autometrics.dev);
 * OpenTelemetry distributed tracing (OTLP/gRPC), exportable to a collector such as Jaeger;
 * `/support` to reach the owner without exposing an email or a personal account, and SQL functions to
-  answer a data deletion request by hand — see [Support requests and data deletion](https://github.com/kozalosev/DickGrowerBot/wiki/Support-requests-and-data-deletion) in the wiki.
+  answer a data deletion request by hand — see [Support requests and data deletion](https://github.com/kozalosev/DickGrowerBot/wiki/Support-requests-and-data-deletion) in the wiki;
+* can be restricted for use in specific topics only.
 
 Technical stuff
 ---------------

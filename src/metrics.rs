@@ -46,8 +46,14 @@ pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
     UserServiceCounters::new("user_service_get_total", "count of user-service get() resolutions, split by whether they were served from cache or sent over gRPC"));
 pub static CMD_LANGUAGE: Lazy<LanguageCommandCounters> = Lazy::new(||
     LanguageCommandCounters::new("command_language_usage_total", "count of /language usage, by scope (personal/chat) and state (invoked when the command is used, finished when a language is actually changed)"));
-pub static CHAT_LANGUAGE: Lazy<ChatLanguageCounters> = Lazy::new(||
-    ChatLanguageCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
+pub static CHAT_LANGUAGE: Lazy<CacheSourceCounters> = Lazy::new(||
+    CacheSourceCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
+pub static CMD_TOPICS: Lazy<ComplexCommandCounters> = Lazy::new(||
+    ComplexCommandCounters::new("command_topics_usage_total", "count of /topics invocations and changes of the setting", ["invoked", "finished"]));
+pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
+    CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
+pub static TOPIC_RESTRICTED: Lazy<Counter> = Lazy::new(||
+    Counter::new("topic_restricted_total", "count of updates dropped because they came from a forum topic the chat doesn't let the bot work in"));
 pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
     SpokenLanguageCounter::new("used_language_total", "count of updates by the sender's Telegram (client) language_code, region suffix kept — an anonymous proxy for the languages the audience speaks"));
 pub static UPDATE_KIND: Lazy<UpdateKindCounter> = Lazy::new(||
@@ -136,6 +142,9 @@ fn force_registration() {
     Lazy::force(&USER_SERVICE);
     Lazy::force(&CMD_LANGUAGE);
     Lazy::force(&CHAT_LANGUAGE);
+    Lazy::force(&CMD_TOPICS);
+    Lazy::force(&CHAT_TOPICS);
+    Lazy::force(&TOPIC_RESTRICTED);
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&UPDATE_KIND);
     Lazy::force(&SELF_DESTRUCTION);
@@ -241,7 +250,8 @@ pub struct CommandProgress {
     invoked: Counter,
     finished: Counter,
 }
-pub struct ChatLanguageCounters {
+/// A pair of counters for a read-through cache: where each lookup was answered from.
+pub struct CacheSourceCounters {
     cache: Counter,
     db: Counter,
 }
@@ -418,7 +428,7 @@ impl CommandProgress {
     }
 }
 
-impl ChatLanguageCounters {
+impl CacheSourceCounters {
     fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["source"]);
         Self {
@@ -427,12 +437,12 @@ impl ChatLanguageCounters {
         }
     }
 
-    /// A chat-language resolution served from the local TTL cache.
+    /// A lookup served from the local TTL cache.
     pub fn cache_hit(&self) {
         self.cache.inc()
     }
 
-    /// A chat-language resolution that hit the database.
+    /// A lookup that hit the database.
     pub fn db_query(&self) {
         self.db.inc()
     }
