@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Users SET banned_until = current_timestamp - interval '1 day' WHERE uid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1b3fc0b0d0a0d0b6a7202d2438eccebcc58ae7123b9a99339b2c931317722fe3"
+}

@@ -7,6 +7,7 @@ use crate::config::self_destruction::*;
 use crate::config::shrink::DailyShrinkConfig;
 use crate::config::incrementor::IncrementorConfig;
 use crate::domain::primitives::{Bet, DaysCount, Limit, Ratio};
+use crate::domain::primitives::chat::TelegramChatId;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Default))]
@@ -22,6 +23,8 @@ pub struct AppConfig {
     pub announcements: AnnouncementsConfig,
     pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
+    pub support_chat_id: Option<TelegramChatId>,
+    pub ban_list_refresh_secs: Duration,
 }
 
 #[derive(Clone)]
@@ -59,6 +62,8 @@ impl AppConfig {
             reading_speed_cpm: get_env_value_or_default("MSG_SELFDESTRUCT_READING_SPEED_CPM", 500),
             warning: Duration::from_secs(get_optional_env_value("MSG_SELFDESTRUCT_WARNING_SECONDS")),
         };
+        let support_chat_id = get_chat_id("SUPPORT_CHAT_ID");
+        let ban_list_refresh_secs = Duration::from_secs(get_env_value_or_default("BAN_LIST_REFRESH_SECS", 900).max(1));
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -84,6 +89,8 @@ impl AppConfig {
             announcements: AnnouncementsConfig::load(&announcements_file),
             self_destruction,
             command_toggles: Default::default(),
+            support_chat_id,
+            ban_list_refresh_secs,
         }
     }
 }

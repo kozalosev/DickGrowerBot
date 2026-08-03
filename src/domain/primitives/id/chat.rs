@@ -16,6 +16,12 @@ impl From<ChatId> for TelegramChatId {
     }
 }
 
+impl From<TelegramChatId> for ChatId {
+    fn from(chat_id: TelegramChatId) -> Self {
+        Self(chat_id.value())
+    }
+}
+
 #[derive(derive_more::Display, Debug, Default, Copy, Clone)]
 pub enum ChatIdSource {
     InlineQuery,

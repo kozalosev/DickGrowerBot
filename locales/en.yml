@@ -17,6 +17,13 @@ commands:
       auto_button: "🌐 Auto (each user's own)"
   privacy:
     description: "Privacy Policy detailing what data we store"
+  support:
+    description: "Write to the bot's owner"
+    request: "Write your message and I'll pass it to my owner. Send any command to cancel."
+    sent: "Your message is sent. The answer will come from my owner in a private chat."
+    cancelled: "The request is cancelled."
+    too_often: "You've just sent a message. Please wait a minute before the next one."
+    disabled: "This feature is currently unavailable."
   grow:
     description: "Grow your dick!"
     result: "Your dick has %{event} by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."
@@ -162,5 +169,7 @@ errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"
   feature_disabled: "This feature is currently temporarily disabled."
+  banned: "You can't play until %{date}. Write via /support if you think it's a mistake."
+  banned_inline_title: "You are blocked"
 self_destruction:
   warning: "🧹 <i>To keep the chat clean, this message will be deleted in <b>%{seconds}</b> seconds…</i>"

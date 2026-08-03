@@ -2,6 +2,7 @@ mod dick;
 mod help;
 mod start;
 mod privacy;
+mod support;
 mod dod;
 mod import;
 mod promo;
@@ -28,6 +29,7 @@ pub use dick::*;
 pub use help::*;
 pub use start::*;
 pub use privacy::*;
+pub use support::*;
 pub use dod::*;
 pub use import::*;
 pub use inline::*;
@@ -40,6 +42,9 @@ use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::SelfDestructionService;
 use crate::repo::Repositories;
 use crate::users::LanguageResolver;
+
+const BANNED_SQL_CODE: &str = "GD3E1";
+const BAN_DATE_FORMAT: &str = "%d.%m.%Y";
 
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -176,7 +181,7 @@ macro_rules! reply_html {
 }
 
 /// Like [`reply_html!`], but additionally registers the sent message with the
-/// [`SelfDestructionService`](crate::handlers::utils::SelfDestructionService) so it
+/// [`SelfDestructionService`](SelfDestructionService) so it
 /// self-destructs after the delay configured for `$group`. `$lang` (a `&LanguageCode`) is
 /// used to localize the optional deletion warning. Evaluates to the sent `Message`.
 /// `$svc` must be a `SelfDestructionService` in scope.
@@ -225,19 +230,31 @@ pub(crate) async fn answer_callback_feature_disabled(
     Ok(())
 }
 
+pub(crate) fn banned_until_of(e: &anyhow::Error) -> Option<String> {
+    e.downcast_ref::<sqlx::Error>()
+     .and_then(sqlx::Error::as_database_error)
+     .filter(|e| e.code().is_some_and(|code| code == BANNED_SQL_CODE))
+     .map(|e| e.message().to_owned())
+}
+
 pub mod checks {
     use autometrics::autometrics;
     use std::ops::Not;
+    use chrono::{DateTime, Utc};
     use rust_i18n::t;
     use teloxide::Bot;
     use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
-    use teloxide::types::{Update, Message};
+    use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
+    use teloxide::requests::Requester;
+    use teloxide::types::{InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, Update, UpdateKind};
     use teloxide::utils::command::BotCommands;
+    use crate::bans::BanList;
     use crate::config::MessageGroup;
-    use crate::domain::primitives::LanguageCode;
+    use crate::domain::primitives::{LanguageCode, UserId};
     use crate::domain::primitives::chat::TelegramChatId;
     use crate::handlers::HandlerDeps;
-    use super::{HandlerResult, reply_html};
+    use crate::metrics;
+    use super::{BAN_DATE_FORMAT, HandlerResult, reply_html};
 
     pub fn is_group_chat(msg: Message) -> bool {
         if msg.chat.is_private() || msg.chat.is_channel() {
@@ -323,6 +340,55 @@ pub mod checks {
     async fn handle_needs_setup(bot: Bot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         super::setup::send_setup_message(&bot, msg.chat.id, &lang_code).await?;
+        Ok(())
+    }
+    
+    fn banned_until(upd: &Update, ban_list: BanList) -> Option<DateTime<Utc>> {
+        upd.from()
+           .map(UserId::from)
+           .and_then(|uid| ban_list.banned_until(uid))
+    }
+
+    #[inline]
+    pub fn is_banned(upd: Update, ban_list: BanList) -> bool {
+        banned_until(&upd, ban_list).is_some()
+    }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = ?upd.from().map(|u| u.id.0), lang_code = tracing::field::Empty))]
+    pub async fn handle_banned(bot: Bot, upd: Update, bans: BanList, deps: HandlerDeps) -> HandlerResult {
+        let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
+        let Some(until) = banned_until(&upd, bans) else {
+            return Ok(())
+        };
+        metrics::BANNED_UPDATES_BLOCKED.inc();
+
+        let lang_code = lang_resolver.execute().await;
+        let answer = t!("errors.banned", locale = &lang_code,
+            date = until.format(BAN_DATE_FORMAT).to_string());
+
+        match upd.kind {
+            UpdateKind::Message(msg) => {
+                reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
+            }
+            UpdateKind::CallbackQuery(query) => {
+                bot.answer_callback_query(query.id)
+                    .show_alert(true)
+                    .text(answer)
+                    .await?;
+            }
+            UpdateKind::InlineQuery(query) => {
+                let title = t!("errors.banned_inline_title", locale = &lang_code);
+                let content = InputMessageContent::Text(InputMessageContentText::new(answer));
+                let article = InlineQueryResultArticle::new("banned", title, content);
+                bot.answer_inline_query(query.id, vec![article.into()])
+                    .is_personal(true)
+                    .cache_time(1)
+                    .await?;
+            }
+            // a chosen inline result has nothing to answer to
+            _ => {}
+        }
         Ok(())
     }
 

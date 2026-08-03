@@ -5,7 +5,7 @@ use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
 use crate::config::CachedEnvToggles;
-use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommands};
+use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommands, SupportCommands};
 use crate::handlers::pvp::BattleCommands;
 use crate::handlers::stats::StatsCommands;
 
@@ -18,6 +18,9 @@ pub struct CommandToggles {
     /// Whether the personal `/language` command is advertised in private chats — it needs the
     /// user-service, so it's hidden when that integration is disabled.
     pub personal_language_enabled: bool,
+    /// Whether `/support` is advertised — it needs a chat to relay the messages to, so it's hidden
+    /// when `SUPPORT_CHAT_ID` is unset.
+    pub support_enabled: bool,
 }
 
 pub async fn set_my_commands(
@@ -38,6 +41,7 @@ pub async fn set_my_commands(
         PromoCommands::bot_commands(),
         StatsCommands::bot_commands(),
         if toggles.personal_language_enabled { LanguageCommands::bot_commands() } else { Vec::new() },
+        if toggles.support_enabled { SupportCommands::bot_commands() } else { Vec::new() },
     ];
     let group_commands = vec![
         HelpCommands::bot_commands(),

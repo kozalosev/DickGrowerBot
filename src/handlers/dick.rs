@@ -13,7 +13,7 @@ use crate::{metrics, reply_html, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
-use crate::handlers::{answer_callback_feature_disabled, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
+use crate::handlers::{answer_callback_feature_disabled, banned_until_of, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, Incrementor};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
@@ -78,7 +78,14 @@ pub(crate) async fn grow_impl(
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let uid = UserId::from(from);
     let name = utils::get_full_name(from);
-    let user = repos.users.create_or_update(uid, &name).await?;
+    let user = match repos.users.create_or_update(uid, &name).await {
+        Ok(user) => user,
+        Err(e) if let Some(date) = banned_until_of(&e) => {
+            let text = t!("errors.banned", locale = &lang_code, date = date).to_string();
+            return Ok(TaggedReply { text, group: MessageGroup::Notice })
+        },
+        Err(e) => return Err(e)
+    };
     let days_since_registration = Utc::now() - user.created_at;
     let days_since_registration = days_since_registration.num_days().to_u32()
         .map(DaysCount::new)

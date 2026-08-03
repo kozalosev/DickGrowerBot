@@ -17,7 +17,7 @@ use crate::config::AppConfig;
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatInstanceId};
-use crate::handlers::{dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
+use crate::handlers::{banned_until_of, dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -160,7 +160,17 @@ pub async fn inline_handler(
     metrics::INLINE_COUNTER.invoked();
 
     let name = utils::get_full_name(&query.from);
-    repos.users.create_or_update(DomainUserId::from(&query.from), &name).await?;
+    match repos.users.create_or_update(DomainUserId::from(&query.from), &name).await {
+        Ok(_) => {},
+        Err(e) if banned_until_of(&e).is_some() => {
+            bot.answer_inline_query(query.id, vec![])
+                .is_personal(true)
+                .cache_time(1)
+                .await?;
+            return Ok(())
+        },
+        Err(e) => return Err(e.into()),
+    }
 
     let uid = query.from.id.0;
     let btn_label = t!("inline.results.button", locale = &lang_code);

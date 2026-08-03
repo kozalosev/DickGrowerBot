@@ -16,6 +16,9 @@ cargo build --release
 # Run tests (requires Docker — testcontainers spins up a throwaway Postgres)
 cargo test
 
+# Remove the containers an interrupted test run left behind
+task test:clean
+
 # Run a single test (substring-matches the test name)
 cargo test test_name_substring
 
@@ -72,6 +75,40 @@ BOT_HTTP_TIMEOUT_SECS=17         # total per-request timeout; teloxide default w
 Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are auto-detected by
 reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read only by the stock
 `Bot::from_env()` client (i.e. when both timeouts are unset).
+
+### Optional: /support and user bans
+
+```
+SUPPORT_CHAT_ID=-1001234567890  # where /support relays messages; unset => command hidden and disabled
+BAN_LIST_REFRESH_SECS=900       # how often the in-memory ban list is re-read from the DB
+```
+
+`Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
+only from outside the bot, with the SQL functions of migration 35 (`erase_user`, `ban_user`,
+`unban_user`) — there is no self-service delete command, and there must not be one: a deletion
+request is answered by hand. `erase_user` deletes every row the user owns but **keeps** the `Users`
+row (empty name, reset `created_at`, future `banned_until`), which is why none of the missing
+`ON DELETE CASCADE` foreign keys matter.
+
+Because the ban is written straight into the database, the bot polls for it: `bans::BanList` keeps
+the whole (tiny) list in memory, refreshes it on a timer and on SIGHUP.
+
+That list is only how fast a banned user sees the polite message — **the enforcement is migration
+36**, a `BEFORE UPDATE` trigger on `Users` that refuses any statement touching a banned user's row
+unless the statement changes `banned_until` itself (which is how the three admin functions pass).
+It sits on `Users` rather than `Dicks` for three reasons: the check is free there (`banned_until` is
+on the row being updated, so there is nothing to look up), `Users` has exactly one production write
+(`create_or_update`, `src/repo/users.rs:13`) and nothing bulk, and a trigger on `Dicks` would fire
+during the chat merge's bulk insert (`src/repo/chats.rs:609`) and abort the whole merge. The error
+carries SQLSTATE `GD3E1` (`handlers::BANNED_SQL_CODE`) with the ban's end date as its message, which
+both call sites turn back into the `errors.banned` notice.
+
+`checks::reject_banned_users()` sits in the middle of the dispatcher tree in `main.rs`. The order
+there is load-bearing: **nothing above the gate may write a row for its sender.** Only `/help`,
+`/privacy` and `/support` qualify. `/start` does not — a promo deeplink activates a code — and
+neither does `/language`, which writes to user-service. The gate is an `Update`-level filter rather
+than a `Message` one because the inline handler upserts a `Users` row too, and that upsert would
+restore an erased name.
 
 ### Observability / tracing
 
@@ -326,6 +363,30 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
   A `match` is still the right tool when a branch needs `return`/`continue`, guards
   (`Err(e) if …`), or more than two outcomes.
+
+## Tests against the database
+
+Starting a container costs seconds, creating a database inside a running one costs milliseconds, so
+a test file shares **one** container and gives every test a **fresh database** of its own. See
+`src/repo/test/bans.rs`:
+
+```rust
+static POSTGRES: SharedPostgresCell = SharedPostgresCell::new();
+
+async fn fresh_db() -> (Arc<SharedPostgres>, Pool<Postgres>) {
+    let postgres = POSTGRES.get().await;
+    let db = postgres.fresh_db().await;
+    (postgres, db)
+}
+```
+
+The handle must stay alive for the whole test (`let (_postgres, db) = fresh_db().await;`).
+`SharedPostgresCell` holds a `Weak`, not a `OnceCell`, on purpose: a `static` is never dropped, so a
+`OnceCell` would leave a Postgres running after every test run. With the `Weak`, the container stops
+as soon as the last test using it finishes.
+
+The older `start_postgres()` — one container per test — still works and the files that have not been
+converted yet keep using it.
 
 ## DB Migrations
 

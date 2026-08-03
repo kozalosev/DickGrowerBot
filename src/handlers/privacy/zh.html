@@ -1,4 +1,4 @@
-关于本机器人收集和存储哪些信息，最权威、最新且最完整的真相来源是 <a href="https://github.com/kozalosev/DickGrowerBot/tree/main/migrations">数据库迁移文件</a>，它们和其余源代码一样发布在 GitHub 上。
+关于本机器人收集和存储哪些信息，最权威、最新且最完整的真相来源是 <a href="https://github.com/kozalosev/DickGrowerBot/tree/main/migrations">数据库迁移文件</a>，它们和其余源代码一样发布在 GitHub 上，以及<a href="https://github.com/Kozalo-Blog/user-service/tree/main/migrations">用户数据服务</a>的数据库迁移文件。
 
 不过，让我们简要地看一下其中最重要的部分：
 1️⃣ 机器人必须存储用户的 ID 和名字，以便显示排行榜和 PvP 对战结果；
@@ -14,3 +14,6 @@
 8️⃣ 上述任何数据都不会提供给第三方机构，以下情况除外：
     ➖ 俄罗斯托管公司 <a href="https://timeweb.cloud">TimeWeb</a>，提供运行应用程序代码所需的云基础设施；
     ➖ 法国托管公司 <a href="https://www.scaleway.com/en/">Scaleway</a>，提供兼容 S3 的存储服务用于保存数据库备份；
+9️⃣ 应你的要求，上述所有数据都会被删除。删除后只保留你的 ID：这是为了防止有人利用删除权来重置自己的进度——所有数据删除后，90 天内无法创建新账号。
+
+关于删除你的个人数据，或获取我们所存储的全部数据的副本，请使用 /support 指令联系我们。

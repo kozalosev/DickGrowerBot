@@ -17,6 +17,13 @@ commands:
       auto_button: "🌐 自动（各自的语言）"
   privacy:
     description: "存储数据说明详见隐私政策，"
+  support:
+    description: "联系机器人主人"
+    request: "请写下你的留言，我会转交给我的主人。发送任意命令即可取消。"
+    sent: "留言已发送。主人会在私聊中回复你。"
+    cancelled: "请求已取消。"
+    too_often: "你刚刚已经发过留言了，请等一分钟再发。"
+    disabled: "此功能当前不可用。"
   grow:
     description: "让你的丁丁变大！"
     result: "你的丁丁已经<b>%{incr} 厘米</b> %{event}，现在长度为<b>%{length} 厘米</b>。"
@@ -162,5 +169,7 @@ errors:
   not_group_chat: "此机器人仅在群聊中执行任务！"
   group_account: "不能以群组或频道的身份游玩——请关闭匿名模式后重试！"
   feature_disabled: "此功能当前暂时禁用。"
+  banned: "你在 %{date} 之前无法游玩。如果你认为这是误判，请用 /support 联系我们。"
+  banned_inline_title: "你已被封禁"
 self_destruction:
   warning: "🧹 <i>为保持群聊整洁，此消息将在 <b>%{seconds}</b> 秒后删除……</i>"

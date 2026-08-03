@@ -13,3 +13,9 @@ pub struct ExternalUser {
     pub uid: UserId,
     pub length: Length,
 }
+
+#[derive(sqlx::FromRow, Debug, PartialEq)]
+pub struct BannedUser {
+    pub uid: UserId,
+    pub banned_until: DateTime<Utc>,
+}

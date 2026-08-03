@@ -20,6 +20,10 @@ pub static CMD_HELP_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_help_usage_total", "count of /help invocations"));
 pub static CMD_PRIVACY_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_privacy_usage_total", "count of /privacy invocations"));
+pub static CMD_SUPPORT_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_support_usage_total", "count of /support invocations"));
+pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
+    Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
 pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_grow_usage_total", "count of /grow invocations"));
 pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
@@ -115,6 +119,8 @@ fn force_registration() {
     Lazy::force(&CMD_START_COUNTER);
     Lazy::force(&CMD_HELP_COUNTER);
     Lazy::force(&CMD_PRIVACY_COUNTER);
+    Lazy::force(&CMD_SUPPORT_COUNTER);
+    Lazy::force(&BANNED_UPDATES_BLOCKED);
     Lazy::force(&CMD_GROW_COUNTER);
     Lazy::force(&CMD_TOP_COUNTER);
     Lazy::force(&CMD_LOAN_COUNTER);

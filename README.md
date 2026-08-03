@@ -28,7 +28,9 @@ Features
 * true system random from the environment's chaos by usage of the `get_random()` syscall (`BCryptGenRandom` on Windows, or other alternatives on different OSes);
 * localizations for English, Russian, Italian, Persian, and Chinese (Simplified & Traditional), switchable per chat via `/language` — and per user too when the optional [user-service](#user-service-integration) is enabled;
 * Prometheus-like metrics, including per-function request/error/latency metrics via [autometrics](https://autometrics.dev);
-* OpenTelemetry distributed tracing (OTLP/gRPC), exportable to a collector such as Jaeger.
+* OpenTelemetry distributed tracing (OTLP/gRPC), exportable to a collector such as Jaeger;
+* `/support` to reach the owner without exposing an email or a personal account, and SQL functions to
+  answer a data deletion request by hand — see [Support requests and data deletion](https://github.com/kozalosev/DickGrowerBot/wiki/Support-requests-and-data-deletion) in the wiki.
 
 Technical stuff
 ---------------

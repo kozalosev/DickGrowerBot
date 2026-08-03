@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Promo_Codes (code, bonus_length, capacity) VALUES ('TEST', 10, 5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f8a641951dcd4bcad1bfbd6f14b9ef07ee85be4c37a6fc46a9f646138014faad"
+}

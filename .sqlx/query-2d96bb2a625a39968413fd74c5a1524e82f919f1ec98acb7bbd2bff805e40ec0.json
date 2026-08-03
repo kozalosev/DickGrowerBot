@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Promo_Code_Activations (uid, code, affected_chats) VALUES ($1, 'TEST', 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d96bb2a625a39968413fd74c5a1524e82f919f1ec98acb7bbd2bff805e40ec0"
+}
