@@ -30,7 +30,8 @@ pub struct AppConfig {
 #[derive(Clone)]
 pub struct DatabaseConfig {
     pub url: Url,
-    pub max_connections: u32
+    pub max_connections: u32,
+    pub min_connections: u32,
 }
 
 impl AppConfig {
@@ -99,7 +100,8 @@ impl DatabaseConfig {
     pub fn from_env() -> anyhow::Result<Self> {
         Ok(Self {
             url: get_env_mandatory_value("DATABASE_URL")?,
-            max_connections: get_env_value_or_default("DATABASE_MAX_CONNECTIONS", 10)
+            max_connections: get_env_value_or_default("DATABASE_MAX_CONNECTIONS", 10),
+            min_connections: get_env_value_or_default("DATABASE_MIN_CONNECTIONS", 5),
         })
     }
 }
