@@ -22,6 +22,28 @@ impl TopicId {
     pub const GENERAL: Self = Self(0);
 }
 
+/// A message inside a chat. Unique for that chat only, which is why nothing addresses a message
+/// by it alone.
+#[domain_type]
+struct TelegramMessageId(i32);
+
+/// The opaque handle Telegram gives an inline message. It's the only way to address one — such a
+/// message has no chat and no message id of its own, and can never be deleted, only edited.
+#[domain_type]
+struct InlineMessageId(String);
+
+impl From<MessageId> for TelegramMessageId {
+    fn from(message_id: MessageId) -> Self {
+        Self(message_id.0)
+    }
+}
+
+impl From<TelegramMessageId> for MessageId {
+    fn from(message_id: TelegramMessageId) -> Self {
+        Self(message_id.value())
+    }
+}
+
 impl From<ThreadId> for TopicId {
     fn from(thread_id: ThreadId) -> Self {
         Self(thread_id.0.0)

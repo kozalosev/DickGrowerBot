@@ -11,16 +11,16 @@ use crate::repository;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct Chat {
-    pub internal_id: i64,
-    pub chat_id: Option<i64>,
-    pub chat_instance: Option<String>,
+    pub internal_id: InternalChatId,
+    pub chat_id: Option<TelegramChatId>,
+    pub chat_instance: Option<TelegramChatInstanceId>,
     /// The bot can't post to this chat: it was kicked, blocked, muted, or the chat is gone. Set by
     /// a failed broadcast, cleared by the next command processed in the chat.
     pub is_unreachable: bool,
 }
 
 #[derive(Debug, derive_more::Error, derive_more::Display)]
-pub struct NoChatIdError(#[error(not(source))] i64);
+pub struct NoChatIdError(#[error(not(source))] InternalChatId);
 
 /// What became of a chat when Telegram turned its group into a supergroup.
 ///
@@ -69,7 +69,7 @@ fn parse_allowed_topics(value: sqlx::types::JsonValue) -> AllowedTopics {
 
 impl ChatMigrationOutcome {
     /// Which of the two "the row moved" outcomes applies, given the instance that row held.
-    fn of_migrated(instance: Option<&str>) -> Self {
+    fn of_migrated(instance: Option<&TelegramChatInstanceId>) -> Self {
         instance.map(|_| Self::Migrated).unwrap_or(Self::MigratedUnanchored)
     }
 }
@@ -87,15 +87,11 @@ impl TryInto<ChatIdPartiality> for Chat {
     fn try_into(self) -> Result<ChatIdPartiality, Self::Error> {
         match (self.chat_id, self.chat_instance) {
             (Some(id), Some(instance)) => Ok(ChatIdPartiality::Both(
-                ChatIdFull { id: TelegramChatId::new(id), instance: TelegramChatInstanceId::new(instance) },
+                ChatIdFull { id, instance },
                 ChatIdSource::Database
             )),
-            (Some(id), None) => Ok(ChatIdPartiality::Specific(
-                ChatIdKind::ID(TelegramChatId::new(id))
-            )),
-            (None, Some(instance)) => Ok(ChatIdPartiality::Specific(
-                ChatIdKind::Instance(TelegramChatInstanceId::new(instance))
-            )),
+            (Some(id), None) => Ok(ChatIdPartiality::Specific(ChatIdKind::ID(id))),
+            (None, Some(instance)) => Ok(ChatIdPartiality::Specific(ChatIdKind::Instance(instance))),
             (None, None) => Err(NoChatIdError(self.internal_id))
         }
     }
@@ -105,8 +101,10 @@ repository!(Chats, with_feature_toggles,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_chat(&self, chat_id: ChatIdKind) -> anyhow::Result<Option<Chat>> {
-        sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance, is_unreachable FROM Chats
-                WHERE chat_id = $1::bigint OR chat_instance = $1::text",
+        sqlx::query_as!(Chat,
+            r#"SELECT id AS "internal_id: InternalChatId", chat_id AS "chat_id: TelegramChatId",
+                      chat_instance AS "chat_instance: TelegramChatInstanceId", is_unreachable
+                FROM Chats WHERE chat_id = $1::bigint OR chat_instance = $1::text"#,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
@@ -125,7 +123,7 @@ repository!(Chats, with_feature_toggles,
     pub async fn is_anchored(&self, chat_id: &TelegramChatId) -> anyhow::Result<bool> {
         sqlx::query_scalar!(r#"SELECT EXISTS(SELECT 1 FROM Chats
                 WHERE chat_id = $1 AND chat_instance IS NOT NULL) AS "exists!""#,
-                chat_id.value())
+                chat_id as &TelegramChatId)
             .fetch_one(&self.pool)
             .await
             .context(format!("couldn't check whether the chat with id = {chat_id} is anchored"))
@@ -140,11 +138,39 @@ repository!(Chats, with_feature_toggles,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn mark_unreachable(&self, chat_id: &TelegramChatId) -> anyhow::Result<()> {
-        sqlx::query!("UPDATE Chats SET is_unreachable = true WHERE chat_id = $1", chat_id.value())
+        sqlx::query!("UPDATE Chats SET is_unreachable = true WHERE chat_id = $1",
+                chat_id as &TelegramChatId)
             .execute(&self.pool)
             .await
             .map(|_| ())
             .context(format!("couldn't mark the chat with id = {chat_id} as unreachable"))
+    }
+,
+    /// Whether the bot may delete other members' messages here, as far as we know. `None` means
+    /// Telegram was never asked (or the chat has no row yet), so the caller has to ask and store
+    /// the answer with [`Self::set_bot_admin`].
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn is_bot_admin(&self, chat_id: &TelegramChatId) -> anyhow::Result<Option<bool>> {
+        let value = sqlx::query_scalar!("SELECT is_bot_admin FROM Chats WHERE chat_id = $1",
+                chat_id as &TelegramChatId)
+            .fetch_optional(&self.pool)
+            .await
+            .context(format!("couldn't check whether the bot is an admin of the chat with id = {chat_id}"))?;
+        Ok(value.flatten())
+    }
+,
+    /// Remembers what Telegram answered about the bot's rights in the chat. Updating no row is
+    /// fine: the chat may have been merged or migrated away since the message was scheduled.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, is_admin = %is_admin))]
+    pub async fn set_bot_admin(&self, chat_id: &TelegramChatId, is_admin: bool) -> anyhow::Result<()> {
+        sqlx::query!("UPDATE Chats SET is_bot_admin = $2 WHERE chat_id = $1",
+                chat_id as &TelegramChatId, is_admin)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .context(format!("couldn't store the bot's rights in the chat with id = {chat_id}"))
     }
 ,
     #[autometrics]
@@ -153,7 +179,6 @@ repository!(Chats, with_feature_toggles,
         self.get_chat(chat_id.clone()).await
             .map_err(SearchError::Internal)?
             .map(|chat| chat.internal_id)
-            .map(InternalChatId::new)
             .ok_or(SearchError::NotFound(chat_id.clone()))
     }
 ,
@@ -223,7 +248,7 @@ repository!(Chats, with_feature_toggles,
                 "UPDATE Chats SET settings = jsonb_set(settings, '{topics}',
                     COALESCE(settings->'topics', '{}'::jsonb) || jsonb_build_object($2::text, true))
                     WHERE id = $1",
-                internal_id as InternalChatId, topic_id.value().to_string())
+                internal_id as InternalChatId, topic_id as TopicId)
             .execute(&self.pool)
             .await
             .context(format!("couldn't allow the topic {topic_id} of the chat {chat_id}"))?;
@@ -244,7 +269,7 @@ repository!(Chats, with_feature_toggles,
                     ELSE jsonb_set(settings, '{topics}', (settings->'topics') - $2::text)
                     END
                     WHERE id = $1 AND settings->'topics' IS NOT NULL",
-                internal_id as InternalChatId, topic_id.value().to_string())
+                internal_id as InternalChatId, topic_id as TopicId)
             .execute(&self.pool)
             .await
             .context(format!("couldn't forbid the topic {topic_id} of the chat {chat_id}"))?;
@@ -268,26 +293,28 @@ repository!(Chats, with_feature_toggles,
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn upsert_chat(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<InternalChatId> {
         let (id, instance) = match chat_id {
-            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id.value()), Some(full.instance.to_string())),
-            ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id.value()), None),
-            ChatIdPartiality::Both(full, ChatIdSource::InlineQuery) => (None, Some(full.instance.to_string())),
-            ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(id.value()), None),
-            ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance.to_string())),
+            ChatIdPartiality::Both(full, _) if self.features.chats_merging => (Some(full.id), Some(&full.instance)),
+            ChatIdPartiality::Both(full, ChatIdSource::Database) => (Some(full.id), None),
+            ChatIdPartiality::Both(full, ChatIdSource::InlineQuery) => (None, Some(&full.instance)),
+            ChatIdPartiality::Specific(ChatIdKind::ID(id)) => (Some(*id), None),
+            ChatIdPartiality::Specific(ChatIdKind::Instance(instance)) => (None, Some(instance)),
         };
         let handled_in_chat = matches!(chat_id,
             ChatIdPartiality::Both(_, ChatIdSource::Database) | ChatIdPartiality::Specific(ChatIdKind::ID(_)));
         let mut tx = self.pool.begin().await?;
-        let chats = sqlx::query_as!(Chat, "SELECT id as internal_id, chat_id, chat_instance, is_unreachable FROM Chats
-                WHERE chat_id = $1 OR chat_instance = $2",
-                id, instance)
+        let chats = sqlx::query_as!(Chat,
+            r#"SELECT id AS "internal_id: InternalChatId", chat_id AS "chat_id: TelegramChatId",
+                      chat_instance AS "chat_instance: TelegramChatInstanceId", is_unreachable
+                FROM Chats WHERE chat_id = $1 OR chat_instance = $2"#,
+                id as Option<TelegramChatId>, instance as Option<&TelegramChatInstanceId>)
             .fetch_all(&mut *tx)
             .await
             .context(format!("couldn't find the chat with id = {chat_id}"))?;
         let was_unreachable = chats.iter().any(|chat| chat.is_unreachable);
         let internal_id = match chats.len() {
-            1 if chats[0].chat_id == id && chats[0].chat_instance == instance => Ok(chats[0].internal_id),
-            1 => Self::update_chat(&mut tx, chats[0].internal_id, id, instance.as_deref()).await,
-            0 => Self::create_chat(&mut tx, id, instance.as_deref()).await,
+            1 if chats[0].chat_id == id && chats[0].chat_instance.as_ref() == instance => Ok(chats[0].internal_id),
+            1 => Self::update_chat(&mut tx, chats[0].internal_id, id, instance).await,
+            0 => Self::create_chat(&mut tx, id, instance).await,
             2 => Self::merge_chats(&mut tx, [&chats[0], &chats[1]]).await,
             x => bail!("unexpected count of chats ({x}): {chats:?}"),
         }?;
@@ -295,16 +322,16 @@ repository!(Chats, with_feature_toggles,
             Self::mark_reachable(&mut tx, internal_id).await?;
         }
         tx.commit().await?;
-        Ok(InternalChatId::new(internal_id))
+        Ok(internal_id)
     }
 ,
     /// Undoes [`Self::mark_unreachable`]. Runs inside the caller's transaction, so it can't clear
     /// the flag for a chat whose upsert then rolls back.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id))]
-    async fn mark_reachable(tx: &mut Transaction<'_, Postgres>, internal_id: i64) -> anyhow::Result<()> {
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %internal_id))]
+    async fn mark_reachable(tx: &mut Transaction<'_, Postgres>, internal_id: InternalChatId) -> anyhow::Result<()> {
         tracing::info!("the chat is reachable again");
-        sqlx::query!("UPDATE Chats SET is_unreachable = false WHERE id = $1", internal_id)
+        sqlx::query!("UPDATE Chats SET is_unreachable = false WHERE id = $1", internal_id as InternalChatId)
             .execute(&mut **tx)
             .await
             .map(|_| ())
@@ -331,7 +358,9 @@ repository!(Chats, with_feature_toggles,
         new: &TelegramChatId,
     ) -> anyhow::Result<ChatMigrationOutcome> {
         let mut tx = self.pool.begin().await?;
-        let old_chat = sqlx::query!("SELECT id, chat_instance FROM Chats WHERE chat_id = $1 FOR UPDATE", old.value())
+        let old_chat = sqlx::query!(
+            r#"SELECT id AS "id: InternalChatId", chat_instance AS "chat_instance: TelegramChatInstanceId"
+                FROM Chats WHERE chat_id = $1 FOR UPDATE"#, old as &TelegramChatId)
             .fetch_optional(&mut *tx)
             .await
             .context(format!("couldn't look up the chat to migrate from id = {old}"))?;
@@ -343,20 +372,23 @@ repository!(Chats, with_feature_toggles,
             None => {
                 // The repointed row still holds whatever instance it had before, so the loser of
                 // the race reads the same answer the winner reported.
-                let migrated = sqlx::query_scalar!("SELECT chat_instance FROM Chats WHERE chat_id = $1", new.value())
+                let migrated = sqlx::query_scalar!(
+                    r#"SELECT chat_instance AS "chat_instance: TelegramChatInstanceId"
+                        FROM Chats WHERE chat_id = $1"#, new as &TelegramChatId)
                     .fetch_optional(&mut *tx)
                     .await
                     .context(format!("couldn't check whether the chat had already been migrated to {new}"))?;
                 return Ok(match migrated {
                     Some(instance) => {
                         tracing::debug!("the migrated chat had already been repointed");
-                        ChatMigrationOutcome::of_migrated(instance.as_deref())
+                        ChatMigrationOutcome::of_migrated(instance.as_ref())
                     }
                     None => ChatMigrationOutcome::Untraceable
                 })
             }
         };
-        let new_internal_id = sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", new.value())
+        let new_internal_id = sqlx::query_scalar!(
+            r#"SELECT id AS "id: InternalChatId" FROM Chats WHERE chat_id = $1"#, new as &TelegramChatId)
             .fetch_optional(&mut *tx)
             .await
             .context(format!("couldn't look up the chat to migrate to id = {new}"))?;
@@ -366,26 +398,27 @@ repository!(Chats, with_feature_toggles,
             // normally happens, and exactly one of the two announcements gets here — whichever
             // takes the lock first. The other one returns early above.
             None => {
-                sqlx::query!("UPDATE Chats SET chat_id = $2 WHERE id = $1", old_internal_id, new.value())
+                sqlx::query!("UPDATE Chats SET chat_id = $2 WHERE id = $1",
+                        old_internal_id as InternalChatId, new as &TelegramChatId)
                     .execute(&mut *tx)
                     .await
                     .map_err(Into::into)
                     .and_then(ensure_only_one_row_updated)
                     .context(format!("couldn't migrate the chat with id = {old_internal_id} from {old} to {new}"))?;
-                Self::journal_migration(&mut tx, old_internal_id, old, old_instance.as_deref(), new).await?;
-                tracing::info!(internal_id = old_internal_id, "migrated the chat");
-                ChatMigrationOutcome::of_migrated(old_instance.as_deref())
+                Self::journal_migration(&mut tx, old_internal_id, old, old_instance.as_ref(), new).await?;
+                tracing::info!(internal_id = %old_internal_id, "migrated the chat");
+                ChatMigrationOutcome::of_migrated(old_instance.as_ref())
             }
             Some(id) if id == old_internal_id => {
-                tracing::debug!(internal_id = old_internal_id, "the chat has already been migrated");
-                ChatMigrationOutcome::of_migrated(old_instance.as_deref())
+                tracing::debug!(internal_id = %old_internal_id, "the chat has already been migrated");
+                ChatMigrationOutcome::of_migrated(old_instance.as_ref())
             }
             // Two rows for what is one and the same chat. Folding them together would mean moving
             // dicks, loans and stats across rows, some of which sit behind triggers that forbid
             // updates outright — too destructive to attempt blindly for a case Telegram shouldn't
             // produce. Left for manual resolution instead.
             Some(id) => {
-                tracing::error!(internal_id = old_internal_id, conflicting_internal_id = id,
+                tracing::error!(internal_id = %old_internal_id, conflicting_internal_id = %id,
                     "couldn't migrate the chat: the new id is already taken by another chat, the two rows have to be merged manually");
                 ChatMigrationOutcome::Conflict
             }
@@ -402,19 +435,20 @@ repository!(Chats, with_feature_toggles,
     /// anchored. A chat migrates once, so an existing record means the journal is being written
     /// twice for one event and the first one stands.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id, old = %old, new = %new))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %internal_id, old = %old, new = %new))]
     async fn journal_migration(
         tx: &mut Transaction<'_, Postgres>,
-        internal_id: i64,
+        internal_id: InternalChatId,
         old: &TelegramChatId,
-        old_instance: Option<&str>,
+        old_instance: Option<&TelegramChatInstanceId>,
         new: &TelegramChatId,
     ) -> anyhow::Result<()> {
         sqlx::query!(
             "INSERT INTO Chat_Migrations (internal_id, old_chat_id, old_chat_instance, new_chat_id)
                     VALUES ($1, $2, $3, $4)
                     ON CONFLICT (internal_id) DO NOTHING",
-                internal_id, old.value(), old_instance, new.value())
+                internal_id as InternalChatId, old as &TelegramChatId,
+                old_instance as Option<&TelegramChatInstanceId>, new as &TelegramChatId)
             .execute(&mut **tx)
             .await
             .context(format!("couldn't journal the migration of the chat with id = {internal_id} from {old} to {new}"))?;
@@ -425,28 +459,32 @@ repository!(Chats, with_feature_toggles,
     #[tracing::instrument(skip_all, fields(chat_id = ?chat_id, chat_instance = ?chat_instance))]
     async fn create_chat(
         tx: &mut Transaction<'_, Postgres>,
-        chat_id: Option<i64>,
-        chat_instance: Option<&str>,
-    ) -> anyhow::Result<i64> {
+        chat_id: Option<TelegramChatId>,
+        chat_instance: Option<&TelegramChatInstanceId>,
+    ) -> anyhow::Result<InternalChatId> {
         tracing::info!("creating a chat");
-        sqlx::query_scalar!("INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
-                chat_id, chat_instance)
+        sqlx::query_scalar!(
+            r#"INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id AS "id: InternalChatId""#,
+                chat_id as Option<TelegramChatId>, chat_instance as Option<&TelegramChatInstanceId>)
             .fetch_one(&mut **tx)
             .await
             .context(format!("couldn't create a chat with chat_id = {chat_id:?} or chat_instance = {chat_instance:?}"))
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(internal_chat_id = internal_id, chat_id = ?chat_id, chat_instance = ?chat_instance))]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %internal_id, chat_id = ?chat_id, chat_instance = ?chat_instance))]
     async fn update_chat(
         tx: &mut Transaction<'_, Postgres>,
-        internal_id: i64,
-        chat_id: Option<i64>,
-        chat_instance: Option<&str>,
-    ) -> anyhow::Result<i64> {
+        internal_id: InternalChatId,
+        chat_id: Option<TelegramChatId>,
+        chat_instance: Option<&TelegramChatInstanceId>,
+    ) -> anyhow::Result<InternalChatId> {
         tracing::debug!("updating the chat");
         sqlx::query!("UPDATE Chats SET chat_id = coalesce($2, chat_id), chat_instance = coalesce($3, chat_instance) WHERE id = $1",
-                internal_id, chat_id, chat_instance)
+            internal_id as InternalChatId,
+            chat_id as Option<TelegramChatId>,
+            chat_instance as Option<&TelegramChatInstanceId>
+        )
             .execute(&mut **tx)
             .await
             .map(|_| internal_id)
@@ -685,8 +723,8 @@ repository!(Chats, with_feature_toggles,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_a = chats[0].internal_id, chat_b = chats[1].internal_id))]
-    async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<i64> {
+    #[tracing::instrument(skip_all, fields(chat_a = %chats[0].internal_id, chat_b = %chats[1].internal_id))]
+    async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<InternalChatId> {
         let state = merge_chat_objects(&chats)?;
         // Moving the dicks over rather than summing into the surviving rows: a user who only ever
         // played through inline mode has no row in the surviving chat at all, and updating in
@@ -703,31 +741,32 @@ repository!(Chats, with_feature_toggles,
                         length = Dicks.length + EXCLUDED.length,
                         bonus_attempts = Dicks.bonus_attempts + EXCLUDED.bonus_attempts + 1,
                         updated_at = GREATEST(Dicks.updated_at, EXCLUDED.updated_at)",
-                state.main.internal_id, state.deleted.0)
+                state.main.internal_id as InternalChatId, state.deleted.0 as InternalChatId)
             .execute(&mut **tx)
             .await
             .context(format!("couldn't update dicks while merging in the chats = {chats:?}"))?
             .rows_affected();
-        let deleted_dicks = sqlx::query!("DELETE FROM Dicks WHERE chat_id = $1", state.deleted.0)
+        let deleted_dicks = sqlx::query!("DELETE FROM Dicks WHERE chat_id = $1",
+                state.deleted.0 as InternalChatId)
             .execute(&mut **tx)
             .await
             .context(format!("couldn't delete dicks from the old chat with id = {}", state.deleted.0))?
             .rows_affected();
         tracing::info!(updated_dicks, deleted_dicks, "merging the chats");
-        Self::move_dependent_rows(tx,
-            InternalChatId::new(state.main.internal_id),
-            InternalChatId::new(state.deleted.0)
-        ).await?;
+        Self::move_dependent_rows(tx, state.main.internal_id, state.deleted.0).await?;
 
         sqlx::query!("DELETE FROM Chats WHERE id = $1 AND chat_instance = $2",
-                state.deleted.0, state.deleted.1)
+                state.deleted.0 as InternalChatId, state.deleted.1 as &TelegramChatInstanceId)
             .execute(&mut **tx)
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
             .context(format!("couldn't delete the old chat with id = {} and chat_instance = {}", state.deleted.0, state.deleted.1))?;
         sqlx::query!("UPDATE Chats SET chat_instance = $3 WHERE id = $1 AND chat_id = $2",
-                state.main.internal_id, state.main.chat_id, state.main.chat_instance)
+            state.main.internal_id as InternalChatId,
+            state.main.chat_id as TelegramChatId,
+            state.main.chat_instance as &TelegramChatInstanceId
+        )
             .execute(&mut **tx)
             .await
             .map_err(Into::into)
@@ -738,14 +777,14 @@ repository!(Chats, with_feature_toggles,
 );
 
 struct MergedChat<'a> {
-    internal_id: i64,
-    chat_id: i64,
-    chat_instance: &'a str
+    internal_id: InternalChatId,
+    chat_id: TelegramChatId,
+    chat_instance: &'a TelegramChatInstanceId
 }
 
 struct MergedChatState<'a> {
     main: MergedChat<'a>,
-    deleted: (i64, &'a str)
+    deleted: (InternalChatId, &'a TelegramChatInstanceId)
 }
 
 #[derive(Debug, derive_more::Error)]
@@ -764,10 +803,10 @@ impl MergeChatsError {
 }
 
 fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, MergeChatsError> {
-    let chat_ids: Vec<(i64, i64)> = chats.iter()
+    let chat_ids: Vec<(InternalChatId, TelegramChatId)> = chats.iter()
         .filter_map(|c| c.chat_id.map(|id| (c.internal_id, id)))
         .collect();
-    let chat_instances: Vec<(i64, &'a String)> = chats.iter()
+    let chat_instances: Vec<(InternalChatId, &'a TelegramChatInstanceId)> = chats.iter()
         .filter_map(|c| c.chat_instance.as_ref().map(|inst| (c.internal_id, inst)))
         .collect();
 
@@ -790,50 +829,38 @@ fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, 
 #[cfg(test)]
 mod tests {
     use super::{Chat, merge_chat_objects};
+    use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramChatInstanceId};
+
+    fn chat(internal_id: i64, chat_id: Option<i64>, chat_instance: Option<&str>) -> Chat {
+        Chat {
+            internal_id: InternalChatId::new(internal_id),
+            chat_id: chat_id.map(TelegramChatId::new),
+            chat_instance: chat_instance.map(|instance| TelegramChatInstanceId::new(instance.to_owned())),
+            is_unreachable: false,
+        }
+    }
 
     #[test]
     fn merge_valid_chats() {
         let id = 123;
         let inst = "one".to_owned();
-        let chat1 = Chat {
-            internal_id: 1,
-            chat_id: Some(id),
-            chat_instance: None,
-            is_unreachable: false,
-        };
-        let chat2 = Chat {
-            internal_id: 2,
-            chat_id: None,
-            chat_instance: Some(inst.clone()),
-            is_unreachable: false,
-        };
+        let chat1 = chat(1, Some(id), None);
+        let chat2 = chat(2, None, Some(&inst));
         let chats = [&chat1, &chat2];
         let res = merge_chat_objects(&chats)
             .expect("merge_chat_objects failed");
 
-        assert_eq!(res.main.internal_id, 1);
-        assert_eq!(res.main.chat_id, id);
-        assert_eq!(res.main.chat_instance, &inst);
-        assert_eq!(res.deleted.0, 2);
-        assert_eq!(res.deleted.1, &inst);
+        assert_eq!(res.main.internal_id, InternalChatId::new(1));
+        assert_eq!(res.main.chat_id, TelegramChatId::new(id));
+        assert_eq!(res.main.chat_instance, &TelegramChatInstanceId::new(inst.clone()));
+        assert_eq!(res.deleted.0, InternalChatId::new(2));
+        assert_eq!(res.deleted.1, &TelegramChatInstanceId::new(inst));
     }
 
     #[test]
     fn merge_both_filled_chats() {
-        let id = 123;
-        let inst = "one".to_owned();
-        let chat1 = Chat {
-            internal_id: 1,
-            chat_id: Some(id),
-            chat_instance: Some(inst.clone()),
-            is_unreachable: false,
-        };
-        let chat2 = Chat {
-            internal_id: 2,
-            chat_id: Some(id),
-            chat_instance: Some(inst.clone()),
-            is_unreachable: false,
-        };
+        let chat1 = chat(1, Some(123), Some("one"));
+        let chat2 = chat(2, Some(123), Some("one"));
         let chats = [&chat1, &chat2];
         let res = merge_chat_objects(&chats);
 
@@ -842,18 +869,8 @@ mod tests {
 
     #[test]
     fn merge_chats_with_same_id() {
-        let chat1 = Chat {
-            internal_id: 1,
-            chat_id: Some(123),
-            chat_instance: None,
-            is_unreachable: false,
-        };
-        let chat2 = Chat {
-            internal_id: 1,
-            chat_id: None,
-            chat_instance: Some("one".to_owned()),
-            is_unreachable: false,
-        };
+        let chat1 = chat(1, Some(123), None);
+        let chat2 = chat(1, None, Some("one"));
         let chats = [&chat1, &chat2];
         let res = merge_chat_objects(&chats);
 

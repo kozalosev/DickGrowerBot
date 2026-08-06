@@ -72,7 +72,7 @@ async fn handle_personal_language(
     }
     if arg.trim().is_empty() {
         let keyboard = build_language_keyboard(LanguageScope::User, from_id, lang_code);
-        let mut request = reply_html(bot.clone(), &msg, t!("commands.language.prompt", locale = lang_code));
+        let mut request = reply_html(&bot, &msg, t!("commands.language.prompt", locale = lang_code));
         request.reply_markup = Some(ReplyMarkup::InlineKeyboard(keyboard));
         request.await?;
     } else if let Some(lang) = parse_language_arg(arg) {
@@ -101,7 +101,7 @@ async fn handle_chat_language(
     let chat_id: ChatIdPartiality = msg.chat.id.into();
     if arg.trim().is_empty() {
         let keyboard = build_language_keyboard(LanguageScope::Chat, from_id, lang_code);
-        reply_html(bot, &msg, t!("commands.language.chat.prompt", locale = lang_code))
+        reply_html(&bot, &msg, t!("commands.language.chat.prompt", locale = lang_code))
             .reply_markup(ReplyMarkup::InlineKeyboard(keyboard))
             .await?;
     } else if let Some(lang) = parse_language_arg(arg) {

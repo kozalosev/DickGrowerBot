@@ -143,7 +143,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
-    let self_destruction = SelfDestructionService::new(app_config.self_destruction);
+    let self_destruction = SelfDestructionService::new(app_config.self_destruction,
+                                                       repos.deletions.clone(), repos.chats.clone(),
+                                                       me.user.id);
     let support_service = SupportService::new(app_config.support_chat_id);
 
     let webhook_url = integrations_config.webhook_url;
@@ -153,8 +155,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
-    scheduler::spawn_daily_shrink(bot.clone(), repos.clone(), language_service.clone(),
+    // One throttle for both schedulers: it counts the requests in a worker of its own, so a second
+    // one would count a second budget and let twice as much through.
+    // TODO: [#153] Use a common `Throttle` object shared between handlers and schedulers
+    let throttled_bot = scheduler::throttled(bot.clone(), config::ThrottleConfig::from_env());
+    scheduler::spawn_daily_shrink(throttled_bot.clone(), repos.clone(), language_service.clone(),
                                   topic_policy.clone(), app_config.clone());
+    scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), app_config.clone());
+    scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
     ban_list.spawn_refresh_task(app_config.ban_list_refresh_secs);
 

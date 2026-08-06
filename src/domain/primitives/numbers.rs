@@ -37,6 +37,14 @@ impl AffectedRows {
     }
 }
 
+#[domain_type(number)]
+struct AttemptsCount(u32);
+
+/// How many requests are allowed in one period of time. Which period, and to whom, is up to the
+/// field that holds it.
+#[domain_type(number)]
+struct RateLimit(u32);
+
 #[cfg(test)]
 mod deserialize_tests {
     use crate::literal;

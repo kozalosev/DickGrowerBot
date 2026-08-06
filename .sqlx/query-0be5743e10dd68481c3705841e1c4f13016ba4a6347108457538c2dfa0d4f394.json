@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id as internal_id, chat_id, chat_instance, is_unreachable FROM Chats\n                WHERE chat_id = $1::bigint OR chat_instance = $1::text",
+  "query": "SELECT id AS \"internal_id: InternalChatId\", chat_id AS \"chat_id: TelegramChatId\",\n                      chat_instance AS \"chat_instance: TelegramChatInstanceId\", is_unreachable\n                FROM Chats WHERE chat_id = $1 OR chat_instance = $2",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "internal_id",
+        "name": "internal_id: InternalChatId",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "chat_id",
+        "name": "chat_id: TelegramChatId",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "chat_instance",
+        "name": "chat_instance: TelegramChatInstanceId",
         "type_info": "Varchar",
         "origin": {
           "Table": {
@@ -50,7 +50,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -60,5 +61,5 @@
       false
     ]
   },
-  "hash": "9d39e3c26e50ff2663afcfb118b60410177f38845363fdbe632cfa8ef2d6a0ff"
+  "hash": "0be5743e10dd68481c3705841e1c4f13016ba4a6347108457538c2dfa0d4f394"
 }

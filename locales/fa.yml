@@ -190,3 +190,4 @@ errors:
   banned_inline_title: "شما مسدود شده‌اید"
 self_destruction:
   warning: "🧹 <i>برای تمیز ماندن چت، این پیام تا <b>%{seconds}</b> ثانیه دیگر حذف می‌شود…</i>"
+  placeholder: "🧹 <i>این پیام برای تمیز ماندن چت پاک شد.</i>"

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Scheduled_Message_Deletions WHERE inline_message_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d9b22c3e82265abad86d71a4fc7d3a81d738c731102631ec66326cf6568369f"
+}

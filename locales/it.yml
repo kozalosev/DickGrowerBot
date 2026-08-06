@@ -189,3 +189,4 @@ errors:
   banned_inline_title: "Sei bloccato"
 self_destruction:
   warning: "🧹 <i>Per mantenere pulita la chat, questo messaggio verrà eliminato tra <b>%{seconds}</b> secondi…</i>"
+  placeholder: "🧹 <i>Questo messaggio è stato rimosso per mantenere pulita la chat.</i>"

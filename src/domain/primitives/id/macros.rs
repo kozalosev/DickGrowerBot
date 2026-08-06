@@ -22,4 +22,7 @@ macro_rules! positive_id {
         )]
         struct $name(i64);
     };
+    ($($name:ident),+) => {
+        $(positive_id!($name);)+
+    }
 }

@@ -49,7 +49,10 @@ pub fn classify(error: &RequestError) -> &'static str {
         RequestError::Network(e) if e.is_connect() => "connect",
         RequestError::Network(e) if e.is_timeout() => "timeout",
         RequestError::Network(_) | RequestError::Io(_) => "network",
-        RequestError::Api(_) | RequestError::RetryAfter(_) | RequestError::MigrateToChatId(_) => "api",
+        // Telegram says the bot sends too fast. Kept apart from the other API answers, because it
+        // is the one that says the limits are too high rather than that the request was wrong.
+        RequestError::RetryAfter(_) => "rate_limited",
+        RequestError::Api(_) | RequestError::MigrateToChatId(_) => "api",
         _ => "other",
     }
 }

@@ -159,7 +159,7 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
     }
 }
 
-pub fn reply_html<T: Into<String>>(bot: Bot, msg: &Message, answer: T) -> JsonRequest<SendMessage> {
+pub fn reply_html<T: Into<String>>(bot: &Bot, msg: &Message, answer: T) -> JsonRequest<SendMessage> {
     // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer)
         .parse_mode(Html)
@@ -172,28 +172,34 @@ pub fn reply_html<T: Into<String>>(bot: Bot, msg: &Message, answer: T) -> JsonRe
 
 #[macro_export]
 macro_rules! reply_html {
-    // `$bot` is an expr (not an ident) so call sites may pass e.g. `bot.clone()`. It is
-    // used exactly once below, so there is no double-evaluation concern.
-    ($bot:expr, $msg:ident, $answer:expr) => {
+    // `$bot` is an expr (not an ident) so call sites may pass whatever they hold. It is used
+    // exactly once below, and only by reference, so it stays theirs afterwards.
+    //
+    // Trailing `field = value` pairs set the optional parts of the request. Each goes through
+    // `Into`, and every one of those fields is an `Option`, so both `reply_markup = markup` (an
+    // `Option` already) and `parse_mode = ParseMode::Html` (the bare value) land correctly.
+    ($bot:expr, $msg:ident, $answer:expr $(, $field:ident = $value:expr)* $(,)?) => {{
+        #[allow(unused_mut)]
+        let mut request = reply_html(&$bot, &$msg, $answer);
+        $( request.$field = ::core::convert::Into::into($value); )*
         anyhow::Context::context(
-            reply_html($bot, &$msg, $answer).await,
+            request.await,
             format!("failed for {:?}", $msg)
         )?
-    };
+    }};
 }
 
 /// Like [`reply_html!`], but additionally registers the sent message with the
 /// [`SelfDestructionService`](SelfDestructionService) so it
-/// self-destructs after the delay configured for `$group`. `$lang` (a `&LanguageCode`) is
-/// used to localize the optional deletion warning. Evaluates to the sent `Message`.
-/// `$svc` must be a `SelfDestructionService` in scope.
+/// self-destructs after the delay configured for `$group`, together with the command `$msg` that
+/// caused it. `$lang` (a `&LanguageCode`) is used to localize the optional deletion warning.
+/// Evaluates to the sent `Message`. `$svc` must be a `SelfDestructionService` in scope.
 #[macro_export]
 macro_rules! reply_html_ephemeral {
-    ($bot:ident, $msg:ident, $answer:expr, $svc:ident, $group:expr, $lang:expr) => {{
-        // Send with a clone (`reply_html` consumes the `Bot`) and keep `$bot` for the
-        // scheduler (a `Bot` is a cheap `Arc` clone).
-        let sent = $crate::reply_html!($bot.clone(), $msg, $answer);
-        $svc.schedule(&$bot, &sent, $group, $lang);
+    ($bot:ident, $msg:ident, $answer:expr, $svc:ident, $group:expr, $lang:expr
+     $(, $field:ident = $value:expr)* $(,)?) => {{
+        let sent = $crate::reply_html!($bot, $msg, $answer $(, $field = $value)*);
+        $svc.schedule(&$bot, &$msg, &sent, $group, &$lang).await;
         sent
     }};
 }
@@ -306,7 +312,7 @@ pub mod checks {
         let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
         let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.group_account", locale = &lang_code);
-        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, lang_code);
         Ok(())
     }
 
@@ -396,7 +402,7 @@ pub mod checks {
 
         let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.forbidden_topic", locale = &lang_code);
-        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, lang_code);
         Ok(())
     }
 
@@ -468,7 +474,7 @@ pub mod checks {
 
         match upd.kind {
             UpdateKind::Message(msg) => {
-                reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, &lang_code);
+                reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, lang_code);
             }
             UpdateKind::CallbackQuery(query) => {
                 bot.answer_callback_query(query.id)

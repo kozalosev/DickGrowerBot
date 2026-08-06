@@ -1,0 +1,169 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Message_Deletions SET fire_after = $2\n                WHERE id IN (\n                    SELECT id FROM Scheduled_Message_Deletions\n                    WHERE fire_after <= current_timestamp AND finished_at IS NULL\n                    ORDER BY fire_after\n                    LIMIT $1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING id AS \"id: ScheduledDeletionId\", chat_id AS \"chat_id: TelegramChatId\",\n                          message_id AS \"message_id: TelegramMessageId\",\n                          inline_message_id AS \"inline_message_id: InlineMessageId\",\n                          message_kind AS \"kind: MessageKind\", message_group AS \"group: MessageGroup\",\n                          lang_code AS \"lang_code: LanguageCode\", state AS \"state: DeletionState\",\n                          created_at, attempts::bigint AS \"attempts!: AttemptsCount\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: ScheduledDeletionId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chat_id: TelegramChatId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "chat_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "message_id: TelegramMessageId",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "message_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "inline_message_id: InlineMessageId",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "inline_message_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "kind: MessageKind",
+        "type_info": {
+          "Custom": {
+            "name": "message_kind",
+            "kind": {
+              "Enum": [
+                "reply",
+                "command",
+                "inline"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "message_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "group: MessageGroup",
+        "type_info": {
+          "Custom": {
+            "name": "message_group",
+            "kind": {
+              "Enum": [
+                "notice",
+                "report",
+                "event",
+                "application"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "message_group"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "lang_code: LanguageCode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "lang_code"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "state: DeletionState",
+        "type_info": {
+          "Custom": {
+            "name": "deletion_state",
+            "kind": {
+              "Enum": [
+                "created",
+                "warned",
+                "removed",
+                "removed_before",
+                "expired",
+                "failed"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "attempts!: AttemptsCount",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "d9340e964333175ccd3ef07ac78e56a99ab3b1bf5b74da19ded07395d60e1879"
+}

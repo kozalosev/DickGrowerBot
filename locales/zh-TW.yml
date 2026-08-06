@@ -177,3 +177,4 @@ errors:
   banned_inline_title: "你已被封鎖"
 self_destruction:
   warning: "🧹 <i>為保持群聊整潔，此訊息將在 <b>%{seconds}</b> 秒後刪除……</i>"
+  placeholder: "🧹 <i>為保持群聊整潔，此訊息已清理。</i>"

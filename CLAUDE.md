@@ -162,6 +162,193 @@ That also fixes a failure that predates the feature: a forum whose General topic
 a message sent without a topic. The setup message needs none of this — it only ever goes to legacy
 basic groups, which can't be forums.
 
+### Optional: self-destruction of messages
+
+A busy chat drowns in the bot's own answers, so each of them may be given a lifetime and removed
+when it runs out (issue #49). Messages fall into four groups — `Notice` (help, privacy, statuses),
+`Report` (`/top`, `/stats`), `Event` (growths, DoDs, fought battles) and `Application` (offers
+waiting for an answer) — and each group has a delay of its own, zero meaning permanent. Private
+chats are never cleaned up; they aren't noisy.
+
+```
+MSG_SELFDESTRUCT_DELAY_NOTICE=2         # minutes; 0 or unset => the group is permanent
+MSG_SELFDESTRUCT_DELAY_REPORT=5
+MSG_SELFDESTRUCT_DELAY_EVENT=0          # the chat's history — permanent by default
+MSG_SELFDESTRUCT_DELAY_APPLICATION=60
+MSG_SELFDESTRUCT_READING_SPEED_CPM=500  # a long message lives at least as long as it takes to read
+MSG_SELFDESTRUCT_WARNING_SECONDS=15     # grace period showing "will be deleted in N seconds"
+MSG_SELFDESTRUCT_MODE=WITHOUT_COMMAND   # DISABLED | ENABLED | ONLY_WITH_COMMAND | WITHOUT_COMMAND
+MSG_SELFDESTRUCT_POLL_SECS=5            # how often the worker looks for the due messages
+MSG_SELFDESTRUCT_BATCH_SIZE=50          # messages one run takes on
+MSG_SELFDESTRUCT_LEASE_SECS=300         # how long a claimed batch is held out of reach
+MSG_SELFDESTRUCT_INLINE_GROUPS=         # comma-separated groups; empty => inline messages are kept
+MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS=60 # the first wait after a failure; it doubles with each one
+MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECS=3600  # the cap that doubling stops at
+MSG_SELFDESTRUCT_MAX_ATTEMPTS=3         # attempts before the row is marked `failed` and left alone
+MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY=1440  # minutes a finished row is kept; 0 => for ever
+```
+
+**Everything goes through the database**, short-lived groups included: `SelfDestructionService`
+(`handlers/utils/self_destruction.rs`) only writes rows into `Scheduled_Message_Deletions`
+(migration 37), and the worker in `scheduler/deletions.rs` claims what is due and acts on it. The
+claim *leases* its batch — one `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING`
+that pushes `fire_after` `MSG_SELFDESTRUCT_LEASE_SECS` out. The lease, not the lock, is what makes the claim
+exclusive: the row's lock lives only as long as that statement, while the requests it leads to take
+much longer. A worker killed mid-batch leaves its messages to be claimed again once the lease runs
+out. That is what a restart between an answer and its
+deletion costs nothing, and what makes an `Application` delay of hours possible at all. The column
+is `fire_after`, not `fire_at`: the worker polls, so it acts somewhat after the moment stored.
+
+Three things are load-bearing in the schema:
+
+* the **unique indexes** on `(chat_id, message_id)` and on `inline_message_id` make scheduling
+  idempotent (`ON CONFLICT DO NOTHING`), which is why paging through a leaderboard can't push its
+  deletion off for ever, and give `cancel` an exact key;
+* the **`state`** enum carries the grace period in the same row: the message is edited into the
+  warning and rescheduled, rather than held in memory. An inline row stays `created` to its end;
+* **`Chats.is_bot_admin`** (migration 38) caches what Telegram answered about the bot's rights.
+  `NULL` means it was never asked. A refused deletion writes `false` back, so one lost promotion
+  doesn't turn every later command into the same failed request.
+
+**What becomes of a row** is the whole state machine, and **no ending deletes it**:
+
+| Ending | State |
+|---|---|
+| the message was deleted or replaced | `removed` |
+| it was already gone (someone got there first) | `removed_before` |
+| it outlived Telegram's 48 hours while it waited | `expired` |
+| the bot may not touch it, or the chat is gone | `failed` |
+| every attempt failed for a reason that looked transient | `failed`, after `MAX_ATTEMPTS` |
+| anything else | unchanged; postponed by the back-off, `attempts` + 1 |
+
+**The counter counts endings, one per message.** `self_destruction_total{group,kind,outcome}` grows
+only when a row reaches a terminal state, and the `outcome` values are those states. So it shows the
+same four things as `self_destruction_finished{state}`, but as a rate instead of a current number.
+`scheduler::deletions::finish` writes the row and the counter together, so they can't say different
+things.
+
+A warning is not an ending, so it is not counted: the message will be counted later, when it goes.
+A retry is not an ending either, and it has its own counter,
+`self_destruction_retries_total{group,kind}`. This is what keeps the outcomes equal to the number of
+messages. A message that was retried twice and then deleted is one `removed` plus two retries, not
+two failures and one success.
+
+A finished row is stamped with `finished_at` and left where it is, so
+`Scheduled_Message_Deletions` is the whole account of what the worker did — including the successes,
+which is what makes a failure rate readable from the table itself rather than only from Prometheus.
+`removed_before` is kept apart from `removed` on purpose: a chat where it is the usual ending
+already has a human or another bot doing the cleaning, and the delays configured here are only
+getting in their way.
+`SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
+stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
+`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY` minutes
+later — a task of its own, because clearing the history must never be part of the run that wrote it.
+**A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
+on a busy bot.
+
+The wait between attempts is **exponential** — `MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS` doubled once
+per failure already recorded, capped at `MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECS`
+(`scheduler::deletions::backoff`). The count comes from the claimed row's `attempts`, not from the
+`postpone` that follows: the delay has to be known before it is written. Keep the cap well under
+Telegram's 48 hours. Without a cap the doubling would push an old row past that limit, and every
+attempt after it is refused for sure.
+
+**Only `MAX_AGE` stays a constant** (`scheduler::deletions`). 48 hours is Telegram's number, and a
+setting for it would be a knob that changes nothing. Everything else the worker uses — the batch
+size and the lease too — is an environment variable, because the right value depends on how busy
+the bot is, and finding it should not need a rebuild.
+
+**Deciding on `MSG_SELFDESTRUCT_POLL_SECS`** takes two metrics, not one, because a long tick has two
+opposite causes. `run_pending_deletions` carries `#[autometrics]`, so how long a run took is
+`function_calls_duration_seconds{function="run_pending_deletions"}` — and the default buckets
+include `5.0`, the stock interval, so "the share of runs that fit into one tick" needs no
+interpolation. How much a run had to do is `self_destruction_batch_size`, bucketed at the default
+batch limit. Read together:
+
+| duration | batch size | what it means |
+|---|---|---|
+| under the interval | any | the queue keeps up; leave it alone |
+| at or over it | hitting the limit | saturated — raise `MSG_SELFDESTRUCT_BATCH_SIZE`; a longer interval makes it worse |
+| at or over it | well under it | Telegram is slow, not the queue — a longer interval costs nothing |
+
+Changing `MSG_SELFDESTRUCT_BATCH_SIZE` needs no other change. The buckets go up to 500, well past
+any sane limit, and the limit itself is exported as `self_destruction_batch_limit`
+(`spawn_deletion_worker` sets it), so the graph draws the line to compare against instead of
+holding a copy of the number.
+
+The empty runs are measured too: an idle worker is what tells a queue that keeps up from one that is
+only being asked for less than it holds. `self_destruction_total` alone won't stand in for the batch
+size — a warned message isn't counted there, so the messages-per-run ratio comes out low. Neither
+will `TASK_SELF_DESTRUCTION`: a `TaskMonitor` sums the poll and idle time of one task, and the worker
+is a single endless loop, so every tick blends into the same number.
+
+The age is checked **before** the request, against `created_at` (the row is written right after the
+message is sent, so it is the message's age). Delays are capped below 48 hours, so only a queue that
+fell behind — a long outage, a chain of retries — can produce a message that old, and spending a
+request on a refusal that is certain teaches nothing.
+
+The command behind an answer is a row of its own (`message_kind = 'command'`), scheduled at
+`fire_after + warning` so that both messages disappear together — a user's message can't be edited
+into the warning the answer shows meanwhile. `ONLY_WITH_COMMAND` writes *neither* row when the bot
+may not delete the command: the point of that mode is that a lone answer is worse than both staying.
+
+Two limits are Telegram's:
+
+* **A bot can't delete a message older than 48 hours.** Two constants come out of that one limit,
+  an hour apart. Every delay is cut down to **47** (`config::MAX_DELAY`), reading-time stretch
+  included: the hour of headroom pays for the poll interval, the lease, the warning's grace period
+  and the waits between failed attempts, so a message scheduled at the cap is still deletable when
+  its request finally goes out. **48** is the real thing (`scheduler::deletions::MAX_AGE`): a
+  message that reaches it — only a queue that fell behind can bring one there — is marked `expired`
+  without spending a request on a certain refusal.
+* **An inline message can never be deleted, only edited.** So those are replaced with the
+  `self_destruction.placeholder` text instead, and only for the groups
+  `MSG_SELFDESTRUCT_INLINE_GROUPS` names — whatever is put there stays in the chat for good, which
+  is worth being conservative about. The bot gets an `inline_message_id` from a
+  `ChosenInlineResult`, so that is where the scheduling sits. Legacy groups send no chosen result,
+  so `inline_callback_handler` schedules too. The second call only fills the gap: the unique index
+  on `inline_message_id` makes the insert do nothing for a message that already waits, so paging
+  through a leaderboard does not delay its placeholder.
+
+An application answered before it expires is *cancelled* (`loan.rs`, `pvp.rs`): the message has
+stopped being an offer, and its outcome is kept like any other event.
+
+### One throttle for the schedulers
+
+The daily shrink and the deletion worker both send to many chats at once, so both go through
+`teloxide`'s `Throttle`. They share **one**, built by `scheduler::throttled` and cloned into both
+(`main.rs`).
+
+Sharing is not a nicety. The adaptor counts requests inside a worker task that the wrapper spawns,
+and a clone only adds a handle to that same worker. Two wrappers would be two workers with two
+separate histories, so each would allow the full 30 requests per second and 1 per second per chat.
+Together they would send twice as much, and a pause after a 429 would stop only the one that got it.
+
+The dispatcher and the handlers still use the plain `Bot`. They answer one user at a time, and their
+rate follows the users.
+
+Because those answers are **not** counted by the throttle, the schedulers are given less than
+Telegram allows. What is left over is the room the answers need.
+
+```
+THROTTLE_MESSAGES_PER_SEC_OVERALL=20      # Telegram allows 30; the rest is for the answers to users
+THROTTLE_MESSAGES_PER_SEC_CHAT=1
+THROTTLE_MESSAGES_PER_MIN_CHAT=15         # private chats and legacy groups
+THROTTLE_MESSAGES_PER_MIN_SUPERGROUP=10   # every chat whose id starts with -100
+```
+
+The last one is the interesting one, and its teloxide name
+(`messages_per_min_channel_or_supergroup`) is easy to misread. The adaptor picks it whenever
+`ChatId::is_channel_or_supergroup()` holds, and that is only a check that the id starts with -100.
+Supergroups pass it, so this limit governs most of the chats the bot serves, while
+`THROTTLE_MESSAGES_PER_MIN_CHAT` is left for private chats and the few legacy groups. The bot is
+never in a channel; the name is teloxide's.
+
+`Settings::on_queue_full` is wired to `telegram_throttle_queue_full_total`. The queue holds 30
+requests, and teloxide reports it as full at most once every 4 seconds, so the counter counts
+moments, not requests. A few of them at midnight are normal — that is the shrink broadcast. A number
+that keeps growing all day means the schedulers ask for more than Telegram allows.
+
 ### Observability / tracing
 
 Logging and tracing go through `tracing` (initialized in `src/observability.rs` via

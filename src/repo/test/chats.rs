@@ -277,7 +277,7 @@ async fn unreachable_flag_lifecycle() {
         .await.expect("couldn't fetch after a command")
         .expect("the chat should exist");
     assert!(!chat.is_unreachable, "a command in the chat clears the mark");
-    assert_eq!(chat.chat_instance, Some(instance.to_string()), "the rows should have been merged");
+    assert_eq!(chat.chat_instance, Some(instance.clone()), "the rows should have been merged");
 }
 
 #[tokio::test]

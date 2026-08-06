@@ -49,7 +49,7 @@ pub async fn topics_cmd_handler(
     let current = TopicId::from(msg.thread_id);
     let allowed = topics.allowed(&msg.chat.id.into()).await;
     let keyboard = build_keyboard(&allowed, current, from_id, &lang_code);
-    reply_html(bot, &msg, render_state(&allowed, current, &lang_code))
+    reply_html(&bot, &msg, render_state(&allowed, current, &lang_code))
         .reply_markup(ReplyMarkup::InlineKeyboard(keyboard))
         .await?;
     Ok(())

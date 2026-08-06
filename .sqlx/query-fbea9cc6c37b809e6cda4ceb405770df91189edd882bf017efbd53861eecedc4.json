@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!: Count<ScheduledDeletion>\"\n                FROM Scheduled_Message_Deletions WHERE finished_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!: Count<ScheduledDeletion>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fbea9cc6c37b809e6cda4ceb405770df91189edd882bf017efbd53861eecedc4"
+}

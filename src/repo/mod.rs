@@ -8,6 +8,7 @@ mod pvpstats;
 mod stats;
 mod shrinks;
 mod announcements;
+mod deletions;
 
 #[cfg(test)]
 pub(crate) mod test;
@@ -25,6 +26,7 @@ pub use pvpstats::*;
 pub use stats::*;
 pub use shrinks::*;
 pub use announcements::*;
+pub use deletions::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 use crate::domain::primitives::chat::ChatIdKind;
@@ -41,6 +43,7 @@ pub struct Repositories {
     pub pvp_stats: BattleStatsRepo,
     pub personal_stats: PersonalStatsRepo,
     pub shrinks: Shrinks,
+    pub deletions: ScheduledDeletions,
 }
 
 impl Repositories {
@@ -56,6 +59,7 @@ impl Repositories {
             pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features),
             personal_stats: PersonalStatsRepo::new(db_conn.clone()),
             shrinks: Shrinks::new(db_conn.clone()),
+            deletions: ScheduledDeletions::new(db_conn.clone()),
         }
     }
 }

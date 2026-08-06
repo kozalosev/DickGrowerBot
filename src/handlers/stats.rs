@@ -41,7 +41,7 @@ pub async fn stats_cmd_handler(
             chat_stats_impl(&repos, from_refs, features, &lang_code).await?
         };
 
-        reply_html_ephemeral!(bot, msg, answer, self_destruction, Report, &lang_code);
+        reply_html_ephemeral!(bot, msg, answer, self_destruction, Report, lang_code);
     } else {
         tracing::info!("ignoring the /stats command since it's disabled");
     }

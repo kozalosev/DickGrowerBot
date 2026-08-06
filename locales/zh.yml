@@ -189,3 +189,4 @@ errors:
   banned_inline_title: "你已被封禁"
 self_destruction:
   warning: "🧹 <i>为保持群聊整洁，此消息将在 <b>%{seconds}</b> 秒后删除……</i>"
+  placeholder: "🧹 <i>为保持群聊整洁，此消息已清理。</i>"

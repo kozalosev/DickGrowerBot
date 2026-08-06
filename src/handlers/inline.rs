@@ -13,7 +13,7 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, MessageGroup};
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatInstanceId};
@@ -37,22 +37,25 @@ enum InlineCommand {
 struct InlineResult {
     text: String,
     keyboard: Option<InlineKeyboardMarkup>,
-}
-
-impl <D: CallbackDataWithPrefix> From<HandlerImplResult<D>> for InlineResult {
-    fn from(value: HandlerImplResult<D>) -> Self {
-        Self {
-            text: value.text(),
-            keyboard: value.keyboard()
-        }
-    }
+    /// The lifetime of the message, as with [`TaggedReply`](crate::handlers::TaggedReply) — it
+    /// decides whether the message is later replaced with the self-destruction placeholder.
+    group: MessageGroup,
 }
 
 impl InlineResult {
-    fn text(value: String) -> Self {
+    fn text(value: String, group: MessageGroup) -> Self {
         Self {
             text: value,
             keyboard: None,
+            group,
+        }
+    }
+
+    fn with_keyboard<D: CallbackDataWithPrefix>(value: HandlerImplResult<D>, group: MessageGroup) -> Self {
+        Self {
+            text: value.text(),
+            keyboard: value.keyboard(),
+            group,
         }
     }
 }
@@ -64,21 +67,21 @@ impl InlineCommand {
         config: AppConfig,
         incr: Incrementor,
         from_refs: FromRefs<'_>,
-        lang_code: LanguageCode,
+        lang_code: &LanguageCode,
     ) -> anyhow::Result<InlineResult> {
         match self {
             InlineCommand::Grow => {
                 metrics::CMD_GROW_COUNTER.inline.inc();
                 dick::grow_impl(repos, incr, from_refs, lang_code)
                     .await
-                    .map(|reply| InlineResult::text(reply.text))
+                    .map(|reply| InlineResult::text(reply.text, reply.group))
             },
             InlineCommand::Top => {
                 metrics::CMD_TOP_COUNTER.inline.inc();
                 dick::top_impl(repos, &config, from_refs, lang_code, Page::first())
                     .await
                     .map(|top| {
-                        let mut res = InlineResult::text(top.lines);
+                        let mut res = InlineResult::text(top.lines, MessageGroup::Report);
                         res.keyboard = config.features.top_unlimited
                             .then_some(dick::build_pagination_keyboard(Page::first(), top.has_more_pages));
                         res
@@ -88,26 +91,26 @@ impl InlineCommand {
                 metrics::CMD_DOD_COUNTER.inline.inc();
                 dod::dick_of_day_impl(config, repos, incr, from_refs, lang_code)
                     .await
-                    .map(|reply| InlineResult::text(reply.text))
+                    .map(|reply| InlineResult::text(reply.text, reply.group))
             },
             InlineCommand::Loan => {
                 metrics::CMD_LOAN_COUNTER.invoked.inline.inc();
                 loan::loan_impl(repos, from_refs, config, lang_code)
                     .await
-                    .map(InlineResult::from)
+                    .map(|result| InlineResult::with_keyboard(result, MessageGroup::Application))
             },
             InlineCommand::Stats => {
                 metrics::CMD_STATS.inline.inc();
-                stats::chat_stats_impl(repos, from_refs, config.features.pvp, &lang_code)
+                stats::chat_stats_impl(repos, from_refs, config.features.pvp, lang_code)
                     .await
-                    .map(InlineResult::text)
+                    .map(|text| InlineResult::text(text, MessageGroup::Report))
             },
             InlineCommand::Shrinks => {
                 metrics::CMD_SHRINKS.inc();
-                shrink::recent_shrinks_impl(repos, from_refs, &config, &lang_code)
+                shrink::recent_shrinks_impl(repos, from_refs, &config, lang_code)
                     .await
                     .map(|(page, keyboard)| {
-                        let mut res = InlineResult::text(page.lines);
+                        let mut res = InlineResult::text(page.lines, MessageGroup::Report);
                         res.keyboard = keyboard;
                         res
                     })
@@ -222,7 +225,7 @@ pub async fn inline_chosen_handler(
     incr: Incrementor,
     deps: HandlerDeps,
 ) -> HandlerResult {
-    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.finished();
 
@@ -244,15 +247,17 @@ pub async fn inline_chosen_handler(
                 .context(format!("couldn't parse inline command '{}'", result.result_id))?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs, &lang_code).await?;
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
-            let mut request = bot.edit_message_text_inline(inline_message_id, inline_result.text);
+            let mut request = bot.edit_message_text_inline(inline_message_id.as_str(), inline_result.text);
             request.reply_markup = inline_result.keyboard;
             request.parse_mode.replace(Html);
             request.disable_web_page_preview.replace(true);
             request.await?;
+
+            self_destruction.schedule_inline(&inline_message_id, inline_result.group, &lang_code).await;
         }
     }
 
@@ -267,7 +272,7 @@ pub async fn inline_callback_handler(
     incr: Incrementor,
     deps: HandlerDeps,
 ) -> HandlerResult {
-    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     let mut answer = bot.answer_callback_query(query.id.clone());
 
@@ -291,12 +296,17 @@ pub async fn inline_callback_handler(
         let parse_res = parse_callback_data(data, query.from.id);
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
-            let inline_result = cmd.execute(&repos, config, incr, from_refs, lang_code).await?;
+            let inline_result = cmd.execute(&repos, config, incr, from_refs, &lang_code).await?;
             let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
             edit.disable_web_page_preview.replace(true);
             edit.await?;
+
+            // Legacy groups send no chosen result. For them this is the first place the bot sees
+            // the id. If the message is already scheduled, the insert does nothing, so paging does
+            // not move the time it will go at.
+            self_destruction.schedule_inline(inline_msg_id, inline_result.group, &lang_code).await;
         } else {
             let key = match parse_res {
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",

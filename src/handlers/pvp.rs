@@ -10,8 +10,8 @@ use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
 use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackResult, HandlerDeps, HandlerResult};
-use crate::{metrics, reply_html, repo};
-use crate::config::BattlesFeatureToggles;
+use crate::{metrics, reply_html, reply_html_ephemeral, repo};
+use crate::config::{BattlesFeatureToggles, MessageGroup};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
 use crate::domain::primitives::{Bet, LanguageCode, LengthChange, LoanPayout, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, TelegramChatId};
@@ -102,7 +102,7 @@ pub async fn pvp_cmd_handler(
     cmd: BattleCommands,
     deps: HandlerDeps,
 ) -> HandlerResult {
-    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
 
@@ -111,14 +111,13 @@ pub async fn pvp_cmd_handler(
         repos,
         features: config.features.pvp,
         chat_id: msg.chat.id.into(),
-        lang_code,
+        lang_code: lang_code.clone(),
     };
     let bet = Bet::new(cmd.bet().into()).map_err(|e| anyhow!(e))?;
     let (text, keyboard) = pvp_impl_start(params, user, bet).await?;
 
-    let mut answer = reply_html(bot, &msg, text);
-    answer.reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard);
-    answer.await?;
+    reply_html_ephemeral!(bot, msg, text, self_destruction, MessageGroup::Application, lang_code,
+        reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard));
     Ok(())
 }
 
@@ -185,9 +184,17 @@ pub(super) fn build_inline_keyboard_article_result(
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all)]
-pub async fn pvp_inline_chosen_handler() -> HandlerResult {
+#[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
+pub async fn pvp_inline_chosen_handler(result: ChosenInlineResult, deps: HandlerDeps) -> HandlerResult {
+    let HandlerDeps { self_destruction, lang_resolver, .. } = deps;
     metrics::INLINE_COUNTER.finished();
+
+    // The offer is built by Telegram out of the article, so this is the first (and only) moment the
+    // bot learns which message carries it.
+    if let Some(inline_message_id) = result.inline_message_id {
+        let lang_code = lang_resolver.execute().await;
+        self_destruction.schedule_inline(&inline_message_id, MessageGroup::Application, &lang_code).await;
+    }
     Ok(())
 }
 
@@ -204,7 +211,7 @@ pub async fn pvp_callback_handler(
     mut battle_locker: LockCallbackServiceFacade,
     deps: HandlerDeps,
 ) -> HandlerResult {
-    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat().id)
@@ -237,6 +244,12 @@ pub async fn pvp_callback_handler(
         chat_id: chat_id.clone(),
     };
     let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;
+    // A fought battle is a record of itself, not an offer waiting to expire.
+    match (query.message.as_ref(), query.inline_message_id.as_ref()) {
+        (Some(message), _) => self_destruction.cancel_message(message.chat().id, message.id()).await,
+        (None, Some(inline_message_id)) => self_destruction.cancel_inline(inline_message_id).await,
+        (None, None) => {},
+    };
     attack_result.apply(bot, query).await?;
 
     metrics::CMD_PVP_COUNTER.inline.inc();

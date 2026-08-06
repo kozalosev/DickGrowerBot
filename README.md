@@ -31,7 +31,10 @@ Features
 * OpenTelemetry distributed tracing (OTLP/gRPC), exportable to a collector such as Jaeger;
 * `/support` to reach the owner without exposing an email or a personal account, and SQL functions to
   answer a data deletion request by hand — see [Support requests and data deletion](https://github.com/kozalosev/DickGrowerBot/wiki/Support-requests-and-data-deletion) in the wiki;
-* can be restricted for use in specific topics only.
+* can be restricted for use in specific topics only;
+* optional self-destruction of the bot's own messages (and of the commands behind them, where the
+  bot is an administrator) to keep a busy chat readable — configured per message group with the
+  `MSG_SELFDESTRUCT_*` variables of [.env.example](.env.example).
 
 Technical stuff
 ---------------

@@ -15,8 +15,10 @@
 #     added. The string domain types are absent: `#[domain_type]` generates no `literal` for them.
 disallowed-methods = [
     { path = "dick_grower_bot::domain::primitives::numbers::AffectedRows::literal", reason = "use literal!(AffectedRows = …)" },
+    { path = "dick_grower_bot::domain::primitives::numbers::AttemptsCount::literal", reason = "use literal!(AttemptsCount = …)" },
     { path = "dick_grower_bot::domain::primitives::numbers::BattlesCount::literal", reason = "use literal!(BattlesCount = …)" },
     { path = "dick_grower_bot::domain::primitives::length::Bet::literal", reason = "use literal!(Bet = …)" },
+    { path = "dick_grower_bot::domain::primitives::count::Count::literal", reason = "use literal!(Count<T> = …)" },
     { path = "dick_grower_bot::domain::primitives::numbers::Counter::literal", reason = "use literal!(Counter = …)" },
     { path = "dick_grower_bot::domain::primitives::id::DatacenterId::literal", reason = "use literal!(DatacenterId = …)" },
     { path = "dick_grower_bot::domain::primitives::numbers::DaysCount::literal", reason = "use literal!(DaysCount = …)" },
@@ -35,9 +37,12 @@ disallowed-methods = [
     { path = "dick_grower_bot::domain::primitives::length::PositiveLength::literal", reason = "use literal!(PositiveLength = …)" },
     { path = "dick_grower_bot::domain::primitives::promo::PromoBonus::literal", reason = "use literal!(PromoBonus = …)" },
     { path = "dick_grower_bot::domain::primitives::promo::PromoCapacity::literal", reason = "use literal!(PromoCapacity = …)" },
+    { path = "dick_grower_bot::domain::primitives::numbers::RateLimit::literal", reason = "use literal!(RateLimit = …)" },
     { path = "dick_grower_bot::domain::primitives::ratio::Ratio::literal", reason = "use literal!(Ratio = …)" },
+    { path = "dick_grower_bot::domain::primitives::id::ScheduledDeletionId::literal", reason = "use literal!(ScheduledDeletionId = …)" },
     { path = "dick_grower_bot::domain::primitives::length::SignedLengthChange::literal", reason = "use literal!(SignedLengthChange = …)" },
     { path = "dick_grower_bot::domain::primitives::id::chat::TelegramChatId::literal", reason = "use literal!(TelegramChatId = …)" },
+    { path = "dick_grower_bot::domain::primitives::id::chat::TelegramMessageId::literal", reason = "use literal!(TelegramMessageId = …)" },
     { path = "dick_grower_bot::domain::primitives::id::chat::TopicId::literal", reason = "use literal!(TopicId = …)" },
     { path = "dick_grower_bot::domain::primitives::id::UserId::literal", reason = "use literal!(UserId = …)" },
     { path = "dick_grower_bot::domain::primitives::numbers::WinStreak::literal", reason = "use literal!(WinStreak = …)" },

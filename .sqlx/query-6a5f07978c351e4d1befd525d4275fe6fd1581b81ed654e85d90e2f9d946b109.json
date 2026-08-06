@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT state AS \"state: DeletionState\", count(*) AS \"count!: Count<ScheduledDeletion>\"\n                FROM Scheduled_Message_Deletions WHERE finished_at IS NOT NULL GROUP BY state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state: DeletionState",
+        "type_info": {
+          "Custom": {
+            "name": "deletion_state",
+            "kind": {
+              "Enum": [
+                "created",
+                "warned",
+                "removed",
+                "removed_before",
+                "expired",
+                "failed"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!: Count<ScheduledDeletion>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "6a5f07978c351e4d1befd525d4275fe6fd1581b81ed654e85d90e2f9d946b109"
+}

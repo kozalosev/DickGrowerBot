@@ -189,3 +189,4 @@ errors:
   banned_inline_title: "Вы заблокированы"
 self_destruction:
   warning: "🧹 <i>Чтобы не засорять чат, это сообщение будет удалено через <b>%{seconds}</b> сек…</i>"
+  placeholder: "🧹 <i>Это сообщение вычищено, чтобы не засорять чат.</i>"

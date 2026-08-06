@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "ALTER TABLE Scheduled_Message_Deletions DROP CONSTRAINT scheduled_message_deletions_check",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "6cbd581e02580d1e0298d91e32a02af44ad06e3e188af76aef410ee60e27d71a"
+}

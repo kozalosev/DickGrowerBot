@@ -6,7 +6,10 @@ use domain_types_macro::domain_type;
 use crate::*;
 
 id!(LoanId);
-positive_id!(UserId);
+positive_id!(
+    UserId,
+    ScheduledDeletionId
+);
 
 #[domain_type]
 struct DatacenterId(i32);
