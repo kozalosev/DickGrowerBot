@@ -1020,6 +1020,13 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                     pub const fn new(value: #inner_type) -> Self {
                         Self(value)
                     }
+
+                    /// What `new` is for a type that validates nothing, under the name every domain
+                    /// number answers to. Code that only wraps literals can then say `literal` and
+                    /// be checked wherever the call is a constant, whichever kind of type it got.
+                    pub const fn literal(value: #inner_type) -> Self {
+                        Self(value)
+                    }
                 }
             },
         }

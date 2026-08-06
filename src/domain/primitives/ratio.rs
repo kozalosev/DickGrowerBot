@@ -70,53 +70,54 @@ impl From<Ratio> for FloatPercentage {
 
 #[cfg(test)]
 mod test {
+    use crate::literal;
     use super::{FloatPercentage, Percentage, Ratio};
 
     #[test]
     fn percentage_display() {
-        assert_eq!(Percentage::literal(0).to_string(), "0%");
-        assert_eq!(Percentage::literal(33).to_string(), "33%");
-        assert_eq!(Percentage::literal(100).to_string(), "100%");
+        assert_eq!(literal!(Percentage = 0).to_string(), "0%");
+        assert_eq!(literal!(Percentage = 33).to_string(), "33%");
+        assert_eq!(literal!(Percentage = 100).to_string(), "100%");
     }
 
     #[test]
     fn float_percentage_display() {
-        assert_eq!(FloatPercentage::literal(0.0).to_string(), "0.00%");
-        assert_eq!(FloatPercentage::literal(10.0).to_string(), "10.00%");
-        assert_eq!(FloatPercentage::literal(33.333).to_string(), "33.33%");
+        assert_eq!(literal!(FloatPercentage = 0.0).to_string(), "0.00%");
+        assert_eq!(literal!(FloatPercentage = 10.0).to_string(), "10.00%");
+        assert_eq!(literal!(FloatPercentage = 33.333).to_string(), "33.33%");
     }
 
     #[test]
     fn ratio_scale() {
-        assert_eq!(Ratio::literal(0.1).scale(50.0), 5.0);
-        assert_eq!(Ratio::literal(0.0).scale(50.0), 0.0);
-        assert_eq!(Ratio::literal(1.0).scale(50.0), 50.0);
+        assert_eq!(literal!(Ratio = 0.1).scale(50.0), 5.0);
+        assert_eq!(literal!(Ratio = 0.0).scale(50.0), 0.0);
+        assert_eq!(literal!(Ratio = 1.0).scale(50.0), 50.0);
     }
 
     #[test]
     fn ratio_percentage_conversions() {
-        let ratio = Ratio::literal(0.1);
-        assert_eq!(Percentage::from(ratio), Percentage::literal(10));
-        assert_eq!(FloatPercentage::from(ratio), FloatPercentage::literal(10.0));
+        let ratio = literal!(Ratio = 0.1);
+        assert_eq!(Percentage::from(ratio), literal!(Percentage = 10));
+        assert_eq!(FloatPercentage::from(ratio), literal!(FloatPercentage = 10.0));
     }
 
     #[test]
     fn ratio_percentage_lower_bound() {
-        assert_eq!(Percentage::from(Ratio::literal(0.0)), Percentage::literal(0));
-        assert_eq!(FloatPercentage::from(Ratio::literal(0.0)), FloatPercentage::literal(0.0));
+        assert_eq!(Percentage::from(literal!(Ratio = 0.0)), literal!(Percentage = 0));
+        assert_eq!(FloatPercentage::from(literal!(Ratio = 0.0)), literal!(FloatPercentage = 0.0));
     }
 
     #[test]
     fn ratio_percentage_upper_bound() {
-        assert_eq!(Percentage::from(Ratio::literal(1.0)), Percentage::literal(100));
-        assert_eq!(FloatPercentage::from(Ratio::literal(1.0)), FloatPercentage::literal(100.0));
+        assert_eq!(Percentage::from(literal!(Ratio = 1.0)), literal!(Percentage = 100));
+        assert_eq!(FloatPercentage::from(literal!(Ratio = 1.0)), literal!(FloatPercentage = 100.0));
     }
 
     #[test]
     fn ratio_percentage_rounds_half_away_from_zero() {
         // 0.125 and 100 are both exactly representable in f64, so the product (12.5) is exact
         // too - no floating-point drift to worry about in this assertion.
-        assert_eq!(Percentage::from(Ratio::literal(0.125)), Percentage::literal(13));
+        assert_eq!(Percentage::from(literal!(Ratio = 0.125)), literal!(Percentage = 13));
     }
 
     #[test]
@@ -124,7 +125,7 @@ mod test {
         // Values close enough to 0/1 that rounding lands exactly on the boundary - this is
         // what the old clamping `match` in `percentage()` used to guard against; make sure
         // dropping it didn't reintroduce a panic at the edges.
-        assert_eq!(Percentage::from(Ratio::literal(0.001)), Percentage::literal(0));
-        assert_eq!(Percentage::from(Ratio::literal(0.999)), Percentage::literal(100));
+        assert_eq!(Percentage::from(literal!(Ratio = 0.001)), literal!(Percentage = 0));
+        assert_eq!(Percentage::from(literal!(Ratio = 0.999)), literal!(Percentage = 100));
     }
 }

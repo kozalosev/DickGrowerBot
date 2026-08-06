@@ -1,14 +1,15 @@
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
-use crate::domain::primitives::{Debt, LoanPayout, Ratio, UserId};
+use crate::domain::primitives::{Debt, LoanPayout, Ratio};
 use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
-use crate::repo::test::{CHAT_ID, NAME, fresh_db, UID, USER_ID, CHAT_ID_KIND};
+use crate::repo::test::{user_id, CHAT_ID, NAME, fresh_db, UID, USER_ID, CHAT_ID_KIND};
+use crate::literal;
 
 #[tokio::test]
 async fn test_all() {
     let db = fresh_db().await;
-    let payout_ratio = Ratio::literal(0.1);
+    let payout_ratio = literal!(Ratio = 0.1);
 
     create_user(&db).await;
     create_dick(&db).await; // to create a chat
@@ -53,7 +54,8 @@ async fn test_all() {
         .await.expect("couldn't fetch a length after borrowing");
     assert_eq!(length_after_borrowing, value.value());
 
-    let half_payment = LoanPayout::literal(value.value() as i32);
+    let half_payment = LoanPayout::new(value.value() as i32)
+        .expect("a test payout must be non-negative");
     loans.pay(user_id, &chat_id, half_payment)
         .await.expect("couldn't pay the loan");
 
@@ -95,13 +97,13 @@ async fn test_borrow_without_dick() {
     create_dick(&db).await; // to create a chat
 
     let chat_id = CHAT_ID_KIND;
-    let user_id_without_dick = UserId::literal(UID + 1);
+    let user_id_without_dick = user_id(UID + 1);
     repo::Users::new(db.clone())
         .create_or_update(user_id_without_dick, &format!("{NAME} 2"))
         .await.expect("couldn't create a user");
 
     let loans = repo::Loans::new(db.clone(), &config::AppConfig {
-        loan_payout_ratio: Ratio::literal(0.1),
+        loan_payout_ratio: literal!(Ratio = 0.1),
         ..Default::default()
     });
     let borrow_result = loans.borrow(user_id_without_dick, &chat_id, Debt::new(10))

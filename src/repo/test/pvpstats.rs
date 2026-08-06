@@ -1,9 +1,10 @@
 use crate::domain::objects::WinRateAware;
-use crate::domain::primitives::{Bet, UserId};
+use crate::domain::primitives::Bet;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::repo;
 use crate::repo::test::dicks::{create_dick, create_user, create_user_and_dick_2};
-use crate::repo::test::{fresh_db, CHAT_ID_KIND, UID, USER_ID};
+use crate::repo::test::{user_id, fresh_db, CHAT_ID_KIND, UID, USER_ID};
+use crate::literal;
 
 #[tokio::test]
 async fn test_all() {
@@ -11,7 +12,7 @@ async fn test_all() {
     let pvp_stats = repo::BattleStatsRepo::new(db.clone(), Default::default());
 
     let chat_id = CHAT_ID_KIND;
-    let bet = Bet::literal(42);
+    let bet = literal!(Bet = 42);
     let bet_length = i64::from(bet.value());
 
     // create user and dick #1
@@ -20,7 +21,7 @@ async fn test_all() {
     let uid_1 = USER_ID;
     // create user and dick #2
     create_user_and_dick_2(&db, &ChatIdPartiality::Specific(chat_id.clone()), "User-2").await;
-    let uid_2 = UserId::literal(UID + 1);
+    let uid_2 = user_id(UID + 1);
 
     // get stats when no rows
     let stats = pvp_stats.get_stats(&chat_id, uid_1).await

@@ -1,5 +1,7 @@
 mod validators;
 mod macros;
+#[cfg(test)]
+mod literal;
 
 use crate::pub_use_modules;
 

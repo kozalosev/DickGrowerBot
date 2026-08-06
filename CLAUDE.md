@@ -328,6 +328,35 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Code Style
 
+- **A domain value written into the source goes through `literal!`.** `literal!(Counter = 0)`, never
+  `Counter::literal(0)`. The macro puts the call inside a `const` block, which is what makes the
+  type's validator run while the code is compiled — a `const fn` is evaluated early only where the
+  language requires it, and an ordinary call requires nothing, so a bare call would defer the check
+  to whenever the line happens to run.
+
+  A **runtime** value is not a literal and must not be dressed as one: it goes through the checked
+  constructor (`UserId::new(uid)?`, or `repo::test::user_id(uid)` in the tests), which returns the
+  refusal instead of hiding it.
+
+  ```rust
+  // ❌ the validator runs when this line is reached, if ever
+  grow_shrink_ratio: Ratio::literal(0.5),
+
+  // ✅ the validator runs during the build
+  grow_shrink_ratio: literal!(Ratio = 0.5),
+  ```
+
+  `clippy.toml` forbids the bare constructor for every domain number, so the rule is enforced rather
+  than remembered — `literal!` carries the one `#[allow]` that lets itself through. Two things to
+  know about that list: a path spelled wrong resolves to nothing and is ignored **silently**, and it
+  has no globs, so a new domain type stays unprotected until it is added. The guard is
+  `src/domain/primitives/literal.rs`: `cargo test literal` compares the list with the types that
+  are declared and fails if one of them is missing or if a path leads nowhere.
+
+  Where the failure shows up depends on the kind of constant: a named `const` item is evaluated by
+  `cargo check`, while an inline `const` block — which is what `literal!` expands to — is evaluated
+  during codegen, so only `cargo build` and `cargo test` report it. The IDE stays quiet.
+
 - **A log message is a constant; the values are fields.** Use `tracing::{debug,info,warn,error}!`
   (never `log::*`) and keep the message text free of interpolated values, so that repeated events
   group together in the log database. Messages are lower-case and have no trailing dots. Pass the

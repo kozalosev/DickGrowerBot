@@ -19,6 +19,7 @@ use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
 use crate::repo::Repositories;
+use crate::literal;
 
 // let's calculate time offsets from 22.06.2024
 const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
@@ -317,7 +318,7 @@ async fn pvp_impl_attack(
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
-       p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { Bet::literal(0) }),
+       p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { literal!(Bet = 0) }),
     );
     let (enough_initiator, enough_acceptor) = (enough_initiator?, enough_acceptor?);
 

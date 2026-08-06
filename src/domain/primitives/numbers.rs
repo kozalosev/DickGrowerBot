@@ -39,12 +39,13 @@ impl AffectedRows {
 
 #[cfg(test)]
 mod deserialize_tests {
+    use crate::literal;
     use super::{Counter, DaysCount};
 
     #[test]
     fn validated_type_round_trips_and_rejects_invalid() {
         let valid: Counter = serde_saphyr::from_str("5").expect("5 must deserialize");
-        assert_eq!(valid, Counter::literal(5));
+        assert_eq!(valid, literal!(Counter = 5));
 
         let invalid = serde_saphyr::from_str::<Counter>("-1");
         assert!(invalid.is_err(), "negative value must be rejected by the validator");

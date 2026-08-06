@@ -41,6 +41,7 @@ impl InvalidPage {
 
 #[cfg(test)]
 mod test {
+    use crate::literal;
     use super::Page;
 
     #[test]
@@ -50,9 +51,9 @@ mod test {
         let p00 = (p1 - 1).unwrap();
         let p5 = (p1 * 5).unwrap();
 
-        assert_eq!(p0, Page::literal(0));
-        assert_eq!(p1, Page::literal(1));
-        assert_eq!(p00, Page::literal(0));
-        assert_eq!(p5, Page::literal(5));
+        assert_eq!(p0, literal!(Page = 0));
+        assert_eq!(p1, literal!(Page = 1));
+        assert_eq!(p00, literal!(Page = 0));
+        assert_eq!(p5, literal!(Page = 5));
     }
 }

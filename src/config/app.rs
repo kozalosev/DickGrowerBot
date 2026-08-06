@@ -8,6 +8,7 @@ use crate::config::shrink::DailyShrinkConfig;
 use crate::config::incrementor::IncrementorConfig;
 use crate::domain::primitives::{Bet, DaysCount, Limit, Ratio};
 use crate::domain::primitives::chat::TelegramChatId;
+use crate::literal;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Default))]
@@ -36,15 +37,15 @@ pub struct DatabaseConfig {
 
 impl AppConfig {
     pub fn from_env() -> Self {
-        let top_limit = get_env_value_or_default("TOP_LIMIT", Limit::literal(10));
+        let top_limit = get_env_value_or_default("TOP_LIMIT", literal!(Limit = 10));
         let inactivity_days = get_env_value_or_default("INACTIVITY_DAYS", DaysCount::new(7));
-        let loan_payout_ratio = get_env_value_or_default("LOAN_PAYOUT_COEF", Ratio::literal(0.0));
+        let loan_payout_ratio = get_env_value_or_default("LOAN_PAYOUT_COEF", literal!(Ratio = 0.0));
         let dod_selection_mode = get_optional_env_value("DOD_SELECTION_MODE");
         let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
         let multiple_loans = get_env_value_or_default("MULTIPLE_LOANS_ENABLED", false);
-        let pvp_default_bet = get_env_value_or_default("PVP_DEFAULT_BET", Bet::literal(1));
+        let pvp_default_bet = get_env_value_or_default("PVP_DEFAULT_BET", literal!(Bet = 1));
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
         let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
@@ -52,7 +53,7 @@ impl AppConfig {
         let most_popular_language_enabled = get_env_value_or_default("MOST_POPULAR_LANGUAGE_ENABLED", true);
         let hide_inactive_zero_length_from_top = get_env_value_or_default("HIDE_INACTIVE_ZERO_LENGTH_FROM_TOP", true);
         let daily_shrink = DailyShrinkConfig {
-            ratio: get_env_value_or_default("DAILY_SHRINK_RATIO", Ratio::literal(0.0)),
+            ratio: get_env_value_or_default("DAILY_SHRINK_RATIO", literal!(Ratio = 0.0)),
             inactivity_days: get_env_value_or_default("DAILY_SHRINK_INACTIVITY_DAYS", DaysCount::new(7)),
             ramp_up_days: get_env_value_or_default("DAILY_SHRINK_RAMP_UP_DAYS", DaysCount::new(7)),
         };

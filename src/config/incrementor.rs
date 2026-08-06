@@ -1,5 +1,6 @@
 use std::ops::RangeInclusive;
 use crate::config::env::get_env_value_or_default;
+use crate::literal;
 use crate::domain::primitives::{DaysCount, Ratio};
 
 /// Tuning of the length changes produced by the incrementor and its perks.
@@ -21,7 +22,7 @@ impl Default for IncrementorConfig {
     fn default() -> Self {
         Self {
             growth_range: -5..=10,
-            grow_shrink_ratio: Ratio::literal(0.5),
+            grow_shrink_ratio: literal!(Ratio = 0.5),
             newcomers_grace_days: DaysCount::new(7),
             dod_bonus_range: 1..=5,
             perks: Default::default(),
@@ -42,7 +43,7 @@ impl IncrementorConfig {
             newcomers_grace_days: get_env_value_or_default("NEWCOMERS_GRACE_DAYS", defaults.newcomers_grace_days),
             dod_bonus_range: *defaults.dod_bonus_range.start()..=dod_max_bonus,
             perks: PerksConfig {
-                help_pussies_ratio: get_env_value_or_default("HELP_PUSSIES_COEF", Ratio::literal(0.0)),
+                help_pussies_ratio: get_env_value_or_default("HELP_PUSSIES_COEF", literal!(Ratio = 0.0)),
             },
         }
     }

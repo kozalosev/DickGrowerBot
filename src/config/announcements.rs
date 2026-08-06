@@ -115,6 +115,7 @@ impl Announcement {
 
 #[cfg(test)]
 mod tests {
+    use crate::literal;
     use std::io::Write;
     use crate::domain::primitives::{Counter, SupportedLanguage};
     use super::AnnouncementsConfig;
@@ -151,7 +152,7 @@ texts:
   ru: |
     <a href="https://t.me/kozaloru/712">Что нового?</a>
 "#);
-        assert_eq!(config.max_shows, Counter::literal(3));
+        assert_eq!(config.max_shows, literal!(Counter = 3));
         let en = config.announcements.get(&SupportedLanguage::EN)
             .expect("no English announcement");
         assert_eq!(en.text.as_str(), r#"<a href="https://t.me/kozalo_blog/20">What's new?</a>"#);
@@ -169,7 +170,7 @@ texts:
   # a comment inside the map
   en: hello    # trailing comment
 "#);
-        assert_eq!(config.max_shows, Counter::literal(2));
+        assert_eq!(config.max_shows, literal!(Counter = 2));
         let en = config.announcements.get(&SupportedLanguage::EN)
             .expect("no English announcement");
         assert_eq!(en.text.as_str(), "hello");
@@ -181,7 +182,7 @@ texts:
 texts:
   en: hello
 "#);
-        assert_eq!(config.max_shows, Counter::literal(0));
+        assert_eq!(config.max_shows, literal!(Counter = 0));
         assert!(config.announcements.contains_key(&SupportedLanguage::EN));
     }
 
@@ -210,7 +211,7 @@ texts:
     #[test]
     fn missing_file_yields_empty_config() {
         let config = AnnouncementsConfig::load("definitely/does/not/exist.yml");
-        assert_eq!(config.max_shows, Counter::literal(0));
+        assert_eq!(config.max_shows, literal!(Counter = 0));
         assert!(config.announcements.is_empty());
     }
 
@@ -231,7 +232,7 @@ texts:
   en: hello
 "#);
         assert!(config.announcements.is_empty());
-        assert_eq!(config.max_shows, Counter::literal(0));
+        assert_eq!(config.max_shows, literal!(Counter = 0));
     }
 
     mod fallback {

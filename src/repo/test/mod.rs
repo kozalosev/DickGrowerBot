@@ -28,6 +28,7 @@ use crate::domain::primitives::UserId;
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::ChatIdKind;
+use crate::literal;
 
 /// Put on the container the tests share; `task test:clean` finds it by this and is the only thing
 /// that ever removes it.
@@ -46,7 +47,7 @@ pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = -67890;
 pub const NAME: &str = "test";
 
-pub const USER_ID: UserId = UserId::literal(UID);
+pub const USER_ID: UserId = literal!(UserId = UID);
 pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
 
 /// The runtime that owns the shared container and its maintenance pool.
@@ -182,6 +183,13 @@ async fn start_container() -> (ContainerAsync<GenericImage>, u16) {
         .await
         .expect("couldn't fetch port from PostgreSQL server");
     (postgres_container, postgres_port)
+}
+
+/// A user id a test computes instead of writing down, like `UID + 1` or an id taken from a loop.
+/// Such a value is not known while the code is compiled, so `literal!` does not fit. This uses the
+/// checked constructor and fails the test if the number turns out to be wrong.
+pub fn user_id(value: i64) -> UserId {
+    UserId::new(value).expect("a test user id must be positive")
 }
 
 #[inline]

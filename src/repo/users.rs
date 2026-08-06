@@ -4,6 +4,7 @@ use crate::domain::objects::{BannedUser, User};
 use crate::domain::primitives::{DaysCount, Ratio, UserId, Username};
 use crate::repo::ChatIdKind;
 use crate::repository;
+use crate::literal;
 
 repository!(Users,
     #[autometrics]
@@ -61,7 +62,7 @@ repository!(Users,
         rich_exclusion_ratio: Ratio,
         inactivity_days: DaysCount,
     ) -> anyhow::Result<Option<User>> {
-        let wealth_borderline = (Ratio::literal(1.0) - rich_exclusion_ratio)?;
+        let wealth_borderline = (literal!(Ratio = 1.0) - rich_exclusion_ratio)?;
         sqlx::query_as!(User,
             r#"WITH ranked_users AS (
                 SELECT u.uid, name, u.created_at, PERCENT_RANK() OVER (ORDER BY length) AS percentile_rank
