@@ -1,6 +1,6 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, SupportedLanguage};
-use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId, TopicId};
+use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
@@ -334,7 +334,7 @@ async fn migrate_chat_id() {
 
     // the journal keeps both ids; this chat had never been anchored, so it had no instance to keep
     let journal = sqlx::query!("SELECT old_chat_id, old_chat_instance, new_chat_id FROM Chat_Migrations WHERE internal_id = $1",
-            internal_id.value())
+            internal_id as InternalChatId)
         .fetch_one(&db)
         .await.expect("the migration must be journaled");
     assert_eq!((journal.old_chat_id, journal.new_chat_id), (old.value(), new.value()));

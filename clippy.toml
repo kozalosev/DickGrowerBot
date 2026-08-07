@@ -34,7 +34,6 @@ disallowed-methods = [
     { path = "dick_grower_bot::domain::primitives::pagination::Page::literal", reason = "use literal!(Page = …)" },
     { path = "dick_grower_bot::domain::primitives::ratio::Percentage::literal", reason = "use literal!(Percentage = …)" },
     { path = "dick_grower_bot::domain::primitives::numbers::Position::literal", reason = "use literal!(Position = …)" },
-    { path = "dick_grower_bot::domain::primitives::length::PositiveLength::literal", reason = "use literal!(PositiveLength = …)" },
     { path = "dick_grower_bot::domain::primitives::promo::PromoBonus::literal", reason = "use literal!(PromoBonus = …)" },
     { path = "dick_grower_bot::domain::primitives::promo::PromoCapacity::literal", reason = "use literal!(PromoCapacity = …)" },
     { path = "dick_grower_bot::domain::primitives::numbers::RateLimit::literal", reason = "use literal!(RateLimit = …)" },

@@ -498,6 +498,19 @@ migrations/  — SQL migration files, auto-applied on startup (see DB Migrations
 
 `#[domain_type]` (from `domain_types_macro`) generates newtype wrappers with arithmetic impls, `From`/`Into`, sqlx `Type`/`Encode`/`Decode`, and other trait impls from a simple attribute annotation. See `domain_types/src/traits.rs` and `domain_types_macro/src/lib.rs`.
 
+**A quantity that can't be negative takes an unsigned inner type**, not a validator: there is then
+no invalid value to refuse, so the constructor and the arithmetic stay infallible. Only a *range* is
+worth validating (`Ratio`, `Percentage`), because no integer type encodes one.
+
+Postgres has no unsigned column, so the macro stores such a type in the signed integer of the same
+width — `u16` in an `int2`, `u32` in an `int4`, `u64` in an `int8`. Only `u8` widens, as Postgres
+has no one-byte integer. Encoding and decoding convert rather than cast, and can refuse; a value in
+the half of the range that has no signed counterpart would not have fit the column either.
+
+Two things follow at the call sites. Arithmetic **saturates** instead of returning an `Err`, so
+`page - 1` on the first page is the first page. And `.value()` is unsigned, so a place that mixes it
+with a signed number — `LengthChange::value`, a Prometheus gauge — casts at that point.
+
 ### Feature-oriented handler/repo pairing
 
 Each bot feature is a vertical slice: a file in `handlers/` (e.g. `dick.rs`, `pvp.rs`,
@@ -586,10 +599,11 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   of days, a length, a ratio, an id, …) should use the newtype from `domain_types` / the
   `#[domain_type]` macro (e.g. `DaysCount`, `Length`, `Ratio`, `UserId`) rather than a bare `i32` /
   `u32` / `String`. This keeps units and intent in the type system and stays consistent with the
-  repo layer, which already speaks domain types. Convert to the primitive only at the true boundary
-  (e.g. `value() as i32` right before an sqlx bind). If a suitable wrapper doesn't exist yet, add one
-  (see `domain_types/src/traits.rs` and `domain_types_macro/src/lib.rs`) instead of falling back to a
-  primitive. Short-lived locals and loop indices don't need wrapping.
+  repo layer, which already speaks domain types. A query binds the wrapper itself with an `as`
+  override (`uid as UserId`), which tells sqlx the type rather than converting anything; reach for
+  `.value()` only where a plain number is genuinely wanted. If a suitable wrapper doesn't exist yet,
+  add one (see `domain_types/src/traits.rs` and `domain_types_macro/src/lib.rs`) instead of falling
+  back to a primitive. Short-lived locals and loop indices don't need wrapping.
 
   ```rust
   // ❌ raw primitives for domain concepts on a long-living config struct

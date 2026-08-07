@@ -20,8 +20,8 @@ fn primitives_dir() -> PathBuf {
 /// string types get none), or it is written out by hand, as `Count` does.
 fn declared_types() -> BTreeMap<String, String> {
     let newtype = Regex::new(r"struct (\w+)\((\w+)\)").expect("a valid pattern");
-    let by_macro = Regex::new(r"(?:positive_number|signed_number)!\((\w+),").expect("a valid pattern");
-    let ids = Regex::new(r"(?s)(?:positive_)?id!\s*[({](.*?)[)}]").expect("a valid pattern");
+    let by_macro = Regex::new(r"number!\((\w+),").expect("a valid pattern");
+    let ids = Regex::new(r"(?s)(?:signed_)?id!\s*[({](.*?)[)}]").expect("a valid pattern");
     let name = Regex::new(r"\b([A-Z]\w*)\b").expect("a valid pattern");
     let impl_header = Regex::new(r"^impl\s*(?:<[^>]*>)?\s*(\w+)").expect("a valid pattern");
 

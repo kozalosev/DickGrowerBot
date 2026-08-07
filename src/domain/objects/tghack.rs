@@ -21,7 +21,9 @@ impl InlineMessageIdInfo {
         access_hash: i64,
     ) -> Self {
         Self {
-            dc_id: DatacenterId::new(dc_id),
+            // Telegram has a handful of datacenters, numbered from 1. Anything else means the id
+            // was not what it claimed to be, and 0 says so without failing the whole decoding.
+            dc_id: DatacenterId::new(u8::try_from(dc_id).unwrap_or_default()),
             chat_id: chat_id.map(TelegramChatId::new),
             message_id: MessageId(message_id),
             access_hash: AccessHash::new(access_hash),

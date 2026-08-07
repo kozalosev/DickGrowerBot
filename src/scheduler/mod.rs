@@ -128,7 +128,7 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 /// same database the run just used, so a failure here is only logged.
 async fn report_queue(repos: &Repositories) {
     match repos.deletions.count_pending().await {
-        Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending.value()),
+        Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending.value() as i64),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending self-destructions"),
     }
     match repos.deletions.count_finished().await {

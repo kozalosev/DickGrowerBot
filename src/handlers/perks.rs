@@ -79,9 +79,8 @@ impl Perk for LoanPayoutPerk {
         } else {
             0
         };
-        let payout = i32::try_from(payout_value)
-            .map_err(anyhow::Error::from)
-            .and_then(|v| LoanPayout::new(v).map_err(anyhow::Error::from))
+        let payout = u32::try_from(payout_value)
+            .map(LoanPayout::new)
             .unwrap_or_else(|e| {
                 tracing::error!(payout = payout_value, dick_id = %dick_id, error = %e, "the loan payout is invalid");
                 literal!(LoanPayout = 0)

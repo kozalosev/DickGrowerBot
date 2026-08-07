@@ -184,7 +184,7 @@ impl TryFrom<String> for TopicsCallbackData {
         let err = InvalidCallbackDataBuilder(&data);
         let mut parts = data.as_str().split(':');
         let uid = callbacks::parse_part(&mut parts, &err, "uid").map(UserId)?;
-        let current: i32 = callbacks::parse_part(&mut parts, &err, "current")?;
+        let current: u32 = callbacks::parse_part(&mut parts, &err, "current")?;
         let action = match parts.next().ok_or_else(|| err.missing_part("action"))? {
             "a" => TopicsAction::Allow(TopicId::new(callbacks::parse_part(&mut parts, &err, "topic")?)),
             "f" => TopicsAction::Forbid(TopicId::new(callbacks::parse_part(&mut parts, &err, "topic")?)),
@@ -247,7 +247,7 @@ mod test {
             .collect()
     }
 
-    fn allowed_topics(ids: &[i32]) -> AllowedTopics {
+    fn allowed_topics(ids: &[u32]) -> AllowedTopics {
         AllowedTopics::new(ids.iter().map(|id| TopicId::new(*id)).collect())
     }
 

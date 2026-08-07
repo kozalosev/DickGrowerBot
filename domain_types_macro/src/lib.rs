@@ -50,15 +50,11 @@ enum InnerTypeKind {
 }
 
 /// How a domain type maps onto `sqlx`. Postgres has no unsigned wire type, so an unsigned inner
-/// type can't `#[sqlx(transparent)]`-derive directly; instead it's encoded/decoded through the
-/// smallest signed integer type that can always represent its full range (see `bump_signed_type`).
-/// An unsigned type with no such "bump" type available (`u64` — `i128` isn't a Postgres wire type)
-/// gets no `sqlx` impls at all: it simply can't be bound into a query, and callers convert at the
-/// query boundary as needed.
+/// type can't `#[sqlx(transparent)]`-derive directly; it goes through a signed type instead (see
+/// [`signed_counterpart`]), which the generated `Encode`/`Decode` convert to and from.
 enum SqlxMode {
     Transparent,
-    Bumped(Box<Type>),
-    None,
+    Signed(Box<Type>),
 }
 
 struct TypeInfo<'a> {
@@ -164,22 +160,25 @@ fn parse_features(input: ParseStream) -> syn::Result<bool> {
     Ok(no_auto_display)
 }
 
-/// The smallest signed integer type that can always represent the full range of `unsigned_ident`
-/// (`"u8"`, `"u16"`, ...), for `SqlxMode::Bumped`. `None` for `u64` (and anything unrecognized) —
-/// see `SqlxMode` for why.
-fn bump_signed_type(ty: &Type) -> Option<Type> {
+/// The signed integer type an unsigned one is stored as, for [`SqlxMode::Signed`].
+///
+/// The width is kept, so a domain type's column stays the column it already is: `u16` goes into an
+/// `int2`, `u32` into an `int4`, `u64` into an `int8`. Only `u8` widens, because Postgres has no
+/// one-byte integer. Half of the unsigned range has no signed counterpart, which is why encoding
+/// converts rather than casts — but a value in that half would not have fit the column either.
+fn signed_counterpart(ty: &Type) -> Option<Type> {
     if let Type::Group(group) = ty {
-        return bump_signed_type(&group.elem);
+        return signed_counterpart(&group.elem);
     }
     let Type::Path(type_path) = ty else { return None };
     let ident = &type_path.path.segments.last()?.ident;
-    let bumped = match ident.to_string().as_str() {
-        "u8" => "i16",
-        "u16" => "i32",
-        "u32" => "i64",
+    let signed = match ident.to_string().as_str() {
+        "u8" | "u16" => "i16",
+        "u32" => "i32",
+        "u64" => "i64",
         _ => return None,
     };
-    syn::parse_str(bumped).ok()
+    syn::parse_str(signed).ok()
 }
 
 #[proc_macro_attribute]
@@ -220,10 +219,9 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
 
     let sqlx_mode = match &variant {
         DomainTypeKind::Number(NumberKind { primitive: PrimitiveKind::Integer(IntegerSignedness::Unsigned), .. }) => {
-            match bump_signed_type(&inner_type) {
-                Some(bump) => SqlxMode::Bumped(Box::new(bump)),
-                None => SqlxMode::None,
-            }
+            let signed = signed_counterpart(&inner_type)
+                .unwrap_or_else(|| panic!("no signed type to store {} in", quote!(#inner_type)));
+            SqlxMode::Signed(Box::new(signed))
         }
         _ => SqlxMode::Transparent,
     };
@@ -234,10 +232,9 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
     let derives = generate_derives(&info);
     let impls = generate_impls(&info);
 
-    let (sqlx_transparent, bumped_sqlx_impls) = match &info.sqlx_mode {
+    let (sqlx_transparent, signed_sqlx_impls) = match &info.sqlx_mode {
         SqlxMode::Transparent => (quote! { #[sqlx(transparent)] }, TokenStream::new()),
-        SqlxMode::Bumped(bump) => (quote! {}, generate_bumped_sqlx_impls(&info, bump)),
-        SqlxMode::None => (quote! {}, TokenStream::new()),
+        SqlxMode::Signed(signed) => (quote! {}, generate_signed_sqlx_impls(&info, signed)),
     };
 
     let TypeInfo { name, inner_type, .. } = info;
@@ -248,52 +245,67 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
         pub struct #name(#inner_type);
 
         #impls
-        #bumped_sqlx_impls
+        #signed_sqlx_impls
     };
 
     proc_macro::TokenStream::from(output)
 }
 
-/// Hand-written `Type`/`Encode`/`Decode`, delegating to `bump` (the smallest signed integer that
-/// always fits the unsigned inner type — see `bump_signed_type`). `#[sqlx(transparent)]` can't be
-/// used here since it requires the wrapped field's own type to already implement these traits,
-/// with no substitution; unsigned integers never do (Postgres has no unsigned wire type).
-fn generate_bumped_sqlx_impls(info: &TypeInfo, bump: &Type) -> TokenStream {
+/// Hand-written `Type`/`Encode`/`Decode` for an unsigned inner type, going through `signed` (see
+/// [`signed_counterpart`]). `#[sqlx(transparent)]` can't be used here since it requires the wrapped
+/// field's own type to already implement these traits, with no substitution; unsigned integers never
+/// do, as Postgres has no unsigned wire type.
+///
+/// Both directions convert instead of casting, and both can refuse: a value above the signed half
+/// of the range going out, a negative one coming back. Neither is reachable through a column that
+/// holds what this type writes.
+fn generate_signed_sqlx_impls(info: &TypeInfo, signed: &Type) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
     quote! {
         #[automatically_derived]
         impl<DB: ::sqlx::Database> ::sqlx::Type<DB> for #name
-        where #bump: ::sqlx::Type<DB>
+        where #signed: ::sqlx::Type<DB>
         {
             fn type_info() -> DB::TypeInfo {
-                <#bump as ::sqlx::Type<DB>>::type_info()
+                <#signed as ::sqlx::Type<DB>>::type_info()
+            }
+
+            fn compatible(ty: &DB::TypeInfo) -> bool {
+                <#signed as ::sqlx::Type<DB>>::compatible(ty)
             }
         }
 
         #[automatically_derived]
         impl<'q, DB: ::sqlx::Database> ::sqlx::Encode<'q, DB> for #name
-        where #bump: ::sqlx::Encode<'q, DB>
+        where #signed: ::sqlx::Encode<'q, DB>
         {
             fn encode_by_ref(
                 &self,
                 buf: &mut <DB as ::sqlx::Database>::ArgumentBuffer,
             ) -> ::std::result::Result<::sqlx::encode::IsNull, ::sqlx::error::BoxDynError> {
-                // Always lossless: `bump` is chosen to be wide enough for the full range of
-                // #inner_type.
-                <#bump as ::sqlx::Encode<DB>>::encode_by_ref(&(self.0 as #bump), buf)
+                let value = <#signed as ::std::convert::TryFrom<#inner_type>>::try_from(self.0)?;
+                <#signed as ::sqlx::Encode<DB>>::encode_by_ref(&value, buf)
             }
         }
 
         #[automatically_derived]
         impl<'r, DB: ::sqlx::Database> ::sqlx::Decode<'r, DB> for #name
-        where #bump: ::sqlx::Decode<'r, DB>
+        where #signed: ::sqlx::Decode<'r, DB>
         {
             fn decode(
                 value: <DB as ::sqlx::Database>::ValueRef<'r>,
             ) -> ::std::result::Result<Self, ::sqlx::error::BoxDynError> {
-                let raw = <#bump as ::sqlx::Decode<DB>>::decode(value)?;
-                // Only fails for genuinely corrupted/out-of-range column data.
-                Ok(Self(<#inner_type as ::std::convert::TryFrom<#bump>>::try_from(raw)?))
+                let raw = <#signed as ::sqlx::Decode<DB>>::decode(value)?;
+                Ok(Self(<#inner_type as ::std::convert::TryFrom<#signed>>::try_from(raw)?))
+            }
+        }
+
+        // What `#[sqlx(transparent)]` would have derived. Without it the type can be bound on its
+        // own but not as an array, which is how a batch insert passes its rows.
+        #[automatically_derived]
+        impl ::sqlx::postgres::PgHasArrayType for #name {
+            fn array_type_info() -> ::sqlx::postgres::PgTypeInfo {
+                <#signed as ::sqlx::postgres::PgHasArrayType>::array_type_info()
             }
         }
     }

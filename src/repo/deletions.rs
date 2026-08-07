@@ -173,7 +173,7 @@ repository!(ScheduledDeletions,
                           inline_message_id AS "inline_message_id: InlineMessageId",
                           message_kind AS "kind: MessageKind", message_group AS "group: MessageGroup",
                           lang_code AS "lang_code: LanguageCode", state AS "state: DeletionState",
-                          created_at, attempts::bigint AS "attempts!: AttemptsCount""#,
+                          created_at, attempts AS "attempts!: AttemptsCount""#,
             limit as Limit, lease_until
         )
             .fetch_all(&self.pool)
@@ -251,7 +251,7 @@ repository!(ScheduledDeletions,
     pub async fn postpone(&self, id: ScheduledDeletionId, retry_after: DateTime<Utc>) -> anyhow::Result<AttemptsCount> {
         let attempts = sqlx::query_scalar!(
             r#"UPDATE Scheduled_Message_Deletions SET attempts = attempts + 1, fire_after = $2
-                    WHERE id = $1 RETURNING attempts::bigint AS "attempts!: AttemptsCount""#,
+                    WHERE id = $1 RETURNING attempts AS "attempts!: AttemptsCount""#,
                 id as ScheduledDeletionId, retry_after)
             .fetch_one(&self.pool)
             .await
@@ -322,7 +322,7 @@ mod tests {
 
     const CHAT_ID: i64 = -1001234567890;
 
-    fn chat_message(message_id: i32) -> DeletionTarget {
+    fn chat_message(message_id: u32) -> DeletionTarget {
         DeletionTarget::ChatMessage {
             chat_id: TelegramChatId::new(CHAT_ID),
             message_id: TelegramMessageId::new(message_id),
@@ -498,7 +498,7 @@ mod tests {
         let db = fresh_db().await;
         let repo = ScheduledDeletions::new(db);
         let messages: Vec<_> = (0..DeletionState::TERMINAL.len())
-            .map(|i| due(chat_message(i as i32 + 1), MessageKind::Reply))
+            .map(|i| due(chat_message(i as u32 + 1), MessageKind::Reply))
             .collect();
         repo.schedule(&messages).await.expect("couldn't schedule the deletions");
         let claimed = repo.claim_due(literal!(Limit = 10), lease())

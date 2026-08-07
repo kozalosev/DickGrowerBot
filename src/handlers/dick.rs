@@ -152,7 +152,7 @@ pub(crate) async fn top_impl(
 ) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let offset = Offset::calculate(page, config.top_limit);
-    let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
+    let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
     let has_more_pages = dicks.len() > config.top_limit.value() as usize;
     let mut any_inactive = false;
@@ -227,10 +227,9 @@ pub async fn page_callback_handler(
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
             .map(str::to_owned)
             .ok_or(InvalidPage::for_value(d, "invalid prefix")))
-        .and_then(|r| r.parse::<i16>()
+        .and_then(|r| r.parse::<u16>()
+            .map(Page::new)
             .map_err(|e| InvalidPage::for_value(&r, e)))
-        .and_then(|value| Page::new(value)
-            .map_err(|e| InvalidPage::for_value(&value.to_string(), e)))
         .map_err(|e| anyhow!(e))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
@@ -245,11 +244,11 @@ pub async fn page_callback_handler(
 pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
     let mut buttons = Vec::new();
     if page > 0 {
-        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
+        let prev_page = page - 1;
         buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{prev_page}")))
     }
     if has_more_pages {
-        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
+        let next_page = page + 1;
         buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
     InlineKeyboardMarkup::new(vec![buttons])

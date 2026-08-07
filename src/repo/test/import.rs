@@ -122,7 +122,7 @@ async fn read_dick(db: &Pool<Postgres>, uid: UserId, chat_id: i64) -> StoredDick
     let row = sqlx::query!(
             "SELECT d.length, d.bonus_attempts FROM Dicks d JOIN Chats c ON c.id = d.chat_id
                 WHERE c.chat_id = $1 AND d.uid = $2",
-            chat_id, uid.value())
+            chat_id, uid as UserId)
         .fetch_one(db)
         .await
         .expect("couldn't read the dick");

@@ -644,7 +644,7 @@ impl SelfDestructionFinishedGauges {
         for state in DeletionState::TERMINAL {
             let count = counts.iter()
                 .find(|(counted, _)| *counted == state)
-                .map_or(0, |(_, count)| count.value());
+                .map_or(0, |(_, count)| count.value() as i64);
             self.0.gauge(&[&state.to_string()]).set(count);
         }
     }

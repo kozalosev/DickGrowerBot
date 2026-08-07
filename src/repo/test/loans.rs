@@ -54,8 +54,7 @@ async fn test_all() {
         .await.expect("couldn't fetch a length after borrowing");
     assert_eq!(length_after_borrowing, value.value());
 
-    let half_payment = LoanPayout::new(value.value() as i32)
-        .expect("a test payout must be non-negative");
+    let half_payment = LoanPayout::new(value.value() as u32);
     loans.pay(user_id, &chat_id, half_payment)
         .await.expect("couldn't pay the loan");
 

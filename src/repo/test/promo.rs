@@ -1,6 +1,6 @@
 use chrono::Utc;
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode};
+use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode, UserId};
 use crate::repo;
 use crate::repo::PromoCodeParams;
 use crate::repo::test::{fresh_db, USER_ID};
@@ -65,11 +65,11 @@ async fn check_promo_code_activations(db: &Pool<Postgres>) {
     let row = sqlx::query!(
             r#"SELECT uid, code, affected_chats, activated_at as "activated_at!"
                 FROM Promo_Code_Activations WHERE uid = $1 AND code = $2"#,
-            i64::from(USER_ID), PROMO_CODE)
+            USER_ID as UserId, PROMO_CODE)
         .fetch_one(db)
         .await
         .expect("couldn't fetch the promo code activation");
-    assert_eq!(row.uid, USER_ID.value());
+    assert_eq!(row.uid, USER_ID.value() as i64);
     assert_eq!(row.code, PROMO_CODE);
     assert_eq!(row.affected_chats, 1);
     assert_eq!(row.activated_at.date_naive(), Utc::now().date_naive());

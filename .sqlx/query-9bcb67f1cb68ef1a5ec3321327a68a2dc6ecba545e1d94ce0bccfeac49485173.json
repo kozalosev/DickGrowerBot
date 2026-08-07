@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE Scheduled_Message_Deletions SET fire_after = $2\n                WHERE id IN (\n                    SELECT id FROM Scheduled_Message_Deletions\n                    WHERE fire_after <= current_timestamp AND finished_at IS NULL\n                    ORDER BY fire_after\n                    LIMIT $1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING id AS \"id: ScheduledDeletionId\", chat_id AS \"chat_id: TelegramChatId\",\n                          message_id AS \"message_id: TelegramMessageId\",\n                          inline_message_id AS \"inline_message_id: InlineMessageId\",\n                          message_kind AS \"kind: MessageKind\", message_group AS \"group: MessageGroup\",\n                          lang_code AS \"lang_code: LanguageCode\", state AS \"state: DeletionState\",\n                          created_at, attempts::bigint AS \"attempts!: AttemptsCount\"",
+  "query": "UPDATE Scheduled_Message_Deletions SET fire_after = $2\n                WHERE id IN (\n                    SELECT id FROM Scheduled_Message_Deletions\n                    WHERE fire_after <= current_timestamp AND finished_at IS NULL\n                    ORDER BY fire_after\n                    LIMIT $1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING id AS \"id: ScheduledDeletionId\", chat_id AS \"chat_id: TelegramChatId\",\n                          message_id AS \"message_id: TelegramMessageId\",\n                          inline_message_id AS \"inline_message_id: InlineMessageId\",\n                          message_kind AS \"kind: MessageKind\", message_group AS \"group: MessageGroup\",\n                          lang_code AS \"lang_code: LanguageCode\", state AS \"state: DeletionState\",\n                          created_at, attempts AS \"attempts!: AttemptsCount\"",
   "describe": {
     "columns": [
       {
@@ -142,8 +142,13 @@
       {
         "ordinal": 9,
         "name": "attempts!: AttemptsCount",
-        "type_info": "Int8",
-        "origin": "Expression"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "attempts"
+          }
+        }
       }
     ],
     "parameters": {
@@ -162,8 +167,8 @@
       false,
       false,
       false,
-      null
+      false
     ]
   },
-  "hash": "d9340e964333175ccd3ef07ac78e56a99ab3b1bf5b74da19ded07395d60e1879"
+  "hash": "9bcb67f1cb68ef1a5ec3321327a68a2dc6ecba545e1d94ce0bccfeac49485173"
 }

@@ -1,13 +1,8 @@
-use std::borrow::Cow;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use derive_where::derive_where;
-use domain_types::errors::DomainAssertionError;
-use super::validators;
-use crate::literal;
 
-const MUST_BE_NON_NEGATIVE: &str = "Count must be greater or equal to zero";
-
-/// How many rows of `T` there are — the type says what was counted, which a bare `i64` never could.
+/// How many rows of `T` there are — the type says what was counted, which a bare number never could.
 ///
 /// `T` is a marker and never a value, which is why the standard traits come from `derive_where`:
 /// the plain derives would each demand the same trait of `T`, so a count of something unclonable
@@ -19,32 +14,25 @@ pub struct Count<T> {
     #[derive_where(skip(Debug))]
     _phantom: PhantomData<T>,
 
-    value: i64,
+    value: u64,
 }
 
 impl <T> Count<T> {
-    /// Nothing is ever counted a negative number of times, so a `Count` in hand is always a real
-    /// one — validated the way `positive_number!` validates its types, and by the same predicate.
-    pub fn new(value: i64) -> Result<Self, DomainAssertionError<i64>> {
-        if validators::i64::greater_or_equal_to_zero(&value) {
-            Ok(Self::of(value))
-        } else {
-            Err(DomainAssertionError::new(value, Cow::from(MUST_BE_NON_NEGATIVE)))
-        }
-    }
-
-    /// The same for a value that is known as the code is written: a negative one fails the build
-    /// wherever the call is evaluated as a constant, and panics at once everywhere else.
-    pub const fn literal(value: i64) -> Self {
-        assert!(validators::i64::greater_or_equal_to_zero(&value), "{}", MUST_BE_NON_NEGATIVE);
-        Self::of(value)
-    }
-
-    const fn of(value: i64) -> Self {
+    /// Nothing is ever counted a negative number of times, and the type says so, so there is
+    /// nothing here to refuse.
+    pub const fn new(value: u64) -> Self {
         Self { _phantom: PhantomData, value }
     }
 
-    pub const fn value(&self) -> i64 {
+    /// The same for a value written into the source. It adds no check of its own — there is none
+    /// left to make — but it keeps `literal!` working for this type, so a count is written the way
+    /// every other domain number is.
+    #[allow(dead_code)]
+    pub const fn literal(value: u64) -> Self {
+        Self::new(value)
+    }
+
+    pub const fn value(&self) -> u64 {
         self.value
     }
 }
@@ -71,7 +59,8 @@ where i64: sqlx::Encode<'q, DB>
         &self,
         buf: &mut <DB as sqlx::Database>::ArgumentBuffer,
     ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        <i64 as sqlx::Encode<DB>>::encode_by_ref(&self.value, buf)
+        let value = i64::try_from(self.value)?;
+        <i64 as sqlx::Encode<DB>>::encode_by_ref(&value, buf)
     }
 }
 
@@ -81,32 +70,40 @@ where i64: sqlx::Decode<'r, DB>
     fn decode(value: <DB as sqlx::Database>::ValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
         let raw = <i64 as sqlx::Decode<DB>>::decode(value)?;
         // `count(*)` is never negative, so this only fires on genuinely corrupted column data.
-        Ok(Self::new(raw)?)
+        Ok(Self::new(u64::try_from(raw)?))
     }
 }
 
-impl <T> PartialEq<i64> for Count<T> {
-    fn eq(&self, other: &i64) -> bool {
+// The macro gives every other domain number a `Deref` to its primitive, and this one is written by
+// hand, so it is spelled out here to keep them alike.
+impl <T> Deref for Count<T> {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl <T> PartialEq<u64> for Count<T> {
+    fn eq(&self, other: &u64) -> bool {
         self.value == *other
     }
 }
 
-impl <T> PartialOrd<i64> for Count<T> {
-    fn partial_cmp(&self, other: &i64) -> Option<std::cmp::Ordering> {
+impl <T> PartialOrd<u64> for Count<T> {
+    fn partial_cmp(&self, other: &u64) -> Option<std::cmp::Ordering> {
         self.value.partial_cmp(other)
     }
 }
 
 impl <T> Default for Count<T> {
     fn default() -> Self {
-        literal!(Self = 0)
+        Self::new(0)
     }
 }
 
-impl <T> TryFrom<i64> for Count<T> {
-    type Error = DomainAssertionError<i64>;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
+impl <T> From<u64> for Count<T> {
+    fn from(value: u64) -> Self {
         Self::new(value)
     }
 }
@@ -115,22 +112,15 @@ impl <T> TryFrom<i64> for Count<T> {
 mod tests {
     use super::*;
 
+    use crate::literal;
+
     struct Anything;
 
     #[test]
-    fn nothing_is_counted_a_negative_number_of_times() {
-        assert!(Count::<Anything>::new(-1).is_err());
-        assert!(Count::<Anything>::new(0).is_ok());
-        assert_eq!(Count::<Anything>::new(3).expect("3 must be a valid count"), 3);
-    }
-
-    #[test]
-    fn a_valid_literal_is_the_number_it_was_written_as() {
+    fn a_count_is_the_number_it_was_built_from() {
+        assert_eq!(Count::<Anything>::new(3), 3);
         assert_eq!(literal!(Count<Anything> = 3), 3);
     }
-
-    // A negative literal has no test of its own: `literal!(Count<Anything> = -1)` stops the build,
-    // so there is nothing left for a test to observe. That is the point of the macro.
 
     #[test]
     fn the_default_count_is_zero() {

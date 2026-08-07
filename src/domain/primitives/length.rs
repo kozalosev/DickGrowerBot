@@ -1,14 +1,13 @@
 use std::ops::Add;
 use domain_types::errors::{ArithmeticOperation, DomainArithmeticOverflowError as OverflowError};
 use domain_types_macro::domain_type;
-use crate::{positive_number, signed_number};
+use crate::number;
 
-signed_number!(Length, i64);
-positive_number!(PositiveLength, i64);
-positive_number!(LengthIncrement, i64);
+number!(Length, i64);
+number!(LengthIncrement, u64);
 
-positive_number!(Bet, i32);
-positive_number!(LoanPayout, i32);
+number!(Bet, u32);
+number!(LoanPayout, u32);
 
 #[domain_type(number, features(no_auto_display))]
 struct SignedLengthChange(i64);
@@ -36,10 +35,11 @@ impl LengthChange {
         Self::Signed(SignedLengthChange::new(value))
     }
 
+    /// Signed, because a change can go either way. An increment is unsigned and always fits.
     pub fn value(self) -> i64 {
         match self {
             LengthChange::Signed(value) => value.value(),
-            LengthChange::Increment(value) => value.value()
+            LengthChange::Increment(value) => value.value() as i64
         }
     }
 
@@ -73,9 +73,7 @@ impl Add<SignedLengthChange> for LengthChange {
 
 impl Bet {
     pub fn as_length_change_for_winner(&self) -> LengthChange {
-        LengthIncrement::new(self.0.into())
-            .map(LengthChange::Increment)
-            .expect("Bet is non-negative, so the conversion to LengthIncrement is safe")
+        LengthChange::Increment(LengthIncrement::new(self.0.into()))
     }
 
     pub fn as_length_change_for_loser(&self) -> LengthChange {

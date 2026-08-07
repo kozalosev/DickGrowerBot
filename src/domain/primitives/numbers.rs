@@ -1,7 +1,7 @@
 use domain_types_macro::domain_type;
-use crate::positive_number;
+use crate::number;
 
-positive_number!(Counter, i16);
+number!(Counter, u16);
 
 #[domain_type(number)]
 struct DaysCount(u32);
@@ -15,8 +15,6 @@ struct BattlesCount(u32);
 #[domain_type(number)]
 struct WinStreak(u16);
 
-// u64 has no signed Postgres-representable "bump" type (see SqlxMode in domain_types_macro), so
-// these ones stay Rust-only values — can't be bound into a query directly.
 #[domain_type(number)]
 struct Position(u64);
 

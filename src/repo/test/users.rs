@@ -3,7 +3,7 @@ use crate::domain::objects::User;
 use crate::domain::primitives::{DaysCount, LengthChange, Ratio, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{CHAT_ID, NAME, fresh_db, UID, USER_ID};
+use crate::repo::test::{user_id, CHAT_ID, NAME, fresh_db, UID, USER_ID};
 use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
@@ -71,7 +71,7 @@ macro_rules! base_checks {
             .await
             .expect("couldn't fetch Some(User)")
             .expect("no active member");
-        assert_eq!(user.uid, UID);
+        assert_eq!(user.uid, USER_ID);
         assert_eq!(user.name.value(), NAME);
 
         // check inactive member is not found
@@ -113,7 +113,7 @@ async fn get_random_active_poor_member() {
             .await
             .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
             .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));
-        assert_ne!(user.uid, UID+2);
+        assert_ne!(user.uid, user_id(UID + 2));
     }
 }
 
@@ -167,19 +167,20 @@ async fn prepare_for_additional_tests(db: &Pool<Postgres>) -> (repo::Users, Chat
 }
 
 fn count(v: &[UserId], uid: i64) -> usize {
+    let uid = user_id(uid);
     v.iter()
         .filter(|u| **u == uid)
         .count()
 }
 
 fn check_user_with_name(user: &User, name: &str) {
-    assert_eq!(user.uid, UID);
+    assert_eq!(user.uid, USER_ID);
     assert_eq!(user.name.value(), name);
 }
 
 fn check_member_with_name(members: &[User], name: &str) {
     assert_eq!(members.len(), 1);
-    assert_eq!(members[0].uid, UID);
+    assert_eq!(members[0].uid, USER_ID);
     assert_eq!(members[0].name.value(), name);
 }
 

@@ -43,11 +43,13 @@ const TEMPLATE_DB: &str = "test_template";
 const TEST_DB_PREFIX: &str = "test_run";
 const POSTGRES_PORT: u16 = 5432;
 
+/// The raw column value, so that a test can do arithmetic on it and hand it to a query. The domain
+/// value is [`USER_ID`], and [`user_id`] makes one out of a computed number.
 pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = -67890;
 pub const NAME: &str = "test";
 
-pub const USER_ID: UserId = literal!(UserId = UID);
+pub const USER_ID: UserId = literal!(UserId = UID as u64);
 pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
 
 /// The runtime that owns the shared container and its maintenance pool.
@@ -186,10 +188,9 @@ async fn start_container() -> (ContainerAsync<GenericImage>, u16) {
 }
 
 /// A user id a test computes instead of writing down, like `UID + 1` or an id taken from a loop.
-/// Such a value is not known while the code is compiled, so `literal!` does not fit. This uses the
-/// checked constructor and fails the test if the number turns out to be wrong.
+/// Such a value is not known while the code is compiled, so `literal!` does not fit.
 pub fn user_id(value: i64) -> UserId {
-    UserId::new(value).expect("a test user id must be positive")
+    UserId::new(value as u64)
 }
 
 #[inline]

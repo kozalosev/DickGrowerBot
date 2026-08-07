@@ -136,7 +136,7 @@ pub(crate) async fn shrinks_page_impl(
     page: Page,
 ) -> anyhow::Result<ShrinksPage> {
     let offset = Offset::calculate(page, config.top_limit);
-    let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
+    let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let shrinks = repos.shrinks
         .get_shrinks_for_date(chat_id, date, offset, query_limit)
         .await?;
@@ -156,12 +156,10 @@ pub(crate) fn build_shrink_keyboard(
 
     let mut user_row = Vec::new();
     if page > 0 {
-        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
-        user_row.push(InlineKeyboardButton::callback("⬅️", callback(date, prev_page)));
+        user_row.push(InlineKeyboardButton::callback("⬅️", callback(date, page - 1)));
     }
     if has_more_pages {
-        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
-        user_row.push(InlineKeyboardButton::callback("➡️", callback(date, next_page)));
+        user_row.push(InlineKeyboardButton::callback("➡️", callback(date, page + 1)));
     }
 
     let day_row = adjacent.map(|AdjacentDates { older, newer }| {

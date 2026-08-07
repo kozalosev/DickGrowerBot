@@ -85,10 +85,8 @@ impl TryFrom<String> for BattleCallbackData {
     fn try_from(data: String) -> Result<Self, Self::Error> {
         let err = InvalidCallbackDataBuilder(&data);
         let mut parts = data.split(':');
-        let initiator = callbacks::parse_part(&mut parts, &err, "uid")
-            .and_then(|value: i64| UserId::new(value).map_err(|e| err.parsing_err(e)))?;
-        let bet = callbacks::parse_part(&mut parts, &err, "bet")
-            .and_then(|value: i32| Bet::new(value).map_err(|e| err.parsing_err(e)))?;
+        let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId::new)?;
+        let bet = callbacks::parse_part(&mut parts, &err, "bet").map(Bet::new)?;
         let timestamp = callbacks::parse_optional_part(&mut parts, &err)?;
         Ok(Self { initiator, bet, timestamp })
     }
@@ -113,7 +111,7 @@ pub async fn pvp_cmd_handler(
         chat_id: msg.chat.id.into(),
         lang_code: lang_code.clone(),
     };
-    let bet = Bet::new(cmd.bet().into()).map_err(|e| anyhow!(e))?;
+    let bet = Bet::new(cmd.bet().into());
     let (text, keyboard) = pvp_impl_start(params, user, bet).await?;
 
     reply_html_ephemeral!(bot, msg, text, self_destruction, MessageGroup::Application, lang_code,
@@ -149,8 +147,7 @@ pub async fn pvp_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps)
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
-    let bet = Bet::new(query.query.parse()?)
-        .map_err(|e| anyhow!(e))?;
+    let bet = Bet::new(query.query.parse()?);
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
@@ -426,8 +423,7 @@ async fn pay_for_loan_if_needed(
     // the ratio is within [0; 1], so the payout never exceeds the award
     let payout_value = (loan.payout_ratio.value() * f64::from(award.value())).round() as i64;
     let payout_value = payout_value.min(loan.debt.value());
-    let payout = LoanPayout::new(payout_value.clamp(0, i32::MAX as i64) as i32)
-        .expect("loan payout is non-negative by construction");
+    let payout = LoanPayout::new(payout_value.clamp(0, u32::MAX as i64) as u32);
 
     p.repos.loans.pay(winner_id, &chat_id_kind, payout).await?;
 

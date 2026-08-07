@@ -59,7 +59,7 @@ fn parse_allowed_topics(value: sqlx::types::JsonValue) -> AllowedTopics {
     };
     let topics = entries.into_iter()
         .map(|(id, _)| id)
-        .filter_map(|id| id.parse::<i32>()
+        .filter_map(|id| id.parse::<u32>()
             .inspect_err(|_| tracing::warn!(topic_id = %id, "an unparsable topic id is stored for the chat"))
             .map(TopicId::new)
             .ok())
@@ -831,7 +831,7 @@ mod tests {
     use super::{Chat, merge_chat_objects};
     use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramChatInstanceId};
 
-    fn chat(internal_id: i64, chat_id: Option<i64>, chat_instance: Option<&str>) -> Chat {
+    fn chat(internal_id: u64, chat_id: Option<i64>, chat_instance: Option<&str>) -> Chat {
         Chat {
             internal_id: InternalChatId::new(internal_id),
             chat_id: chat_id.map(TelegramChatId::new),

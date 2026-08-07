@@ -1,7 +1,8 @@
 use sqlx::{AssertSqlSafe, Pool, Postgres};
 use crate::handlers::banned_until_of;
 use crate::repo;
-use crate::repo::test::{fresh_db, CHAT_ID, NAME, UID, USER_ID};
+use crate::domain::primitives::UserId;
+use crate::repo::test::{fresh_db, CHAT_ID, NAME, USER_ID};
 
 /// Every table `erase_user` must clear, as `(table, uid column)`. The guard test below fails when a
 /// new one appears in the schema, because then the function needs a new DELETE too.
@@ -35,7 +36,7 @@ async fn erase_user_deletes_everything_and_bans() {
     let users_left = count_rows(&db, "users", "uid").await;
     assert_eq!(users_left, 1, "the Users row itself must survive an erasure");
 
-    let user = sqlx::query!(r#"SELECT name, banned_until, created_at FROM Users WHERE uid = $1"#, UID)
+    let user = sqlx::query!(r#"SELECT name, banned_until, created_at FROM Users WHERE uid = $1"#, USER_ID as UserId)
         .fetch_one(&db)
         .await.expect("the Users row must survive an erasure");
     assert_eq!(user.name, "", "the name must be cleared");
@@ -100,7 +101,7 @@ async fn get_banned_skips_expired_bans() {
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
 
-    sqlx::query!("UPDATE Users SET banned_until = current_timestamp - interval '1 day' WHERE uid = $1", UID)
+    sqlx::query!("UPDATE Users SET banned_until = current_timestamp - interval '1 day' WHERE uid = $1", USER_ID as UserId)
         .execute(&db)
         .await.expect("couldn't set an expired ban");
 
@@ -154,7 +155,7 @@ async fn an_expired_ban_lets_the_user_be_upserted_again() {
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
 
-    sqlx::query!("UPDATE Users SET banned_until = current_timestamp - interval '1 day' WHERE uid = $1", UID)
+    sqlx::query!("UPDATE Users SET banned_until = current_timestamp - interval '1 day' WHERE uid = $1", USER_ID as UserId)
         .execute(&db)
         .await.expect("couldn't set an expired ban");
 
@@ -166,7 +167,7 @@ async fn an_expired_ban_lets_the_user_be_upserted_again() {
 async fn erase_user_rejects_an_unknown_uid() {
     let db = fresh_db().await;
 
-    let result = sqlx::query!("SELECT erase_user($1, 90)", UID)
+    let result = sqlx::query!("SELECT erase_user($1, 90)", USER_ID as UserId)
         .execute(&db)
         .await;
     assert!(result.is_err(), "erasing a user who doesn't exist must fail loudly");
@@ -178,23 +179,23 @@ async fn fill_all_tables(db: &Pool<Postgres>) {
         .await.expect("couldn't create the chat")
         .id;
 
-    sqlx::query!("INSERT INTO Users (uid, name) VALUES ($1, $2)", UID, NAME)
+    sqlx::query!("INSERT INTO Users (uid, name) VALUES ($1, $2)", USER_ID as UserId, NAME)
         .execute(db).await.expect("couldn't create the user");
-    sqlx::query!("INSERT INTO Dicks (uid, chat_id, length) VALUES ($1, $2, 5)", UID, internal_chat_id)
+    sqlx::query!("INSERT INTO Dicks (uid, chat_id, length) VALUES ($1, $2, 5)", USER_ID as UserId, internal_chat_id)
         .execute(db).await.expect("couldn't create the dick");
-    sqlx::query!("INSERT INTO Battle_Stats (uid, chat_id) VALUES ($1, $2)", UID, internal_chat_id)
+    sqlx::query!("INSERT INTO Battle_Stats (uid, chat_id) VALUES ($1, $2)", USER_ID as UserId, internal_chat_id)
         .execute(db).await.expect("couldn't create the battle stats");
-    sqlx::query!("INSERT INTO Loans (uid, chat_id, debt, payout_ratio) VALUES ($1, $2, 100, 0.1)", UID, internal_chat_id)
+    sqlx::query!("INSERT INTO Loans (uid, chat_id, debt, payout_ratio) VALUES ($1, $2, 100, 0.1)", USER_ID as UserId, internal_chat_id)
         .execute(db).await.expect("couldn't create the loan");
-    sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)", internal_chat_id, UID)
+    sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)", internal_chat_id, USER_ID as UserId)
         .execute(db).await.expect("couldn't create the dick of the day");
     sqlx::query!("INSERT INTO Promo_Codes (code, bonus_length, capacity) VALUES ('TEST', 10, 5)")
         .execute(db).await.expect("couldn't create the promo code");
-    sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats) VALUES ($1, 'TEST', 1)", UID)
+    sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats) VALUES ($1, 'TEST', 1)", USER_ID as UserId)
         .execute(db).await.expect("couldn't create the promo code activation");
-    sqlx::query!("INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length) VALUES ($1, $2, 3)", internal_chat_id, UID)
+    sqlx::query!("INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length) VALUES ($1, $2, 3)", internal_chat_id, USER_ID as UserId)
         .execute(db).await.expect("couldn't create the shrink");
-    sqlx::query!("INSERT INTO Imports (chat_id, uid, original_length) VALUES ($1, $2, 7)", internal_chat_id, UID)
+    sqlx::query!("INSERT INTO Imports (chat_id, uid, original_length) VALUES ($1, $2, 7)", internal_chat_id, USER_ID as UserId)
         .execute(db).await.expect("couldn't create the import");
 }
 
@@ -209,25 +210,25 @@ async fn count_rows(
 ) -> i64 {
     let query = format!("SELECT COUNT(*) FROM {table_name} WHERE {uid_field} = $1");
     sqlx::query_scalar(AssertSqlSafe(query))
-        .bind(UID)
+        .bind(USER_ID)
         .fetch_one(db)
         .await.expect("couldn't count the rows")
 }
 
 async fn erase(db: &Pool<Postgres>, days: i32) {
-    sqlx::query!("SELECT erase_user($1, $2)", UID, days)
+    sqlx::query!("SELECT erase_user($1, $2)", USER_ID as UserId, days)
         .execute(db)
         .await.expect("couldn't erase the user");
 }
 
 async fn ban(db: &Pool<Postgres>, days: i32) {
-    sqlx::query!("SELECT ban_user($1, $2)", UID, days)
+    sqlx::query!("SELECT ban_user($1, $2)", USER_ID as UserId, days)
         .execute(db)
         .await.expect("couldn't ban the user");
 }
 
 async fn unban(db: &Pool<Postgres>) {
-    sqlx::query!("SELECT unban_user($1)", UID)
+    sqlx::query!("SELECT unban_user($1)", USER_ID as UserId)
         .execute(db)
         .await.expect("couldn't unban the user");
 }

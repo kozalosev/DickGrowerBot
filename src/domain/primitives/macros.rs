@@ -36,24 +36,16 @@ macro_rules! error {
     };
 }
 
+/// A domain number: a wrapper over an integer, with the arithmetic that goes with it.
+///
+/// A quantity that can never be negative takes an unsigned inner type, which says so in the type
+/// system rather than in a validator — there is then no invalid value to refuse, so the constructor
+/// and the arithmetic stay infallible. Postgres has no unsigned column, so the macro stores such a
+/// type in the signed integer of the same width.
 #[macro_export]
-macro_rules! signed_number {
+macro_rules! number {
     ($name:ident, $inner_type:ty) => {
         #[domain_type(number)]
         struct $name($inner_type);
     };
-}
-
-#[macro_export]
-macro_rules! positive_number {
-    ($name:ident, $inner_type:ident) => {
-        #[domain_type(
-            number,
-            validated(
-                $crate::domain::primitives::validators::$inner_type::greater_or_equal_to_zero,
-                error_message("must be greater or equal to zero")
-            )
-        )]
-        struct $name($inner_type);
-    }
 }
