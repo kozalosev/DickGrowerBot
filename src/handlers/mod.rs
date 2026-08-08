@@ -182,9 +182,11 @@ macro_rules! reply_html {
         #[allow(unused_mut)]
         let mut request = reply_html(&$bot, &$msg, $answer);
         $( request.$field = ::core::convert::Into::into($value); )*
+        // The error handler runs outside the handler's span, so the ids of the message being
+        // answered survive only in this context.
         anyhow::Context::context(
             request.await,
-            format!("failed for {:?}", $msg)
+            format!("failed to answer message {} in chat {}", $msg.id.0, $msg.chat.id.0)
         )?
     }};
 }
