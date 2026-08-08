@@ -146,33 +146,6 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't mark the chat with id = {chat_id} as unreachable"))
     }
 ,
-    /// Whether the bot may delete other members' messages here, as far as we know. `None` means
-    /// Telegram was never asked (or the chat has no row yet), so the caller has to ask and store
-    /// the answer with [`Self::set_bot_admin`].
-    #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
-    pub async fn is_bot_admin(&self, chat_id: &TelegramChatId) -> anyhow::Result<Option<bool>> {
-        let value = sqlx::query_scalar!("SELECT is_bot_admin FROM Chats WHERE chat_id = $1",
-                chat_id as &TelegramChatId)
-            .fetch_optional(&self.pool)
-            .await
-            .context(format!("couldn't check whether the bot is an admin of the chat with id = {chat_id}"))?;
-        Ok(value.flatten())
-    }
-,
-    /// Remembers what Telegram answered about the bot's rights in the chat. Updating no row is
-    /// fine: the chat may have been merged or migrated away since the message was scheduled.
-    #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, is_admin = %is_admin))]
-    pub async fn set_bot_admin(&self, chat_id: &TelegramChatId, is_admin: bool) -> anyhow::Result<()> {
-        sqlx::query!("UPDATE Chats SET is_bot_admin = $2 WHERE chat_id = $1",
-                chat_id as &TelegramChatId, is_admin)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
-            .context(format!("couldn't store the bot's rights in the chat with id = {chat_id}"))
-    }
-,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_internal_id(&self, chat_id: &ChatIdKind) -> Result<InternalChatId, SearchError<ChatIdKind>> {

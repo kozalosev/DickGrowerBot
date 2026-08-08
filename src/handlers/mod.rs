@@ -16,6 +16,7 @@ pub mod loan;
 pub mod stats;
 pub mod setup;
 pub mod topics;
+pub mod rights;
 
 use derive_more::Constructor;
 use rust_i18n::t;

@@ -199,16 +199,30 @@ out. That is what a restart between an answer and its
 deletion costs nothing, and what makes an `Application` delay of hours possible at all. The column
 is `fire_after`, not `fire_at`: the worker polls, so it acts somewhat after the moment stored.
 
-Three things are load-bearing in the schema:
+Two things are load-bearing in the schema:
 
 * the **unique indexes** on `(chat_id, message_id)` and on `inline_message_id` make scheduling
   idempotent (`ON CONFLICT DO NOTHING`), which is why paging through a leaderboard can't push its
   deletion off for ever, and give `cancel` an exact key;
 * the **`state`** enum carries the grace period in the same row: the message is edited into the
-  warning and rescheduled, rather than held in memory. An inline row stays `created` to its end;
-* **`Chats.is_bot_admin`** (migration 38) caches what Telegram answered about the bot's rights.
-  `NULL` means it was never asked. A refused deletion writes `false` back, so one lost promotion
-  doesn't turn every later command into the same failed request.
+  warning and rescheduled, rather than held in memory. An inline row stays `created` to its end.
+
+**Whether the bot may delete the command** is not in the schema at all — it lives in the cache
+(see "The cache" below), because the bot is *told* the answer rather than having to ask for it.
+`handlers::rights` writes it from every `my_chat_member` update, which Telegram sends when the bot
+is added, promoted or demoted, and `scheduler::deletions` writes `false` when a deletion is refused.
+
+Where the cache knows nothing, what happens depends on the mode, and the two differ because a wrong
+guess costs them different things:
+
+* `ENABLED` guesses "yes" and finds out by trying. A refusal costs one request, marks the row
+  `failed` and teaches the cache. Nobody sees it, so **it never asks Telegram**.
+* `ONLY_WITH_COMMAND` can't guess. The answer is deleted *before* its command, so a refusal would
+  leave the command sitting alone in the chat — the very thing the mode exists to prevent. This is
+  the only place `getChatMember` is still called, and only when nothing is known.
+
+That asymmetry is the whole reason the check survived at all: for `ENABLED` it would be pure
+overhead.
 
 **What becomes of a row** is the whole state machine, and **no ending deletes it**:
 
@@ -428,6 +442,42 @@ body to log; it is still measured.
 
 Changing any of this means updating the Grafana dashboard in the server-configs repo, next to the
 "Telegram API request errors by kind" panel.
+
+### Optional: the cache
+
+Short-lived values live in Redis (`src/cache.rs`), which is the one place that keeps them.
+
+```
+REDIS_HOST=localhost    # unset => the cache is off
+REDIS_PORT=6379
+REDIS_PASSWORD=…
+REDIS_CACHE_TTL_SECS=21600
+```
+
+**Nothing here is a source of truth.** A miss is answered by the caller doing the work again, so a
+server that is down, slow or simply absent costs only the work it would have saved. Every failure is
+logged and swallowed: `Cache` returns no errors and never panics, and an unreachable server at
+startup leaves `Cache::Disabled` rather than stopping the bot. That is also why `REDIS_HOST` is
+merely a switch — **the bot must start and run without it**, which is the path most likely to rot
+and so has a test of its own.
+
+The client is `redis` with `ConnectionManager`, and there is deliberately **no pool**. Redis runs
+commands one at a time, so extra connections buy no parallelism; the protocol multiplexes instead,
+letting many requests share one socket, and `ConnectionManager` adds reconnection on top. A pool
+would only add an acquire step that can fail, a size to choose, and a dead connection to retry.
+Keep it this way unless something needs a connection to itself — `BLPOP`, `SUBSCRIBE`, `WATCH` —
+and note that `MULTI`/`EXEC` is unsafe on a multiplexed connection, so an atomic operation wants a
+single command (`SET NX EX`) or a Lua script.
+
+The container in `docker-compose.yml` runs **Valkey**, the BSD-licensed fork. The protocol is Redis,
+which is what the service, the network and the variables are named after; only the binaries differ
+(`valkey-server`, `valkey-cli`). It sits behind the `redis` Compose profile, like `user-service` and
+`tracing`.
+
+Everything else the bot caches is still in process memory, each with its own TTL and mutex —
+`topics.rs`, the two in `users/mod.rs`, `bans.rs`, and the PVP locks in `handlers/utils/locks.rs`.
+Moving them here is tracked separately. The locks are the interesting one: an in-memory `HashSet`
+locks nothing across two instances, so that one is a bug rather than a tidy-up.
 
 ### Optional: user-service integration
 
@@ -697,6 +747,11 @@ load-bearing:
   so the next run finds it instead of paying the startup again. It is *only* removed by
   `task test:clean`. Its databases are named `test_run<pid>_<n>` and the ones left by earlier runs
   are dropped at startup — one test binary at a time is assumed, which is how `cargo test` runs.
+
+The cache tests (`src/cache.rs`) keep a container the same way. A reusable container is matched by
+its **labels**, so the value of `TEST_CONTAINER_LABEL` names the service (`postgres`, `cache`) and
+must stay distinct: labelled alike, the second request is handed the first container and fails on a
+port that isn't there. `task test:clean` matches the label by key, so it sweeps every value.
 
 This replaced one container per test: ~35s for the suite instead of ~75s. Don't reintroduce a
 per-test or per-file container, and don't put the shared pool in a plain `static` without the

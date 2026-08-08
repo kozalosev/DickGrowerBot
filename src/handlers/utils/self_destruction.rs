@@ -6,7 +6,8 @@ use teloxide::types::{ChatId, Message, MessageId, UserId as TeloxideUserId};
 use crate::config::{MessageGroup, SelfDestructionConfig, MAX_DELAY};
 use crate::domain::primitives::LanguageCode;
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
-use crate::repo::{Chats, DeletionTarget, MessageKind, NewDeletion, ScheduledDeletions};
+use crate::cache::Cache;
+use crate::repo::{DeletionTarget, MessageKind, NewDeletion, ScheduledDeletions};
 
 /// Estimated time needed to read `char_count` visible characters at `cpm` characters per
 /// minute. Returns zero when `cpm` is zero (reading-time adjustment disabled).
@@ -27,7 +28,7 @@ fn reading_time(char_count: usize, cpm: u64) -> Duration {
 pub struct SelfDestructionService {
     config: SelfDestructionConfig,
     deletions: ScheduledDeletions,
-    chats: Chats,
+    cache: Cache,
     bot_id: TeloxideUserId,
 }
 
@@ -35,10 +36,10 @@ impl SelfDestructionService {
     pub fn new(
         config: SelfDestructionConfig,
         deletions: ScheduledDeletions,
-        chats: Chats,
+        cache: Cache,
         bot_id: TeloxideUserId,
     ) -> Self {
-        Self { config, deletions, chats, bot_id }
+        Self { config, deletions, cache, bot_id }
     }
 
     /// Schedules the answer `sent` and, when the configuration and the bot's rights allow it, the
@@ -153,16 +154,28 @@ impl SelfDestructionService {
             .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't cancel a self-destruction"));
     }
 
-    /// Whether the bot may delete other members' messages in this chat. Telegram is asked once and
-    /// the answer is kept in `Chats.is_bot_admin`; a refused deletion clears it again (see the
-    /// worker). Anything that goes wrong here answers "no": leaving a command in place is the
-    /// harmless outcome.
+    /// Whether the bot may delete other members' messages in this chat.
+    ///
+    /// The answer comes from the cache, which `handlers::rights` fills from every `my_chat_member`
+    /// update and the worker corrects on a refusal. When the cache knows nothing, what to do
+    /// depends on the mode, because the two modes pay different prices for a wrong guess:
+    ///
+    /// * [`DeletionMode::Enabled`] guesses "yes" and finds out by trying. A refusal costs one
+    ///   request, marks the row `failed` and teaches the cache, and no one sees any of it.
+    /// * [`DeletionMode::OnlyWithCommand`] can't guess. The answer is deleted *before* its command,
+    ///   so a refusal would leave the command sitting alone in the chat — the very thing the mode
+    ///   exists to prevent. Only here is Telegram asked, and only when nothing is known.
+    ///
+    /// A failed request answers "no": keeping both messages is the harmless outcome.
+    ///
+    /// [`DeletionMode::Enabled`]: crate::config::DeletionMode::Enabled
+    /// [`DeletionMode::OnlyWithCommand`]: crate::config::DeletionMode::OnlyWithCommand
     async fn may_delete_commands(&self, bot: &Bot, chat_id: ChatId) -> bool {
-        let telegram_chat_id = TelegramChatId::from(chat_id);
-        match self.chats.is_bot_admin(&telegram_chat_id).await {
-            Ok(Some(is_admin)) => return is_admin,
-            Ok(None) => {},
-            Err(e) => tracing::error!(error = format!("{e:#}"), "couldn't read the bot's rights in the chat")
+        if let Some(known) = self.cache.bot_admin(chat_id).await {
+            return known
+        }
+        if !self.config.requires_command() {
+            return true
         }
 
         let is_admin = match bot.get_chat_member(chat_id, self.bot_id).await {
@@ -172,8 +185,7 @@ impl SelfDestructionService {
                 return false
             }
         };
-        self.chats.set_bot_admin(&telegram_chat_id, is_admin).await
-            .unwrap_or_else(|e| tracing::warn!(error = format!("{e:#}"), "couldn't store the bot's rights in the chat"));
+        self.cache.set_bot_admin(chat_id, is_admin).await;
         is_admin
     }
 }

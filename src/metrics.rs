@@ -53,6 +53,8 @@ pub static CMD_TOPICS: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_topics_usage_total", "count of /topics invocations and changes of the setting", ["invoked", "finished"]));
 pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
+pub static BOT_ADMIN_LOOKUP: Lazy<BotAdminLookupCounters> = Lazy::new(||
+    BotAdminLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static TOPIC_RESTRICTED: Lazy<Counter> = Lazy::new(||
     Counter::new("topic_restricted_total", "count of updates dropped because they came from a forum topic the chat doesn't let the bot work in"));
 pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
@@ -160,6 +162,7 @@ fn force_registration() {
     Lazy::force(&CHAT_LANGUAGE);
     Lazy::force(&CMD_TOPICS);
     Lazy::force(&CHAT_TOPICS);
+    Lazy::force(&BOT_ADMIN_LOOKUP);
     Lazy::force(&TOPIC_RESTRICTED);
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&UPDATE_KIND);
@@ -274,6 +277,12 @@ pub struct CommandProgress {
 pub struct CacheSourceCounters {
     cache: Counter,
     db: Counter,
+}
+/// Where a lookup of the bot's rights in a chat was answered from. A miss is not a failure — it
+/// means the caller had to fall back, either to asking Telegram or to assuming it may go ahead.
+pub struct BotAdminLookupCounters {
+    cache: Counter,
+    miss: Counter,
 }
 
 impl Counter {
@@ -495,6 +504,26 @@ impl CacheSourceCounters {
     /// A lookup that hit the database.
     pub fn db_query(&self) {
         self.db.inc()
+    }
+}
+
+impl BotAdminLookupCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        Self {
+            cache: vec.counter(&["cache"]),
+            miss: vec.counter(&["miss"]),
+        }
+    }
+
+    /// The cache knew the answer.
+    pub fn cache_hit(&self) {
+        self.cache.inc()
+    }
+
+    /// The cache didn't, so the caller had to ask Telegram or go ahead without knowing.
+    pub fn miss(&self) {
+        self.miss.inc()
     }
 }
 

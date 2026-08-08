@@ -33,6 +33,9 @@ tower = "0.5.3"
 dotenvy = "0.15.7"
 # Database and SQL
 sqlx = { version = "0.9.0", features = [ "runtime-tokio", "postgres", "chrono", "tls-rustls", "macros" ] }
+# Cache. `connection-manager` is one multiplexed connection that reconnects by itself, so there is
+# no pool: Redis runs the commands one at a time anyway, and extra connections buy nothing.
+redis = { version = "1.5.0", default-features = false, features = ["tokio-comp", "connection-manager"] }
 # gRPC client
 tonic = "0.14"
 tonic-prost = "0.14"

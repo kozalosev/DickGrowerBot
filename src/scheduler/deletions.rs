@@ -10,8 +10,8 @@ use teloxide::types::{ChatId, MessageId};
 use teloxide::types::ParseMode::Html;
 use crate::config::SelfDestructionConfig;
 use crate::config::MessageGroup;
+use crate::cache::Cache;
 use crate::domain::primitives::{AttemptsCount, ScheduledDeletionId};
-use crate::domain::primitives::chat::TelegramChatId;
 use crate::metrics;
 use crate::repo::{DeletionState, DeletionTarget, MessageKind, Repositories, ScheduledDeletion};
 
@@ -43,6 +43,7 @@ enum Outcome {
 pub async fn run_pending_deletions(
     bot: &Throttle<Bot>,
     repos: &Repositories,
+    cache: &Cache,
     config: &SelfDestructionConfig,
 ) -> anyhow::Result<()> {
     let due = repos.deletions.claim_due(config.batch_size, Utc::now() + config.lease).await?;
@@ -59,7 +60,7 @@ pub async fn run_pending_deletions(
         let group = deletion.group;
         let kind = deletion.kind;
         let failures = deletion.attempts;
-        let outcome = act(bot, repos, config, deletion).await;
+        let outcome = act(bot, cache, config, deletion).await;
 
         // Only an ending is counted, and each one only once, so the outcomes add up to the number
         // of messages. A warning and a retry are steps, not endings; retries have their own counter.
@@ -128,7 +129,7 @@ pub async fn clean_finished_deletions(repos: &Repositories, retention: Duration)
 /// Does to the message whatever its row asks for, and says what became of it.
 async fn act(
     bot: &Throttle<Bot>,
-    repos: &Repositories,
+    cache: &Cache,
     config: &SelfDestructionConfig,
     deletion: ScheduledDeletion,
 ) -> Outcome {
@@ -149,7 +150,7 @@ async fn act(
             let placeholder = t!("self_destruction.placeholder", locale = &deletion.lang_code);
             let request = bot.edit_message_text_inline(inline_message_id.value(), placeholder)
                 .parse_mode(Html);
-            outcome_of(request.await.map(|_| ()), &deletion, repos).await
+            outcome_of(request.await.map(|_| ()), &deletion, cache).await
         },
         DeletionTarget::ChatMessage { chat_id, message_id } => {
             let chat = ChatId::from(*chat_id);
@@ -173,7 +174,7 @@ async fn act(
                     }
                 }
             }
-            outcome_of(bot.delete_message(chat, message).await.map(|_| ()), &deletion, repos).await
+            outcome_of(bot.delete_message(chat, message).await.map(|_| ()), &deletion, cache).await
         },
     }
 }
@@ -182,7 +183,7 @@ async fn act(
 async fn outcome_of(
     result: Result<(), RequestError>,
     deletion: &ScheduledDeletion,
-    repos: &Repositories,
+    cache: &Cache,
 ) -> Outcome {
     let error = match result {
         Ok(()) => return Outcome::Removed,
@@ -196,10 +197,10 @@ async fn outcome_of(
     }
 
     if is_refused(&error) && deletion.kind == MessageKind::Command {
-        // The bot was an administrator when the message was scheduled and isn't one now. Storing
-        // that keeps every later command out of the queue instead of into this same failure.
+        // The bot may not delete messages here. Remembering that keeps every later command out of
+        // the queue instead of into this same failure.
         if let DeletionTarget::ChatMessage { chat_id, .. } = deletion.target {
-            forget_the_rights(repos, chat_id).await;
+            cache.set_bot_admin(ChatId::from(chat_id), false).await;
         }
     }
     if is_final(&error) {
@@ -209,11 +210,6 @@ async fn outcome_of(
 
     tracing::warn!(kind = %deletion.kind, error = %error, "couldn't remove the self-destructing message");
     Outcome::Retry
-}
-
-async fn forget_the_rights(repos: &Repositories, chat_id: TelegramChatId) {
-    repos.chats.set_bot_admin(&chat_id, false).await
-        .unwrap_or_else(|e| tracing::warn!(error = format!("{e:#}"), "couldn't store the bot's rights in the chat"));
 }
 
 /// The wordings Telegram uses for a bot that may not delete that message and that teloxide has no

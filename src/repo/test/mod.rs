@@ -30,8 +30,12 @@ use crate::repo;
 use crate::repo::ChatIdKind;
 use crate::literal;
 
-/// Put on the container the tests share; `task test:clean` finds it by this and is the only thing
-/// that ever removes it.
+/// Put on every container the tests share; `task test:clean` finds them by this key and is the only
+/// thing that ever removes them.
+///
+/// The **value** names the service, and it has to differ per container: a reusable container is
+/// matched by its labels, so two of them labelled alike would make the second request hand back the
+/// first container.
 pub const TEST_CONTAINER_LABEL: &str = "dickgrowerbot.test";
 
 const POSTGRES_USER: &str = "test";
@@ -173,7 +177,7 @@ async fn start_container() -> (ContainerAsync<GenericImage>, u16) {
         .with_env_var("POSTGRES_DB", POSTGRES_DB)
         // Marks the container as ours, so `task test:clean` can find it without touching anything
         // else running on the machine. It is now the only way it ever gets removed.
-        .with_label(TEST_CONTAINER_LABEL, "true")
+        .with_label(TEST_CONTAINER_LABEL, "postgres")
         // The container outlives the run on purpose: the next one finds this same container
         // instead of paying the startup again. `task test:clean` removes it.
         .with_reuse(ReuseDirective::Always)

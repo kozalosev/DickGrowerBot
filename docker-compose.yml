@@ -72,6 +72,10 @@ services:
       - BOT_HTTP_TIMEOUT_SECS
       - SUPPORT_CHAT_ID
       - BAN_LIST_REFRESH_SECS
+      - REDIS_HOST
+      - REDIS_PORT
+      - REDIS_PASSWORD
+      - REDIS_CACHE_TTL_SECS
     expose:
       - 8080
     volumes:
@@ -80,6 +84,7 @@ services:
       - postgres-network
       - user-service-network
       - tracing-network
+      - redis-network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     logging:
@@ -114,6 +119,37 @@ services:
     restart: unless-stopped
     networks:
       - postgres-network
+    logging:
+      driver: local
+  # The cache the bot keeps its short-lived values in. Optional: gated behind the `redis` Compose
+  # profile, and the bot runs without it (REDIS_HOST unset) by doing the work a hit would have
+  # saved. The image is Valkey — the BSD-licensed fork of Redis — but the protocol is Redis, which
+  # is what the service, the network and the REDIS_* variables are named after. Its binaries are
+  # `valkey-server` and `valkey-cli`.
+  redis:
+    image: valkey/valkey:9-alpine
+    container_name: dickgrowerbot-redis
+    profiles: ["redis"]
+    restart: unless-stopped
+    environment:
+      - REDIS_PORT
+      - REDIS_PASSWORD
+    # The variables are expanded by the container's shell, not by Compose (hence `$$`), so that a
+    # .env without them still lets every other Compose command run — this service is optional, and
+    # a `:?error` here would stop even `task infra:min`. No password set means no `--requirepass`.
+    command: sh -c 'exec valkey-server --save 20 1 --loglevel warning --port "$${REDIS_PORT:-6379}" $${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}'
+    healthcheck:
+      test: [ "CMD-SHELL", "valkey-cli -p \"$${REDIS_PORT:-6379}\" $${REDIS_PASSWORD:+-a \"$$REDIS_PASSWORD\"} ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    expose:
+      - ${REDIS_PORT:-6379}
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - redis-network
     logging:
       driver: local
   # Optional user-service integration (personal /language, cross-bot user languages).
@@ -183,4 +219,6 @@ networks:
   user-service-network:
     driver: bridge
   tracing-network:
+    driver: bridge
+  redis-network:
     driver: bridge

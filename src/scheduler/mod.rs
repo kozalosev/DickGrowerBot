@@ -3,6 +3,7 @@ mod deletions;
 
 use teloxide::Bot;
 use teloxide::adaptors::throttle::{Settings, Throttle};
+use crate::cache::Cache;
 use crate::config::{get_env_value_or_default, AppConfig, ThrottleConfig};
 use crate::handlers::utils::date::duration_till_next_day;
 use crate::metrics;
@@ -77,7 +78,7 @@ pub fn spawn_daily_shrink(
 /// Spawns the task that removes the messages whose self-destruction has come due. No-op when every
 /// group is permanent. Unlike the two schedulers above, this one survives a restart: the messages
 /// it acts on are rows, and the tick after the restart finds every one that fell due meanwhile.
-pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, config: AppConfig) {
+pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cache, config: AppConfig) {
     let self_destruction = config.self_destruction;
     if !self_destruction.enabled() {
         tracing::info!("the self-destruction of messages is disabled (set the MSG_SELFDESTRUCT_DELAY_* variables to enable it)");
@@ -93,7 +94,7 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, config: Ap
 
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.
-            if let Err(e) = run_pending_deletions(&bot, &repos, &self_destruction).await {
+            if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction).await {
                 tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
                 continue;
             }
