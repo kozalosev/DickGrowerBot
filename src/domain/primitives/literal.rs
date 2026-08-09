@@ -16,13 +16,11 @@ fn primitives_dir() -> PathBuf {
 }
 
 /// Every type with a `literal` constructor and the module it is declared in — the path clippy
-/// resolves it to. Two ways to get one: `#[domain_type]` generates it for the numbers (the
-/// string types get none), or it is written out by hand, as `Count` does.
+/// resolves it to. `#[domain_type]` generates one only where a validator was given, so this looks
+/// for the attribute carrying `validated(...)`; a constructor written by hand counts too.
 fn declared_types() -> BTreeMap<String, String> {
-    let newtype = Regex::new(r"struct (\w+)\((\w+)\)").expect("a valid pattern");
-    let by_macro = Regex::new(r"number!\((\w+),").expect("a valid pattern");
-    let ids = Regex::new(r"(?s)(?:signed_)?id!\s*[({](.*?)[)}]").expect("a valid pattern");
-    let name = Regex::new(r"\b([A-Z]\w*)\b").expect("a valid pattern");
+    let validated = Regex::new(r"(?s)#\[domain_type\((?:[^)]|\)[^\]])*?validated\(.*?\n(?:pub )?struct (\w+)\(")
+        .expect("a valid pattern");
     let impl_header = Regex::new(r"^impl\s*(?:<[^>]*>)?\s*(\w+)").expect("a valid pattern");
 
     let mut found = BTreeMap::new();
@@ -44,18 +42,8 @@ fn declared_types() -> BTreeMap<String, String> {
             .to_owned();
         let source = fs::read_to_string(&path).expect("a readable source file");
 
-        for captures in newtype.captures_iter(&source) {
-            if &captures[2] != "String" {
-                found.insert(captures[1].to_owned(), module.clone());
-            }
-        }
-        for captures in by_macro.captures_iter(&source) {
+        for captures in validated.captures_iter(&source) {
             found.insert(captures[1].to_owned(), module.clone());
-        }
-        for captures in ids.captures_iter(&source) {
-            for captures in name.captures_iter(&captures[1]) {
-                found.insert(captures[1].to_owned(), module.clone());
-            }
         }
         // A constructor written by hand rather than generated, attributed to the `impl` it sits
         // in. Without this the guard would miss exactly the types the macro never saw.
@@ -90,6 +78,10 @@ fn forbidden_types() -> BTreeMap<String, String> {
 fn every_domain_number_is_forbidden_by_its_real_path() {
     let declared = declared_types();
     let forbidden = forbidden_types();
+
+    // Both sets empty would satisfy every comparison below, and a pattern that stops matching is
+    // exactly how this guard would fail without saying so.
+    assert!(!declared.is_empty(), "no validated type was found; the pattern must have stopped matching");
 
     let missing: Vec<_> = declared.iter().filter(|(name, _)| !forbidden.contains_key(*name)).collect();
     assert!(missing.is_empty(), "not forbidden by clippy.toml: {missing:?}");

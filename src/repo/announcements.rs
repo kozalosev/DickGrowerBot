@@ -7,7 +7,6 @@ use crate::config;
 use crate::domain::objects::Announcement;
 use crate::domain::primitives::{Counter, LanguageCode, SupportedLanguage, TextHash};
 use crate::domain::primitives::chat::InternalChatId;
-use crate::literal;
 
 #[derive(Clone)]
 pub struct Announcements {
@@ -67,7 +66,7 @@ impl Announcements {
         lang_code: &LanguageCode,
     ) -> anyhow::Result<bool> {
         let res = match self.get_announcement(chat_id_kind, lang_code).await? {
-            _ if max_shows == literal!(Counter = 0) => false,
+            _ if max_shows == Counter::new(0) => false,
             Some(entity) if entity.hash != *announcement.hash => {
                 self.update_announcement(entity.chat_id, lang_code, &announcement.hash).await?;
                 true

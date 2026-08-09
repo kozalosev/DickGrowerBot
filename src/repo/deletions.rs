@@ -314,7 +314,6 @@ repository!(ScheduledDeletions,
 
 #[cfg(test)]
 mod tests {
-    use crate::literal;
     use std::time::Duration;
     use domain_types::traits::SaturatingInto;
     use chrono::Utc;
@@ -354,7 +353,7 @@ mod tests {
         repo.schedule(&[due(chat_message(1), MessageKind::Reply), later])
             .await.expect("couldn't schedule the deletions");
 
-        let claimed = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert_eq!(claimed.len(), 1);
         assert_eq!(claimed[0].target, chat_message(1));
         assert_eq!(claimed[0].kind, MessageKind::Reply);
@@ -373,9 +372,9 @@ mod tests {
         repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
             .await.expect("couldn't schedule the deletion");
 
-        let claimed = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert_eq!(claimed.len(), 1);
-        let claimed_again = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert!(claimed_again.is_empty());
     }
 
@@ -388,9 +387,9 @@ mod tests {
             .await.expect("couldn't schedule the deletion");
 
         let expired = Utc::now() - Duration::from_secs(1);
-        let claimed = repo.claim_due(literal!(Limit = 10), expired).await.expect("couldn't claim the deletions");
+        let claimed = repo.claim_due(Limit::new(10), expired).await.expect("couldn't claim the deletions");
         assert_eq!(claimed.len(), 1);
-        let claimed_again = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert_eq!(claimed_again.len(), 1);
         assert_eq!(claimed_again[0].id, claimed[0].id);
     }
@@ -404,7 +403,7 @@ mod tests {
         repo.schedule(&[due(target.clone(), MessageKind::Inline)])
             .await.expect("couldn't schedule the deletion");
 
-        let claimed = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert_eq!(claimed.len(), 1);
         assert_eq!(claimed[0].target, target);
         assert_eq!(claimed[0].kind, MessageKind::Inline);
@@ -430,16 +429,16 @@ mod tests {
         let repo = ScheduledDeletions::new(db);
         repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
             .await.expect("couldn't schedule the deletion");
-        let claimed = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
 
         repo.mark_warned(claimed[0].id, Utc::now() + Duration::from_secs(600))
             .await.expect("couldn't mark the deletion as warned");
-        let claimed_again = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert!(claimed_again.is_empty());
 
         repo.mark_warned(claimed[0].id, Utc::now() - Duration::from_secs(1))
             .await.expect("couldn't mark the deletion as warned");
-        let claimed_again = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert_eq!(claimed_again.len(), 1);
         assert_eq!(claimed_again[0].state, DeletionState::Warned);
     }
@@ -450,7 +449,7 @@ mod tests {
         let repo = ScheduledDeletions::new(db);
         repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
             .await.expect("couldn't schedule the deletion");
-        let claimed = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
 
         let attempts = repo.postpone(claimed[0].id, Utc::now() - Duration::from_secs(1))
             .await.expect("couldn't postpone the deletion");
@@ -461,7 +460,7 @@ mod tests {
 
         // The count the back-off is computed from has to survive the round trip, or every attempt
         // would rest as long as the first.
-        let claimed_again = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert_eq!(claimed_again.len(), 1);
         assert_eq!(claimed_again[0].attempts, 2);
     }
@@ -474,21 +473,21 @@ mod tests {
         let repo = ScheduledDeletions::new(db);
         repo.schedule(&[due(chat_message(1), MessageKind::Reply), due(chat_message(2), MessageKind::Command)])
             .await.expect("couldn't schedule the deletions");
-        let claimed = repo.claim_due(literal!(Limit = 10), Utc::now() - Duration::from_secs(1))
+        let claimed = repo.claim_due(Limit::new(10), Utc::now() - Duration::from_secs(1))
             .await.expect("couldn't claim the deletions");
         assert_eq!(claimed.len(), 2);
 
         repo.finish(claimed[0].id, DeletionState::Removed).await.expect("couldn't finish the deletion");
         repo.finish(claimed[1].id, DeletionState::Failed).await.expect("couldn't fail the deletion");
 
-        let claimed_again = repo.claim_due(literal!(Limit = 10), lease()).await.expect("couldn't claim the deletions");
+        let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
         assert!(claimed_again.is_empty());
         let pending = repo.count_pending().await.expect("couldn't count the pending deletions");
         assert_eq!(pending, 0);
 
         let mut finished = repo.count_finished().await.expect("couldn't count the finished deletions");
         finished.sort_by_key(|(state, _)| state.to_string());
-        assert_eq!(finished, vec![(DeletionState::Failed, literal!(Count<ScheduledDeletion> = 1)), (DeletionState::Removed, literal!(Count<ScheduledDeletion> = 1))]);
+        assert_eq!(finished, vec![(DeletionState::Failed, Count::<ScheduledDeletion>::new(1)), (DeletionState::Removed, Count::<ScheduledDeletion>::new(1))]);
     }
 
     /// Every terminal state has to survive the trip to the database and back, or a row would end up
@@ -502,7 +501,7 @@ mod tests {
             .map(|i| due(chat_message(i.saturating_into()), MessageKind::Reply))
             .collect();
         repo.schedule(&messages).await.expect("couldn't schedule the deletions");
-        let claimed = repo.claim_due(literal!(Limit = 10), lease())
+        let claimed = repo.claim_due(Limit::new(10), lease())
             .await.expect("couldn't claim the deletions");
 
         for (deletion, state) in claimed.iter().zip(DeletionState::TERMINAL) {
@@ -511,7 +510,7 @@ mod tests {
 
         let finished = repo.count_finished().await.expect("couldn't count the finished deletions");
         for state in DeletionState::TERMINAL {
-            assert!(finished.contains(&(state, literal!(Count<ScheduledDeletion> = 1))), "{state} is missing from {finished:?}");
+            assert!(finished.contains(&(state, Count::<ScheduledDeletion>::new(1))), "{state} is missing from {finished:?}");
         }
     }
 
@@ -521,7 +520,7 @@ mod tests {
         let repo = ScheduledDeletions::new(db);
         repo.schedule(&[due(chat_message(1), MessageKind::Reply), due(chat_message(2), MessageKind::Reply)])
             .await.expect("couldn't schedule the deletions");
-        let claimed = repo.claim_due(literal!(Limit = 10), lease())
+        let claimed = repo.claim_due(Limit::new(10), lease())
             .await.expect("couldn't claim the deletions");
         repo.finish(claimed[0].id, DeletionState::Failed)
             .await.expect("couldn't fail the deletion");
@@ -552,14 +551,14 @@ mod tests {
                 VALUES ('reply', 'notice', 'en', current_timestamp - interval '1 minute')")
             .execute(&db).await.expect("couldn't insert the malformed row");
 
-        let claimed = repo.claim_due(literal!(Limit = 10), lease())
+        let claimed = repo.claim_due(Limit::new(10), lease())
             .await.expect("couldn't claim the deletions");
         assert!(claimed.is_empty());
 
         let finished = repo.count_finished()
             .await.expect("couldn't count the finished deletions");
-        assert_eq!(finished, vec![(DeletionState::Failed, literal!(Count<ScheduledDeletion> = 1))]);
-        let claimed_again = repo.claim_due(literal!(Limit = 10), Utc::now())
+        assert_eq!(finished, vec![(DeletionState::Failed, Count::<ScheduledDeletion>::new(1))]);
+        let claimed_again = repo.claim_due(Limit::new(10), Utc::now())
             .await.expect("couldn't claim the deletions");
         assert!(claimed_again.is_empty());
     }
@@ -572,7 +571,7 @@ mod tests {
         let repo = ScheduledDeletions::new(db);
         repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
             .await.expect("couldn't schedule the deletion");
-        let claimed = repo.claim_due(literal!(Limit = 10), lease())
+        let claimed = repo.claim_due(Limit::new(10), lease())
             .await.expect("couldn't claim the deletions");
 
         repo.finish(claimed[0].id, DeletionState::Removed)
@@ -581,7 +580,7 @@ mod tests {
         let pending = repo.count_pending().await.expect("couldn't count the pending deletions");
         assert_eq!(pending, 0);
         let finished = repo.count_finished().await.expect("couldn't count the finished deletions");
-        assert_eq!(finished, vec![(DeletionState::Removed, literal!(Count<ScheduledDeletion> = 1))]);
+        assert_eq!(finished, vec![(DeletionState::Removed, Count::<ScheduledDeletion>::new(1))]);
 
         let removed = repo.delete_finished(Utc::now() + Duration::from_secs(600))
             .await.expect("couldn't clean the deletions up");

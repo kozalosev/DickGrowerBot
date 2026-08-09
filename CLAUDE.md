@@ -578,30 +578,35 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Code Style
 
-- **A domain value written into the source goes through `literal!`.** `literal!(Counter = 0)`, never
-  `Counter::literal(0)`. The macro puts the call inside a `const` block, which is what makes the
-  type's validator run while the code is compiled — a `const fn` is evaluated early only where the
-  language requires it, and an ordinary call requires nothing, so a bare call would defer the check
-  to whenever the line happens to run.
+- **`new` builds a domain value; `literal!` is for the validated types only.** Three types validate
+  anything — `Ratio`, `Percentage`, `FloatPercentage`, all in `ratio.rs`. They alone have a
+  `literal`, and `literal!(Ratio = 0.5)` is what makes its `assert!` run while the code is compiled;
+  a bare `Ratio::literal(0.5)` would defer the check to whenever the line happens to run, since a
+  `const fn` is evaluated early only where the language requires it.
 
-  A **runtime** value is not a literal and must not be dressed as one: it goes through the checked
-  constructor (`UserId::new(uid)?`, or `repo::test::user_id(uid)` in the tests), which returns the
-  refusal instead of hiding it.
+  Everything else takes an unsigned or plain inner type instead of a validator, so there is nothing
+  to force: `new` is `const` and infallible and is all a constant needs.
 
   ```rust
-  // ❌ the validator runs when this line is reached, if ever
+  // ✅ validated: the assert runs during the build
+  grow_shrink_ratio: literal!(Ratio = 0.5),
+
+  // ❌ validated, bare: the assert runs when the line is reached, if ever
   grow_shrink_ratio: Ratio::literal(0.5),
 
-  // ✅ the validator runs during the build
-  grow_shrink_ratio: literal!(Ratio = 0.5),
+  // ✅ everything else: nothing to check, so no ceremony
+  top_limit: Limit::new(10),
   ```
 
-  `clippy.toml` forbids the bare constructor for every domain number, so the rule is enforced rather
-  than remembered — `literal!` carries the one `#[allow]` that lets itself through. Two things to
-  know about that list: a path spelled wrong resolves to nothing and is ignored **silently**, and it
-  has no globs, so a new domain type stays unprotected until it is added. The guard is
-  `src/domain/primitives/literal.rs`: `cargo test literal` compares the list with the types that
-  are declared and fails if one of them is missing or if a path leads nowhere.
+  **Nothing has to be remembered here** — the compiler picks for you. A validated `new` returns a
+  `Result`, so it will not compile where the value itself is wanted; an unvalidated type has no
+  `literal` to reach for. `clippy.toml` closes the last gap by forbidding the three bare
+  constructors.
+
+  That list has two silent failure modes: a path spelled wrong resolves to nothing and is ignored
+  without a word, and it takes no globs, so a new validated type stays unprotected until it is
+  added. `src/domain/primitives/literal.rs` guards it — `cargo test literal` compares the list
+  against the types that declare a validator and fails if the two disagree.
 
   Where the failure shows up depends on the kind of constant: a named `const` item is evaluated by
   `cargo check`, while an inline `const` block — which is what `literal!` expands to — is evaluated

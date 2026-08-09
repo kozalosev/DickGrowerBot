@@ -320,7 +320,7 @@ async fn test_get_shrinks_for_date_only_returns_that_day() {
     seed_old_shrink(&db, chat_id, UID, 5, 8).await;
 
     let today = chrono::Utc::now().date_naive();
-    let recent = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, today, Offset::new(0), literal!(Limit = 10)).await
+    let recent = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, today, Offset::new(0), Limit::new(10)).await
         .expect("couldn't fetch today's shrinks");
     assert_eq!(recent.len(), 1, "only today's shrink should be returned, not the older one");
     assert_eq!(recent[0].lost_length, 10);
@@ -354,9 +354,9 @@ async fn test_get_shrinks_for_date_pages() {
     }
 
     let date = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
-    let page0 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(0), literal!(Limit = 2)).await
+    let page0 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(0), Limit::new(2)).await
         .expect("couldn't fetch page 0");
-    let page1 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(2), literal!(Limit = 2)).await
+    let page1 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(2), Limit::new(2)).await
         .expect("couldn't fetch page 1");
 
     assert_eq!(page0.len(), 2, "page 0 must be full");

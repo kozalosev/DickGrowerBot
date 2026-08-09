@@ -882,7 +882,6 @@ pub(crate) fn render_metrics() -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::literal;
     use once_cell::sync::Lazy;
     use strum::IntoEnumIterator;
     use crate::config::MessageGroup;
@@ -983,7 +982,7 @@ mod tests {
         let gauges = SelfDestructionFinishedGauges::new("test_self_destruction_finished",
             "the finished self-destructions of the test");
 
-        gauges.set_all(&[(DeletionState::Failed, literal!(Count<ScheduledDeletion> = 3))]);
+        gauges.set_all(&[(DeletionState::Failed, Count::<ScheduledDeletion>::new(3))]);
         assert_eq!(gauges.0.gauge(&["failed"]).0.get(), 3);
         assert_eq!(gauges.0.gauge(&["expired"]).0.get(), 0);
 

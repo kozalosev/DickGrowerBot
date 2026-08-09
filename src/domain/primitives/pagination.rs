@@ -44,7 +44,6 @@ impl InvalidPage {
 
 #[cfg(test)]
 mod test {
-    use crate::literal;
     use super::{Limit, Offset, Page};
 
     #[test]
@@ -54,10 +53,10 @@ mod test {
         let p00 = p1 - 1;
         let p5 = p1 * 5;
 
-        assert_eq!(p0, literal!(Page = 0));
-        assert_eq!(p1, literal!(Page = 1));
-        assert_eq!(p00, literal!(Page = 0));
-        assert_eq!(p5, literal!(Page = 5));
+        assert_eq!(p0, Page::new(0));
+        assert_eq!(p1, Page::new(1));
+        assert_eq!(p00, Page::new(0));
+        assert_eq!(p5, Page::new(5));
     }
 
     /// A page below the first one saturates instead of wrapping around to 65535.
@@ -68,15 +67,15 @@ mod test {
 
     #[test]
     fn the_offset_is_the_page_times_the_limit() {
-        let offset = Offset::calculate(literal!(Page = 3), literal!(Limit = 10));
-        assert_eq!(offset, literal!(Offset = 30));
+        let offset = Offset::calculate(Page::new(3), Limit::new(10));
+        assert_eq!(offset, Offset::new(30));
     }
 
     /// The product of two `u16` reaches 4.29 billion, well past what an `i32` offset can hold, so
     /// it is cut down rather than allowed to wrap.
     #[test]
     fn an_offset_too_large_to_hold_is_cut_down() {
-        let offset = Offset::calculate(literal!(Page = 65535), literal!(Limit = 65535));
-        assert_eq!(offset, literal!(Offset = i32::MAX));
+        let offset = Offset::calculate(Page::new(65535), Limit::new(65535));
+        assert_eq!(offset, Offset::new(i32::MAX));
     }
 }

@@ -1,8 +1,5 @@
 //! Validators must be `const fn` so that the macro-generated `Type::literal(...)` constructors can
 //! evaluate them while the code is compiled.
-//!
-//! Only ranges are left here. A quantity that merely has to be non-negative takes an unsigned inner
-//! type instead, which leaves nothing to check.
 
 pub const fn ratio_range_validator(x: &f64) -> bool {
     *x >= 0.0 && *x <= 1.0

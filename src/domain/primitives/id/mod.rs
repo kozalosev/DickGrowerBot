@@ -11,8 +11,6 @@ id!(
     ScheduledDeletionId
 );
 
-/// Which of Telegram's datacenters a message lives in — a number from 1 to 5, read out of an
-/// `inline_message_id` and never stored.
 #[domain_type]
 struct DatacenterId(u8);
 

@@ -84,7 +84,7 @@ impl Perk for LoanPayoutPerk {
             .map(LoanPayout::new)
             .unwrap_or_else(|e| {
                 tracing::error!(payout = payout_value, dick_id = %dick_id, error = %e, "the loan payout is invalid");
-                literal!(LoanPayout = 0)
+                LoanPayout::new(0)
             });
         match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
             Ok(()) => AdditionalChange(LengthChange::signed(-i64::from(payout.value()))),
@@ -114,8 +114,8 @@ mod test {
         
         let perk = HelpPussiesPerk { coefficient: literal!(Ratio = 0.5) };
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
-        let change_intent_positive_length = ChangeIntent { current_length: Length::new(1), base_increment: literal!(LengthIncrement = 1).into() };
-        let change_intent_negative_length_positive_increment = ChangeIntent { current_length: Length::new(-1), base_increment: literal!(LengthIncrement = 1).into() };
+        let change_intent_positive_length = ChangeIntent { current_length: Length::new(1), base_increment: LengthIncrement::new(1).into() };
+        let change_intent_negative_length_positive_increment = ChangeIntent { current_length: Length::new(-1), base_increment: LengthIncrement::new(1).into() };
         let change_intent_negative_length_negative_increment = ChangeIntent { current_length: Length::new(-1), base_increment: SignedLengthChange::new(-1).into() };
         
         assert!(perk.enabled());
@@ -148,8 +148,8 @@ mod test {
 
         let perk = LoanPayoutPerk { loans: loans.clone() };
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
-        let change_intent_positive_increment = ChangeIntent { current_length: Length::new(1), base_increment: literal!(LengthIncrement = 10).into() };
-        let change_intent_positive_increment_small = ChangeIntent { current_length: Length::new(1), base_increment: literal!(LengthIncrement = 2).into() };
+        let change_intent_positive_increment = ChangeIntent { current_length: Length::new(1), base_increment: LengthIncrement::new(10).into() };
+        let change_intent_positive_increment_small = ChangeIntent { current_length: Length::new(1), base_increment: LengthIncrement::new(2).into() };
         let change_intent_negative_increment = ChangeIntent { current_length: Length::new(1), base_increment: SignedLengthChange::new(-1).into() };
 
         assert!(perk.enabled());

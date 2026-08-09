@@ -29,7 +29,6 @@ use crate::domain::primitives::UserId;
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::ChatIdKind;
-use crate::literal;
 
 /// Put on every container the tests share; `task test:clean` finds them by this key and is the only
 /// thing that ever removes them.
@@ -54,7 +53,7 @@ pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = -67890;
 pub const NAME: &str = "test";
 
-pub const USER_ID: UserId = literal!(UserId = UID as u64);
+pub const USER_ID: UserId = UserId::new(UID as u64);
 pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
 
 /// The runtime that owns the shared container and its maintenance pool.

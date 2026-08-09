@@ -6,7 +6,6 @@ use crate::repo;
 use crate::repo::PromoCodeParams;
 use crate::repo::test::{fresh_db, USER_ID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user};
-use crate::literal;
 
 const PROMO_CODE: &str = "test10";
 const PROMO_CODE_UPPERCASE: &str = "TEST10";
@@ -23,7 +22,7 @@ async fn activate() {
     promo.create_promo_code(PromoCodeParams{
         code: PromoCode::of(PROMO_CODE),
         bonus_length: PromoBonus::new(PROMO_BONUS),
-        capacity: literal!(PromoCapacity = 1),
+        capacity: PromoCapacity::new(1),
     }).await.expect("couldn't create a promo code");
 
     create_user(&db).await;
@@ -48,7 +47,7 @@ async fn activate_with_negative_bonus() {
     promo.create_promo_code(PromoCodeParams{
         code: PromoCode::of(PENALTY_PROMO_CODE),
         bonus_length: PromoBonus::new(PENALTY_PROMO_BONUS),
-        capacity: literal!(PromoCapacity = 1),
+        capacity: PromoCapacity::new(1),
     }).await.expect("couldn't create a promo code");
 
     create_user(&db).await;

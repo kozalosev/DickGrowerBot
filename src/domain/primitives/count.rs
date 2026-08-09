@@ -19,18 +19,8 @@ pub struct Count<T> {
 }
 
 impl <T> Count<T> {
-    /// Nothing is ever counted a negative number of times, and the type says so, so there is
-    /// nothing here to refuse.
     pub const fn new(value: u64) -> Self {
         Self { _phantom: PhantomData, value }
-    }
-
-    /// The same for a value written into the source. It adds no check of its own — there is none
-    /// left to make — but it keeps `literal!` working for this type, so a count is written the way
-    /// every other domain number is.
-    #[allow(dead_code)]
-    pub const fn literal(value: u64) -> Self {
-        Self::new(value)
     }
 
     /// The number itself, under the name every other domain number answers to. The conversions
@@ -79,8 +69,6 @@ where i64: sqlx::Decode<'r, DB>
     }
 }
 
-// The macro gives every other domain number a `Deref` to its primitive, and this one is written by
-// hand, so it is spelled out here to keep them alike.
 impl <T> Deref for Count<T> {
     type Target = u64;
 
@@ -136,14 +124,13 @@ where u64: ApproxInto<Target>
 mod tests {
     use super::*;
 
-    use crate::literal;
 
     struct Anything;
 
     #[test]
     fn a_count_is_the_number_it_was_built_from() {
         assert_eq!(Count::<Anything>::new(3), 3);
-        assert_eq!(literal!(Count<Anything> = 3), 3);
+        assert_eq!(Count::<Anything>::new(3), 3);
     }
 
     #[test]

@@ -45,8 +45,7 @@ where
 /// Reads a domain value from an environment variable, with a fallback and a lower bound written as
 /// the plain numbers they are.
 ///
-/// Use it through [`env_value!`], which is what makes those numbers constants — and so checked
-/// while the code is compiled rather than when it is started.
+/// Use it through [`env_value!`], which wraps those numbers in the domain type.
 ///
 /// The variable itself is parsed by `T`'s own `FromStr`, so a validated type turns a bad value down
 /// exactly as it would anywhere else and the fallback takes over.
@@ -90,20 +89,16 @@ where
 /// Reads an environment variable into a domain type, taking the fallback and the lower bound as
 /// bare numbers.
 ///
-/// Each of those numbers becomes a `const` item, which is the whole point: a constant is evaluated
-/// while the code is compiled, so `literal`'s validator runs then too and a value the type would
-/// refuse **fails the build**. Written as an ordinary call it would only panic at startup, because
-/// a `const fn` is evaluated early only where the language requires it — in a constant.
-///
-/// This works for every domain number, floats included. The restriction that keeps `f64` out of
-/// const *generics* (it isn't `Eq`, so it can't be structural-match) says nothing about a `const`
-/// item of a type that merely holds one.
+/// Both go through the type's `new`, so a number too large for the inner type fails the build.
+/// Every type used here validates nothing, which is why `new` is enough. A validated type's `new`
+/// returns a `Result` and would not compile in this position — that is the signal to write the
+/// bound as a `literal!(...)` and hand it over already built.
 macro_rules! env_value {
     ($key:literal : $type:ty $(, or = $default:expr)? $(, at_least = $min:expr)?) => {{
         #[allow(unused_mut)]
         let mut value = $crate::config::env::EnvValue::<$type>::of($key);
-        $( value = value.or($crate::literal!($type = $default)); )?
-        $( value = value.at_least($crate::literal!($type = $min)); )?
+        $( value = value.or(<$type>::new($default)); )?
+        $( value = value.at_least(<$type>::new($min)); )?
         value.read()
     }};
 }
@@ -177,7 +172,6 @@ pub(super) fn get_optional_chat_id(key: &str) -> Option<TelegramChatId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::literal;
     use crate::domain::primitives::{AttemptsCount, Limit};
 
     const UNSET: &str = "DICK_GROWER_BOT_TEST_VARIABLE_THAT_IS_NEVER_SET";
@@ -189,7 +183,7 @@ mod tests {
         let value = env_value!("DICK_GROWER_BOT_TEST_VARIABLE_THAT_IS_NEVER_SET": AttemptsCount, or = 3);
         assert_eq!(value, AttemptsCount::new(3));
         let value = env_value!("DICK_GROWER_BOT_TEST_VARIABLE_THAT_IS_NEVER_SET": Limit, or = 10);
-        assert_eq!(value, literal!(Limit = 10));
+        assert_eq!(value, Limit::new(10));
     }
 
     #[test]

@@ -6,7 +6,6 @@ use crate::repo;
 use crate::repo::ChatMigrationOutcome;
 use crate::repo::test::{CHAT_ID, fresh_db, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
-use crate::literal;
 
 #[tokio::test]
 async fn chat_language_roundtrip() {
@@ -314,7 +313,7 @@ async fn migrate_chat_id() {
     assert_eq!(migrated.internal_id, internal_id.value());
     assert!(chats.get_chat(old.into()).await.expect("couldn't fetch").is_none());
 
-    let top = dicks.get_top(&ChatIdKind::ID(new), Offset::new(0), literal!(Limit = 1), DaysCount::new(7))
+    let top = dicks.get_top(&ChatIdKind::ID(new), Offset::new(0), Limit::new(1), DaysCount::new(7))
         .await.expect("couldn't fetch the top");
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].length, 5);
@@ -623,7 +622,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
     check_chat(chats, id, inst).await;
 
     let chat_id_kind = chat_id.kind();
-    let dick = dicks.get_top(&chat_id_kind, Offset::new(0), literal!(Limit = 1), DaysCount::new(7))
+    let dick = dicks.get_top(&chat_id_kind, Offset::new(0), Limit::new(1), DaysCount::new(7))
         .await.expect("couldn't fetch the dick");
     assert_eq!(dick.len(), 1);
     assert_eq!(dick[0].length, 3);

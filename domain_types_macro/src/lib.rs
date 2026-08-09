@@ -1060,16 +1060,12 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
                     }
                 }
             },
+            // No `literal` here. It exists to force a validator to run while the code is compiled,
+            // and this type has none — `new` is `const` and infallible, so it is already everything
+            // a constant needs.
             _ => quote! {
                 impl #name {
                     pub const fn new(value: #inner_type) -> Self {
-                        Self(value)
-                    }
-
-                    /// What `new` is for a type that validates nothing, under the name every domain
-                    /// number answers to. Code that only wraps literals can then say `literal` and
-                    /// be checked wherever the call is a constant, whichever kind of type it got.
-                    pub const fn literal(value: #inner_type) -> Self {
                         Self(value)
                     }
                 }

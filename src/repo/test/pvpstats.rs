@@ -4,7 +4,6 @@ use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::repo;
 use crate::repo::test::dicks::{create_dick, create_user, create_user_and_dick_2};
 use crate::repo::test::{user_id, fresh_db, CHAT_ID_KIND, UID, USER_ID};
-use crate::literal;
 
 #[tokio::test]
 async fn test_all() {
@@ -12,7 +11,7 @@ async fn test_all() {
     let pvp_stats = repo::BattleStatsRepo::new(db.clone(), Default::default());
 
     let chat_id = CHAT_ID_KIND;
-    let bet = literal!(Bet = 42);
+    let bet = Bet::new(42);
     let bet_length = i64::from(bet.value());
 
     // create user and dick #1
