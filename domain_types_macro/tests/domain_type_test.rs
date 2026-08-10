@@ -72,6 +72,7 @@ struct Meters(i64);
 #[domain_type]
 struct Login(String);
 
+
 // `no_auto_display` types must provide Display manually (DomainType requires it).
 #[domain_type(features(no_auto_display))]
 struct Opaque(i64);

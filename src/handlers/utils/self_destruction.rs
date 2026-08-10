@@ -5,6 +5,7 @@ use teloxide::Bot;
 use teloxide::prelude::Requester;
 use teloxide::types::{ChatId, Message, MessageId, UserId as TeloxideUserId};
 use crate::config::{MessageGroup, SelfDestructionConfig, MAX_DELAY};
+use crate::handlers::rights;
 use crate::domain::primitives::LanguageCode;
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
 use crate::cache::Cache;
@@ -173,7 +174,7 @@ impl SelfDestructionService {
     /// [`DeletionMode::Enabled`]: crate::config::DeletionMode::Enabled
     /// [`DeletionMode::OnlyWithCommand`]: crate::config::DeletionMode::OnlyWithCommand
     async fn may_delete_commands(&self, bot: &Bot, chat_id: ChatId) -> bool {
-        if let Some(known) = self.cache.bot_admin(chat_id).await {
+        if let Some(known) = rights::cached_deletion_right(&self.cache, chat_id).await {
             return known
         }
         if !self.config.requires_command() {
@@ -187,7 +188,7 @@ impl SelfDestructionService {
                 return false
             }
         };
-        self.cache.set_bot_admin(chat_id, is_admin).await;
+        rights::remember_deletion_right(&self.cache, chat_id, is_admin).await;
         is_admin
     }
 }

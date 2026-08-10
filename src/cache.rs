@@ -9,21 +9,11 @@
 //! [`Cache::Disabled`] is for. That variant answers "nothing known" to every read and drops every
 //! write.
 
+use std::fmt::Display;
 use std::time::Duration;
 use redis::AsyncTypedCommands;
 use redis::aio::ConnectionManager;
-use teloxide::types::ChatId;
 use crate::config::RedisConfig;
-use crate::metrics;
-
-/// Whether the bot may delete other members' messages in a chat, as far as we last knew.
-fn bot_admin_key(chat_id: ChatId) -> String {
-    format!("chat:{}:bot_admin", chat_id.0)
-}
-
-async fn connect_to(url: String) -> redis::RedisResult<ConnectionManager> {
-    ConnectionManager::new(redis::Client::open(url)?).await
-}
 
 /// A handle on the cached values. Cheap to clone — the clones share one multiplexed connection.
 #[derive(Clone)]
@@ -57,43 +47,43 @@ impl Cache {
         }
     }
 
-    /// What we last knew about the bot's right to delete messages here, or `None` when nothing is
-    /// known — never asked, expired, or the cache is unavailable.
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
-    pub async fn bot_admin(&self, chat_id: ChatId) -> Option<bool> {
-        let value = self.get(&bot_admin_key(chat_id)).await;
-        match value {
-            Some(_) => metrics::BOT_ADMIN_LOOKUP.cache_hit(),
-            None => metrics::BOT_ADMIN_LOOKUP.miss(),
-        }
-        value
-    }
-
-    /// Remembers what Telegram said, or showed, about the bot's rights here.
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, is_admin = %is_admin))]
-    pub async fn set_bot_admin(&self, chat_id: ChatId, is_admin: bool) {
-        self.set(&bot_admin_key(chat_id), is_admin).await
-    }
-
-    async fn get(&self, key: &str) -> Option<bool> {
+    /// The flag stored under this key, or `None` when nothing is — never written, expired, or the
+    /// cache is unavailable. The three are deliberately one answer: every caller falls back the
+    /// same way.
+    pub async fn get_flag(&self, key: impl CacheKey) -> Option<bool> {
         let Self::Connected { conn, .. } = self else {
             return None
         };
-        conn.clone().get(key).await
+        let key = key.to_string();
+        conn.clone().get(&key).await
             .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't read a value from the cache"))
             .ok()
             .flatten()
             .map(|value| value == "1")
     }
 
-    async fn set(&self, key: &str, value: bool) {
+    /// Stores a flag for as long as the configured lifetime.
+    pub async fn set_flag(&self, key: impl CacheKey, value: bool) {
         let Self::Connected { conn, ttl } = self else {
             return
         };
+        let key = key.to_string();
         let value = if value { "1" } else { "0" };
-        conn.clone().set_ex(key, value, ttl.as_secs()).await
+        conn.clone().set_ex(&key, value, ttl.as_secs()).await
             .unwrap_or_else(|e| tracing::warn!(error = %e, key, "couldn't write a value into the cache"))
     }
+}
+
+/// A key in the cache: one type per kind of value, declared by whoever owns that value.
+///
+/// Everything here shares a single keyspace, so a key's shape is worth a type rather than a
+/// `format!` at each call site. The bound is `Display` and not `Into<String>` because that is what
+/// stops a bare string being passed off as a key.
+pub trait CacheKey: Display {}
+
+#[inline]
+async fn connect_to(url: String) -> redis::RedisResult<ConnectionManager> {
+    ConnectionManager::new(redis::Client::open(url)?).await
 }
 
 #[cfg(test)]
@@ -106,6 +96,13 @@ mod test {
     use tokio::runtime::{Builder, Runtime};
     use tokio::sync::OnceCell;
     use crate::repo::test::TEST_CONTAINER_LABEL;
+
+    /// Stands in for the real keys, which live with the values they name rather than here.
+    #[derive(Clone, Copy, derive_more::Display)]
+    #[display("test:{_0}")]
+    struct TestKey(u8);
+
+    impl CacheKey for TestKey {}
 
     const IMAGE: &str = "valkey/valkey";
     const TAG: &str = "9-alpine";
@@ -140,8 +137,7 @@ mod test {
     }
 
     /// A connected cache with the given TTL. The whole test binary shares one server, so a test
-    /// that needs isolation asks for keys of its own — [`Cache::bot_admin`] is keyed by chat, so a
-    /// chat id per test is enough.
+    /// that needs isolation asks for a key of its own.
     async fn cache(ttl: Duration) -> Cache {
         let port = RUNTIME
             .spawn(async { CONTAINER.get_or_init(start).await.1 })
@@ -156,40 +152,39 @@ mod test {
     #[tokio::test]
     async fn a_value_survives_a_round_trip() {
         let cache = cache(Duration::from_secs(60)).await;
-        let chat_id = ChatId(-1001);
+        let key = TestKey(1);
 
-        cache.set_bot_admin(chat_id, true).await;
-        assert_eq!(cache.bot_admin(chat_id).await, Some(true));
+        cache.set_flag(key, true).await;
+        assert_eq!(cache.get_flag(key).await, Some(true));
 
-        cache.set_bot_admin(chat_id, false).await;
-        assert_eq!(cache.bot_admin(chat_id).await, Some(false));
+        cache.set_flag(key, false).await;
+        assert_eq!(cache.get_flag(key).await, Some(false));
     }
 
     #[tokio::test]
     async fn an_absent_key_is_nothing_known() {
         let cache = cache(Duration::from_secs(60)).await;
-        assert_eq!(cache.bot_admin(ChatId(-1002)).await, None);
+        assert_eq!(cache.get_flag(TestKey(2)).await, None);
     }
 
     #[tokio::test]
     async fn a_value_stops_being_known_once_its_time_is_up() {
         let cache = cache(Duration::from_secs(1)).await;
-        let chat_id = ChatId(-1003);
+        let key = TestKey(3);
 
-        cache.set_bot_admin(chat_id, false).await;
-        assert_eq!(cache.bot_admin(chat_id).await, Some(false));
+        cache.set_flag(key, false).await;
+        assert_eq!(cache.get_flag(key).await, Some(false));
 
         tokio::time::sleep(Duration::from_millis(1500)).await;
-        assert_eq!(cache.bot_admin(chat_id).await, None);
+        assert_eq!(cache.get_flag(key).await, None);
     }
 
     #[tokio::test]
     async fn a_disabled_cache_knows_nothing_and_keeps_nothing() {
         let cache = Cache::Disabled;
-        let chat_id = ChatId(-1004);
 
-        cache.set_bot_admin(chat_id, true).await;
-        assert_eq!(cache.bot_admin(chat_id).await, None);
+        cache.set_flag(TestKey(4), true).await;
+        assert_eq!(cache.get_flag(TestKey(4)).await, None);
     }
 
     #[tokio::test]

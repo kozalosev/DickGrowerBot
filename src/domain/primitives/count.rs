@@ -138,9 +138,8 @@ mod tests {
         assert_eq!(Count::<Anything>::default(), 0);
     }
 
-    /// What the gauges need: a count goes back to the signed number the database gave it.
     #[test]
-    fn a_count_converts_to_the_number_a_gauge_takes() {
+    fn a_count_converts_back_to_a_signed_number() {
         let value: i64 = Count::<Anything>::new(3).saturating_into();
         assert_eq!(value, 3);
 

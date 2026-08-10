@@ -239,8 +239,12 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
     };
 
     let TypeInfo { name, inner_type, .. } = info;
+    // Everything written above the struct is carried over: its documentation, and any attribute
+    // the derives below read — `#[display(...)]` above all, which `derive_more::Display` takes.
+    let attrs = &input.attrs;
     // Generate the final struct with a conditional 'sqlx' attribute
     let output = quote! {
+        #(#attrs)*
         #[derive(#(#derives),*)]
         #sqlx_transparent
         pub struct #name(#inner_type);

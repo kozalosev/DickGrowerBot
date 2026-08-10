@@ -11,6 +11,7 @@ use teloxide::types::ParseMode::Html;
 use crate::config::SelfDestructionConfig;
 use crate::config::MessageGroup;
 use crate::cache::Cache;
+use crate::handlers::rights;
 use crate::domain::primitives::{AttemptsCount, ScheduledDeletionId};
 use crate::metrics;
 use crate::repo::{DeletionState, DeletionTarget, MessageKind, Repositories, ScheduledDeletion};
@@ -200,7 +201,7 @@ async fn outcome_of(
         // The bot may not delete messages here. Remembering that keeps every later command out of
         // the queue instead of into this same failure.
         if let DeletionTarget::ChatMessage { chat_id, .. } = deletion.target {
-            cache.set_bot_admin(ChatId::from(chat_id), false).await;
+            rights::remember_deletion_right(cache, ChatId::from(chat_id), false).await;
         }
     }
     if is_final(&error) {

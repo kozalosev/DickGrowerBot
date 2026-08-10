@@ -5,12 +5,29 @@
 //! without asking. It is the cheapest and the most accurate source there is, which is why nothing
 //! here polls: the bot is told.
 //!
-//! The one right that matters is deleting other members' messages, which the self-destruction of
-//! a command depends on (see [`crate::handlers::utils::SelfDestructionService`]).
+//! The one right tracked here is deleting other members' messages.
 
 use autometrics::autometrics;
-use teloxide::types::ChatMemberUpdated;
-use crate::cache::Cache;
+use teloxide::types::{ChatId, ChatMemberUpdated};
+use crate::cache::{Cache, CacheKey};
+use crate::domain::primitives::chat::TelegramChatId;
+use crate::metrics;
+
+/// What the cache last knew about the bot's right to delete messages here, or `None` when nothing
+/// is known.
+pub async fn cached_deletion_right(cache: &Cache, chat_id: ChatId) -> Option<bool> {
+    let known = cache.get_flag(BotAdminKey::new(chat_id)).await;
+    match known {
+        Some(_) => metrics::BOT_ADMIN_LOOKUP.cache_hit(),
+        None => metrics::BOT_ADMIN_LOOKUP.miss(),
+    }
+    known
+}
+
+/// Remembers what Telegram said, or showed, about that right.
+pub async fn remember_deletion_right(cache: &Cache, chat_id: ChatId, may_delete: bool) {
+    cache.set_flag(BotAdminKey::new(chat_id), may_delete).await
+}
 
 /// What to remember for this update, or `None` for a chat nothing is ever cleaned up in.
 fn right_to_remember(upd: &ChatMemberUpdated) -> Option<bool> {
@@ -41,7 +58,20 @@ pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache) {
     if may_delete != upd.old_chat_member.can_delete_messages() {
         tracing::info!(may_delete, "the bot's rights in the chat have changed");
     }
-    cache.set_bot_admin(upd.chat.id, may_delete).await;
+    remember_deletion_right(&cache, upd.chat.id, may_delete).await;
+}
+
+/// Keyed by chat, because the right is granted per chat.
+#[derive(derive_more::Display)]
+#[display("chat:{_0}:bot_admin")]
+struct BotAdminKey(TelegramChatId);
+
+impl CacheKey for BotAdminKey {}
+
+impl BotAdminKey {
+    fn new(chat_id: ChatId) -> Self {
+        Self(TelegramChatId::from(chat_id))
+    }
 }
 
 #[cfg(test)]

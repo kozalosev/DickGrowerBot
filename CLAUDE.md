@@ -627,6 +627,48 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   `cargo check`, while an inline `const` block — which is what `literal!` expands to — is evaluated
   during codegen, so only `cargo build` and `cargo test` report it. The IDE stays quiet.
 
+- **A comment never points against the dependencies.** This one is strict. A module may describe
+  what it is and what it depends on; it must **not** name, list or explain the things that depend on
+  it. No `[`crate::handlers::…`]` in `cache.rs`, no "used by the daily shrink" in a repo method, no
+  roll-call of call sites anywhere.
+
+  Two reasons, and the first is enough. Such a comment is a second place to update when the caller
+  moves, and nothing makes it fail — it rots silently while the code stays correct. The second: it
+  is not the lower layer's business. `cache.rs` stores flags under keys; that a key happens to
+  describe the bot's rights is knowledge it must not have, in code *or* in prose.
+
+  ```rust
+  // ❌ src/cache.rs — the arrow runs backwards
+  //! A key is declared by whoever owns the value it names — `crate::handlers::rights` for the
+  //! bot's rights in a chat.
+
+  // ✅ the same file says only what is true of itself
+  //! A key's shape is worth a type rather than a `format!` at each call site.
+  ```
+
+  The same restraint applies generally: prefer no comment to one that repeats what the code says,
+  and never explain a design by describing what the alternative would have generated. If the
+  reasoning is worth keeping, it goes in this file or in the commit message.
+
+- **A file reads from its public surface downwards.** Constants and statics first, then the types,
+  then the functions; within each group, what callers use comes before what only this file uses. A
+  private helper — a small constructor, a one-line wrapper around a library call — belongs near the
+  bottom, under the thing it serves.
+
+  ```rust
+  // ✅ src/cache.rs
+  pub enum Cache { … }          // what the rest of the bot sees
+  impl Cache { … }
+  trait CacheKey: Display {}    // how it spells its keys
+  struct BotAdminKey(…);
+  async fn connect_to(…) { … }  // a helper of one call site
+  #[cfg(test)] mod test { … }
+  ```
+
+  Not a rule to follow off a cliff: a type that only makes sense next to its user stays next to it,
+  and a helper wanted in two places belongs between them. The point is that someone opening the
+  file meets what it is for before how it manages.
+
 - **A log message is a constant; the values are fields.** Use `tracing::{debug,info,warn,error}!`
   (never `log::*`) and keep the message text free of interpolated values, so that repeated events
   group together in the log database. Messages are lower-case and have no trailing dots. Pass the
