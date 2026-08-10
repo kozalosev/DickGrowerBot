@@ -1,7 +1,6 @@
 use autometrics::autometrics;
 use anyhow::anyhow;
 use derive_more::Display;
-use domain_types::traits::{ApproxInto, SaturatingInto};
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
@@ -13,7 +12,8 @@ use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
 use crate::{check_invoked_by_owner_and_get_answer_params, metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::objects::Loan;
-use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, UserId as DomainUserId};
+use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, PayoutRatio, UserId as DomainUserId};
+use crate::literal;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::handlers::{CallbackButton, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
 use crate::handlers::utils::try_resolve_chat_id;
@@ -79,7 +79,7 @@ pub(crate) async fn loan_impl(
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
-    let debt = length.unsigned_abs();
+    let debt = Debt::new(length.unsigned_abs());
     let payout_percentage = FloatPercentage::from(config.loan_payout_ratio).to_string();
 
     let btn_agree = CallbackButton::new(
@@ -88,7 +88,7 @@ pub(crate) async fn loan_impl(
             uid: from.id,
             action: LoanCallbackAction::Confirmed {
                 value: debt,
-                payout_ratio: config.loan_payout_ratio.approx_into()
+                payout_ratio: config.loan_payout_ratio
             }
         }
     );
@@ -132,17 +132,12 @@ pub async fn loan_callback_handler(
         EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
             self_destruction.cancel_inline(inline_message_id).await,
     };
-    // The callback data carries the ratio the offer was made under, so it is compared against the
-    // configured one in the shape it was serialized in.
-    let configured_payout_ratio: f32 = config.loan_payout_ratio.approx_into();
     match data.action {
         LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {
             answer.show_alert.replace(true);
             answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
         }
-        LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == configured_payout_ratio => {
-            // the value comes from our own callback data, where it was serialized from a non-negative i64
-            let debt = Debt::new(value.saturating_into());
+        LoanCallbackAction::Confirmed { value: debt, payout_ratio } if payout_ratio == config.loan_payout_ratio => {
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.into(), debt).await?;
@@ -216,7 +211,7 @@ pub(crate) struct LoanCallbackData {
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub(crate) enum LoanCallbackAction {
     #[display("confirmed:{value}:{payout_ratio}")]
-    Confirmed { value: u64, payout_ratio: f32 },
+    Confirmed { value: Debt, payout_ratio: PayoutRatio },
     #[display("refused")]
     Refused
 }
@@ -244,7 +239,7 @@ impl TryFrom<String> for LoanCallbackData {
                     // for backward compatibility; zero ratio disables the loans completely,
                     // so this value is out of possible ones, thus either the "rate changed" or
                     // "feature disabled" message will always be sent.
-                    Err(InvalidCallbackData::MissingPart { .. }) => 0.0,
+                    Err(InvalidCallbackData::MissingPart { .. }) => literal!(PayoutRatio = 0.0),
                     Err(e) => return Err(e)
                 };
                 LoanCallbackAction::Confirmed { value, payout_ratio }
@@ -260,6 +255,8 @@ impl TryFrom<String> for LoanCallbackData {
 #[cfg(test)]
 mod test {
     use teloxide::types::UserId;
+    use crate::literal;
+    use crate::domain::primitives::{Debt, PayoutRatio};
     use crate::handlers::loan::{LoanCallbackAction, LoanCallbackData};
     use crate::handlers::utils::callbacks::{build_callback_query, CallbackDataWithPrefix};
 
@@ -289,7 +286,7 @@ mod test {
         let lcd_confirmed = LoanCallbackData::parse(&cd_confirmed)
             .expect("callback data for 'confirmed' must be parsed successfully");
         assert_eq!(lcd_confirmed.uid, uid);
-        assert_eq!(lcd_confirmed.action, LoanCallbackAction::Confirmed { value, payout_ratio: 0.0 });
+        assert_eq!(lcd_confirmed.action, LoanCallbackAction::Confirmed { value, payout_ratio: literal!(PayoutRatio = 0.0) });
     }
 
     #[test]
@@ -310,11 +307,11 @@ mod test {
         assert_eq!(lcd_refused.to_data_string(), expected_refused);
     }
 
-    fn get_test_params() -> (UserId, u64, f32) {
-        (UserId(123456), 10, 0.1)
+    fn get_test_params() -> (UserId, Debt, PayoutRatio) {
+        (UserId(123456), Debt::new(10), literal!(PayoutRatio = 0.1))
     }
 
-    fn get_strings(uid: UserId, value: u64, payout_ratio: f32) -> [String; 2] {[
+    fn get_strings(uid: UserId, value: Debt, payout_ratio: PayoutRatio) -> [String; 2] {[
         format!("loan:{uid}:confirmed:{value}:{payout_ratio}"),
         format!("loan:{uid}:refused"),
     ]}

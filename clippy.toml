@@ -12,6 +12,7 @@
 # the `pub use` re-export does not resolve.
 disallowed-methods = [
     { path = "dick_grower_bot::domain::primitives::ratio::FloatPercentage::from_literal", reason = "use literal!(FloatPercentage = …)" },
+    { path = "dick_grower_bot::domain::primitives::ratio::PayoutRatio::from_literal", reason = "use literal!(PayoutRatio = …)" },
     { path = "dick_grower_bot::domain::primitives::ratio::Percentage::from_literal", reason = "use literal!(Percentage = …)" },
     { path = "dick_grower_bot::domain::primitives::promo::PromoCode::from_literal", reason = "use literal!(PromoCode = …)" },
     { path = "dick_grower_bot::domain::primitives::ratio::Ratio::from_literal", reason = "use literal!(Ratio = …)" },

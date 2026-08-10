@@ -1,16 +1,21 @@
 use domain_types::traits::{ApproxInto, SaturatingInto};
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
-use crate::domain::primitives::{Debt, LoanPayout, Ratio};
+use crate::domain::primitives::{Debt, LoanPayout, PayoutRatio};
 use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
 use crate::repo::test::{user_id, CHAT_ID, NAME, fresh_db, UID, USER_ID, CHAT_ID_KIND};
 use crate::literal;
 
+/// A debt is a positive amount owed; the length it was borrowed against is its negation.
+fn length_of(debt: Debt) -> i64 {
+    debt.saturating_into()
+}
+
 #[tokio::test]
 async fn test_all() {
     let db = fresh_db().await;
-    let payout_ratio = literal!(Ratio = 0.1);
+    let payout_ratio = literal!(PayoutRatio = 0.1);
 
     create_user(&db).await;
     create_dick(&db).await; // to create a chat
@@ -36,7 +41,7 @@ async fn test_all() {
         .await.expect("couldn't fetch active loans after the rejected application");
     assert!(no_loan.is_none());
 
-    set_length(&db, UID, CHAT_ID, -value.value()).await;
+    set_length(&db, UID, CHAT_ID, -length_of(value)).await;
 
     let debt = Debt::new(value.value() * 2);
     let borrow_result = loans.borrow(user_id, &chat_id, debt)
@@ -55,7 +60,7 @@ async fn test_all() {
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let length_after_borrowing = dicks.fetch_length(user_id, &chat_id)
         .await.expect("couldn't fetch a length after borrowing");
-    assert_eq!(length_after_borrowing, value.value());
+    assert_eq!(length_after_borrowing, length_of(value));
 
     let half_payment = LoanPayout::new(value.saturating_into());
     loans.pay(user_id, &chat_id, half_payment)
@@ -65,7 +70,7 @@ async fn test_all() {
         .await.expect("couldn't fetch how much is left to pay")
         .expect("the loan, which I left to pay, must be present")
         .debt;
-    assert_eq!(left_to_pay, i64::from(half_payment.value()));
+    assert_eq!(left_to_pay, u64::from(half_payment.value()));
 
     // the length is positive, so refinancing must be rejected as well
     // (this is the fix for the over-loaning exploit: stale confirmation buttons
@@ -79,7 +84,7 @@ async fn test_all() {
         .debt;
     assert_eq!(untouched_debt, value);
 
-    set_length(&db, UID, CHAT_ID, -value.value()).await;
+    set_length(&db, UID, CHAT_ID, -length_of(value)).await;
 
     let borrow_result = loans.borrow(user_id, &chat_id, value)
         .await.expect("couldn't increase the total sum of the loan");
@@ -105,7 +110,7 @@ async fn test_borrow_without_dick() {
         .await.expect("couldn't create a user");
 
     let loans = repo::Loans::new(db.clone(), &config::AppConfig {
-        loan_payout_ratio: literal!(Ratio = 0.1),
+        loan_payout_ratio: literal!(PayoutRatio = 0.1),
         ..Default::default()
     });
     let borrow_result = loans.borrow(user_id_without_dick, &chat_id, Debt::new(10))

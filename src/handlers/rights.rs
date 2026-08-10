@@ -11,22 +11,37 @@
 use autometrics::autometrics;
 use teloxide::types::ChatMemberUpdated;
 use crate::cache::Cache;
-use crate::handlers::HandlerResult;
 
-/// Fires when the bot's own right to delete messages has just changed. Private chats are skipped:
-/// nothing is ever cleaned up there.
-pub fn bot_rights_changed_filter(upd: ChatMemberUpdated) -> bool {
-    !upd.chat.is_private()
-        && upd.old_chat_member.can_delete_messages() != upd.new_chat_member.can_delete_messages()
+/// What to remember for this update, or `None` for a chat nothing is ever cleaned up in.
+fn right_to_remember(upd: &ChatMemberUpdated) -> Option<bool> {
+    (!upd.chat.is_private()).then(|| upd.new_chat_member.can_delete_messages())
 }
 
+/// Records the bot's rights on every change of its own status.
+///
+/// Not an endpoint. The same update may be the one that adds the bot to a legacy group, and that
+/// branch answers with the setup message and consumes it — including when the bot is added as an
+/// administrator in one step, which is a single update with no second one to follow. Recorded here
+/// instead, before the branches, so nothing depends on which of them wins.
+///
+/// The value is written on every update rather than only when it differs from the previous one.
+/// The question is not whether the right *changed* but whether it is now *known*, and the two come
+/// apart exactly where it matters: a bot added to a chat as an ordinary member goes from `left` to
+/// `member`, neither of which may delete. Nothing changed, and yet this is the moment the bot is
+/// told what it may do there — and the moment it starts answering commands.
+///
+/// Only a change is worth a log line. `my_chat_member` arrives when the bot is added, promoted,
+/// demoted or removed, so the write is rare whatever the bot's traffic.
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = upd.chat.id.0))]
-pub async fn bot_rights_changed_handler(upd: ChatMemberUpdated, cache: Cache) -> HandlerResult {
-    let may_delete = upd.new_chat_member.can_delete_messages();
-    tracing::info!(may_delete, "the bot's rights in the chat have changed");
+pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache) {
+    let Some(may_delete) = right_to_remember(&upd) else {
+        return
+    };
+    if may_delete != upd.old_chat_member.can_delete_messages() {
+        tracing::info!(may_delete, "the bot's rights in the chat have changed");
+    }
     cache.set_bot_admin(upd.chat.id, may_delete).await;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -61,6 +76,10 @@ mod test {
         serde_json::json!({ "status": "member", "user": bot() })
     }
 
+    fn left() -> serde_json::Value {
+        serde_json::json!({ "status": "left", "user": bot() })
+    }
+
     /// An administrator, with every right Telegram sends spelled out — `can_delete_messages` is
     /// the one being varied.
     fn admin(can_delete: bool) -> serde_json::Value {
@@ -83,28 +102,43 @@ mod test {
     }
 
     #[test]
-    fn a_promotion_that_grants_the_right_is_caught() {
+    fn a_promotion_that_grants_the_right_is_remembered() {
         let upd = updated(supergroup(), member(), admin(true));
-        assert!(bot_rights_changed_filter(upd));
+        assert_eq!(right_to_remember(&upd), Some(true));
     }
 
     #[test]
-    fn a_demotion_that_takes_it_away_is_caught() {
+    fn a_demotion_that_takes_it_away_is_remembered() {
         let upd = updated(supergroup(), admin(true), member());
-        assert!(bot_rights_changed_filter(upd));
+        assert_eq!(right_to_remember(&upd), Some(false));
     }
 
     #[test]
-    fn a_promotion_without_that_right_changes_nothing() {
-        // An administrator who may not delete messages is, for our purposes, an ordinary member.
+    fn an_administrator_who_may_not_delete_counts_as_an_ordinary_member() {
         let upd = updated(supergroup(), member(), admin(false));
-        assert!(!bot_rights_changed_filter(upd));
+        assert_eq!(right_to_remember(&upd), Some(false));
+    }
+
+    /// The one that adds the bot to a legacy group as an administrator: the setup branch consumes
+    /// this update, so it has to be recorded before the branches rather than by one of them.
+    #[test]
+    fn joining_a_group_as_an_administrator_is_remembered() {
+        let upd = updated(supergroup(), left(), admin(true));
+        assert_eq!(right_to_remember(&upd), Some(true));
+    }
+
+    /// Neither status may delete, so nothing *changed* — but this is the update that says the bot
+    /// is an ordinary member here, and it arrives before the first command does.
+    #[test]
+    fn joining_a_group_as_an_ordinary_member_is_remembered_too() {
+        let upd = updated(supergroup(), left(), member());
+        assert_eq!(right_to_remember(&upd), Some(false));
     }
 
     #[test]
     fn a_private_chat_is_never_of_interest() {
         let upd = updated(private(), member(), admin(true));
-        assert!(!bot_rights_changed_filter(upd));
+        assert_eq!(right_to_remember(&upd), None);
     }
 
 }

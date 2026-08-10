@@ -54,8 +54,8 @@ pub static CMD_TOPICS: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_topics_usage_total", "count of /topics invocations and changes of the setting", ["invoked", "finished"]));
 pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
-pub static BOT_ADMIN_LOOKUP: Lazy<BotAdminLookupCounters> = Lazy::new(||
-    BotAdminLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
+pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
+    CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static TOPIC_RESTRICTED: Lazy<Counter> = Lazy::new(||
     Counter::new("topic_restricted_total", "count of updates dropped because they came from a forum topic the chat doesn't let the bot work in"));
 pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
@@ -279,9 +279,9 @@ pub struct CacheSourceCounters {
     cache: Counter,
     db: Counter,
 }
-/// Where a lookup of the bot's rights in a chat was answered from. A miss is not a failure — it
-/// means the caller had to fall back, either to asking Telegram or to assuming it may go ahead.
-pub struct BotAdminLookupCounters {
+/// Whether a cache knew the answer. A miss is not a failure — it means the caller fell back to
+/// doing the work itself, which is what every cache here is allowed to assume.
+pub struct CacheLookupCounters {
     cache: Counter,
     miss: Counter,
 }
@@ -513,7 +513,7 @@ impl CacheSourceCounters {
     }
 }
 
-impl BotAdminLookupCounters {
+impl CacheLookupCounters {
     fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["source"]);
         Self {
@@ -527,7 +527,7 @@ impl BotAdminLookupCounters {
         self.cache.inc()
     }
 
-    /// The cache didn't, so the caller had to ask Telegram or go ahead without knowing.
+    /// It didn't, so the caller did the work instead.
     pub fn miss(&self) {
         self.miss.inc()
     }

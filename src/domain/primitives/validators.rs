@@ -15,6 +15,10 @@ pub const fn ratio_range_validator(x: &f64) -> bool {
     *x >= 0.0 && *x <= 1.0
 }
 
+pub const fn ratio_range_validator_f32(x: &f32) -> bool {
+    *x >= 0.0 && *x <= 1.0
+}
+
 /// Latin and Cyrillic letters, digits, `_` and `-`, between 4 and 16 characters.
 pub const fn promo_code_validator(code: &str) -> bool {
     let bytes = code.as_bytes();

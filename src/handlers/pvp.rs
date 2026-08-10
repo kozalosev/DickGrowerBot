@@ -1,6 +1,7 @@
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use domain_types::traits::SaturatingInto;
+use crate::domain::primitives::Coefficient;
 use futures::join;
 use rand::RngExt;
 use rust_i18n::t;
@@ -421,8 +422,8 @@ async fn pay_for_loan_if_needed(
         None => return Ok(None)
     };
     // the ratio is within [0; 1], so the payout never exceeds the award
-    let payout_value: i64 = (loan.payout_ratio.value() * f64::from(award.value())).round().saturating_into();
-    let payout_value = payout_value.min(loan.debt.value());
+    let payout_value: i64 = loan.payout_ratio.scale(award.value().into()).round().saturating_into();
+    let payout_value = payout_value.min(loan.debt.saturating_into());
     let payout = LoanPayout::new(payout_value.saturating_into());
 
     p.repos.loans.pay(winner_id, &chat_id_kind, payout).await?;

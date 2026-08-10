@@ -29,6 +29,7 @@ use teloxide::prelude::*;
 use teloxide::dptree::{deps, HandlerDescription};
 use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::{polling_default, UpdateListener};
+use cache::Cache;
 use config::AppConfig;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
@@ -56,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
     let repos = Repositories::new(&db_conn, &app_config);
-    let cache = cache::Cache::connect(config::RedisConfig::from_env()).await;
+    let cache = Cache::connect(config::RedisConfig::from_env()).await;
     let language_service = users::init_language_service(&integrations_config, repos.chats.clone(),
                                                         app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;
@@ -106,10 +107,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_inline_query().filter(checks::inline::is_not_group_chat).endpoint(checks::inline::handle_not_group_chat_inline))
         .branch(Update::filter_chosen_inline_result().filter(handlers::pvp::chosen_inline_result_filter).endpoint(handlers::pvp::pvp_inline_chosen_handler))
         .branch(Update::filter_chosen_inline_result().endpoint(handlers::inline_chosen_handler))
-        .branch(Update::filter_my_chat_member().filter(handlers::setup::added_to_legacy_group_filter).endpoint(handlers::setup::added_to_legacy_group_handler))
-        // Below the branch above, so that a bot added to a legacy group as an administrator still
-        // gets its setup message; the rights are learned from the next update about the chat.
-        .branch(Update::filter_my_chat_member().filter(handlers::rights::bot_rights_changed_filter).endpoint(handlers::rights::bot_rights_changed_handler))
+        // The rights are recorded before the branch, not by one, because the setup message consumes
+        // the very update that adds the bot to a group — as an administrator too, in one step.
+        .branch(Update::filter_my_chat_member()
+            .inspect_async(handlers::rights::remember_bot_rights)
+            .filter(handlers::setup::added_to_legacy_group_filter)
+            .endpoint(handlers::setup::added_to_legacy_group_handler))
         // The buttons need the same gate as the commands: a keyboard outlives the message it came
         // with, and the restriction may well be younger than both.
         .branch(Update::filter_callback_query().filter_async(checks::is_forbidden_topic_callback).endpoint(checks::handle_forbidden_topic_callback))

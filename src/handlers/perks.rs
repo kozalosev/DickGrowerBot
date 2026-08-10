@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use domain_types::traits::{ApproxInto, SaturatingInto};
+use crate::domain::primitives::Coefficient;
 use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeIntent, ConfigurablePerk, DickId, Perk};
 use crate::{config, repo};
@@ -76,7 +77,7 @@ impl Perk for LoanPayoutPerk {
         let payout_value = if base_increment.is_positive() {
             // the coefficient is a Ratio [0; 1], so the payout never exceeds the base increment
             let payout: i64 = payout_coefficient.scale(base_increment.approx_into()).round().saturating_into();
-            payout.min(debt.value())
+            payout.min(debt.saturating_into())
         } else {
             0
         };
@@ -102,7 +103,7 @@ mod test {
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk};
     use crate::handlers::utils::{ChangeIntent, DickId, Perk};
     use crate::{config, repo};
-    use crate::domain::primitives::{Debt, Length, LengthChange, LengthIncrement, Ratio, SignedLengthChange};
+    use crate::domain::primitives::{Debt, Length, LengthChange, LengthIncrement, PayoutRatio, Ratio, SignedLengthChange};
     use crate::repo::test::{CHAT_ID_KIND, fresh_db, USER_ID};
 
     #[tokio::test]
@@ -129,7 +130,7 @@ mod test {
         let db = fresh_db().await;
         let loans = {
             let cfg = config::AppConfig {
-                loan_payout_ratio: literal!(Ratio = 0.1),
+                loan_payout_ratio: literal!(PayoutRatio = 0.1),
                 ..Default::default()
             };
             repo::Loans::new(db.clone(), &cfg)

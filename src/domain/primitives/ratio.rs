@@ -1,6 +1,6 @@
 use domain_types::traits::SaturatingInto;
 use domain_types_macro::domain_type;
-use crate::domain::primitives::validators::{ratio_range_validator, percentage_range_validator, percentage_range_validator_f64};
+use crate::domain::primitives::validators::{ratio_range_validator, ratio_range_validator_f32, percentage_range_validator, percentage_range_validator_f64};
 
 #[domain_type(
     number,
@@ -11,13 +11,61 @@ use crate::domain::primitives::validators::{ratio_range_validator, percentage_ra
 )]
 pub struct Ratio(f64);
 
-impl Ratio {
-    /// Scales an arbitrary magnitude by this ratio, e.g. a coefficient applied to a length.
-    /// The result is a plain `f64`, not another `Ratio`: unlike this type's `Mul<f64>` (which
-    /// validates the product back into 0.0..=1.0), `magnitude` isn't bounded to that range, so
-    /// the product generally isn't a valid `Ratio` either.
-    pub fn scale(self, magnitude: f64) -> f64 {
-        self.value() * magnitude
+/// The share of a loan paid back out of each growth.
+///
+/// An `f32` because that is what it is everywhere it leaves the process: the `payout_ratio` column
+/// is a `real`, and the confirmation button carries the value through a callback string. Keeping it
+/// at that width means neither boundary converts, and a share of a growth needs nothing like the
+/// seven digits it still has.
+#[domain_type(
+    number,
+    validated(
+        ratio_range_validator_f32,
+        error_message("must be between 0 and 1")
+    )
+)]
+pub struct PayoutRatio(f32);
+
+/// What every coefficient validated into 0.0..=1.0 can do.
+///
+/// The implementors differ in one thing only — the width they are kept at — so that is the only
+/// thing each has to say. Everything below follows from the range, which is why the conversions
+/// can be infallible.
+pub trait Coefficient: Copy {
+    /// The value at the width the arithmetic below is done in. Widening an `f32` is exact.
+    fn as_f64(self) -> f64;
+
+    /// Scales an arbitrary magnitude, e.g. a coefficient applied to a length. The result is a
+    /// plain `f64`, not another coefficient: unlike `Mul<f64>` (which validates the product back
+    /// into 0.0..=1.0), `magnitude` isn't bounded to that range, so the product generally isn't a
+    /// valid coefficient either.
+    fn scale(self, magnitude: f64) -> f64 {
+        self.as_f64() * magnitude
+    }
+
+    /// The source is in 0.0..=1.0, so the product is in 0.0..=100.0, and rounding a value already
+    /// inside a range can't take it out.
+    fn percentage(self) -> Percentage {
+        let percentage: i32 = (self.as_f64() * 100.0).round().saturating_into();
+        Percentage::new(percentage)
+            .expect("a correct ratio must be convertible to percentage")
+    }
+
+    fn float_percentage(self) -> FloatPercentage {
+        FloatPercentage::new(self.as_f64() * 100.0)
+            .expect("a correct ratio must be convertible to a float percentage")
+    }
+}
+
+impl Coefficient for Ratio {
+    fn as_f64(self) -> f64 {
+        self.value()
+    }
+}
+
+impl Coefficient for PayoutRatio {
+    fn as_f64(self) -> f64 {
+        f64::from(self.value())
     }
 }
 
@@ -55,24 +103,26 @@ impl std::fmt::Display for FloatPercentage {
 
 impl From<Ratio> for Percentage {
     fn from(ratio: Ratio) -> Self {
-        // Ratio is validated to 0.0..=1.0, so the product is always within 0.0..=100.0,
-        // and rounding a value already in that range can't leave it either.
-        let percentage: i32 = (ratio.value() * 100.0).round().saturating_into();
-        Percentage::new(percentage)
-            .expect("a correct ratio must be convertible to percentage")
+        ratio.percentage()
     }
 }
 
 impl From<Ratio> for FloatPercentage {
     fn from(ratio: Ratio) -> Self {
-        FloatPercentage::new(ratio.value() * 100.0)
-            .expect("a correct ratio must be convertible to a float percentage")
+        ratio.float_percentage()
+    }
+}
+
+impl From<PayoutRatio> for FloatPercentage {
+    fn from(ratio: PayoutRatio) -> Self {
+        ratio.float_percentage()
     }
 }
 
 #[cfg(test)]
 mod test {
     use crate::literal;
+    use super::Coefficient;
     use super::{FloatPercentage, Percentage, Ratio};
 
     #[test]

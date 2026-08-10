@@ -6,7 +6,7 @@ use crate::config::announcements::*;
 use crate::config::self_destruction::*;
 use crate::config::shrink::DailyShrinkConfig;
 use crate::config::incrementor::IncrementorConfig;
-use crate::domain::primitives::{AttemptsCount, Bet, DaysCount, Limit, Ratio};
+use crate::domain::primitives::{AttemptsCount, Bet, DaysCount, Limit, PayoutRatio, Ratio};
 use crate::domain::primitives::chat::TelegramChatId;
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ pub struct AppConfig {
     pub features: FeatureToggles,
     pub top_limit: Limit,
     pub inactivity_days: DaysCount,
-    pub loan_payout_ratio: Ratio,
+    pub loan_payout_ratio: PayoutRatio,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
     pub pvp_default_bet: Bet,
     pub incrementor: IncrementorConfig,
@@ -38,7 +38,7 @@ impl AppConfig {
     pub fn from_env() -> Self {
         let top_limit = env_value!("TOP_LIMIT": Limit, or = 10);
         let inactivity_days = env_value!("INACTIVITY_DAYS": DaysCount, or = 7);
-        let loan_payout_ratio = env_value!("LOAN_PAYOUT_COEF": Ratio);
+        let loan_payout_ratio = env_value!("LOAN_PAYOUT_COEF": PayoutRatio);
         let dod_selection_mode = get_optional_env_value("DOD_SELECTION_MODE");
         let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
