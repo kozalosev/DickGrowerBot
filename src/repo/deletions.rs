@@ -316,6 +316,7 @@ repository!(ScheduledDeletions,
 mod tests {
     use crate::literal;
     use std::time::Duration;
+    use domain_types::traits::SaturatingInto;
     use chrono::Utc;
     use super::*;
     use crate::repo::test::fresh_db;
@@ -497,8 +498,8 @@ mod tests {
     async fn every_terminal_state_survives_the_round_trip() {
         let db = fresh_db().await;
         let repo = ScheduledDeletions::new(db);
-        let messages: Vec<_> = (0..DeletionState::TERMINAL.len())
-            .map(|i| due(chat_message(i as u32 + 1), MessageKind::Reply))
+        let messages: Vec<_> = (1..=DeletionState::TERMINAL.len())
+            .map(|i| due(chat_message(i.saturating_into()), MessageKind::Reply))
             .collect();
         repo.schedule(&messages).await.expect("couldn't schedule the deletions");
         let claimed = repo.claim_due(literal!(Limit = 10), lease())

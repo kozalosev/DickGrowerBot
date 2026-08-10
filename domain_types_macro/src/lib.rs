@@ -311,6 +311,37 @@ fn generate_signed_sqlx_impls(info: &TypeInfo, signed: &Type) -> TokenStream {
     }
 }
 
+/// The two conversions that lose something, forwarded to the inner type.
+///
+/// Both are bounded by what the inner type itself serves, so each impl covers exactly the targets
+/// that make sense for this wrapper and no branching is needed here: a float-backed type ends up
+/// with `ApproxInto<f32>`, an integer-backed one with `SaturatingInto<i64>`. Which end a value is
+/// clamped to, and how a float is rounded, is decided once in `domain_types::traits`.
+///
+/// The lossless direction is `From<#name> for #inner_type`, generated with the other basics.
+fn generate_lossy_conversion_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    quote! {
+        #[automatically_derived]
+        impl<T> ::domain_types::traits::SaturatingInto<T> for #name
+        where #inner_type: ::domain_types::traits::SaturatingInto<T>
+        {
+            fn saturating_into(self) -> T {
+                ::domain_types::traits::SaturatingInto::saturating_into(self.0)
+            }
+        }
+
+        #[automatically_derived]
+        impl<T> ::domain_types::traits::ApproxInto<T> for #name
+        where #inner_type: ::domain_types::traits::ApproxInto<T>
+        {
+            fn approx_into(self) -> T {
+                ::domain_types::traits::ApproxInto::approx_into(self.0)
+            }
+        }
+    }
+}
+
 fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
     let mut derives = vec![
         quote! { Clone },
@@ -833,8 +864,8 @@ fn generate_domain_float_number_impls(info: &TypeInfo, validated: bool) -> Token
 /// For integer domain numbers annotated with `division_result(SomeFloatDomainType)`:
 /// the `/` operator performs a float division and produces the specified float domain type
 /// (or a `Result` of it, if that type is validated — see the `DivisionResult` trait).
-// TODO: `self.0 as f64` loses precision for 64-bit integers above 2^53;
-//       consider rejecting `division_result` on i64/u64 domain types at macro-expansion time.
+// TODO: an f64 holds integers exactly only up to 2^53, so a 64-bit domain number divides at
+//       reduced precision; consider rejecting `division_result` on i64/u64 at expansion time.
 fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, args, .. } = info;
     let Some(result_type) = &args.division_result else {
@@ -846,7 +877,9 @@ fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
             type Output = <#result_type as ::domain_types::traits::DivisionResult>::Output;
 
             fn div(self, rhs: #inner_type) -> Self::Output {
-                <#result_type as ::domain_types::traits::DivisionResult>::from_division(self.0 as f64 / rhs as f64)
+                let dividend: f64 = ::domain_types::traits::ApproxInto::approx_into(self.0);
+                let divisor: f64 = ::domain_types::traits::ApproxInto::approx_into(rhs);
+                <#result_type as ::domain_types::traits::DivisionResult>::from_division(dividend / divisor)
             }
         }
 
@@ -871,7 +904,7 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
                 type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self::new(value as #inner_type)
+                    Self::new(::domain_types::traits::ApproxInto::approx_into(value))
                 }
             }
         }
@@ -884,7 +917,7 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
                 type Output = Self;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self(value as #inner_type)
+                    Self(::domain_types::traits::ApproxInto::approx_into(value))
                 }
             }
         }
@@ -1073,7 +1106,11 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
         };
     };
 
-    let mut pieces = vec![domain_type_impl, generate_domain_value_impls(info)];
+    let mut pieces = vec![
+        domain_type_impl,
+        generate_domain_value_impls(info),
+        generate_lossy_conversion_impls(info),
+    ];
 
     if kind.validated {
         pieces.push(generate_validated_domain_number_impls(info));

@@ -86,7 +86,7 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
     }
     // Published so that a graph of the batch size can be read against the limit it may reach,
     // instead of against a number written into the dashboard.
-    metrics::SELF_DESTRUCTION_BATCH_LIMIT.set(self_destruction.batch_size.value() as i64);
+    metrics::SELF_DESTRUCTION_BATCH_LIMIT.set(self_destruction.batch_size);
     tokio::spawn(metrics::TASK_SELF_DESTRUCTION.instrument(async move {
         let mut ticker = tokio::time::interval(self_destruction.poll_interval);
         loop {
@@ -129,7 +129,7 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 /// same database the run just used, so a failure here is only logged.
 async fn report_queue(repos: &Repositories) {
     match repos.deletions.count_pending().await {
-        Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending.value() as i64),
+        Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending self-destructions"),
     }
     match repos.deletions.count_finished().await {

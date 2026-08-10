@@ -49,7 +49,7 @@ pub async fn run_pending_deletions(
     let due = repos.deletions.claim_due(config.batch_size, Utc::now() + config.lease).await?;
     // The empty runs are measured too: an idle worker is what tells a queue that keeps up from one
     // that is merely being asked for less than it holds.
-    metrics::SELF_DESTRUCTION_BATCH_SIZE.observe(due.len() as f64);
+    metrics::SELF_DESTRUCTION_BATCH_SIZE.observe(due.len());
     if due.is_empty() {
         return Ok(())
     }

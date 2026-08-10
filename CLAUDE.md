@@ -665,6 +665,42 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   pub shrink_events_days: DaysCount,
   ```
 
+- **A number changing type says which conversion it is.** `as` is denied
+  (`[workspace.lints.clippy]` in the root `Cargo.toml`), because one token means three different
+  things and a reader can't tell them apart without knowing both types. Name it instead:
+
+  | The conversion is | Use | A value that doesn't fit |
+  |---|---|---|
+  | exact | `From` / `Into` | can't happen |
+  | out of range | `SaturatingInto` | stops at the nearer end |
+  | not representable | `ApproxInto` | becomes the nearest that is |
+
+  Both traits live in `domain_types::traits`, are implemented for the integer and float primitives
+  there, and are generated for every numeric domain type by `#[domain_type]`. `SaturatingInto`
+  covers integer to integer (where `as` wraps — this is the one that changes behaviour) and float to
+  integer; `ApproxInto` covers integer to float and float to float. A float truncates toward zero,
+  so a caller who wants rounding calls `.round()` first.
+
+  ```rust
+  // ❌ three different conversions, all spelled the same
+  let pending = count.value() as i64;
+  let ratio = config.loan_payout_ratio.value() as f32;
+  let debt = value.min(i64::MAX as u64) as i64;
+
+  // ✅ each one named
+  let pending: i64 = count.saturating_into();
+  let ratio: f32 = config.loan_payout_ratio.approx_into();
+  let debt: i64 = value.saturating_into();
+  ```
+
+  **Where the sink is ours, the conversion belongs to it, not to the caller.** `Gauge::set` and
+  `Histogram::observe` (`src/metrics.rs`) take `impl SaturatingInto<i64>` / `impl ApproxInto<f64>`,
+  so a caller hands over the domain value itself. The repo layer has done this all along: a query
+  binds `uid as UserId` and sqlx's `Encode` does the converting.
+
+  A cast that is genuinely right keeps an `#[allow]` carrying the reason, on the narrowest scope
+  that works — never a whole function, or it will also cover the next cast written on that line.
+
 - **ALWAYS** break a function signature onto one parameter per line when the single-line signature
   reaches **120+ characters**. Put the opening `(` at the end of the `fn` line, each parameter on
   its own line with a trailing comma, and the closing `)` plus return type on their own line

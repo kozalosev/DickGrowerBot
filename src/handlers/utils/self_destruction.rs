@@ -1,5 +1,6 @@
 use std::time::Duration;
 use chrono::Utc;
+use domain_types::traits::SaturatingInto;
 use teloxide::Bot;
 use teloxide::prelude::Requester;
 use teloxide::types::{ChatId, Message, MessageId, UserId as TeloxideUserId};
@@ -15,7 +16,8 @@ fn reading_time(char_count: usize, cpm: u64) -> Duration {
     if cpm == 0 {
         return Duration::ZERO
     }
-    Duration::from_secs(char_count as u64 * 60 / cpm)
+    let char_count: u64 = char_count.saturating_into();
+    Duration::from_secs(char_count * 60 / cpm)
 }
 
 /// Writes down the messages that are to disappear on their own (see [`MessageGroup`]) and hands

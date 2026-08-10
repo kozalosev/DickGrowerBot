@@ -17,6 +17,7 @@ use once_cell::sync::Lazy;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::OnceCell;
 use reqwest::Url;
+use domain_types::traits::SaturatingInto;
 use sqlx::{Pool, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::AssertSqlSafe;
@@ -194,7 +195,7 @@ async fn start_container() -> (ContainerAsync<GenericImage>, u16) {
 /// A user id a test computes instead of writing down, like `UID + 1` or an id taken from a loop.
 /// Such a value is not known while the code is compiled, so `literal!` does not fit.
 pub fn user_id(value: i64) -> UserId {
-    UserId::new(value as u64)
+    UserId::new(value.saturating_into())
 }
 
 #[inline]

@@ -1,11 +1,28 @@
 [workspace]
 members = ["domain_types", "domain_types_macro"]
 
+# `as` is one token meaning three different conversions, and a reader can't tell which without
+# knowing both types. Denied here, so each one has to be named instead: `From` when it is exact,
+# and `SaturatingInto` / `ApproxInto` (domain_types::traits) when something is lost. The last lint
+# is what makes the exact case say `From` rather than pick one of the other two.
+#
+# Where a cast really is the answer, `#[allow]` with the reason is fine — on the narrowest scope
+# that works, never a whole function, or it will cover the next cast written on that line too.
+[workspace.lints.clippy]
+cast_possible_wrap = "deny"        # u64 -> i64, wraps
+cast_possible_truncation = "deny"  # u64 -> u32, f64 -> f32
+cast_sign_loss = "deny"            # i64 -> u64
+cast_precision_loss = "deny"       # u64 -> f64, digits past 2^53
+cast_lossless = "deny"             # u16 -> i64, exact: use From
+
 [package]
 name = "dick-grower-bot"
 version = "0.1.0"
 edition = "2024"
 license-file = "LICENSE"
+
+[lints]
+workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

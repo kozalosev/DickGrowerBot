@@ -1,3 +1,4 @@
+use domain_types::traits::SaturatingInto;
 use domain_types_macro::domain_type;
 use crate::{error, number};
 
@@ -9,13 +10,13 @@ error!(InvalidPage);
 
 impl From<u16> for Offset {
     fn from(value: u16) -> Self {
-        Self(value as i32)
+        Self(i32::from(value))
     }
 }
 
 impl From<u8> for Limit {
     fn from(value: u8) -> Self {
-        Self(value as u16)
+        Self(u16::from(value))
     }
 }
 
@@ -23,8 +24,9 @@ impl Offset {
     /// Where the page starts. Two `u16` can multiply out to more than an `i32` holds, so the
     /// product is taken in `i64` and cut down to the offset a query can carry.
     pub fn calculate(page: Page, limit: Limit) -> Offset {
-        let value = (page.value() as i64) * (limit.value() as i64);
-        Self(value.min(i32::MAX as i64) as i32)
+        let page: i64 = page.saturating_into();
+        let limit: i64 = limit.saturating_into();
+        Self((page * limit).saturating_into())
     }
 }
 

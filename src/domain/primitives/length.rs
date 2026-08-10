@@ -1,5 +1,6 @@
 use std::ops::Add;
 use domain_types::errors::{ArithmeticOperation, DomainArithmeticOverflowError as OverflowError};
+use domain_types::traits::SaturatingInto;
 use domain_types_macro::domain_type;
 use crate::number;
 
@@ -39,7 +40,7 @@ impl LengthChange {
     pub fn value(self) -> i64 {
         match self {
             LengthChange::Signed(value) => value.value(),
-            LengthChange::Increment(value) => value.value() as i64
+            LengthChange::Increment(value) => value.saturating_into()
         }
     }
 

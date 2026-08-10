@@ -13,6 +13,7 @@ use generated::user_service_client::UserServiceClient as GrpcClient;
 use generated::update_user_request::Target;
 use generated::{GetUserRequest, GetUsersRequest, UpdateUserRequest, User};
 use crate::config::IntegrationsConfig;
+use domain_types::traits::SaturatingInto;
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::handlers::utils::try_resolve_chat_id;
@@ -147,7 +148,7 @@ impl UserServiceClient for UserServiceClientGrpc {
 
         metrics::USER_SERVICE.request_sent();
         let resp = self.inner.clone().get(GetUserRequest {
-            id: uid.0 as i64,
+            id: uid.0.saturating_into(),
             by_external_id: true,
         }).await;
         match resp {
@@ -172,7 +173,7 @@ impl UserServiceClient for UserServiceClientGrpc {
         // the id count, so serving part of the batch from the cache would only shorten the request,
         // not avoid it — every member would have to be cached to skip the wire at all.
         metrics::USER_SERVICE.request_sent();
-        let ids = uids.iter().map(|uid| uid.0 as i64).collect();
+        let ids: Vec<i64> = uids.iter().map(|uid| uid.0.saturating_into()).collect();
         let resp = self.inner.clone().get_many(GetUsersRequest {
             ids,
             by_external_id: true,
@@ -183,7 +184,7 @@ impl UserServiceClient for UserServiceClientGrpc {
 
         let result = uids.iter()
             .filter_map(|&uid| {
-                let code = resp.users.get(&(uid.0 as i64))?
+                let code = resp.users.get(&uid.0.saturating_into())?
                     .options.as_ref()?
                     .language_code.clone()?;
                 Some((uid, LanguageCode::new(code)))

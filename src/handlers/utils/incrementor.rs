@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
+use domain_types::traits::SaturatingInto;
 use std::sync::Arc;
 use async_trait::async_trait;
 use derive_more::Display;
@@ -197,7 +198,8 @@ fn get_base_increment<T>(range: RangeInclusive<T>, sign_ratio: Ratio) -> T
 where
     T: PrimInt + PartialOrd + SampleUniform + From<i8>
 {
-    let sign_ratio_percent = match (sign_ratio.value() * 100.0).round() as u32 {
+    let percent: u32 = (sign_ratio.value() * 100.0).round().saturating_into();
+    let sign_ratio_percent = match percent {
         ..=0 => 0,
         100.. => 100,
         x => x

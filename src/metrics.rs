@@ -5,6 +5,7 @@ use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
 use strum::IntoEnumIterator;
 use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
+use domain_types::traits::{ApproxInto, SaturatingInto};
 use crate::config::MessageGroup;
 use crate::domain::primitives::{Count, SupportedLanguage};
 use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
@@ -226,10 +227,10 @@ impl prometheus::core::Collector for DbPoolCollector {
     fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
         let size = prometheus::IntGauge::new("db_pool_size", "current number of connections in the sqlx pool (in use + idle)")
             .expect("invalid db_pool_size gauge");
-        size.set(self.pool.size() as i64);
+        size.set(i64::from(self.pool.size()));
         let idle = prometheus::IntGauge::new("db_pool_idle_connections", "current number of idle connections in the sqlx pool")
             .expect("invalid db_pool_idle_connections gauge");
-        idle.set(self.pool.num_idle() as i64);
+        idle.set(self.pool.num_idle().saturating_into());
 
         let mut out = size.collect();
         out.extend(idle.collect());
@@ -312,8 +313,11 @@ impl Gauge {
         Self(inner)
     }
 
-    pub fn set(&self, value: i64) {
-        self.0.set(value)
+    /// Takes any number that can reach an `i64`, so that the conversion Prometheus needs happens
+    /// here rather than at every caller. A gauge is a `float64` on the wire whatever is put in it,
+    /// and `IntGauge` holds an `i64` only to keep the arithmetic exact in the process.
+    pub fn set(&self, value: impl SaturatingInto<i64>) {
+        self.0.set(value.saturating_into())
     }
 }
 
@@ -343,8 +347,10 @@ impl Histogram {
         Self(inner)
     }
 
-    pub fn observe(&self, value: f64) {
-        self.0.observe(value)
+    /// Takes any number that can reach an `f64`, so that a caller counting things doesn't convert
+    /// them itself. A histogram's buckets are floats, whatever is measured into them.
+    pub fn observe(&self, value: impl ApproxInto<f64>) {
+        self.0.observe(value.approx_into())
     }
 }
 
@@ -673,7 +679,7 @@ impl SelfDestructionFinishedGauges {
         for state in DeletionState::TERMINAL {
             let count = counts.iter()
                 .find(|(counted, _)| *counted == state)
-                .map_or(0, |(_, count)| count.value() as i64);
+                .map_or(Count::default(), |(_, count)| *count);
             self.0.gauge(&[&state.to_string()]).set(count);
         }
     }

@@ -1,3 +1,4 @@
+use domain_types::traits::SaturatingInto;
 use domain_types_macro::domain_type;
 use crate::domain::primitives::validators::{ratio_range_validator, percentage_range_validator, percentage_range_validator_f64};
 
@@ -56,7 +57,8 @@ impl From<Ratio> for Percentage {
     fn from(ratio: Ratio) -> Self {
         // Ratio is validated to 0.0..=1.0, so the product is always within 0.0..=100.0,
         // and rounding a value already in that range can't leave it either.
-        Percentage::new((ratio.value() * 100.0).round() as i32)
+        let percentage: i32 = (ratio.value() * 100.0).round().saturating_into();
+        Percentage::new(percentage)
             .expect("a correct ratio must be convertible to percentage")
     }
 }

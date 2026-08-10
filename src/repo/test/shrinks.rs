@@ -346,7 +346,7 @@ async fn test_get_shrinks_for_date_pages() {
     // Three shrinks logged on the same day (days_ago 1), with distinct lost_length so ordering is
     // unambiguous (get_shrinks_for_date orders by lost_length DESC).
     for (n, lost) in [(1i32, 30i64), (2, 20), (3, 10)] {
-        let uid = UID + n as i64;
+        let uid = UID + i64::from(n);
         users.create_or_update(user_id(uid), &format!("victim-{n}"))
             .await.expect("couldn't create a victim");
         seed_aged_dick(&db, chat_id, uid, 100, 10).await;
@@ -406,7 +406,7 @@ async fn test_get_latest_and_adjacent_shrink_dates() {
     // Non-consecutive days: 1, 3, and 8 days ago. Two shrinks on the same day (1 day ago) to also
     // confirm MAX/MIN collapse duplicates rather than erroring.
     for (n, days_ago) in [(1i32, 1i32), (2, 1), (3, 3), (4, 8)] {
-        let uid = UID + n as i64;
+        let uid = UID + i64::from(n);
         users.create_or_update(user_id(uid), &format!("victim-{n}"))
             .await.expect("couldn't create a victim");
         seed_old_shrink(&db, chat_id, uid, 10, days_ago).await;

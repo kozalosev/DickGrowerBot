@@ -1,6 +1,7 @@
 use autometrics::autometrics;
 use anyhow::anyhow;
 use derive_more::Display;
+use domain_types::traits::{ApproxInto, SaturatingInto};
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
@@ -87,7 +88,7 @@ pub(crate) async fn loan_impl(
             uid: from.id,
             action: LoanCallbackAction::Confirmed {
                 value: debt,
-                payout_ratio: config.loan_payout_ratio.value() as f32
+                payout_ratio: config.loan_payout_ratio.approx_into()
             }
         }
     );
@@ -131,14 +132,17 @@ pub async fn loan_callback_handler(
         EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
             self_destruction.cancel_inline(inline_message_id).await,
     };
+    // The callback data carries the ratio the offer was made under, so it is compared against the
+    // configured one in the shape it was serialized in.
+    let configured_payout_ratio: f32 = config.loan_payout_ratio.approx_into();
     match data.action {
         LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {
             answer.show_alert.replace(true);
             answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
         }
-        LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == config.loan_payout_ratio.value() as f32 => {
+        LoanCallbackAction::Confirmed { value, payout_ratio } if payout_ratio == configured_payout_ratio => {
             // the value comes from our own callback data, where it was serialized from a non-negative i64
-            let debt = Debt::new(value.min(i64::MAX as u64) as i64);
+            let debt = Debt::new(value.saturating_into());
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.into(), debt).await?;

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::ops::Deref;
 use derive_where::derive_where;
+use domain_types::traits::{ApproxInto, SaturatingInto};
 
 /// How many rows of `T` there are — the type says what was counted, which a bare number never could.
 ///
@@ -32,6 +33,10 @@ impl <T> Count<T> {
         Self::new(value)
     }
 
+    /// The number itself, under the name every other domain number answers to. The conversions
+    /// below cover the places a count crosses into a foreign API, so this is here for the code that
+    /// wants the plain number.
+    #[allow(dead_code)]
     pub const fn value(&self) -> u64 {
         self.value
     }
@@ -108,6 +113,25 @@ impl <T> From<u64> for Count<T> {
     }
 }
 
+/// The clamp is out of reach for a count that came from a query: `count(*)` arrives as a `bigint`
+/// and passes `u64::try_from` on the way in, so it was an `i64` a moment ago and fits back into
+/// one. A count built in code has no such history, which is why this saturates rather than panics.
+impl <T, Target> SaturatingInto<Target> for Count<T>
+where u64: SaturatingInto<Target>
+{
+    fn saturating_into(self) -> Target {
+        self.value.saturating_into()
+    }
+}
+
+impl <T, Target> ApproxInto<Target> for Count<T>
+where u64: ApproxInto<Target>
+{
+    fn approx_into(self) -> Target {
+        self.value.approx_into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +149,15 @@ mod tests {
     #[test]
     fn the_default_count_is_zero() {
         assert_eq!(Count::<Anything>::default(), 0);
+    }
+
+    /// What the gauges need: a count goes back to the signed number the database gave it.
+    #[test]
+    fn a_count_converts_to_the_number_a_gauge_takes() {
+        let value: i64 = Count::<Anything>::new(3).saturating_into();
+        assert_eq!(value, 3);
+
+        let clamped: i64 = Count::<Anything>::new(u64::MAX).saturating_into();
+        assert_eq!(clamped, i64::MAX);
     }
 }

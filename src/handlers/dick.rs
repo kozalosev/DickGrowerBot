@@ -2,6 +2,7 @@ use autometrics::autometrics;
 
 use anyhow::anyhow;
 use chrono::{Datelike, Utc};
+use domain_types::traits::SaturatingInto;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -154,10 +155,10 @@ pub(crate) async fn top_impl(
     let offset = Offset::calculate(page, config.top_limit);
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
-    let has_more_pages = dicks.len() > config.top_limit.value() as usize;
+    let has_more_pages = dicks.len() > config.top_limit.saturating_into();
     let mut any_inactive = false;
     let lines = dicks.into_iter()
-        .take(config.top_limit.value() as usize)
+        .take(config.top_limit.saturating_into())
         .enumerate()
         .map(|(i, d)| {
             let escaped_name = Username::new(d.owner_name).escaped();
@@ -167,9 +168,10 @@ pub(crate) async fn top_impl(
                 escaped_name
             };
             let now = Utc::now();
-            let inactive = (now - d.grown_at).num_days() > config.inactivity_days.value() as i64;
+            let inactive = (now - d.grown_at).num_days() > config.inactivity_days.saturating_into();
             let can_grow = now.num_days_from_ce() > d.grown_at.num_days_from_ce();
-            let pos = d.position.map(|p| p.value() as i64).unwrap_or((i+1) as i64);
+            let pos: i64 = d.position.map(|p| p.saturating_into())
+                .unwrap_or_else(|| (i + 1).saturating_into());
             let mut line = t!("commands.top.line", locale = &lang_code,
                 n = pos, name = name, length = d.length).to_string();
             if inactive {

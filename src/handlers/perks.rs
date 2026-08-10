@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use domain_types::traits::{ApproxInto, SaturatingInto};
 use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeIntent, ConfigurablePerk, DickId, Perk};
 use crate::{config, repo};
@@ -31,8 +32,8 @@ impl Perk for HelpPussiesPerk {
             return AdditionalChange::zero()
         }
 
-        let current_deepness = change_intent.current_length.abs() as f64;
-        let change = self.coefficient.scale(current_deepness).round() as i64;
+        let current_deepness: f64 = change_intent.current_length.abs().approx_into();
+        let change: i64 = self.coefficient.scale(current_deepness).round().saturating_into();
         AdditionalChange(LengthChange::signed(change))
     }
 
@@ -74,7 +75,7 @@ impl Perk for LoanPayoutPerk {
         let base_increment = change_intent.base_increment.value();
         let payout_value = if base_increment.is_positive() {
             // the coefficient is a Ratio [0; 1], so the payout never exceeds the base increment
-            let payout = payout_coefficient.scale(base_increment as f64).round() as i64;
+            let payout: i64 = payout_coefficient.scale(base_increment.approx_into()).round().saturating_into();
             payout.min(debt.value())
         } else {
             0

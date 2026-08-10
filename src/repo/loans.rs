@@ -1,5 +1,6 @@
 use autometrics::autometrics;
 use anyhow::Context;
+use domain_types::traits::ApproxInto;
 use sqlx::{Postgres, Transaction};
 
 use crate::config;
@@ -142,8 +143,10 @@ async fn create_loan(
     value: Debt,
     payout_ratio: Ratio,
 ) -> anyhow::Result<()> {
+    // The column is a `real`, so the ratio gives up the digits an f32 has no room for.
+    let payout_ratio: f32 = payout_ratio.approx_into();
     sqlx::query!("INSERT INTO Loans (chat_id, uid, debt, payout_ratio) VALUES ($1, $2, $3, $4)",
-                chat_internal_id as InternalChatId, uid as UserId, value as Debt, payout_ratio.value() as f32)
+                chat_internal_id as InternalChatId, uid as UserId, value as Debt, payout_ratio)
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)
@@ -158,8 +161,9 @@ async fn refinance_loan(
     value: Debt,
     payout_ratio: Ratio,
 ) -> anyhow::Result<()> {
+    let payout_ratio: f32 = payout_ratio.approx_into();
     sqlx::query!("UPDATE Loans l SET debt = l.debt + $2, payout_ratio = $3 WHERE id = $1",
-                id as LoanId, value as Debt, payout_ratio.value() as f32)
+                id as LoanId, value as Debt, payout_ratio)
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)

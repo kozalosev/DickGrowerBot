@@ -289,6 +289,57 @@ mod float_types {
     }
 }
 
+/// The two conversions that lose something. Each generated impl only forwards, so what is proven
+/// here is that it reaches the primitive impl — the clamping itself is tested in `domain_types`.
+mod lossy_conversions {
+    use domain_types::traits::{ApproxInto, SaturatingInto};
+    use super::*;
+
+    #[test]
+    fn a_value_the_target_can_hold_comes_through_untouched() {
+        let value: i64 = HugeCount::new(1234).saturating_into();
+        assert_eq!(value, 1234);
+    }
+
+    #[test]
+    fn a_value_too_large_for_the_target_stops_at_its_top() {
+        let value: i64 = HugeCount::new(u64::MAX).saturating_into();
+        assert_eq!(value, i64::MAX);
+    }
+
+    #[test]
+    fn a_negative_value_stops_at_the_bottom_of_an_unsigned_target() {
+        let value: u32 = Id::new(-5).saturating_into();
+        assert_eq!(value, 0);
+    }
+
+    /// An id-like type is not a `number` and has no arithmetic, but it still crosses into foreign
+    /// APIs, so it converts like the rest.
+    #[test]
+    fn an_id_like_type_converts_too() {
+        let value: i32 = Id::new(7).saturating_into();
+        assert_eq!(value, 7);
+    }
+
+    #[test]
+    fn an_integer_type_reaches_a_float() {
+        let value: f64 = Count::new(3).approx_into();
+        assert_eq!(value, 3.0);
+    }
+
+    #[test]
+    fn a_float_type_narrows_to_the_smaller_float() {
+        let value: f32 = Speed::new(2.5).approx_into();
+        assert_eq!(value, 2.5);
+    }
+
+    #[test]
+    fn a_float_type_reaches_an_integer_by_truncating() {
+        let value: i64 = Speed::new(7.9).saturating_into();
+        assert_eq!(value, 7);
+    }
+}
+
 mod division_result {
     use super::*;
 

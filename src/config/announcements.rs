@@ -138,7 +138,7 @@ mod tests {
 
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u128;
+        let seq = u128::from(COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         nanos ^ (seq << 100)
     }
 

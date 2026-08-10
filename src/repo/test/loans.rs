@@ -1,3 +1,4 @@
+use domain_types::traits::{ApproxInto, SaturatingInto};
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
 use crate::domain::primitives::{Debt, LoanPayout, Ratio};
@@ -47,14 +48,16 @@ async fn test_all() {
         .expect("the loan must be present");
     assert_eq!(loan.debt, debt);
     // the ratio is stored as REAL (f32) in the database, so compare at f32 precision
-    assert_eq!(loan.payout_ratio.value() as f32, payout_ratio.value() as f32);
+    let stored_ratio: f32 = loan.payout_ratio.approx_into();
+    let expected_ratio: f32 = payout_ratio.approx_into();
+    assert_eq!(stored_ratio, expected_ratio);
 
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let length_after_borrowing = dicks.fetch_length(user_id, &chat_id)
         .await.expect("couldn't fetch a length after borrowing");
     assert_eq!(length_after_borrowing, value.value());
 
-    let half_payment = LoanPayout::new(value.value() as u32);
+    let half_payment = LoanPayout::new(value.saturating_into());
     loans.pay(user_id, &chat_id, half_payment)
         .await.expect("couldn't pay the loan");
 

@@ -1,4 +1,5 @@
 use chrono::Utc;
+use domain_types::traits::SaturatingInto;
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode, UserId};
 use crate::repo;
@@ -69,7 +70,8 @@ async fn check_promo_code_activations(db: &Pool<Postgres>) {
         .fetch_one(db)
         .await
         .expect("couldn't fetch the promo code activation");
-    assert_eq!(row.uid, USER_ID.value() as i64);
+    let uid: i64 = USER_ID.saturating_into();
+    assert_eq!(row.uid, uid);
     assert_eq!(row.code, PROMO_CODE);
     assert_eq!(row.affected_chats, 1);
     assert_eq!(row.activated_at.date_naive(), Utc::now().date_naive());
