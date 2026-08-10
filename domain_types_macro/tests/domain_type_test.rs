@@ -7,15 +7,8 @@
 //! since-removed `not_database_type` flag.
 
 use std::str::FromStr;
+use domain_types::literal;
 use domain_types_macro::domain_type;
-
-/// What `crate::literal!` is in the bot: the const block is what forces `check_literal` to run
-/// while the code is compiled, and `from_literal` then wraps what it approved.
-macro_rules! literal {
-    ($type:ty = $value:expr) => {
-        <$type>::from_literal(const { <$type>::check_literal($value) })
-    };
-}
 
 const fn ge_zero(value: &i32) -> bool {
     *value >= 0
@@ -71,7 +64,6 @@ struct Meters(i64);
 
 #[domain_type]
 struct Login(String);
-
 
 // `no_auto_display` types must provide Display manually (DomainType requires it).
 #[domain_type(features(no_auto_display))]
@@ -330,16 +322,25 @@ mod lossy_conversions {
         assert_eq!(value, 7);
     }
 
+    /// An `f64` holds every `i32`, so this one is exact and `ApproxInto` is not implemented for
+    /// it — the widening says `From`, like any conversion that loses nothing.
     #[test]
-    fn an_integer_type_reaches_a_float() {
-        let value: f64 = Count::new(3).approx_into();
-        assert_eq!(value, 3.0);
+    fn an_integer_a_float_holds_exactly_widens_with_from() {
+        assert_eq!(f64::from(Count::new(3).value()), 3.0);
     }
 
+    /// The narrowing that does lose something: `f32` has 24 bits of mantissa against `f64`'s 53.
     #[test]
     fn a_float_type_narrows_to_the_smaller_float() {
-        let value: f32 = Speed::new(2.5).approx_into();
-        assert_eq!(value, 2.5);
+        let exact: f32 = Speed::new(2.5).approx_into();
+        assert_eq!(exact, 2.5, "a value both can hold comes through unchanged");
+
+        let rounded: f32 = Speed::new(0.1).approx_into();
+        assert_ne!(f64::from(rounded), 0.1, "0.1 is not the same number in the two widths");
+        assert_eq!(rounded, 0.1_f32);
+
+        let too_large: f32 = Speed::new(f64::MAX).approx_into();
+        assert!(too_large.is_infinite());
     }
 
     #[test]

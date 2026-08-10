@@ -140,6 +140,7 @@ commands:
         plural: "Your dick has shrunk by <b>%{growth}</b> cm in <b>%{affected_chats}</b> chats!"
     errors:
       no_activations_left: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
+      invalid_format: "That doesn't look like a promo code 🤔 They are 4 to 16 characters long: letters, digits, hyphens and underscores."
       already_activated: "It seems you already used this promocode earlier 🤨"
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
     inline:

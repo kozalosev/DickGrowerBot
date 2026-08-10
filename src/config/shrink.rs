@@ -1,5 +1,5 @@
 use crate::domain::primitives::{DaysCount, Ratio};
-use crate::literal;
+use domain_types::literal;
 
 /// Tuning for the daily job that shrinks dicks neglected for a while (issue #15).
 #[derive(Clone, Default)]

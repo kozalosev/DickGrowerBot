@@ -1,5 +1,5 @@
 use crate::domain::primitives::{BattlesCount, Length, Percentage, WinStreak};
-use crate::literal;
+use domain_types::literal;
 
 pub struct UserStats {
     pub battles_total: BattlesCount,

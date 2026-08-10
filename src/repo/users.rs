@@ -4,7 +4,7 @@ use crate::domain::objects::{BannedUser, User};
 use crate::domain::primitives::{DaysCount, Ratio, UserId, Username};
 use crate::repo::ChatIdKind;
 use crate::repository;
-use crate::literal;
+use domain_types::literal;
 
 repository!(Users,
     #[autometrics]

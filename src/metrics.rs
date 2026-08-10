@@ -5,7 +5,7 @@ use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
 use strum::IntoEnumIterator;
 use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
-use domain_types::traits::{ApproxInto, SaturatingInto};
+use domain_types::traits::SaturatingInto;
 use crate::config::MessageGroup;
 use crate::domain::primitives::{Count, SupportedLanguage};
 use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
@@ -347,10 +347,8 @@ impl Histogram {
         Self(inner)
     }
 
-    /// Takes any number that can reach an `f64`, so that a caller counting things doesn't convert
-    /// them itself. A histogram's buckets are floats, whatever is measured into them.
-    pub fn observe(&self, value: impl ApproxInto<f64>) {
-        self.0.observe(value.approx_into())
+    pub fn observe(&self, value: f64) {
+        self.0.observe(value)
     }
 }
 

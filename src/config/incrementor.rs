@@ -1,7 +1,7 @@
 use std::ops::RangeInclusive;
 use crate::config::env::{env_value, get_env_value_or_default};
 use crate::domain::primitives::{DaysCount, Ratio};
-use crate::literal;
+use domain_types::literal;
 
 /// Tuning of the length changes produced by the incrementor and its perks.
 #[derive(Clone)]

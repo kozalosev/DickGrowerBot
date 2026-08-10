@@ -13,7 +13,7 @@ use crate::repo;
 use crate::config::IncrementorConfig;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::{DaysCount, Length, LengthChange, Ratio, SignedLengthChange, UserId};
-use crate::literal;
+use domain_types::literal;
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -223,7 +223,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::literal;
+    use domain_types::literal;
     use crate::domain::primitives::Ratio;
     use super::get_base_increment;
 
@@ -251,7 +251,7 @@ mod test {
 
 #[cfg(test)]
 mod test_incrementor {
-    use crate::literal;
+    use domain_types::literal;
     use std::iter::zip;
 
     use async_trait::async_trait;

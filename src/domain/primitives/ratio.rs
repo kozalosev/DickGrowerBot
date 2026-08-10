@@ -121,7 +121,7 @@ impl From<PayoutRatio> for FloatPercentage {
 
 #[cfg(test)]
 mod test {
-    use crate::literal;
+    use domain_types::literal;
     use super::Coefficient;
     use super::{FloatPercentage, Percentage, Ratio};
 

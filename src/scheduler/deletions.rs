@@ -10,6 +10,7 @@ use teloxide::types::{ChatId, MessageId};
 use teloxide::types::ParseMode::Html;
 use crate::config::SelfDestructionConfig;
 use crate::config::MessageGroup;
+use domain_types::traits::ApproxInto;
 use crate::cache::Cache;
 use crate::handlers::rights;
 use crate::domain::primitives::{AttemptsCount, ScheduledDeletionId};
@@ -50,7 +51,7 @@ pub async fn run_pending_deletions(
     let due = repos.deletions.claim_due(config.batch_size, Utc::now() + config.lease).await?;
     // The empty runs are measured too: an idle worker is what tells a queue that keeps up from one
     // that is merely being asked for less than it holds.
-    metrics::SELF_DESTRUCTION_BATCH_SIZE.observe(due.len());
+    metrics::SELF_DESTRUCTION_BATCH_SIZE.observe(due.len().approx_into());
     if due.is_empty() {
         return Ok(())
     }

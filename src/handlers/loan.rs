@@ -13,7 +13,7 @@ use crate::{check_invoked_by_owner_and_get_answer_params, metrics, reply_html_ep
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::objects::Loan;
 use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, PayoutRatio, UserId as DomainUserId};
-use crate::literal;
+use domain_types::literal;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::handlers::{CallbackButton, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
 use crate::handlers::utils::try_resolve_chat_id;
@@ -255,7 +255,7 @@ impl TryFrom<String> for LoanCallbackData {
 #[cfg(test)]
 mod test {
     use teloxide::types::UserId;
-    use crate::literal;
+    use domain_types::literal;
     use crate::domain::primitives::{Debt, PayoutRatio};
     use crate::handlers::loan::{LoanCallbackAction, LoanCallbackData};
     use crate::handlers::utils::callbacks::{build_callback_query, CallbackDataWithPrefix};

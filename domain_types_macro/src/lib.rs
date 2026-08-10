@@ -182,6 +182,23 @@ fn signed_counterpart(ty: &Type) -> Option<Type> {
     syn::parse_str(signed).ok()
 }
 
+/// The name of the primitive, for the two decisions below that depend on which one it is.
+fn primitive_name(ty: &Type) -> Option<String> {
+    if let Type::Group(group) = ty {
+        return primitive_name(&group.elem);
+    }
+    let Type::Path(type_path) = ty else { return None };
+    Some(type_path.path.segments.last()?.ident.to_string())
+}
+
+/// Whether every value of this type is exactly representable in an `f64`. An `f64` holds every
+/// 32-bit integer and every `f32`; it does not hold every `i64` or `u64`, whose values run past its
+/// 53 bits of mantissa. The exact ones widen with `From`, the rest have to name what they lose.
+fn exact_in_f64(ty: &Type) -> bool {
+    primitive_name(ty).is_some_and(|name|
+        matches!(name.as_str(), "i8" | "i16" | "i32" | "u8" | "u16" | "u32" | "f32"))
+}
+
 #[proc_macro_attribute]
 pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let args = parse_macro_input!(args as DomainTypeAttr);
@@ -885,14 +902,19 @@ fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
     let Some(result_type) = &args.division_result else {
         return TokenStream::new();
     };
+    let widen = if exact_in_f64(inner_type) {
+        quote! { f64::from }
+    } else {
+        quote! { ::domain_types::traits::ApproxInto::approx_into }
+    };
     quote! {
         #[automatically_derived]
         impl std::ops::Div<#inner_type> for #name {
             type Output = <#result_type as ::domain_types::traits::DivisionResult>::Output;
 
             fn div(self, rhs: #inner_type) -> Self::Output {
-                let dividend: f64 = ::domain_types::traits::ApproxInto::approx_into(self.0);
-                let divisor: f64 = ::domain_types::traits::ApproxInto::approx_into(rhs);
+                let dividend: f64 = #widen(self.0);
+                let divisor: f64 = #widen(rhs);
                 <#result_type as ::domain_types::traits::DivisionResult>::from_division(dividend / divisor)
             }
         }
@@ -911,6 +933,12 @@ fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
 /// Makes a float domain type usable as the target of `division_result(...)` on integer types.
 fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
+    // An `f64` result needs no conversion at all; only a narrower float loses anything.
+    let narrow = if exact_in_f64(inner_type) {
+        quote! { ::domain_types::traits::ApproxInto::approx_into(value) }
+    } else {
+        quote! { value }
+    };
     if validated {
         quote! {
             #[automatically_derived]
@@ -918,7 +946,7 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
                 type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self::new(::domain_types::traits::ApproxInto::approx_into(value))
+                    Self::new(#narrow)
                 }
             }
         }
@@ -931,7 +959,7 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
                 type Output = Self;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self(::domain_types::traits::ApproxInto::approx_into(value))
+                    Self(#narrow)
                 }
             }
         }

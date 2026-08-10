@@ -1,16 +1,11 @@
-use domain_types::traits::{ApproxInto, SaturatingInto};
+use domain_types::traits::SaturatingInto;
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
 use crate::domain::primitives::{Debt, LoanPayout, PayoutRatio};
 use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
 use crate::repo::test::{user_id, CHAT_ID, NAME, fresh_db, UID, USER_ID, CHAT_ID_KIND};
-use crate::literal;
-
-/// A debt is a positive amount owed; the length it was borrowed against is its negation.
-fn length_of(debt: Debt) -> i64 {
-    debt.saturating_into()
-}
+use domain_types::literal;
 
 #[tokio::test]
 async fn test_all() {
@@ -52,10 +47,7 @@ async fn test_all() {
         .await.expect("couldn't fetch active loans again")
         .expect("the loan must be present");
     assert_eq!(loan.debt, debt);
-    // the ratio is stored as REAL (f32) in the database, so compare at f32 precision
-    let stored_ratio: f32 = loan.payout_ratio.approx_into();
-    let expected_ratio: f32 = payout_ratio.approx_into();
-    assert_eq!(stored_ratio, expected_ratio);
+    assert_eq!(loan.payout_ratio, payout_ratio);
 
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let length_after_borrowing = dicks.fetch_length(user_id, &chat_id)
@@ -125,4 +117,9 @@ async fn set_length(db: &Pool<Postgres>, uid: i64, chat_id: i64, length: i64) {
         .execute(db)
         .await
         .expect("couldn't set the dick length directly");
+}
+
+/// A debt is a positive amount owed; the length it was borrowed against is its negation.
+fn length_of(debt: Debt) -> i64 {
+    debt.saturating_into()
 }

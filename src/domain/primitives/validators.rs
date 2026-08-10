@@ -25,8 +25,11 @@ pub const fn promo_code_validator(code: &str) -> bool {
     let mut i = 0;
     let mut length = 0;
     while i < bytes.len() {
-        let width = promo_code_char_width(bytes, i);
-        if width == 0 {
+        let (c, width) = match char_at(bytes, i) {
+            Some(next) => next,
+            None => return false,
+        };
+        if !is_promo_code_char(c) {
             return false
         }
         i += width;
@@ -35,24 +38,29 @@ pub const fn promo_code_validator(code: &str) -> bool {
     length >= PROMO_CODE_MIN_LENGTH && length <= PROMO_CODE_MAX_LENGTH
 }
 
-/// How many bytes the character at `i` takes, or zero when it isn't one the alphabet allows. Every
-/// non-ASCII letter here is two bytes in UTF-8, so the pairs are matched directly instead of
-/// decoding a code point.
-const fn promo_code_char_width(bytes: &[u8], i: usize) -> usize {
+const fn is_promo_code_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё')
+}
+
+/// The character starting at `i` and how many bytes it took, or `None` for a sequence of three
+/// bytes or more.
+///
+/// `chars()` is not const, so the walk over UTF-8 happens here and the rules above read in
+/// characters. No letter any of them allows is wider than two bytes, so a wider one is turned down
+/// without being decoded.
+#[allow(clippy::cast_lossless, reason = "u32::from is not const; the widening is exact")]
+const fn char_at(bytes: &[u8], i: usize) -> Option<(char, usize)> {
     let first = bytes[i];
-    if first.is_ascii_alphanumeric() || first == b'_' || first == b'-' {
-        return 1
-    }
-    if i + 1 >= bytes.len() {
-        return 0
-    }
-    let second = bytes[i + 1];
-    match first {
-        // Ё, then А-Я and а-п
-        0xD0 => if matches!(second, 0x81 | 0x90..=0xBF) { 2 } else { 0 },
-        // р-я, then ё
-        0xD1 => if matches!(second, 0x80..=0x8F | 0x91) { 2 } else { 0 },
-        _ => 0,
+    let (code, width) = if first < 0x80 {
+        (first as u32, 1)
+    } else if first < 0xE0 && i + 1 < bytes.len() {
+        ((first as u32 & 0x1F) << 6 | (bytes[i + 1] as u32 & 0x3F), 2)
+    } else {
+        return None
+    };
+    match char::from_u32(code) {
+        Some(c) => Some((c, width)),
+        None => None,
     }
 }
 

@@ -208,18 +208,17 @@ impl_saturating_between_integers!(signed isize => i8, i16, i32, i64, isize, u8, 
 impl_saturating_from_float!(f32 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 impl_saturating_from_float!(f64 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 
-impl_approx_into_float!(i8 => f32, f64);
-impl_approx_into_float!(i16 => f32, f64);
-impl_approx_into_float!(i32 => f32, f64);
+// Only the pairs that can actually lose something. Everything absent here is exact — std has a
+// `From` for it — and the exact case must say `From`, the same rule `cast_lossless` enforces for
+// `as`. An `f64` holds every `i32` and every `u32`; an `f32` holds neither, having 24 bits of
+// mantissa against 53.
+impl_approx_into_float!(i32 => f32);
+impl_approx_into_float!(u32 => f32);
 impl_approx_into_float!(i64 => f32, f64);
-impl_approx_into_float!(isize => f32, f64);
-impl_approx_into_float!(u8 => f32, f64);
-impl_approx_into_float!(u16 => f32, f64);
-impl_approx_into_float!(u32 => f32, f64);
 impl_approx_into_float!(u64 => f32, f64);
+impl_approx_into_float!(isize => f32, f64);
 impl_approx_into_float!(usize => f32, f64);
-impl_approx_into_float!(f32 => f32, f64);
-impl_approx_into_float!(f64 => f32, f64);
+impl_approx_into_float!(f64 => f32);
 
 /// String domain type
 pub trait DomainString: DomainType<String> +

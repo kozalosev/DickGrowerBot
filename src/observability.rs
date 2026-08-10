@@ -172,6 +172,10 @@ mod tests {
     const VICTORIA_LOGS_PORT: u16 = 9428;
     const INGESTION_PATH: &str = "/insert/opentelemetry/v1/logs";
 
+    static CONTAINER: SharedContainer = SharedContainer::new(
+        "victoria-logs", "victoriametrics/victoria-logs", "latest", VICTORIA_LOGS_PORT, &[])
+        .with_settle_millis(500);
+
     /// The record must carry the ids of the span it was written in, put there by the SDK. Everything
     /// here is the real pipeline: the tracing bridge, the OTLP/HTTP exporter, and the same log database
     /// the server runs. The fields must survive as fields, not as text inside the message.
@@ -198,7 +202,7 @@ mod tests {
         logger_provider.force_flush()
             .expect("couldn't flush the log records");
 
-        let logs = query_logs(&base_url).await;
+        let logs = query_logs(&base_url, &trace_id).await;
         assert!(logs.contains("a message from the test"), "the record is missing from:\n{logs}");
         assert!(logs.contains(&trace_id), "the trace id {trace_id} is missing from:\n{logs}");
         assert!(logs.contains("-100500"), "the chat_id field is missing from:\n{logs}");
@@ -209,10 +213,6 @@ mod tests {
         assert!(logs.contains(r#""_stream":"{service.name=\"dick-grower-bot\"}""#),
             "unexpected stream fields in:\n{logs}");
     }
-
-    static CONTAINER: SharedContainer = SharedContainer::new(
-        "victoria-logs", "victoriametrics/victoria-logs", "latest", VICTORIA_LOGS_PORT, &[])
-        .with_settle_millis(500);
 
     /// Where to reach it, once it answers.
     async fn victoria_logs() -> String {
@@ -230,18 +230,22 @@ mod tests {
         panic!("VictoriaLogs didn't become healthy in time");
     }
 
-    /// Everything stored, as JSON lines. Ingestion is asynchronous, hence the retries.
-    async fn query_logs(base_url: &str) -> String {
+    /// Everything stored, as JSON lines, once `awaited` is among it.
+    ///
+    /// Ingestion is asynchronous, hence the retries — and the wait is for that needle rather than
+    /// for any answer at all, because the container outlives the run: a non-empty answer may be
+    /// entirely the previous run's records.
+    async fn query_logs(base_url: &str, awaited: &str) -> String {
         let client = reqwest::Client::new();
         for _ in 0..50 {
             let body = client.get(format!("{base_url}/select/logsql/query?query=*"))
                 .send().await.expect("couldn't query VictoriaLogs")
                 .text().await.expect("couldn't read the answer of VictoriaLogs");
-            if !body.trim().is_empty() {
+            if body.contains(awaited) {
                 return body;
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        panic!("nothing was stored in VictoriaLogs in time");
+        panic!("{awaited} didn't reach VictoriaLogs in time");
     }
 }

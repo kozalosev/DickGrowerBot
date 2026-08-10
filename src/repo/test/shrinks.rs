@@ -3,7 +3,7 @@ use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio, U
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, NAME, fresh_db, UID, USER_ID};
-use crate::literal;
+use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
 

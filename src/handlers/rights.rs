@@ -29,11 +29,6 @@ pub async fn remember_deletion_right(cache: &Cache, chat_id: ChatId, may_delete:
     cache.set_flag(BotAdminKey::new(chat_id), may_delete).await
 }
 
-/// What to remember for this update, or `None` for a chat nothing is ever cleaned up in.
-fn right_to_remember(upd: &ChatMemberUpdated) -> Option<bool> {
-    (!upd.chat.is_private()).then(|| upd.new_chat_member.can_delete_messages())
-}
-
 /// Records the bot's rights on every change of its own status.
 ///
 /// Not an endpoint. The same update may be the one that adds the bot to a legacy group, and that
@@ -59,6 +54,11 @@ pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache) {
         tracing::info!(may_delete, "the bot's rights in the chat have changed");
     }
     remember_deletion_right(&cache, upd.chat.id, may_delete).await;
+}
+
+/// What to remember for this update, or `None` for a chat nothing is ever cleaned up in.
+fn right_to_remember(upd: &ChatMemberUpdated) -> Option<bool> {
+    (!upd.chat.is_private()).then(|| upd.new_chat_member.can_delete_messages())
 }
 
 /// Keyed by chat, because the right is granted per chat.

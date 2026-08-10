@@ -101,16 +101,6 @@ mod test {
     static CONTAINER: SharedContainer = SharedContainer::new(
         "cache", "valkey/valkey", "9-alpine", 6379, &["Ready to accept connections"]);
 
-    /// A connected cache with the given TTL. The whole test binary shares one server, so a test
-    /// that needs isolation asks for a key of its own.
-    async fn cache(ttl: Duration) -> Cache {
-        let port = CONTAINER.port().await;
-        Cache::connect(Some(RedisConfig {
-            url: format!("redis://localhost:{port}/"),
-            cache_ttl: ttl,
-        })).await
-    }
-
     #[tokio::test]
     async fn a_value_survives_a_round_trip() {
         let cache = cache(Duration::from_secs(60)).await;
@@ -157,5 +147,15 @@ mod test {
             cache_ttl: Duration::from_secs(60),
         })).await;
         assert!(matches!(cache, Cache::Disabled));
+    }
+
+    /// A connected cache with the given TTL. The whole test binary shares one server, so a test
+    /// that needs isolation asks for a key of its own.
+    async fn cache(ttl: Duration) -> Cache {
+        let port = CONTAINER.port().await;
+        Cache::connect(Some(RedisConfig {
+            url: format!("redis://localhost:{port}/"),
+            cache_ttl: ttl,
+        })).await
     }
 }

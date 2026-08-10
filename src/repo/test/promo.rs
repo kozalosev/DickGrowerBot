@@ -1,6 +1,6 @@
 use chrono::Utc;
 use domain_types::traits::SaturatingInto;
-use crate::literal;
+use domain_types::literal;
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode, UserId};
 use crate::repo;

@@ -68,6 +68,19 @@ pub async fn fresh_db() -> Pool<Postgres> {
     connect_and_migrate(url).await
 }
 
+/// A user id a test computes instead of writing down, like `UID + 1` or an id taken from a loop.
+/// Such a value is not known while the code is compiled, so `literal!` does not fit.
+pub fn user_id(value: i64) -> UserId {
+    UserId::new(value.saturating_into())
+}
+
+#[inline]
+pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
+    (chat_id, dicks)
+}
+
 /// One Postgres for the whole binary, reused across runs, with a database per test.
 struct SharedPostgres {
     port: u16,
@@ -147,15 +160,3 @@ async fn connect_and_migrate(url: Url) -> Pool<Postgres> {
         .await.expect("couldn't establish a database connection")
 }
 
-/// A user id a test computes instead of writing down, like `UID + 1` or an id taken from a loop.
-/// Such a value is not known while the code is compiled, so `literal!` does not fit.
-pub fn user_id(value: i64) -> UserId {
-    UserId::new(value.saturating_into())
-}
-
-#[inline]
-pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
-    (chat_id, dicks)
-}

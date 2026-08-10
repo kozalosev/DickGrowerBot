@@ -114,6 +114,7 @@ commands:
         plural: "你的老二在 <b>%{affected_chats}</b> 個聊天中縮短了 <b>%{growth}</b> 公分！"
     errors:
       no_activations_left: "你輸入了無效的神秘代碼 😞"
+      invalid_format: "這看起來不像神秘代碼 🤔 它由 4 到 16 個字元組成：字母、數字、連字號和底線。"
       already_activated: "神秘代碼已經啟用過了 🤨"
       no_dicks: "看起來你還沒有任何老二。🤔 現在是時候把我加入一個聊天並執行 <code>/grow</code> 命令了！"
     inline:

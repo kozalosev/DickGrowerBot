@@ -5,7 +5,7 @@ use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeIntent, ConfigurablePerk, DickId, Perk};
 use crate::{config, repo};
 use crate::domain::primitives::{Length, LengthChange, LoanPayout, Ratio};
-use crate::literal;
+use domain_types::literal;
 
 pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>> {
     let loans = repo::Loans::new(pool.clone(), cfg);
@@ -99,7 +99,7 @@ impl Perk for LoanPayoutPerk {
 
 #[cfg(test)]
 mod test {
-    use crate::literal;
+    use domain_types::literal;
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk};
     use crate::handlers::utils::{ChangeIntent, DickId, Perk};
     use crate::{config, repo};

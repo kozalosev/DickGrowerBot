@@ -140,6 +140,7 @@ commands:
         plural: "你的丁丁在 <b>%{affected_chats}</b> 个聊天中缩短了 <b>%{growth}</b> 厘米！"
     errors:
       no_activations_left: "你输入了无效的神秘代码 😞"
+      invalid_format: "这看起来不像神秘代码 🤔 它由 4 到 16 个字符组成：字母、数字、连字符和下划线。"
       already_activated: "神秘代码已经激活过了 🤨"
       no_dicks: "看起来你还没有任何丁丁。🤔 现在是时候把我加入一个聊天并执行 <code>/grow</code> 命令了！"
     inline:

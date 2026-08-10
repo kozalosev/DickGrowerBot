@@ -114,20 +114,6 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDep
     Ok(())
 }
 
-/// A code the type refuses never reaches the database. The answer is the one an unknown code
-/// gets, which is what a malformed one is.
-async fn activate_or_refuse(
-    promo_repo: repo::Promo,
-    user: &User,
-    code: String,
-    lang_code: LanguageCode,
-) -> anyhow::Result<String> {
-    match PromoCode::new(code) {
-        Ok(code) => promo_activation_impl(promo_repo, user, &code, lang_code).await,
-        Err(_) => Ok(t!("commands.promo.errors.no_activations_left", locale = &lang_code).to_string()),
-    }
-}
-
 pub(crate) async fn promo_activation_impl(
     promo_repo: repo::Promo,
     user: &User,
@@ -161,6 +147,22 @@ pub(crate) async fn promo_activation_impl(
         }
     };
     Ok(answer)
+}
+
+/// A code the type refuses never reaches the database.
+async fn activate_or_refuse(
+    promo_repo: repo::Promo,
+    user: &User,
+    code: String,
+    lang_code: LanguageCode,
+) -> anyhow::Result<String> {
+    match PromoCode::new(code) {
+        Ok(code) => promo_activation_impl(promo_repo, user, &code, lang_code).await,
+        Err(e) => {
+            tracing::info!(error = %e, "the promo code doesn't fit the format");
+            Ok(t!("commands.promo.errors.invalid_format", locale = &lang_code).to_string())
+        }
+    }
 }
 
 fn get_chats_in_russian(count: AffectedRows) -> String {

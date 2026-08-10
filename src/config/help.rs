@@ -4,7 +4,7 @@ use crate::domain::primitives::{Percentage, Username};
 use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
-use crate::literal;
+use domain_types::literal;
 
 pub fn build_context_for_help_messages(
     me: &Me,
