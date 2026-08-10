@@ -92,7 +92,6 @@ pub async fn added_to_legacy_group_handler(bot: Bot, upd: ChatMemberUpdated) -> 
 /// Telegram reports a group→supergroup migration twice: once in the old group
 /// ([`ChatMigration::To`]) and once in the new supergroup ([`ChatMigration::From`]). Either is
 /// enough to repoint the chat; the other then finds nothing left to do.
-#[inline]
 pub fn migration_filter(msg: Message) -> bool {
     msg.chat_migration().is_some()
 }
@@ -148,7 +147,6 @@ pub async fn migration_handler(
     Ok(())
 }
 
-#[inline]
 pub fn callback_filter(query: CallbackQuery) -> bool {
     SetupCallbackData::check_prefix(query)
 }

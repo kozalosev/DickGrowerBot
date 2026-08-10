@@ -55,7 +55,6 @@ pub async fn topics_cmd_handler(
     Ok(())
 }
 
-#[inline]
 pub fn callback_filter(query: CallbackQuery) -> bool {
     TopicsCallbackData::check_prefix(query)
 }

@@ -81,7 +81,6 @@ impl Cache {
 /// stops a bare string being passed off as a key.
 pub trait CacheKey: Display {}
 
-#[inline]
 async fn connect_to(url: String) -> redis::RedisResult<ConnectionManager> {
     ConnectionManager::new(redis::Client::open(url)?).await
 }

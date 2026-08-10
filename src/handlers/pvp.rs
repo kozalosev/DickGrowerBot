@@ -196,7 +196,6 @@ pub async fn pvp_inline_chosen_handler(result: ChosenInlineResult, deps: Handler
     Ok(())
 }
 
-#[inline]
 pub fn callback_filter(query: CallbackQuery) -> bool {
     BattleCallbackData::check_prefix(query)
 }

@@ -106,7 +106,6 @@ pub(crate) async fn loan_impl(
     })
 }
 
-#[inline]
 pub fn callback_filter(query: CallbackQuery) -> bool {
     LoanCallbackData::check_prefix(query)
 }

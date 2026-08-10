@@ -113,7 +113,6 @@ async fn handle_chat_language(
     Ok(())
 }
 
-#[inline]
 pub fn callback_filter(query: CallbackQuery) -> bool {
     LanguageCallbackData::check_prefix(query)
 }

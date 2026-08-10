@@ -74,7 +74,6 @@ pub fn user_id(value: i64) -> UserId {
     UserId::new(value.saturating_into())
 }
 
-#[inline]
 pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));

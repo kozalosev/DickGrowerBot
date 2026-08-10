@@ -457,7 +457,6 @@ pub mod checks {
            .and_then(|uid| ban_list.banned_until(uid))
     }
 
-    #[inline]
     pub fn is_banned(upd: Update, ban_list: BanList) -> bool {
         banned_until(&upd, ban_list).is_some()
     }
