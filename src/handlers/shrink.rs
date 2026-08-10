@@ -3,7 +3,6 @@ use anyhow::anyhow;
 use autometrics::autometrics;
 use chrono::NaiveDate;
 use derive_more::Display;
-use domain_types::traits::SaturatingInto;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup};
@@ -115,7 +114,7 @@ pub(crate) fn render_shrinks_page<T: ShrinkLine>(
     let prefix = view.template_prefix();
     let line_key = format!("{prefix}.line");
     let lines = rows.iter()
-        .take(config.top_limit.saturating_into())
+        .take(usize::from(config.top_limit))
         .map(|s| {
             let name = s.owner_name().escaped();
             t!(&line_key, locale = lang_code, uid = s.uid(), name = name, lost = s.lost_length(), length = s.length())
@@ -141,7 +140,7 @@ pub(crate) async fn shrinks_page_impl(
     let shrinks = repos.shrinks
         .get_shrinks_for_date(chat_id, date, offset, query_limit)
         .await?;
-    let has_more_pages = shrinks.len() > config.top_limit.saturating_into();
+    let has_more_pages = shrinks.len() > usize::from(config.top_limit);
     Ok(render_shrinks_page(&shrinks, config, lang_code, view, has_more_pages))
 }
 

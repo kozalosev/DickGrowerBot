@@ -194,16 +194,20 @@ macro_rules! impl_approx_into_float {
     )+};
 }
 
-impl_saturating_between_integers!(unsigned u8 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(unsigned u16 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(unsigned u32 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(unsigned u64 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(unsigned usize => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(signed i8 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(signed i16 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(signed i32 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(signed i64 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
-impl_saturating_between_integers!(signed isize => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
+// Only the pairs that can lose something: every narrowing, every signed-to-unsigned, and
+// `usize`/`isize` as a source, neither having a portable `From` to a fixed width. What is missing
+// is what std converts exactly — `the_pairs_left_out_are_the_ones_std_converts` names each one and
+// stops compiling if it was not exact after all.
+impl_saturating_between_integers!(unsigned u8 => i8);
+impl_saturating_between_integers!(unsigned u16 => i8, i16, u8);
+impl_saturating_between_integers!(unsigned u32 => i8, i16, i32, isize, u8, u16, usize);
+impl_saturating_between_integers!(unsigned u64 => i8, i16, i32, i64, isize, u8, u16, u32, usize);
+impl_saturating_between_integers!(unsigned usize => i8, i16, i32, i64, isize, u8, u16, u32, u64);
+impl_saturating_between_integers!(signed i8 => u8, u16, u32, u64, usize);
+impl_saturating_between_integers!(signed i16 => i8, u8, u16, u32, u64, usize);
+impl_saturating_between_integers!(signed i32 => i8, i16, isize, u8, u16, u32, u64, usize);
+impl_saturating_between_integers!(signed i64 => i8, i16, i32, isize, u8, u16, u32, u64, usize);
+impl_saturating_between_integers!(signed isize => i8, i16, i32, i64, u8, u16, u32, u64, usize);
 
 impl_saturating_from_float!(f32 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 impl_saturating_from_float!(f64 => i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
@@ -235,16 +239,25 @@ pub trait DomainString: DomainType<String> +
 mod test {
     use super::{ApproxInto, SaturatingInto};
 
+    /// Every integer pair `SaturatingInto` leaves out, converted with the `From` that is the
+    /// reason it was left out. A pair listed here that std cannot convert stops the build — which
+    /// is what keeps the two halves one table rather than two opinions about it.
+    #[test]
+    fn the_pairs_left_out_are_the_ones_std_converts() {
+        let _ = (u16::from(1u8), u32::from(1u8), u64::from(1u8), usize::from(1u8),
+                 i16::from(1u8), i32::from(1u8), i64::from(1u8), isize::from(1u8));
+        let _ = (u32::from(1u16), u64::from(1u16), usize::from(1u16),
+                 i32::from(1u16), i64::from(1u16));
+        let _ = (u64::from(1u32), i64::from(1u32));
+        let _ = (i16::from(1i8), i32::from(1i8), i64::from(1i8), isize::from(1i8));
+        let _ = (i32::from(1i16), i64::from(1i16), isize::from(1i16));
+        let _ = i64::from(1i32);
+    }
+
     #[test]
     fn a_value_the_target_can_hold_comes_through_untouched() {
         let value: i64 = 1234u64.saturating_into();
         assert_eq!(value, 1234);
-    }
-
-    #[test]
-    fn a_conversion_to_the_same_type_is_the_identity() {
-        let value: i64 = i64::MIN.saturating_into();
-        assert_eq!(value, i64::MIN);
     }
 
     #[test]

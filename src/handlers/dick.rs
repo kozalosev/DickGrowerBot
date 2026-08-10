@@ -155,10 +155,10 @@ pub(crate) async fn top_impl(
     let offset = Offset::calculate(page, config.top_limit);
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
-    let has_more_pages = dicks.len() > config.top_limit.saturating_into();
+    let has_more_pages = dicks.len() > usize::from(config.top_limit);
     let mut any_inactive = false;
     let lines = dicks.into_iter()
-        .take(config.top_limit.saturating_into())
+        .take(usize::from(config.top_limit))
         .enumerate()
         .map(|(i, d)| {
             let escaped_name = Username::new(d.owner_name).escaped();
@@ -168,7 +168,7 @@ pub(crate) async fn top_impl(
                 escaped_name
             };
             let now = Utc::now();
-            let inactive = (now - d.grown_at).num_days() > config.inactivity_days.saturating_into();
+            let inactive = (now - d.grown_at).num_days() > i64::from(config.inactivity_days);
             let can_grow = now.num_days_from_ce() > d.grown_at.num_days_from_ce();
             let pos: i64 = d.position.map(|p| p.saturating_into())
                 .unwrap_or_else(|| (i + 1).saturating_into());

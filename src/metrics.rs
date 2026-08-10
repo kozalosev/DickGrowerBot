@@ -313,11 +313,10 @@ impl Gauge {
         Self(inner)
     }
 
-    /// Takes any number that can reach an `i64`, so that the conversion Prometheus needs happens
-    /// here rather than at every caller. A gauge is a `float64` on the wire whatever is put in it,
-    /// and `IntGauge` holds an `i64` only to keep the arithmetic exact in the process.
-    pub fn set(&self, value: impl SaturatingInto<i64>) {
-        self.0.set(value.saturating_into())
+    /// A gauge is a `float64` on the wire whatever is put in it; `IntGauge` holds an `i64` only
+    /// to keep the arithmetic exact in the process.
+    pub fn set(&self, value: i64) {
+        self.0.set(value)
     }
 }
 
@@ -678,7 +677,7 @@ impl SelfDestructionFinishedGauges {
             let count = counts.iter()
                 .find(|(counted, _)| *counted == state)
                 .map_or(Count::default(), |(_, count)| *count);
-            self.0.gauge(&[&state.to_string()]).set(count);
+            self.0.gauge(&[&state.to_string()]).set(count.saturating_into());
         }
     }
 }

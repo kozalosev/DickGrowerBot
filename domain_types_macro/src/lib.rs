@@ -191,6 +191,43 @@ fn primitive_name(ty: &Type) -> Option<String> {
     Some(type_path.path.segments.last()?.ident.to_string())
 }
 
+/// The types every value of this one converts into without losing anything — std's `From` impls,
+/// which is also what decides the other half: a pair absent here is one `SaturatingInto` keeps,
+/// because it is a pair that can lose something.
+///
+/// Only the widths this workspace uses are listed. A target std has no `From` for would fail to
+/// compile in [`generate_exact_widening_impls`], which is what keeps this honest.
+fn exact_widenings(ty: &Type) -> Vec<Type> {
+    let targets: &[&str] = match primitive_name(ty).as_deref() {
+        Some("u8") => &["u16", "u32", "u64", "usize", "i16", "i32", "i64", "isize", "f32", "f64"],
+        Some("u16") => &["u32", "u64", "usize", "i32", "i64", "f32", "f64"],
+        Some("u32") => &["u64", "i64", "f64"],
+        Some("i8") => &["i16", "i32", "i64", "isize", "f32", "f64"],
+        Some("i16") => &["i32", "i64", "isize", "f32", "f64"],
+        Some("i32") => &["i64", "f64"],
+        Some("f32") => &["f64"],
+        _ => &[],
+    };
+    targets.iter().filter_map(|name| syn::parse_str(name).ok()).collect()
+}
+
+/// `From<#name> for T` for each of them, so that a conversion which loses nothing says so.
+///
+/// The orphan rule is satisfied by the local type sitting in the trait's parameter, which is why
+/// the target may be a foreign primitive.
+fn generate_exact_widening_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    let impls = exact_widenings(inner_type).into_iter().map(|target| quote! {
+        #[automatically_derived]
+        impl ::std::convert::From<#name> for #target {
+            fn from(value: #name) -> Self {
+                <#target as ::std::convert::From<#inner_type>>::from(value.0)
+            }
+        }
+    });
+    quote! { #(#impls)* }
+}
+
 /// Whether every value of this type is exactly representable in an `f64`. An `f64` holds every
 /// 32-bit integer and every `f32`; it does not hold every `i64` or `u64`, whose values run past its
 /// 53 bits of mantissa. The exact ones widen with `From`, the rest have to name what they lose.
@@ -1218,6 +1255,7 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
     let mut pieces = vec![
         domain_type_impl,
         generate_domain_value_impls(info),
+        generate_exact_widening_impls(info),
         generate_lossy_conversion_impls(info),
     ];
 

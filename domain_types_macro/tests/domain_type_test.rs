@@ -78,6 +78,13 @@ impl std::fmt::Display for Opaque {
 // Unsigned inner types: `SqlxMode::Bumped` for u8/u16/u32 (bumped to i16/i32/i64 respectively —
 // see `sqlx_embeddable_for_every_bump_width` below), `SqlxMode::None` for u64 (no signed Postgres
 // type wide enough to bump into, so no `sqlx` impls at all — it just can't bind into a query).
+// The narrow signed widths, so that their rows of the exact-widening table are compiled too.
+#[domain_type(number)]
+struct Tiny(i8);
+
+#[domain_type(number)]
+struct Small(i16);
+
 #[domain_type(number)]
 struct TinyCount(u8);
 
@@ -324,9 +331,16 @@ mod lossy_conversions {
 
     /// An `f64` holds every `i32`, so this one is exact and `ApproxInto` is not implemented for
     /// it — the widening says `From`, like any conversion that loses nothing.
+    /// The widenings that lose nothing, so `ApproxInto` and `SaturatingInto` are not implemented
+    /// for them at all: the conversion is `From`, taking the domain type itself.
     #[test]
-    fn an_integer_a_float_holds_exactly_widens_with_from() {
-        assert_eq!(f64::from(Count::new(3).value()), 3.0);
+    fn an_exact_widening_is_a_from() {
+        assert_eq!(i64::from(Count::new(3)), 3);
+        assert_eq!(f64::from(Count::new(3)), 3.0);
+        assert_eq!(usize::from(MediumCount::new(7)), 7);
+        assert_eq!(i64::from(LargeCount::new(9)), 9);
+        assert_eq!(isize::from(Tiny::new(-1)), -1);
+        assert_eq!(i32::from(Small::new(-2)), -2);
     }
 
     /// The narrowing that does lose something: `f32` has 24 bits of mantissa against `f64`'s 53.

@@ -164,7 +164,7 @@ async fn broadcast_shrink(
     let lang = resolve_broadcast_language(deps, &chat).await;
     let lang_code = LanguageCode::new(lang.to_string());
 
-    let has_more_pages = victims.len() > config.top_limit.saturating_into();
+    let has_more_pages = victims.len() > usize::from(config.top_limit);
     let page = render_shrinks_page(victims, config, &lang_code, ShrinkView::Broadcast, has_more_pages);
     // A single day by definition, so day-navigation (`adjacent`) is always `None`.
     let keyboard = build_shrink_keyboard(ShrinkView::Broadcast, date, Page::first(), page.has_more_pages, None);

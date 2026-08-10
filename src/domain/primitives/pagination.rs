@@ -24,8 +24,8 @@ impl Offset {
     /// Where the page starts. Two `u16` can multiply out to more than an `i32` holds, so the
     /// product is taken in `i64` and cut down to the offset a query can carry.
     pub fn calculate(page: Page, limit: Limit) -> Offset {
-        let page: i64 = page.saturating_into();
-        let limit: i64 = limit.saturating_into();
+        let page = i64::from(page);
+        let limit = i64::from(limit);
         Self((page * limit).saturating_into())
     }
 }
