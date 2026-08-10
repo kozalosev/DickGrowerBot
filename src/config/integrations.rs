@@ -9,13 +9,6 @@ pub struct IntegrationsConfig {
     /// `Some` only when `GRPC_ADDR_USER_SERVICE` is configured; otherwise the whole user-service
     /// integration is disabled.
     pub user_service: Option<UserServiceConfig>,
-    /// TTL of the per-chat language cache. Independent of the user-service — the chat-wide
-    /// language works even when that integration is disabled. We own this data, it lives in our
-    /// own database, so a rather aggressive TTL is fine.
-    pub chat_language_cache_ttl: Duration,
-    /// TTL of the per-chat allowed-topics cache. The setting's own writes refresh it, so this
-    /// only bounds how long another instance's change goes unnoticed.
-    pub chat_topics_cache_ttl: Duration,
 }
 
 #[derive(Clone)]
@@ -38,8 +31,6 @@ impl IntegrationsConfig {
                 .map(|url| url.parse())
                 .transpose()?,
             user_service: UserServiceConfig::from_env(),
-            chat_language_cache_ttl: EnvDuration::seconds("CHAT_LANGUAGE_CACHE_TIME_SECS").or(3600).read(),
-            chat_topics_cache_ttl: EnvDuration::seconds("CHAT_TOPICS_CACHE_TIME_SECS").or(3600).read(),
         })
     }
 }

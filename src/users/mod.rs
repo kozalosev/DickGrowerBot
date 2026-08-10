@@ -387,6 +387,7 @@ impl<C: UserServiceClient> LanguageService<C> {
 /// languages only) when it's not configured or unreachable — the chat-language part keeps working.
 pub async fn init_language_service(
     config: &IntegrationsConfig,
+    chat_ttl: Duration,
     chats: Chats,
     chats_merging: bool,
 ) -> LanguageService<UserServiceClientGrpc> {
@@ -395,7 +396,7 @@ pub async fn init_language_service(
         users,
         chats,
         chat_cache: Arc::new(Mutex::new(HashMap::new())),
-        chat_ttl: config.chat_language_cache_ttl,
+        chat_ttl,
         chats_merging,
     }
 }

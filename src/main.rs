@@ -61,10 +61,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_conn = repo::establish_database_connection(&database_config).await?;
     let repos = Repositories::new(&db_conn, &app_config);
     let cache = Cache::connect(config::RedisConfig::from_env()).await;
-    let language_service = users::init_language_service(&integrations_config, repos.chats.clone(),
-                                                        app_config.features.chats_merging).await;
+    let language_service = users::init_language_service(&integrations_config, app_config.caches.chat_language,
+                                                        repos.chats.clone(), app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;
-    let topic_policy = topics::TopicPolicy::new(&integrations_config, repos.chats.clone());
+    let topic_policy = topics::TopicPolicy::new(app_config.caches.chat_topics, repos.chats.clone());
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
@@ -175,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
-    ban_list.spawn_refresh_task(app_config.ban_list_refresh_secs);
+    ban_list.spawn_refresh_task(app_config.caches.ban_list_refresh);
 
     let ignore_unknown_updates = |_| Box::pin(async {});
     let deps = deps![

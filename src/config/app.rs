@@ -1,5 +1,5 @@
-use std::time::Duration;
 use reqwest::Url;
+use crate::config::caches::CachesConfig;
 use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
@@ -24,7 +24,7 @@ pub struct AppConfig {
     pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
     pub support_chat_id: Option<TelegramChatId>,
-    pub ban_list_refresh_secs: Duration,
+    pub caches: CachesConfig,
 }
 
 #[derive(Clone)]
@@ -75,7 +75,6 @@ impl AppConfig {
             retention: EnvDuration::minutes("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY").or(1440).read(),
         };
         let support_chat_id = get_optional_chat_id("SUPPORT_CHAT_ID");
-        let ban_list_refresh_secs = EnvDuration::seconds("BAN_LIST_REFRESH_SECS").or(900).at_least(1).read();
         Self {
             features: FeatureToggles {
                 chats_merging,
@@ -102,7 +101,7 @@ impl AppConfig {
             self_destruction,
             command_toggles: Default::default(),
             support_chat_id,
-            ban_list_refresh_secs,
+            caches: CachesConfig::from_env(),
         }
     }
 }

@@ -9,6 +9,7 @@ mod incrementor;
 mod env;
 mod help;
 mod integrations;
+mod caches;
 mod redis;
 
 pub use app::*;
