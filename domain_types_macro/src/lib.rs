@@ -39,7 +39,7 @@ struct NumberKind {
 #[derive(PartialEq, Eq)]
 enum DomainTypeKind {
     Number(NumberKind),
-    String,
+    String { validated: bool },
 }
 
 enum InnerTypeKind {
@@ -135,6 +135,7 @@ fn parse_validated(input: ParseStream) -> syn::Result<(syn::Expr, syn::LitStr)> 
     let msg_content;
     syn::parenthesized!(msg_content in content);
     let error_msg = msg_content.parse()?;
+    content.parse::<syn::Token![,]>().ok();
 
     Ok((validator, error_msg))
 }
@@ -206,7 +207,7 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
             is_number: args.number,
             validated: args.validator.is_some(),
         }),
-        InnerTypeKind::String => DomainTypeKind::String,
+        InnerTypeKind::String => DomainTypeKind::String { validated: args.validator.is_some() },
         InnerTypeKind::Unsupported => panic!("unsupported domain type"),
     };
 
@@ -356,13 +357,14 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
     // construct `Self(value)` directly, bypassing the range validator (the same hazard as
     // `Neg` and the plain `FromStr`). They get a hand-written impl routing through `Self::new`
     // in `generate_validated_domain_number_impls` instead.
-    let is_validated = matches!(&info.variant, DomainTypeKind::Number(NumberKind { validated: true, .. }));
+    let is_validated = matches!(&info.variant,
+        DomainTypeKind::Number(NumberKind { validated: true, .. }) | DomainTypeKind::String { validated: true });
     if !is_validated {
         derives.push(quote! { ::serde::Deserialize });
     }
 
     match &info.variant {
-        DomainTypeKind::String => {
+        DomainTypeKind::String { .. } => {
             derives.push(quote! { Eq });
             derives.push(quote! { Ord });
             derives.push(quote! { Hash });
@@ -496,8 +498,16 @@ fn generate_validated_domain_number_impls(info: &TypeInfo) -> TokenStream {
                 }
             }
 
-            pub const fn literal(value: #inner_type) -> Self {
+            /// Validates and hands the value straight back. `literal!` calls this inside a `const`
+            /// block, which is what makes a value the type would refuse fail the build.
+            pub const fn check_literal(value: #inner_type) -> #inner_type {
                 assert!(#validator(&value), #error_msg);
+                value
+            }
+
+            /// Wraps what [`Self::check_literal`] approved. Never call it directly — on its own it
+            /// skips the check entirely, which is why `clippy.toml` forbids it.
+            pub const fn from_literal(value: #inner_type) -> Self {
                 Self(value)
             }
         }
@@ -973,13 +983,77 @@ fn generate_domain_number_marker_impls(info: &TypeInfo, kind: &NumberKind) -> To
     quote! { #value_marker #number_markers }
 }
 
-fn generate_domain_string_impls(info: &TypeInfo) -> TokenStream {
-    let TypeInfo { name, .. } = info;
+/// A validated string type, checked either while the code is compiled or when the value arrives.
+///
+/// The validator takes a `&str`, not a `&String`: a `String` cannot exist in a `const` context, so
+/// only the borrowed form can be checked there. One validator then serves both paths — the literals
+/// written in the source and the values coming from the database, the environment and Telegram.
+///
+/// There is no `const` on `from_literal` here, and there cannot be: that is where the allocation
+/// happens. Only the check is forced early, which is the half that matters.
+fn generate_validated_domain_string_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, args, .. } = info;
+    let validator = args.validator.as_ref().expect("a validator must be given");
+    let error_msg = args.error_msg.as_ref().expect("an error message must be given");
     quote! {
         impl #name {
+            pub fn new(value: String) -> Result<Self, ::domain_types::errors::DomainAssertionError<String>> {
+                if #validator(value.as_str()) {
+                    Ok(Self(value))
+                } else {
+                    Err(::domain_types::errors::DomainAssertionError::new(
+                        value,
+                        ::std::borrow::Cow::from(concat!(stringify!(#name), ' ', #error_msg))
+                    ))
+                }
+            }
+
+            /// Validates and hands the literal straight back. `literal!` calls this inside a
+            /// `const` block, which is what makes a value the type would refuse fail the build.
+            pub const fn check_literal(value: &'static str) -> &'static str {
+                assert!(#validator(value), #error_msg);
+                value
+            }
+
+            /// Wraps what [`Self::check_literal`] approved. Never call it directly — on its own it
+            /// skips the check entirely, which is why `clippy.toml` forbids it.
+            pub fn from_literal(value: &'static str) -> Self {
+                Self(value.to_owned())
+            }
+        }
+
+        // Hand-written instead of derived so deserialization can't bypass the validator.
+        #[automatically_derived]
+        impl<'de> ::serde::Deserialize<'de> for #name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: ::serde::Deserializer<'de>,
+            {
+                let value = <String as ::serde::Deserialize>::deserialize(deserializer)?;
+                Self::new(value).map_err(::serde::de::Error::custom)
+            }
+        }
+    }
+}
+
+fn generate_domain_string_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, variant, .. } = info;
+    let of = if matches!(variant, DomainTypeKind::String { validated: true }) {
+        quote! {
+            pub fn of(value: impl ToString) -> Result<Self, ::domain_types::errors::DomainAssertionError<String>> {
+                Self::new(value.to_string())
+            }
+        }
+    } else {
+        quote! {
             pub fn of(value: impl ToString) -> Self {
                 Self::new(value.to_string())
             }
+        }
+    };
+    quote! {
+        impl #name {
+            #of
 
             pub fn value(&self) -> &str {
                 self.0.as_str()
@@ -1045,7 +1119,8 @@ fn determine_inner_type_kind(ty: &Type) -> InnerTypeKind {
 fn generate_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
 
-    let is_validated = matches!(&info.variant, DomainTypeKind::Number(NumberKind { validated: true, .. }));
+    let is_validated = matches!(&info.variant,
+        DomainTypeKind::Number(NumberKind { validated: true, .. }) | DomainTypeKind::String { validated: true });
     // An inherent constructor, so that call sites don't have to import the traits.
     // Validated types get their own inherent `new` returning a Result instead
     // (generated along with the other validated impls); it shadows the infallible trait method.
@@ -1053,7 +1128,7 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
         TokenStream::new()
     } else {
         match &info.variant {
-            DomainTypeKind::String => quote! {
+            DomainTypeKind::String { .. } => quote! {
                 impl #name {
                     pub fn new(value: #inner_type) -> Self {
                         Self(value)
@@ -1096,9 +1171,15 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
 
     let DomainTypeKind::Number(kind) = &info.variant else {
         let domain_string_impls = generate_domain_string_impls(info);
+        let validated_impls = if is_validated {
+            generate_validated_domain_string_impls(info)
+        } else {
+            TokenStream::new()
+        };
         return quote! {
             #domain_type_impl
             #domain_string_impls
+            #validated_impls
         };
     };
 

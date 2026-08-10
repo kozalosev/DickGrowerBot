@@ -1,5 +1,5 @@
-//! Guards the `disallowed-methods` list of `clippy.toml`, which is what keeps the bare `literal`
-//! constructor out of the code (see the rule in `CLAUDE.md`).
+//! Guards the `disallowed-methods` list of `clippy.toml`, which is what keeps the bare
+//! `from_literal` constructor out of the code (see the rule in `CLAUDE.md`).
 //!
 //! The list needs guarding because both ways of getting it wrong are silent: clippy ignores a path
 //! that resolves to nothing without a word, and it has no globs, so a domain type nobody adds is
@@ -52,7 +52,7 @@ fn declared_types() -> BTreeMap<String, String> {
             if let Some(captures) = impl_header.captures(line) {
                 current_impl = Some(captures[1].to_owned());
             }
-            if line.contains("fn literal(")
+            if line.contains("fn from_literal(")
                 && let Some(name) = current_impl.as_ref()
             {
                 found.insert(name.clone(), module.clone());
@@ -66,7 +66,7 @@ fn declared_types() -> BTreeMap<String, String> {
 fn forbidden_types() -> BTreeMap<String, String> {
     let config = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("clippy.toml"))
         .expect("clippy.toml must be readable");
-    Regex::new(r#"path = "dick_grower_bot::(.+?)::(\w+)::literal""#).expect("a valid pattern")
+    Regex::new(r#"path = "dick_grower_bot::(.+?)::(\w+)::from_literal""#).expect("a valid pattern")
         .captures_iter(&config)
         .map(|captures| (captures[2].to_owned(), captures[1].to_owned()))
         .collect()

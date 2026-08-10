@@ -16,12 +16,11 @@
 /// of the macro and nothing besides.
 #[macro_export]
 macro_rules! literal {
-    ($type:ty = $value:expr) => {
-        const {
-            #[allow(clippy::disallowed_methods)]
-            <$type>::literal($value)
-        }
-    };
+    ($type:ty = $value:expr) => {{
+        #[allow(clippy::disallowed_methods)]
+        let checked = <$type>::from_literal(const { <$type>::check_literal($value) });
+        checked
+    }};
 }
 
 #[macro_export]

@@ -1,6 +1,6 @@
-# `literal` asserts the type's validator in a `const fn`, so only const evaluation makes it fail the
-# build — which is what `literal!` forces and a bare call does not. Hence this list. It holds every
-# validated type and nothing else, because only those have a `literal` at all.
+# `literal!` expands to `from_literal(const { check_literal(v) })`: the const block is what forces
+# the validator to run at build time, and `from_literal` on its own skips it entirely. Hence this
+# list. It holds every validated type and nothing else, because only those have the pair at all.
 #
 # The lint doesn't skip macro expansions; it reports them against the line `literal!` is defined on,
 # where a single `#[allow]` covers them. Everything listed here is therefore a bare call.
@@ -11,7 +11,8 @@
 # The path must be the canonical one, through the module the type is declared in — a path through
 # the `pub use` re-export does not resolve.
 disallowed-methods = [
-    { path = "dick_grower_bot::domain::primitives::ratio::FloatPercentage::literal", reason = "use literal!(FloatPercentage = …)" },
-    { path = "dick_grower_bot::domain::primitives::ratio::Percentage::literal", reason = "use literal!(Percentage = …)" },
-    { path = "dick_grower_bot::domain::primitives::ratio::Ratio::literal", reason = "use literal!(Ratio = …)" },
+    { path = "dick_grower_bot::domain::primitives::ratio::FloatPercentage::from_literal", reason = "use literal!(FloatPercentage = …)" },
+    { path = "dick_grower_bot::domain::primitives::ratio::Percentage::from_literal", reason = "use literal!(Percentage = …)" },
+    { path = "dick_grower_bot::domain::primitives::promo::PromoCode::from_literal", reason = "use literal!(PromoCode = …)" },
+    { path = "dick_grower_bot::domain::primitives::ratio::Ratio::from_literal", reason = "use literal!(Ratio = …)" },
 ]

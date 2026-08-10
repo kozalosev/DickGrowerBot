@@ -42,6 +42,13 @@ where
     get_env_value_or_default(key, T::default())
 }
 
+/// A variable that is set and not empty, which is how an optional integration is switched on. An
+/// empty value counts as unset, so a variable left blank in `.env` turns the feature off rather
+/// than configuring it with nothing. Nothing is logged: the caller says what the absence means.
+pub(super) fn get_optional_env_string(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|value| !value.is_empty())
+}
+
 /// Reads a domain value from an environment variable, with a fallback and a lower bound written as
 /// the plain numbers they are.
 ///

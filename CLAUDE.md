@@ -578,11 +578,11 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Code Style
 
-- **`new` builds a domain value; `literal!` is for the validated types only.** Three types validate
-  anything — `Ratio`, `Percentage`, `FloatPercentage`, all in `ratio.rs`. They alone have a
-  `literal`, and `literal!(Ratio = 0.5)` is what makes its `assert!` run while the code is compiled;
-  a bare `Ratio::literal(0.5)` would defer the check to whenever the line happens to run, since a
-  `const fn` is evaluated early only where the language requires it.
+- **`new` builds a domain value; `literal!` is for the validated types only.** Four types validate
+  anything: `Ratio`, `Percentage`, `FloatPercentage` (`ratio.rs`) and `PromoCode` (`promo.rs`).
+  They alone have the `check_literal`/`from_literal` pair, and
+  `literal!(Ratio = 0.5)` is what makes the `assert!` run while the code is compiled; a bare
+  `Ratio::from_literal(0.5)` skips the `const` block, and with it the check.
 
   Everything else takes an unsigned or plain inner type instead of a validator, so there is nothing
   to force: `new` is `const` and infallible and is all a constant needs.
@@ -590,23 +590,38 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   ```rust
   // ✅ validated: the assert runs during the build
   grow_shrink_ratio: literal!(Ratio = 0.5),
+  code: literal!(PromoCode = "test10"),
 
-  // ❌ validated, bare: the assert runs when the line is reached, if ever
-  grow_shrink_ratio: Ratio::literal(0.5),
+  // ❌ validated, bare: no const block, so nothing is checked at all
+  grow_shrink_ratio: Ratio::from_literal(0.5),
 
   // ✅ everything else: nothing to check, so no ceremony
   top_limit: Limit::new(10),
   ```
 
+  **Strings validate too, and only the check is const.** `literal!` expands to
+  `from_literal(const { check_literal(v) })`: the `const` block runs the validator, and
+  `from_literal` allocates afterwards — a `String` can't exist in a `const` context, but a `&str`
+  can be checked in one. So a string validator takes `&str` and serves both paths, the literals in
+  the source and the values arriving from the database, the environment and Telegram. Working on
+  `&str` in a `const fn` means working on bytes, since `chars()` isn't const; `validators.rs` has
+  the helpers.
+
   **Nothing has to be remembered here** — the compiler picks for you. A validated `new` returns a
   `Result`, so it will not compile where the value itself is wanted; an unvalidated type has no
-  `literal` to reach for. `clippy.toml` closes the last gap by forbidding the three bare
+  `from_literal` to reach for. `clippy.toml` closes the last gap by forbidding the four bare
   constructors.
 
   That list has two silent failure modes: a path spelled wrong resolves to nothing and is ignored
   without a word, and it takes no globs, so a new validated type stays unprotected until it is
   added. `src/domain/primitives/literal.rs` guards it — `cargo test literal` compares the list
   against the types that declare a validator and fails if the two disagree.
+
+  **Validate where a refusal means something.** A rule earns its place when it guards untrusted
+  input and the caller can act on the answer, as `PromoCode` does for what a user types. A value
+  that every call site would have to accept anyway — a display name, say — gains nothing from a
+  fallible constructor and loses by it: the safe path becomes the lossy one, and the plain `new`
+  turns into a panic waiting for someone to reach for it.
 
   Where the failure shows up depends on the kind of constant: a named `const` item is evaluated by
   `cargo check`, while an inline `const` block — which is what `literal!` expands to — is evaluated

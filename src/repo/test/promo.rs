@@ -1,5 +1,6 @@
 use chrono::Utc;
 use domain_types::traits::SaturatingInto;
+use crate::literal;
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode, UserId};
 use crate::repo;
@@ -20,7 +21,7 @@ async fn activate() {
 
     let promo = repo::Promo::new(db.clone());
     promo.create_promo_code(PromoCodeParams{
-        code: PromoCode::of(PROMO_CODE),
+        code: literal!(PromoCode = PROMO_CODE),
         bonus_length: PromoBonus::new(PROMO_BONUS),
         capacity: PromoCapacity::new(1),
     }).await.expect("couldn't create a promo code");
@@ -45,7 +46,7 @@ async fn activate_with_negative_bonus() {
 
     let promo = repo::Promo::new(db.clone());
     promo.create_promo_code(PromoCodeParams{
-        code: PromoCode::of(PENALTY_PROMO_CODE),
+        code: literal!(PromoCode = PENALTY_PROMO_CODE),
         bonus_length: PromoBonus::new(PENALTY_PROMO_BONUS),
         capacity: PromoCapacity::new(1),
     }).await.expect("couldn't create a promo code");
