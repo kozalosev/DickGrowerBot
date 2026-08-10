@@ -20,6 +20,9 @@ mod bans;
 mod topics;
 mod cache;
 
+#[cfg(test)]
+mod test_containers;
+
 use std::net::SocketAddr;
 use futures::future::join_all;
 use rust_i18n::i18n;

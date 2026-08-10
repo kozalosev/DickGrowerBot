@@ -58,7 +58,7 @@ tasks:
     desc: Remove the containers the tests reuse between runs (Postgres and the cache).
     cmds:
       # The tests share one container per service and keep them running on purpose, so that the next
-      # run reuses them instead of paying the startup again (see repo::test::SharedPostgres) — this
+      # run reuses them instead of paying the startup again (see src/test_containers.rs) — this
       # task is the only thing that removes them. Worth running when one holds a port you need, or
       # after changing how a container is built. The label keeps this from touching the infra
       # containers, which use the same images; it is matched by key, so every value is swept.

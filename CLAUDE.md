@@ -835,9 +835,10 @@ load-bearing:
 * **A runtime of its own.** Every `#[tokio::test]` builds a runtime and tears it down when the test
   ends, and a sqlx pool dies with the runtime that created it — sharing a pool between tests fails
   with *"a Tokio 1.x context was found, but it is being shutdown"* as soon as the first test
-  finishes. So the container and its maintenance pool live on a `static RUNTIME`, and `fresh_db`
-  reaches them with `RUNTIME.spawn(...)`. Not `block_on`, which panics inside a runtime. The
-  per-test pool is built on the test's own runtime and dies with it, which is fine.
+  finishes. So the container and its maintenance pool live on the runtime in
+  `src/test_containers.rs`, reached with `test_containers::spawn(...)`. Not `block_on`, which panics
+  inside a runtime. The per-test pool is built on the test's own runtime and dies with it, which is
+  fine.
 * **A template database.** The migrations run once per run into `test_template`; each test's
   database is `CREATE DATABASE … TEMPLATE test_template`, which is far cheaper than replaying every
   migration 54 times.
@@ -846,10 +847,11 @@ load-bearing:
   `task test:clean`. Its databases are named `test_run<pid>_<n>` and the ones left by earlier runs
   are dropped at startup — one test binary at a time is assumed, which is how `cargo test` runs.
 
-The cache tests (`src/cache.rs`) keep a container the same way. A reusable container is matched by
-its **labels**, so the value of `TEST_CONTAINER_LABEL` names the service (`postgres`, `cache`) and
-must stay distinct: labelled alike, the second request is handed the first container and fails on a
-port that isn't there. `task test:clean` matches the label by key, so it sweeps every value.
+**Every shared container is one `SharedContainer`** (`src/test_containers.rs`), declared as a
+`static` next to the tests that need it — Postgres, the cache and VictoriaLogs. A reusable container
+is matched by its **labels**, which is why the service name is a constructor argument and has to
+differ: labelled alike, the second request is handed the first container and fails on a port that
+isn't there. `task test:clean` matches the label by key, so it sweeps every value.
 
 This replaced one container per test: ~35s for the suite instead of ~75s. Don't reintroduce a
 per-test or per-file container, and don't put the shared pool in a plain `static` without the

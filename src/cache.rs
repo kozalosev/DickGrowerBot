@@ -89,13 +89,7 @@ async fn connect_to(url: String) -> redis::RedisResult<ConnectionManager> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use once_cell::sync::Lazy;
-    use testcontainers::{ContainerAsync, GenericImage, ImageExt, ReuseDirective};
-    use testcontainers::core::{IntoContainerPort, WaitFor};
-    use testcontainers::runners::AsyncRunner;
-    use tokio::runtime::{Builder, Runtime};
-    use tokio::sync::OnceCell;
-    use crate::repo::test::TEST_CONTAINER_LABEL;
+    use crate::test_containers::SharedContainer;
 
     /// Stands in for the real keys, which live with the values they name rather than here.
     #[derive(Clone, Copy, derive_more::Display)]
@@ -104,45 +98,13 @@ mod test {
 
     impl CacheKey for TestKey {}
 
-    const IMAGE: &str = "valkey/valkey";
-    const TAG: &str = "9-alpine";
-    const PORT: u16 = 6379;
-
-    /// The same arrangement the database tests use: a sqlx pool dies with the runtime that made it,
-    /// and so does a `ConnectionManager`, so the shared container lives on a runtime of its own that
-    /// outlives every test. See `repo::test` for the full reasoning.
-    static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-        Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .expect("couldn't build the shared cache-test runtime")
-    });
-
-    static CONTAINER: OnceCell<(ContainerAsync<GenericImage>, u16)> = OnceCell::const_new();
-
-    async fn start() -> (ContainerAsync<GenericImage>, u16) {
-        let container = GenericImage::new(IMAGE, TAG)
-            .with_exposed_port(PORT.tcp())
-            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
-            .with_label(TEST_CONTAINER_LABEL, "cache")
-            .with_reuse(ReuseDirective::Always)
-            .start()
-            .await
-            .expect("couldn't start the cache container");
-        let port = container.get_host_port_ipv4(PORT)
-            .await
-            .expect("couldn't fetch the port of the cache container");
-        (container, port)
-    }
+    static CONTAINER: SharedContainer = SharedContainer::new(
+        "cache", "valkey/valkey", "9-alpine", 6379, &["Ready to accept connections"]);
 
     /// A connected cache with the given TTL. The whole test binary shares one server, so a test
     /// that needs isolation asks for a key of its own.
     async fn cache(ttl: Duration) -> Cache {
-        let port = RUNTIME
-            .spawn(async { CONTAINER.get_or_init(start).await.1 })
-            .await
-            .expect("the shared cache container task failed");
+        let port = CONTAINER.port().await;
         Cache::connect(Some(RedisConfig {
             url: format!("redis://localhost:{port}/"),
             cache_ttl: ttl,
