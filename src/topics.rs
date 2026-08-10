@@ -31,7 +31,7 @@ impl TopicPolicy {
         Self {
             chats,
             cache: Arc::new(Mutex::new(HashMap::new())),
-            ttl: Duration::from_secs(config.chat_topics_cache_time_secs),
+            ttl: config.chat_topics_cache_ttl,
         }
     }
 

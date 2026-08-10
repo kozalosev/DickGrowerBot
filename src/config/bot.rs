@@ -1,4 +1,5 @@
 use std::time::Duration;
+use crate::config::env::get_optional_env_string;
 use teloxide::Bot;
 use crate::telegram_observer::TelegramObserver;
 
@@ -54,11 +55,9 @@ impl BotConfig {
 /// Reads an optional environment variable holding a whole number of seconds and returns it as a
 /// [`Duration`]. A missing, empty, or unparseable value yields `None`.
 fn read_optional_secs(key: &str) -> Option<Duration> {
-    std::env::var(key)
+    get_optional_env_string(key)?
+        .parse::<u64>()
+        .inspect_err(|e| tracing::warn!(key = %key, error = %e, "invalid value of an environment variable"))
         .ok()
-        .filter(|value| !value.is_empty())
-        .and_then(|value| value.parse::<u64>()
-            .inspect_err(|e| tracing::warn!(key = %key, error = %e, "invalid value of an environment variable"))
-            .ok())
         .map(Duration::from_secs)
 }

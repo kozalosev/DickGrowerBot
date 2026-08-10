@@ -81,13 +81,12 @@ pub struct UserServiceClientGrpc {
 }
 
 impl UserServiceClientGrpc {
-    pub async fn connect(address: String, cache_time_secs: u64, timeout_secs: u64) -> anyhow::Result<Self> {
+    pub async fn connect(address: String, cache_ttl: Duration, timeout: Duration) -> anyhow::Result<Self> {
         let endpoint = if address.contains("://") {
             address
         } else {
             format!("http://{address}")
         };
-        let timeout = Duration::from_secs(timeout_secs);
         let channel = Channel::from_shared(endpoint)?
             .timeout(timeout)          // bounds each request, so a hanging service can't stall us
             .connect_timeout(timeout)
@@ -96,7 +95,7 @@ impl UserServiceClientGrpc {
         Ok(Self {
             inner: GrpcClient::new(OtelGrpcLayer.layer(channel)),
             cache: Arc::new(Mutex::new(HashMap::new())),
-            cache_ttl: Duration::from_secs(cache_time_secs),
+            cache_ttl,
         })
     }
 
@@ -396,7 +395,7 @@ pub async fn init_language_service(
         users,
         chats,
         chat_cache: Arc::new(Mutex::new(HashMap::new())),
-        chat_ttl: Duration::from_secs(config.chat_language_cache_time_secs),
+        chat_ttl: config.chat_language_cache_ttl,
         chats_merging,
     }
 }
@@ -406,10 +405,10 @@ async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserSe
         tracing::warn!("the user-service integration is disabled (GRPC_ADDR_USER_SERVICE is not set)");
         return UserService::Disabled;
     };
-    match UserServiceClientGrpc::connect(cfg.address.clone(), cfg.cache_time_secs, cfg.timeout_secs).await {
+    match UserServiceClientGrpc::connect(cfg.address.clone(), cfg.cache_ttl, cfg.timeout).await {
         Ok(client) => {
             tracing::info!(address = %cfg.address, "connected to the user-service");
-            spawn_cache_cleanup(client.clone(), cfg.cache_time_secs);
+            spawn_cache_cleanup(client.clone(), cfg.cache_ttl);
             UserService::Connected(client)
         }
         Err(e) => {
@@ -419,9 +418,9 @@ async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserSe
     }
 }
 
-fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_time_secs: u64) {
+fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_ttl: Duration) {
     tokio::spawn(metrics::TASK_USER_SERVICE_CACHE_CLEANUP.instrument(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(cache_time_secs.max(1)));
+        let mut interval = tokio::time::interval(cache_ttl);
         interval.tick().await; // consume the immediate first tick
         loop {
             interval.tick().await;
