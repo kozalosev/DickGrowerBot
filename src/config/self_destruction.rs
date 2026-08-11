@@ -29,9 +29,9 @@ pub enum MessageGroup {
     Application,
 }
 
-/// What the bot does with the command behind a self-destructing answer. The default leaves it
-/// alone: a bot that is already an administrator must not start erasing its members' messages
-/// just because it was updated.
+/// What the bot does with the command behind a self-destructing answer. The default takes both
+/// away: a chat that asked for the answers to go wants no half-dialogues left behind, and the
+/// command is only touched where the bot may delete messages anyway.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, strum_macros::Display, strum_macros::EnumString)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum DeletionMode {
