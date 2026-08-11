@@ -156,7 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
     let self_destruction = SelfDestructionService::new(app_config.self_destruction,
                                                        repos.deletions.clone(), cache.clone(),
-                                                       me.user.id);
+                                                       me.user.id, app_config.caches.bot_admin);
     let support_service = SupportService::new(app_config.support_chat_id);
 
     let webhook_url = integrations_config.webhook_url;

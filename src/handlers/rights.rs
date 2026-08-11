@@ -9,7 +9,9 @@
 
 use autometrics::autometrics;
 use teloxide::types::{ChatId, ChatMemberUpdated};
+use std::time::Duration;
 use crate::cache::{Cache, CacheKey};
+use crate::config::AppConfig;
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::metrics;
 
@@ -24,9 +26,9 @@ pub async fn cached_deletion_right(cache: &Cache, chat_id: ChatId) -> Option<boo
     known
 }
 
-/// Remembers what Telegram said, or showed, about that right.
-pub async fn remember_deletion_right(cache: &Cache, chat_id: ChatId, may_delete: bool) {
-    cache.set_flag(BotAdminKey::new(chat_id), may_delete).await
+/// Remembers what Telegram said, or showed, about that right, for as long as `ttl`.
+pub async fn remember_deletion_right(cache: &Cache, chat_id: ChatId, may_delete: bool, ttl: Duration) {
+    cache.set_flag(BotAdminKey::new(chat_id), may_delete, ttl).await
 }
 
 /// Records the bot's rights on every change of its own status.
@@ -46,14 +48,14 @@ pub async fn remember_deletion_right(cache: &Cache, chat_id: ChatId, may_delete:
 /// demoted or removed, so the write is rare whatever the bot's traffic.
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = upd.chat.id.0))]
-pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache) {
+pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache, config: AppConfig) {
     let Some(may_delete) = right_to_remember(&upd) else {
         return
     };
     if may_delete != upd.old_chat_member.can_delete_messages() {
         tracing::info!(may_delete, "the bot's rights in the chat have changed");
     }
-    remember_deletion_right(&cache, upd.chat.id, may_delete).await;
+    remember_deletion_right(&cache, upd.chat.id, may_delete, config.caches.bot_admin).await;
 }
 
 /// What to remember for this update, or `None` for a chat nothing is ever cleaned up in.

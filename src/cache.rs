@@ -19,10 +19,7 @@ use crate::config::RedisConfig;
 #[derive(Clone)]
 pub enum Cache {
     Disabled,
-    Connected {
-        conn: ConnectionManager,
-        ttl: Duration,
-    },
+    Connected(ConnectionManager),
 }
 
 impl Cache {
@@ -37,8 +34,8 @@ impl Cache {
 
         match connect_to(config.url).await {
             Ok(conn) => {
-                tracing::info!(enabled = true, ttl_secs = config.cache_ttl.as_secs(), "the cache is connected");
-                Self::Connected { conn, ttl: config.cache_ttl }
+                tracing::info!(enabled = true, "the cache is connected");
+                Self::Connected(conn)
             }
             Err(e) => {
                 tracing::error!(error = %e, "couldn't connect to Redis, the cache stays disabled");
@@ -51,7 +48,7 @@ impl Cache {
     /// cache is unavailable. The three are deliberately one answer: every caller falls back the
     /// same way.
     pub async fn get_flag(&self, key: impl CacheKey) -> Option<bool> {
-        let Self::Connected { conn, .. } = self else {
+        let Self::Connected(conn) = self else {
             return None
         };
         let key = key.to_string();
@@ -62,9 +59,13 @@ impl Cache {
             .map(|value| value == "1")
     }
 
-    /// Stores a flag for as long as the configured lifetime.
-    pub async fn set_flag(&self, key: impl CacheKey, value: bool) {
-        let Self::Connected { conn, ttl } = self else {
+    /// Stores a flag for as long as its owner says it stays true.
+    ///
+    /// The lifetime is a property of the value, not of the store: what makes a chat's language
+    /// worth keeping for an hour has nothing to do with what makes a lock worth keeping for
+    /// seconds. So it arrives with each write rather than being configured here.
+    pub async fn set_flag(&self, key: impl CacheKey, value: bool, ttl: Duration) {
+        let Self::Connected(conn) = self else {
             return
         };
         let key = key.to_string();
@@ -102,28 +103,28 @@ mod test {
 
     #[tokio::test]
     async fn a_value_survives_a_round_trip() {
-        let cache = cache(Duration::from_secs(60)).await;
+        let cache = cache().await;
         let key = TestKey(1);
 
-        cache.set_flag(key, true).await;
+        cache.set_flag(key, true, A_MINUTE).await;
         assert_eq!(cache.get_flag(key).await, Some(true));
 
-        cache.set_flag(key, false).await;
+        cache.set_flag(key, false, A_MINUTE).await;
         assert_eq!(cache.get_flag(key).await, Some(false));
     }
 
     #[tokio::test]
     async fn an_absent_key_is_nothing_known() {
-        let cache = cache(Duration::from_secs(60)).await;
+        let cache = cache().await;
         assert_eq!(cache.get_flag(TestKey(2)).await, None);
     }
 
     #[tokio::test]
     async fn a_value_stops_being_known_once_its_time_is_up() {
-        let cache = cache(Duration::from_secs(1)).await;
+        let cache = cache().await;
         let key = TestKey(3);
 
-        cache.set_flag(key, false).await;
+        cache.set_flag(key, false, Duration::from_secs(1)).await;
         assert_eq!(cache.get_flag(key).await, Some(false));
 
         tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -134,27 +135,23 @@ mod test {
     async fn a_disabled_cache_knows_nothing_and_keeps_nothing() {
         let cache = Cache::Disabled;
 
-        cache.set_flag(TestKey(4), true).await;
+        cache.set_flag(TestKey(4), true, A_MINUTE).await;
         assert_eq!(cache.get_flag(TestKey(4)).await, None);
     }
 
     #[tokio::test]
     async fn an_unreachable_server_disables_the_cache() {
         // Port 1 is never a Redis; the bot must start anyway.
-        let cache = Cache::connect(Some(RedisConfig {
-            url: "redis://localhost:1/".to_owned(),
-            cache_ttl: Duration::from_secs(60),
-        })).await;
+        let cache = Cache::connect(Some(RedisConfig { url: "redis://localhost:1/".to_owned() })).await;
         assert!(matches!(cache, Cache::Disabled));
     }
 
-    /// A connected cache with the given TTL. The whole test binary shares one server, so a test
-    /// that needs isolation asks for a key of its own.
-    async fn cache(ttl: Duration) -> Cache {
+    /// A connected cache. The whole test binary shares one server, so a test that needs isolation
+    /// asks for a key of its own.
+    async fn cache() -> Cache {
         let port = CONTAINER.port().await;
-        Cache::connect(Some(RedisConfig {
-            url: format!("redis://localhost:{port}/"),
-            cache_ttl: ttl,
-        })).await
+        Cache::connect(Some(RedisConfig { url: format!("redis://localhost:{port}/") })).await
     }
+
+    const A_MINUTE: Duration = Duration::from_secs(60);
 }

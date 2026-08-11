@@ -33,6 +33,8 @@ pub struct SelfDestructionService {
     deletions: ScheduledDeletions,
     cache: Cache,
     bot_id: TeloxideUserId,
+    /// How long what the cache learns about the bot's rights here stays worth believing.
+    bot_admin_ttl: Duration,
 }
 
 impl SelfDestructionService {
@@ -41,8 +43,9 @@ impl SelfDestructionService {
         deletions: ScheduledDeletions,
         cache: Cache,
         bot_id: TeloxideUserId,
+        bot_admin_ttl: Duration,
     ) -> Self {
-        Self { config, deletions, cache, bot_id }
+        Self { config, deletions, cache, bot_id, bot_admin_ttl }
     }
 
     /// Schedules the answer `sent` and, when the configuration and the bot's rights allow it, the
@@ -188,7 +191,7 @@ impl SelfDestructionService {
                 return false
             }
         };
-        rights::remember_deletion_right(&self.cache, chat_id, is_admin).await;
+        rights::remember_deletion_right(&self.cache, chat_id, is_admin, self.bot_admin_ttl).await;
         is_admin
     }
 }

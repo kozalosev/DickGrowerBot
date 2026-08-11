@@ -121,6 +121,7 @@ in one statement and dedupes for free.
 
 ```
 CHAT_TOPICS_CACHE_TIME_SECS=3600   # optional TTL for the per-chat allowed-topics cache
+BOT_ADMIN_CACHE_TIME_SECS=3600     # optional TTL for what is known about the bot's rights in a chat
 ```
 
 `checks::reject_forbidden_topic()` sits at the very top of the dispatcher tree, above even the ban
@@ -468,8 +469,13 @@ Short-lived values live in Redis (`src/cache.rs`), which is the one place that k
 REDIS_HOST=localhost    # unset => the cache is off
 REDIS_PORT=6379
 REDIS_PASSWORD=…
-REDIS_CACHE_TTL_SECS=21600
 ```
+
+**How long a value lives is not configured here.** A lifetime belongs to the value, not to the
+store: what makes a chat's language worth keeping for an hour says nothing about a lock that is
+worth keeping for seconds. So `set_flag` takes it with each write, and the numbers live together
+in `CachesConfig` (`config/caches.rs`) with one variable each — where the caches of #155 will find
+theirs already waiting when they move here from process memory.
 
 **Nothing here is a source of truth.** A miss is answered by the caller doing the work again, so a
 server that is down, slow or simply absent costs only the work it would have saved. Every failure is

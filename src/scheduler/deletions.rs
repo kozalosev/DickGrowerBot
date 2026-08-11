@@ -49,6 +49,7 @@ pub async fn run_pending_deletions(
     repos: &Repositories,
     cache: &Cache,
     config: &SelfDestructionConfig,
+    bot_admin_ttl: Duration,
 ) -> anyhow::Result<()> {
     let due = repos.deletions.claim_due(config.batch_size, Utc::now() + config.lease).await?;
     // The empty runs are measured too: an idle worker is what tells a queue that keeps up from one
@@ -67,7 +68,7 @@ pub async fn run_pending_deletions(
     // shows up as `telegram_request_errors_total{kind="rate_limited"}`.
     stream::iter(due)
         .for_each_concurrent(usize::from(config.concurrency), |deletion| async move {
-            act_and_record(bot, repos, cache, config, deletion).await
+            act_and_record(bot, repos, cache, config, bot_admin_ttl, deletion).await
         })
         .await;
     Ok(())
@@ -79,13 +80,14 @@ async fn act_and_record(
     repos: &Repositories,
     cache: &Cache,
     config: &SelfDestructionConfig,
+    bot_admin_ttl: Duration,
     deletion: ScheduledDeletion,
 ) {
     let id = deletion.id;
     let group = deletion.group;
     let kind = deletion.kind;
     let failures = deletion.attempts;
-    let outcome = act(bot, cache, config, deletion).await;
+    let outcome = act(bot, cache, config, bot_admin_ttl, deletion).await;
 
     // Only an ending is counted, and each one only once, so the outcomes add up to the number of
     // messages. A warning and a retry are steps, not endings; retries have their own counter.
@@ -154,6 +156,7 @@ async fn act(
     bot: &Throttle<Bot>,
     cache: &Cache,
     config: &SelfDestructionConfig,
+    bot_admin_ttl: Duration,
     deletion: ScheduledDeletion,
 ) -> Outcome {
     // Telegram refuses to delete a message older than 48 hours. Delays are capped below that, so a
@@ -173,7 +176,7 @@ async fn act(
             let placeholder = t!("self_destruction.placeholder", locale = &deletion.lang_code);
             let request = bot.edit_message_text_inline(inline_message_id.value(), placeholder)
                 .parse_mode(Html);
-            outcome_of(request.await.map(|_| ()), &deletion, cache).await
+            outcome_of(request.await.map(|_| ()), &deletion, cache, bot_admin_ttl).await
         },
         DeletionTarget::ChatMessage { chat_id, message_id } => {
             let chat = ChatId::from(*chat_id);
@@ -189,7 +192,7 @@ async fn act(
                 let request = bot.edit_message_text(chat, message, notice).parse_mode(Html);
                 return outcome_of_warning(request.await.map(|_| ()), chat, message)
             }
-            outcome_of(bot.delete_message(chat, message).await.map(|_| ()), &deletion, cache).await
+            outcome_of(bot.delete_message(chat, message).await.map(|_| ()), &deletion, cache, bot_admin_ttl).await
         },
     }
 }
@@ -199,6 +202,7 @@ async fn outcome_of(
     result: Result<(), RequestError>,
     deletion: &ScheduledDeletion,
     cache: &Cache,
+    bot_admin_ttl: Duration,
 ) -> Outcome {
     let error = match result {
         Ok(()) => return Outcome::Removed,
@@ -215,7 +219,7 @@ async fn outcome_of(
         // The bot may not delete messages here. Remembering that keeps every later command out of
         // the queue instead of into this same failure.
         if let DeletionTarget::ChatMessage { chat_id, .. } = deletion.target {
-            rights::remember_deletion_right(cache, ChatId::from(chat_id), false).await;
+            rights::remember_deletion_right(cache, ChatId::from(chat_id), false, bot_admin_ttl).await;
         }
     }
     if is_final(&error) {

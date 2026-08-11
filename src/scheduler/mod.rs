@@ -81,6 +81,7 @@ pub fn spawn_daily_shrink(
 /// it acts on are rows, and the tick after the restart finds every one that fell due meanwhile.
 pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cache, config: AppConfig) {
     let self_destruction = config.self_destruction;
+    let bot_admin_ttl = config.caches.bot_admin;
     if !self_destruction.enabled() {
         tracing::info!("the self-destruction of messages is disabled (set the MSG_SELFDESTRUCT_DELAY_* variables to enable it)");
         return;
@@ -95,7 +96,7 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
 
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.
-            if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction).await {
+            if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction, bot_admin_ttl).await {
                 tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
                 continue;
             }
