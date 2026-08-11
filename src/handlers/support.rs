@@ -54,7 +54,7 @@ impl Relayed {
         match self {
             Relayed::Sent => "commands.support.sent",
             Relayed::TooOften => "commands.support.too_often",
-            Relayed::Disabled => "commands.support.disabled",
+            Relayed::Disabled => "errors.feature_disabled",
         }
     }
 }

@@ -176,9 +176,10 @@ MSG_SELFDESTRUCT_DELAY_NOTICE_MINUTES=2         # minutes; 0 or unset => the gro
 MSG_SELFDESTRUCT_DELAY_REPORT_MINUTES=5
 MSG_SELFDESTRUCT_DELAY_EVENT_MINUTES=0          # the chat's history — permanent by default
 MSG_SELFDESTRUCT_DELAY_APPLICATION_MINUTES=60
+MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES=1,5,15,60,180  # the delays /cleanup offers a chat
 MSG_SELFDESTRUCT_READING_SPEED_CPM=500  # a long message lives at least as long as it takes to read
 MSG_SELFDESTRUCT_WARNING_SECONDS=15     # grace period showing "will be deleted in N seconds"
-MSG_SELFDESTRUCT_MODE=WITHOUT_COMMAND   # DISABLED | ENABLED | ONLY_WITH_COMMAND | WITHOUT_COMMAND
+MSG_SELFDESTRUCT_MODE=ENABLED           # DISABLED | ENABLED | ONLY_WITH_COMMAND | WITHOUT_COMMAND
 MSG_SELFDESTRUCT_POLL_SECONDS=5            # how often the worker looks for the due messages
 MSG_SELFDESTRUCT_BATCH_SIZE=50          # messages one run takes on
 MSG_SELFDESTRUCT_CONCURRENCY=8          # how many of them it acts on at once
@@ -189,6 +190,67 @@ MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS=3600  # the cap that doubling stops at
 MSG_SELFDESTRUCT_MAX_ATTEMPTS=3         # attempts before the row is marked `failed` and left alone
 MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES=1440  # minutes a finished row is kept; 0 => for ever
 ```
+
+**Every chat may overrule all of that** with `/cleanup` (issue #128), an admins-only picker that
+switches each of the four groups on or off for that chat alone. Only on and off: the mode stays the
+operator's, because it is about the bot's rights rather than about taste.
+
+```
+CHAT_CLEANUP_CACHE_TIME_SECONDS=3600   # optional TTL for the per-chat cleanup-settings cache
+```
+
+The choices live in the same `Chats.settings` jsonb as the chat language and the allowed topics,
+under `cleanup` — a group-keyed object of **minutes**, `{"notice": 5}`. A group is therefore in one
+of three states, and all three are distinct: a number is the delay the chat chose, a zero is the
+chat asking for that group to be kept, and an absent key is the chat leaving the decision to the
+bot. The last two look alike until the operator changes his mind, which is exactly when they part.
+`SelfDestructionConfig::delay_for_chat` is where the three meet.
+
+The numbers on offer are `MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES`, a sorted, deduped list parsed
+into `DelayOptions`; "keep them" and "let the bot decide" are added by the picker itself, so no list
+can leave a chat with a choice it can't take back. **A stored value that is no longer in the list
+still applies** — the list is a suggestion for the next press, not a rule about what may already be
+stored — which is also why the cap is applied on the way out and not only on the way in. The list
+counts towards `enabled()`, the worker's spawn gate, since a chat can be the only reason a row is
+ever written; with nothing offered, a chat can only ever keep messages, and the gate says so.
+
+The picker has **two levels**: the groups with their current delays, then the delays for the one
+that was pressed. A flat grid would need one row per group with nothing to label it by, and it
+would break the moment the list grew.
+
+Choosing a **non-zero** delay is the one press that asks Telegram anything: where the mode deletes
+commands, the bot may not be allowed to, and then the answers would go while the commands stay. So
+the press turns into a warning that has to be confirmed (`ONLY_WITH_COMMAND` gets a stronger one —
+there nothing at all would be deleted), carrying the chosen number through the detour, and the
+answer is written into the rights cache, which `ONLY_WITH_COMMAND` reads on every message
+afterwards. `SelfDestructionService::may_delete_here` is that unconditional check, next to the
+mode-dependent `may_delete_commands` the answering path uses. Keeping a group, or handing it back
+to the bot, takes nothing away and asks nothing.
+
+The setting is cached in this process, like the chat language and the allowed topics, not in the
+Redis `Cache`: that one is flag-shaped and is never a source of truth.
+
+**Inline messages obey the chat too, where the chat can be named.** An inline message can only be
+rewritten into the placeholder, never deleted, so it gets a switch of its own in the picker rather
+than following the delays quietly — the `inline` key of the same jsonb object, a boolean beside the
+group names (a group can never be called that, so the two live together). It is a tri-state like the
+delays: absent means the chat said nothing and `MSG_SELFDESTRUCT_INLINE_GROUPS` decides which groups
+are touched, `true` means every group the chat cleans up, `false` means none.
+`SelfDestructionConfig::inline_delay_for_chat` is where the two meet, and the delay is the chat's
+either way.
+
+Naming the chat is the part that isn't always possible. `inline_chosen_handler` already works only
+for anchored groups (it filters on a row holding both the id and the instance), and
+`inline_callback_handler` resolves one for the command itself — both simply pass what they hold.
+`pvp_inline_chosen_handler` has to decode the id out of the `inline_message_id`
+(`utils::try_resolve_chat_id`, under the same `CHATS_MERGING_ENABLED` its neighbours use). Where
+none of that yields a chat — a legacy group without an anchor, an id that encodes none — the bot's
+own settings apply, which is the half of issue #76 that `/topics` runs into as well.
+
+Inline messages are stretched by the reading time now, the same as the others: `schedule_inline`
+takes the character count from the text the handler is about to send. The battle offer is the
+exception and passes zero — Telegram builds that text out of the `InlineQueryResultArticle`, so the
+bot never sees it, and it is one line long anyway.
 
 **Everything goes through the database**, short-lived groups included: `SelfDestructionService`
 (`handlers/utils/self_destruction.rs`) only writes rows into `Scheduled_Message_Deletions`

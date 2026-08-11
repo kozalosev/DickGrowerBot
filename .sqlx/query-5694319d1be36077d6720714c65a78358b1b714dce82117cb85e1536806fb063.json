@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Chats SET settings = jsonb_set(settings, '{cleanup}',\n                    COALESCE(settings->'cleanup', '{}'::jsonb) || jsonb_build_object('inline', $2::bool))\n                    WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5694319d1be36077d6720714c65a78358b1b714dce82117cb85e1536806fb063"
+}

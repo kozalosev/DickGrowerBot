@@ -1,3 +1,4 @@
+use domain_types::traits::SaturatingInto;
 use domain_types_macro::domain_type;
 use crate::number;
 
@@ -42,6 +43,24 @@ struct AttemptsCount(u32);
 /// field that holds it.
 #[domain_type(number)]
 struct RateLimit(u32);
+
+/// How long a message lives before it is taken away. Zero means it is never taken away at all,
+/// which is what makes this a count of minutes rather than a `Duration`: the value is chosen from
+/// a list, stored in jsonb and shown on a button, and all three want a plain number.
+#[domain_type(number)]
+struct DelayMinutes(u32);
+
+/// The visible characters of a message — what its reading time is estimated from. A Telegram
+/// message holds at most a few thousand of them, so the width is never in question.
+#[domain_type(number)]
+struct CharCount(u32);
+
+impl CharCount {
+    /// What a reader actually gets through: characters, not bytes.
+    pub fn of(text: &str) -> Self {
+        Self(text.chars().count().saturating_into())
+    }
+}
 
 #[cfg(test)]
 mod deserialize_tests {

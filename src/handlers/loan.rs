@@ -14,7 +14,7 @@ use crate::config::{AppConfig, MessageGroup};
 use crate::domain::objects::Loan;
 use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, PayoutRatio, UserId as DomainUserId};
 use domain_types::literal;
-use crate::domain::primitives::chat::ChatIdPartiality;
+use crate::domain::primitives::chat::{ChatIdPartiality, InlineMessageId};
 use crate::handlers::{CallbackButton, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::handlers::utils::callbacks;
@@ -129,7 +129,7 @@ pub async fn loan_callback_handler(
         EditMessageReqParamsKind::Chat(chat_id, message_id) =>
             self_destruction.cancel_message(*chat_id, *message_id).await,
         EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
-            self_destruction.cancel_inline(inline_message_id).await,
+            self_destruction.cancel_inline(InlineMessageId::new(inline_message_id.clone())).await,
     };
     match data.action {
         LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {

@@ -7,7 +7,7 @@ use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
 use crate::config::CachedEnvToggles;
-use crate::handlers::{DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
+use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 
@@ -27,6 +27,7 @@ pub static COMMAND_NAMES: Lazy<HashSet<String>> = Lazy::new(|| {
         StatsCommands::bot_commands(),
         LanguageCommands::bot_commands(),
         TopicsCommands::bot_commands(),
+        CleanupCommands::bot_commands(),
         DickCommands::bot_commands(),
         DickOfDayCommands::bot_commands(),
         BattleCommands::bot_commands(),
@@ -51,6 +52,9 @@ pub struct CommandToggles {
     /// Whether `/support` is advertised — it needs a chat to relay the messages to, so it's hidden
     /// when `SUPPORT_CHAT_ID` is unset.
     pub support_enabled: bool,
+    /// Whether `/cleanup` is advertised — there is nothing for a chat to choose while the
+    /// self-destruction is switched off altogether.
+    pub cleanup_enabled: bool,
 }
 
 pub async fn set_my_commands(
@@ -81,12 +85,13 @@ pub async fn set_my_commands(
         LoanCommands::bot_commands(),
         StatsCommands::bot_commands(),
     ];
-    // The chat-wide /language and /topics are admin-only, so they live in the admin scope,
-    // not the group one.
+    // The chat-wide /language, /topics and /cleanup are admin-only, so they live in the admin
+    // scope, not the group one.
     let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),
         LanguageCommands::bot_commands(),
         TopicsCommands::bot_commands(),
+        if toggles.cleanup_enabled { CleanupCommands::bot_commands() } else { Vec::new() },
     ]].concat();
 
     let requests = vec![

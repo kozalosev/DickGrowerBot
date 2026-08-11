@@ -1,5 +1,6 @@
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, SupportedLanguage};
+use crate::domain::enums::MessageGroup;
+use crate::domain::primitives::{DaysCount, DelayMinutes, LengthChange, Limit, Offset, SupportedLanguage};
 use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
@@ -102,10 +103,90 @@ async fn allowed_topics_roundtrip() {
     assert!(topics.is_unrestricted());
 }
 
-/// Both settings live in the same jsonb column, so each one's writes must leave the other alone.
+#[tokio::test]
+async fn cleanup_settings_roundtrip() {
+    let db = fresh_db().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let partiality = ChatIdPartiality::Specific(ChatIdKind::ID(TelegramChatId::new(CHAT_ID)));
+    let kind = partiality.kind();
+
+    // A chat that never touched the setting decided nothing.
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert!(settings.is_default());
+
+    // A choice about one group leaves the other three undecided. Zero is a choice of its own:
+    // the chat asked for these to be kept, which is not the same as leaving it to the bot.
+    chats.set_cleanup_group(&partiality, MessageGroup::Notice, DelayMinutes::new(0))
+        .await.expect("couldn't ask for the notices to be kept");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert!(!settings.is_default());
+    assert_eq!(settings.get(MessageGroup::Notice), Some(DelayMinutes::new(0)));
+    assert_eq!(settings.get(MessageGroup::Report), None);
+
+    chats.set_cleanup_group(&partiality, MessageGroup::Event, DelayMinutes::new(15))
+        .await.expect("couldn't set the delay of the events");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert_eq!(settings.get(MessageGroup::Notice), Some(DelayMinutes::new(0)));
+    assert_eq!(settings.get(MessageGroup::Event), Some(DelayMinutes::new(15)));
+
+    // Choosing again is an overwrite, not a second entry.
+    chats.set_cleanup_group(&partiality, MessageGroup::Notice, DelayMinutes::new(5))
+        .await.expect("couldn't set the delay of the notices");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert_eq!(settings.get(MessageGroup::Notice), Some(DelayMinutes::new(5)));
+    assert_eq!(settings.get(MessageGroup::Event), Some(DelayMinutes::new(15)));
+
+    // One group can be handed back to the bot without touching the others.
+    chats.forget_cleanup_group(&partiality, MessageGroup::Notice)
+        .await.expect("couldn't forget the delay of the notices");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert_eq!(settings.get(MessageGroup::Notice), None);
+    assert_eq!(settings.get(MessageGroup::Event), Some(DelayMinutes::new(15)));
+
+    // Handing back the last one leaves a chat that looks like it never chose, which it hasn't.
+    chats.forget_cleanup_group(&partiality, MessageGroup::Event)
+        .await.expect("couldn't forget the delay of the events");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert!(settings.is_default());
+
+    // The inline flag shares the key with the delays and neither writer touches the other.
+    chats.set_cleanup_inline(&partiality, true)
+        .await.expect("couldn't ask for the inline messages to be shrunk");
+    chats.set_cleanup_group(&partiality, MessageGroup::Event, DelayMinutes::new(15))
+        .await.expect("couldn't set the delay of the events again");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert_eq!(settings.compresses_inline(), Some(true));
+    assert_eq!(settings.get(MessageGroup::Event), Some(DelayMinutes::new(15)));
+
+    chats.set_cleanup_inline(&partiality, false)
+        .await.expect("couldn't ask for the inline messages to be left alone");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert_eq!(settings.compresses_inline(), Some(false));
+    assert_eq!(settings.get(MessageGroup::Event), Some(DelayMinutes::new(15)));
+
+    // And the whole thing goes back at once.
+    chats.reset_cleanup(&partiality)
+        .await.expect("couldn't reset the cleanup settings");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert!(settings.is_default());
+    assert_eq!(settings.get(MessageGroup::Event), None);
+    assert_eq!(settings.compresses_inline(), None);
+}
+
+/// All three settings live in the same jsonb column, so each one's writes must leave the others
+/// alone.
 ///
-/// Every write is followed by reading *both* back: a write that wipes its neighbour has to be
-/// caught at the step that did it, not several steps later when it's no longer clear which one
+/// Every write is followed by reading *all* of them back: a write that wipes its neighbour has to
+/// be caught at the step that did it, not several steps later when it's no longer clear which one
 /// was to blame.
 #[tokio::test]
 async fn allowed_topics_and_language_are_independent() {
@@ -121,6 +202,7 @@ async fn allowed_topics_and_language_are_independent() {
         kind: &ChatIdKind,
         expected_lang: Option<SupportedLanguage>,
         expected_topics: &[TopicId],
+        expected_cleanup: Option<DelayMinutes>,
         step: &str,
     ) {
         let lang = chats.get_chat_language(kind)
@@ -135,50 +217,69 @@ async fn allowed_topics_and_language_are_independent() {
         for topic in expected_topics {
             assert!(topics.allows(*topic), "the topic {topic} is missing after {step}");
         }
+
+        let cleanup = chats.get_cleanup_settings(kind)
+            .await.expect("couldn't read the cleanup settings");
+        assert_eq!(cleanup.get(MessageGroup::Notice), expected_cleanup,
+                   "the cleanup setting is wrong after {step}");
     }
 
     chats.set_chat_language(&partiality, Some(SupportedLanguage::RU))
         .await.expect("couldn't set the language");
-    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[], "setting the language").await;
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[], None, "setting the language").await;
 
     chats.allow_topic(&partiality, games)
         .await.expect("couldn't allow the topic");
-    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], "allowing the first topic").await;
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], None, "allowing the first topic").await;
+
+    chats.set_cleanup_group(&partiality, MessageGroup::Notice, DelayMinutes::new(5))
+        .await.expect("couldn't set the delay of the notices");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], Some(DelayMinutes::new(5)), "setting a cleanup delay").await;
 
     chats.allow_topic(&partiality, general)
         .await.expect("couldn't allow the second topic");
-    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[general, games], "allowing the second topic").await;
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[general, games], Some(DelayMinutes::new(5)), "allowing the second topic").await;
 
     // The language changing under an established restriction is the direction the topics have to
     // survive; the first write above only proved the empty case.
     chats.set_chat_language(&partiality, Some(SupportedLanguage::ZH))
         .await.expect("couldn't overwrite the language");
-    assert_settings(&chats, &kind, Some(SupportedLanguage::ZH), &[general, games], "overwriting the language").await;
+    assert_settings(&chats, &kind, Some(SupportedLanguage::ZH), &[general, games], Some(DelayMinutes::new(5)), "overwriting the language").await;
 
     chats.forbid_topic(&partiality, general)
         .await.expect("couldn't forbid the topic");
-    assert_settings(&chats, &kind, Some(SupportedLanguage::ZH), &[games], "forbidding a topic").await;
+    assert_settings(&chats, &kind, Some(SupportedLanguage::ZH), &[games], Some(DelayMinutes::new(5)), "forbidding a topic").await;
 
     // Clearing removes the key rather than nulling it, which is the write most likely to take the
     // whole `settings` object down with it.
     chats.set_chat_language(&partiality, None)
         .await.expect("couldn't clear the language");
-    assert_settings(&chats, &kind, None, &[games], "clearing the language").await;
+    assert_settings(&chats, &kind, None, &[games], Some(DelayMinutes::new(5)), "clearing the language").await;
 
     chats.allow_all_topics(&partiality)
         .await.expect("couldn't allow all the topics");
-    assert_settings(&chats, &kind, None, &[], "allowing all the topics").await;
+    assert_settings(&chats, &kind, None, &[], Some(DelayMinutes::new(5)), "allowing all the topics").await;
 
-    // And the same pair of clearing writes in the opposite order.
+    chats.reset_cleanup(&partiality)
+        .await.expect("couldn't reset the cleanup settings");
+    assert_settings(&chats, &kind, None, &[], None, "resetting the cleanup settings").await;
+
+    // And the same clearing writes in the opposite order.
     chats.allow_topic(&partiality, games)
         .await.expect("couldn't allow the topic again");
     chats.set_chat_language(&partiality, Some(SupportedLanguage::RU))
         .await.expect("couldn't set the language again");
-    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], "restoring both settings").await;
+    chats.set_cleanup_group(&partiality, MessageGroup::Notice, DelayMinutes::new(15))
+        .await.expect("couldn't set the delay of the notices again");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], Some(DelayMinutes::new(15)), "restoring all three settings").await;
+
+    chats.reset_cleanup(&partiality)
+        .await.expect("couldn't reset the cleanup settings again");
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[games], None, "resetting the cleanup settings again").await;
 
     chats.allow_all_topics(&partiality)
         .await.expect("couldn't allow all the topics again");
-    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[], "dropping the restriction").await;
+    assert_settings(&chats, &kind, Some(SupportedLanguage::RU), &[], None, "dropping the restriction").await;
 }
 
 #[tokio::test]

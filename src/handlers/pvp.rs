@@ -15,8 +15,8 @@ use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackRes
 use crate::{metrics, reply_html, reply_html_ephemeral, repo};
 use crate::config::{BattlesFeatureToggles, MessageGroup};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
-use crate::domain::primitives::{Bet, LanguageCode, LengthChange, LoanPayout, UserId, Username};
-use crate::domain::primitives::chat::{ChatIdPartiality, TelegramChatId};
+use crate::domain::primitives::{Bet, CharCount, LanguageCode, LengthChange, LoanPayout, UserId, Username};
+use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, InlineMessageId, TelegramChatId};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
@@ -184,14 +184,20 @@ pub(super) fn build_inline_keyboard_article_result(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn pvp_inline_chosen_handler(result: ChosenInlineResult, deps: HandlerDeps) -> HandlerResult {
-    let HandlerDeps { self_destruction, lang_resolver, .. } = deps;
+    let HandlerDeps { self_destruction, lang_resolver, config, .. } = deps;
     metrics::INLINE_COUNTER.finished();
 
     // The offer is built by Telegram out of the article, so this is the first (and only) moment the
-    // bot learns which message carries it.
+    // bot learns which message carries it — and the only thing it knows about the chat is whatever
+    // the id encodes. The text is Telegram's too, hence no reading time: the offer is one line.
     if let Some(inline_message_id) = result.inline_message_id {
         let lang_code = lang_resolver.execute().await;
-        self_destruction.schedule_inline(&inline_message_id, MessageGroup::Application, &lang_code).await;
+        let chat = config.features.chats_merging
+            .then(|| utils::try_resolve_chat_id(&inline_message_id))
+            .flatten()
+            .map(ChatIdKind::from);
+        self_destruction.schedule_inline(InlineMessageId::new(inline_message_id), chat,
+            MessageGroup::Application, CharCount::new(0), &lang_code).await;
     }
     Ok(())
 }
@@ -244,7 +250,8 @@ pub async fn pvp_callback_handler(
     // A fought battle is a record of itself, not an offer waiting to expire.
     match (query.message.as_ref(), query.inline_message_id.as_ref()) {
         (Some(message), _) => self_destruction.cancel_message(message.chat().id, message.id()).await,
-        (None, Some(inline_message_id)) => self_destruction.cancel_inline(inline_message_id).await,
+        (None, Some(inline_message_id)) =>
+            self_destruction.cancel_inline(InlineMessageId::new(inline_message_id.clone())).await,
         (None, None) => {},
     };
     attack_result.apply(bot, query).await?;

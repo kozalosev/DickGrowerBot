@@ -54,6 +54,10 @@ pub static CMD_TOPICS: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_topics_usage_total", "count of /topics invocations and changes of the setting", ["invoked", "finished"]));
 pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
+pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
+    ComplexCommandCounters::new("command_cleanup_usage_total", "count of /cleanup invocations and changes of the setting", ["invoked", "finished"]));
+pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
+    CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
 pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
     CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
@@ -169,6 +173,8 @@ fn force_registration() {
     Lazy::force(&CHAT_LANGUAGE);
     Lazy::force(&CMD_TOPICS);
     Lazy::force(&CHAT_TOPICS);
+    Lazy::force(&CMD_CLEANUP);
+    Lazy::force(&CHAT_CLEANUP);
     Lazy::force(&BOT_ADMIN_LOOKUP);
     Lazy::force(&BROADCAST_LANGUAGE);
     Lazy::force(&USER_SERVICE_LANGUAGES_BATCH_SIZE);

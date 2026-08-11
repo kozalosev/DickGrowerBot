@@ -18,6 +18,7 @@ mod scheduler;
 mod reload;
 mod bans;
 mod topics;
+mod cleanup;
 mod cache;
 
 #[cfg(test)]
@@ -37,7 +38,7 @@ use config::AppConfig;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
-use crate::handlers::{DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
+use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
@@ -65,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                         repos.chats.clone(), app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;
     let topic_policy = topics::TopicPolicy::new(app_config.caches.chat_topics, repos.chats.clone());
+    let cleanup_policy = cleanup::CleanupPolicy::new(app_config.caches.chat_cleanup, repos.chats.clone());
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
@@ -98,6 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(checks::group_command::<BattleCommandsNoArgs>().endpoint(handlers::pvp::pvp_cmd_handler_no_args))
         .branch(checks::group_command::<LoanCommands>().endpoint(handlers::loan::loan_cmd_handler))
         .branch(checks::group_command::<ImportCommands>().endpoint(handlers::import_cmd_handler))
+        .branch(checks::group_command::<CleanupCommands>().endpoint(handlers::cleanup::cleanup_cmd_handler))
         .branch(Update::filter_message().filter_command::<StatsCommands>().branch(checks::require_anchored_group()).endpoint(handlers::stats::stats_cmd_handler))
         .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, InMemStorage<PromoCommandState>, PromoCommandState>()
             .branch(dptree::case![PromoCommandState::Start].endpoint(handlers::promo_cmd_handler)))
@@ -126,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::loan::callback_filter).endpoint(handlers::loan::loan_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::language_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::topics::callback_filter).endpoint(handlers::topics::topics_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::cleanup::callback_filter).endpoint(handlers::cleanup::cleanup_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
     let bot = config::BotConfig::build_bot()?;
@@ -137,6 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env: app_config.command_toggles.clone(),
         personal_language_enabled: language_service.user_service_enabled(),
         support_enabled: app_config.support_chat_id.is_some(),
+        cleanup_enabled: app_config.self_destruction.configurable(),
     };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
@@ -154,9 +159,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
-    let self_destruction = SelfDestructionService::new(app_config.self_destruction,
-                                                       repos.deletions.clone(), cache.clone(),
-                                                       me.user.id, app_config.caches.bot_admin);
+    let self_destruction = SelfDestructionService::new(app_config.self_destruction.clone(),
+                                                       repos.deletions.clone(), cleanup_policy.clone(),
+                                                       cache.clone(), me.user.id, app_config.caches.bot_admin);
     let support_service = SupportService::new(app_config.support_chat_id);
 
     let webhook_url = integrations_config.webhook_url;
@@ -190,6 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         support_service,
         ban_list,
         topic_policy,
+        cleanup_policy,
         cache,
         InMemStorage::<PromoCommandState>::new(),
         InMemStorage::<SupportCommandState>::new()

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Chats SET settings = CASE\n                    WHEN (settings->'cleanup') - $2::text = '{}'::jsonb THEN settings - 'cleanup'\n                    ELSE jsonb_set(settings, '{cleanup}', (settings->'cleanup') - $2::text)\n                    END\n                    WHERE id = $1 AND settings->'cleanup' IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5db092e83621696981459a9fdca9020ae394cb61a02aa2112c83846e25799c7d"
+}

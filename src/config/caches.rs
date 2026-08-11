@@ -17,6 +17,8 @@ pub struct CachesConfig {
     pub chat_language: Duration,
     /// The allowed topics of a forum, on the same terms.
     pub chat_topics: Duration,
+    /// Which of the bot's messages a chat has it clean up, on the same terms.
+    pub chat_cleanup: Duration,
     /// How often the ban list is re-read. Never zero: it is an interval as much as a lifetime,
     /// and a zero one is a busy loop.
     pub ban_list_refresh: Duration,
@@ -31,6 +33,7 @@ impl CachesConfig {
         Self {
             chat_language: EnvDuration::seconds("CHAT_LANGUAGE_CACHE_TIME_SECONDS").or(3600).read(),
             chat_topics: EnvDuration::seconds("CHAT_TOPICS_CACHE_TIME_SECONDS").or(3600).read(),
+            chat_cleanup: EnvDuration::seconds("CHAT_CLEANUP_CACHE_TIME_SECONDS").or(3600).read(),
             ban_list_refresh: EnvDuration::seconds("BAN_LIST_REFRESH_SECONDS").or(900).at_least(1).read(),
             bot_admin: EnvDuration::seconds("BOT_ADMIN_CACHE_TIME_SECONDS").or(3600).at_least(1).read(),
         }

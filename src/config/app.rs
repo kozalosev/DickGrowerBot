@@ -62,6 +62,7 @@ impl AppConfig {
             report: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_REPORT_MINUTES").read(),
             event: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_EVENT_MINUTES").read(),
             application: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_APPLICATION_MINUTES").read(),
+            delay_options: get_optional_env_value("MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES"),
             reading_speed_cpm: get_env_value_or_default("MSG_SELFDESTRUCT_READING_SPEED_CPM", 500),
             warning: EnvDuration::seconds("MSG_SELFDESTRUCT_WARNING_SECONDS").read(),
             mode: get_optional_env_value("MSG_SELFDESTRUCT_MODE"),

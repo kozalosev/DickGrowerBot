@@ -34,7 +34,8 @@ Features
 * can be restricted for use in specific topics only;
 * optional self-destruction of the bot's own messages (and of the commands behind them, where the
   bot is an administrator) to keep a busy chat readable — configured per message group with the
-  `MSG_SELFDESTRUCT_*` variables of [.env.example](.env.example).
+  `MSG_SELFDESTRUCT_*` variables of [.env.example](.env.example), and by each chat's administrators
+  for their own chat with `/cleanup`, which offers them a choice of delays per message group.
 
 Technical stuff
 ---------------

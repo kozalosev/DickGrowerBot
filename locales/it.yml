@@ -16,19 +16,52 @@ commands:
       reset: "Fatto! La lingua della chat è stata azzerata — risponderò di nuovo a ciascuno nella propria lingua."
       auto_button: "🌐 Auto (lingua di ciascuno)"
   topics:
-    description: "Choose the topics the bot works in"
+    description: "Scegli gli argomenti in cui il bot lavora"
     state:
-      unrestricted: "I work in <b>every topic</b> of this chat."
-      allowed_here: "I work <b>in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
-      forbidden_here: "I <b>don't work in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+      unrestricted: "Lavoro in <b>tutti gli argomenti</b> di questa chat."
+      allowed_here: "Lavoro <b>in questo argomento</b>. Argomenti in cui sono ammesso: <b>%{count}</b>."
+      forbidden_here: "<b>Non lavoro in questo argomento</b>. Argomenti in cui sono ammesso: <b>%{count}</b>."
     buttons:
-      only_here: "🔒 Work in this topic only"
-      allow_here: "✅ Allow in this topic"
-      forbid_here: "🚫 Forbid in this topic"
-      allow_everywhere: "🌍 Allow in all topics"
+      only_here: "🔒 Lavora solo in questo argomento"
+      allow_here: "✅ Permetti in questo argomento"
+      forbid_here: "🚫 Vieta in questo argomento"
+      allow_everywhere: "🌍 Permetti in tutti gli argomenti"
     errors:
-      not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
-      admins_only: "Only chat administrators can choose the topics I work in."
+      not_a_forum: "Questa chat non ha argomenti, quindi non c'è nulla a cui limitarmi."
+      admins_only: "Solo gli amministratori possono scegliere gli argomenti in cui lavoro."
+  cleanup:
+    description: "Scegli quanto restano i miei messaggi in questa chat"
+    state:
+      header: "Ecco quanto restano i miei messaggi in questa chat:"
+      cleaned: "🧹 %{group} — <b>%{delay}</b>"
+      kept: "📌 %{group} — restano per sempre"
+      inline_compressed: "🗜 Qui restringo anche i miei messaggi inline."
+      inline_kept: "📌 Qui lascio stare i miei messaggi inline."
+    pick:
+      prompt: "Quanto devono restare in questa chat i miei messaggi della categoria «%{group}»?"
+    groups:
+      notice: "Avvisi e rifiuti"
+      report: "Classifiche"
+      event: "Risultati"
+      application: "Sfide e offerte"
+    delays:
+      minutes: "%{count} min"
+      hours: "%{count} h"
+      kept: "per sempre"
+    buttons:
+      group: "%{group}: %{delay}"
+      keep: "📌 Tenerli per sempre"
+      follow: "↩️ Come preferisce il bot"
+      back: "⬅️ Indietro"
+      inline_on: "🗜 Restringi i messaggi inline"
+      inline_off: "📌 Lascia stare i messaggi inline"
+      reset: "↩️ Tutto come preferisce il bot"
+      confirm: "🧹 Imposta comunque"
+    warning:
+      no_rights: "Non posso eliminare messaggi qui, quindi i comandi che mi mandate resteranno mentre le mie risposte spariranno. Rendimi amministratore con il diritto di eliminare i messaggi e porterò via entrambi.\n\nImpostarlo comunque per <b>%{group}</b>?"
+      no_rights_strict: "Non posso eliminare messaggi qui, e una risposta la rimuovo solo insieme al comando che l'ha richiesta — quindi non sparirà niente finché non sarò amministratore con il diritto di eliminare i messaggi.\n\nImpostarlo comunque per <b>%{group}</b>?"
+    errors:
+      admins_only: "Solo gli amministratori possono scegliere quali messaggi si autodistruggono."
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
   support:
@@ -37,7 +70,6 @@ commands:
     sent: "Messaggio inviato. La risposta arriverà dal proprietario in chat privata."
     cancelled: "Richiesta annullata."
     too_often: "Hai appena inviato un messaggio. Aspetta un minuto prima del prossimo."
-    disabled: "Questa funzione al momento non è disponibile."
   grow:
     description: "Fai crescere il tuo pene!"
     result: "Il tuo pene è %{event} di <b>%{incr} cm</b> e ora è lungo <b>%{length} cm</b>."
@@ -172,7 +204,7 @@ titles:
   perks:
     top_line: "I seguenti vantaggi hanno influenzato il risultato:"
     help-pussies: "buco profondo"
-    loan-payout: "micro-loaner"
+    loan-payout: "microdebitore"
 setup:
   text: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo quando vengo chiamato in modalità inline.\n\nPremi il pulsante qui sotto <b>una volta</b> per attivarmi qui — dopodiché tutto funzionerà come al solito.\n\nFinché non viene premuto, tutto ciò che è stato giocato in modalità inline andrà perso se il gruppo diventa un supergruppo."
   button: "Attiva"
@@ -181,8 +213,8 @@ migration:
   lost: "Questo gruppo è appena diventato un supergruppo, e Telegram gli ha dato un'identità del tutto nuova — non riesco più a riconoscerlo come il gruppo che conoscevo.\n\nSe qualcuno ha giocato qui in modalità inline, quella storia purtroppo non è più raggiungibile e i punteggi ripartono da zero. Se nessuno l'ha fatto, non si è perso nulla. D'ora in poi tutto funziona come al solito, e non può più succedere. 🍆"
   lost_inline: "Questo gruppo è appena diventato un supergruppo. Tutto ciò che è stato giocato con i comandi è arrivato insieme a lui ed è al sicuro.\n\nI risultati della modalità inline, invece, non erano mai stati legati a questo gruppo — sarebbe servito premere il tasto di attivazione prima del passaggio. Purtroppo ora non sono più raggiungibili. Se nessuno ha giocato qui in modalità inline, non si è perso nulla. D'ora in poi tutto funziona come al solito. 🍆"
 errors:
-  forbidden_topic_callback: "I don't work in this topic."
-  forbidden_topic: "I don't work in this topic. An administrator can change that with /topics."
+  forbidden_topic_callback: "Non lavoro in questo argomento."
+  forbidden_topic: "Non lavoro in questo argomento. Un amministratore può cambiarlo con /topics."
   not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
   group_account: "Non puoi giocare per conto di un gruppo o canale — disattiva la modalità anonima e riprova!"
   feature_disabled: "Questa funzione non è al momento disponibile."

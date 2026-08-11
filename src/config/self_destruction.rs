@@ -1,6 +1,9 @@
 use std::str::FromStr;
 use std::time::Duration;
-use crate::domain::primitives::{AttemptsCount, Limit};
+use crate::domain::objects::ChatCleanupSettings;
+use crate::domain::primitives::{AttemptsCount, DelayMinutes, Limit};
+
+pub use crate::domain::enums::MessageGroup;
 
 /// The latest a message may be scheduled for. Telegram refuses to let a bot delete anything older
 /// than 48 hours, and the hour of headroom is for everything that happens between the moment a
@@ -8,26 +11,6 @@ use crate::domain::primitives::{AttemptsCount, Limit};
 /// warning's grace period and the waits between failed attempts. Scheduled at the full 48, a
 /// message would be past the limit before it was ever tried.
 pub const MAX_DELAY: Duration = Duration::from_secs(47 * 60 * 60);
-
-/// Lifetime category of a bot message, used to decide when (if ever) it self-destructs.
-///
-/// * `Notice` = canned, always-the-same messages (help, privacy, errors, statuses);
-/// * `Report` = generated read-outs (leaderboard, stats);
-/// * `Event` = permanent records (growths, DoDs, fights);
-/// * `Application` = interactive requests (loans, battles).
-///
-/// The lowercase spelling is shared by the `message_group` enum of the database, the label of
-/// [`crate::metrics::SELF_DESTRUCTION`] and the log field, so the three can't drift apart.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, sqlx::Type,
-         strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter)]
-#[strum(serialize_all = "lowercase")]
-#[sqlx(type_name = "message_group", rename_all = "lowercase")]
-pub enum MessageGroup {
-    Notice,
-    Report,
-    Event,
-    Application,
-}
 
 /// What the bot does with the command behind a self-destructing answer. The default takes both
 /// away: a chat that asked for the answers to go wants no half-dialogues left behind, and the
@@ -89,15 +72,77 @@ impl std::fmt::Display for InlineGroups {
     }
 }
 
+/// The delays `/cleanup` offers a chat to choose from, in minutes, sorted and without repetitions.
+///
+/// Only real delays are held here: "keep for ever" and "as the bot does" are added by the picker
+/// itself, so no list can leave a chat with a choice it can't take back. A zero and anything past
+/// [`MAX_DELAY`] are dropped when the variable is read — the first says nothing the picker doesn't
+/// already offer, and the second is a delay the bot could never honour.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DelayOptions(Vec<DelayMinutes>);
+
+/// A minute for the impatient, an hour for the tolerant, and three steps in between. Unset means
+/// this rather than nothing, because a bot that offers no delays offers no choice worth the
+/// command; a list emptied on purpose still says "keep things only".
+impl Default for DelayOptions {
+    fn default() -> Self {
+        Self([1, 5, 15, 60, 180].map(DelayMinutes::new).into())
+    }
+}
+
+impl DelayOptions {
+    pub fn iter(&self) -> impl Iterator<Item = DelayMinutes> + '_ {
+        self.0.iter().copied()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl FromStr for DelayOptions {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut minutes = s.split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.parse::<u32>())
+            .collect::<Result<Vec<_>, _>>()?;
+        minutes.retain(|value| {
+            let acceptable = *value > 0 && u64::from(*value) * 60 <= MAX_DELAY.as_secs();
+            if !acceptable {
+                tracing::warn!(minutes = %value, "a suggested delay is dropped: it is either zero or past the limit");
+            }
+            acceptable
+        });
+        minutes.sort_unstable();
+        minutes.dedup();
+        Ok(Self(minutes.into_iter().map(DelayMinutes::new).collect()))
+    }
+}
+
+impl std::fmt::Display for DelayOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let values = self.iter()
+            .map(|minutes| minutes.to_string())
+            .collect::<Vec<_>>();
+        f.write_str(&values.join(","))
+    }
+}
+
 /// Per-group self-destruction delays and tuning. A zero group delay means messages of
 /// that group are permanent. The default (all-zero) disables the feature entirely, so it
 /// ships dark.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub struct SelfDestructionConfig {
     pub notice: Duration,
     pub report: Duration,
     pub event: Duration,
     pub application: Duration,
+    /// The delays a chat may choose from with `/cleanup`. An empty list leaves it nothing to pick,
+    /// so its administrators can only keep messages that the bot would otherwise take away.
+    pub delay_options: DelayOptions,
     /// Visible characters an average reader gets through per minute; the base delay of a
     /// long message is stretched to at least its estimated reading time. A value of 0
     /// disables the reading-time adjustment.
@@ -135,19 +180,77 @@ impl SelfDestructionConfig {
         if let DeletionMode::Disabled = self.mode {
             return None
         }
-        let delay = match group {
+        self.capped(self.base_delay(group))
+    }
+
+    /// The same for a chat that chose for itself: the delay it picked, zero minutes meaning it
+    /// wants the group kept for ever. A chat that chose nothing gets [`Self::delay_for`].
+    ///
+    /// A value that is no longer among [`Self::delay_options`] still applies: the list is a
+    /// suggestion for the next press, not a rule about what may already be stored.
+    pub fn delay_for_chat(&self, group: MessageGroup, settings: &ChatCleanupSettings) -> Option<Duration> {
+        if let DeletionMode::Disabled = self.mode {
+            return None
+        }
+        match settings.get(group) {
+            Some(minutes) => self.capped(Duration::from_secs(u64::from(minutes.value()) * 60)),
+            None => self.delay_for(group),
+        }
+    }
+
+    /// How long an inline message of this group lives in a chat, or `None` when it is left alone.
+    ///
+    /// An inline message can't be deleted, only rewritten into the placeholder, so a chat that said
+    /// nothing about them follows [`Self::inline_groups`] — the operator's list of what may be
+    /// touched at all. A chat that did say something decides for itself, and the delay is its own
+    /// either way.
+    pub fn inline_delay_for_chat(
+        &self,
+        group: MessageGroup,
+        settings: &ChatCleanupSettings,
+    ) -> Option<Duration> {
+        let allowed = settings.compresses_inline()
+            .unwrap_or_else(|| self.inline_groups.contains(group));
+        allowed.then(|| self.delay_for_chat(group, settings)).flatten()
+    }
+
+    /// Whether this chat's inline messages are shrunk at all — the position the picker's switch
+    /// shows. A chat that said nothing is summed up by whether the bot opened any group for inline
+    /// at all, because a switch has no room for "some of them".
+    pub fn compresses_inline_for_chat(&self, settings: &ChatCleanupSettings) -> bool {
+        settings.compresses_inline()
+            .unwrap_or_else(|| !self.inline_groups.is_empty())
+    }
+
+    /// Whether anything at all may self-destruct — used to decide if the worker is worth spawning.
+    ///
+    /// A chat may pick a delay for a group the bot itself keeps for ever, so the offered list
+    /// counts as much as the four delays do. With nothing offered, a chat can only keep messages.
+    pub fn enabled(&self) -> bool {
+        use strum::IntoEnumIterator;
+        MessageGroup::iter().any(|group| self.delay_for(group).is_some())
+            || (self.configurable() && !self.delay_options.is_empty())
+    }
+
+    /// Whether a chat may be offered the setting at all. `DISABLED` is the operator's kill switch:
+    /// there is nothing to configure under it.
+    pub fn configurable(&self) -> bool {
+        !matches!(self.mode, DeletionMode::Disabled)
+    }
+
+    fn base_delay(&self, group: MessageGroup) -> Duration {
+        match group {
             MessageGroup::Notice => self.notice,
             MessageGroup::Report => self.report,
             MessageGroup::Event => self.event,
             MessageGroup::Application => self.application,
-        };
-        (!delay.is_zero()).then(|| delay.min(MAX_DELAY))
+        }
     }
 
-    /// Whether anything at all may self-destruct — used to decide if the worker is worth spawning.
-    pub fn enabled(&self) -> bool {
-        use strum::IntoEnumIterator;
-        MessageGroup::iter().any(|group| self.delay_for(group).is_some())
+    /// A delay as it is actually used: cut down to [`MAX_DELAY`], and `None` when it means
+    /// "permanent".
+    fn capped(&self, delay: Duration) -> Option<Duration> {
+        (!delay.is_zero()).then(|| delay.min(MAX_DELAY))
     }
 
     /// Whether the command behind an answer is scheduled together with it.
@@ -163,10 +266,17 @@ impl SelfDestructionConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use super::*;
 
     fn enabled(config: SelfDestructionConfig) -> SelfDestructionConfig {
         SelfDestructionConfig { mode: DeletionMode::Enabled, ..config }
+    }
+
+    /// A configuration with nothing offered to the chats either, so that `enabled()` answers about
+    /// the four delays alone.
+    fn offering_nothing(config: SelfDestructionConfig) -> SelfDestructionConfig {
+        SelfDestructionConfig { delay_options: DelayOptions(Vec::new()), ..enabled(config) }
     }
 
     #[test]
@@ -176,7 +286,14 @@ mod tests {
         assert_eq!(config.delay_for(MessageGroup::Report), None);
         assert_eq!(config.delay_for(MessageGroup::Event), None);
         assert_eq!(config.delay_for(MessageGroup::Application), None);
-        assert!(!config.enabled());
+    }
+
+    /// The worker is still worth running with every delay at zero, because a chat can pick one of
+    /// the offered delays for itself. With nothing offered there is nothing left to wait for.
+    #[test]
+    fn a_bot_that_offers_a_choice_is_enabled_by_it() {
+        assert!(enabled(SelfDestructionConfig::default()).enabled());
+        assert!(!offering_nothing(SelfDestructionConfig::default()).enabled());
     }
 
     #[test]
@@ -213,6 +330,151 @@ mod tests {
         };
         assert_eq!(config.delay_for(MessageGroup::Notice), None);
         assert!(!config.enabled());
+    }
+
+    fn chose(group: MessageGroup, minutes: u32) -> ChatCleanupSettings {
+        ChatCleanupSettings::new([(group, DelayMinutes::new(minutes))].into(), None)
+    }
+
+    #[test]
+    fn a_chat_that_chose_nothing_follows_the_bot() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            ..Default::default()
+        });
+        let settings = ChatCleanupSettings::default();
+        assert_eq!(config.delay_for_chat(MessageGroup::Notice, &settings), Some(Duration::from_secs(120)));
+        assert_eq!(config.delay_for_chat(MessageGroup::Report, &settings), None);
+    }
+
+    #[test]
+    fn a_chosen_delay_wins_over_the_bots_own() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            ..Default::default()
+        });
+        let settings = chose(MessageGroup::Notice, 5);
+        assert_eq!(config.delay_for_chat(MessageGroup::Notice, &settings), Some(Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn a_group_kept_for_ever_is_permanent_in_that_chat() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            ..Default::default()
+        });
+        let settings = chose(MessageGroup::Notice, 0);
+        assert_eq!(config.delay_for_chat(MessageGroup::Notice, &settings), None);
+    }
+
+    /// The direction the whole feature exists for: a chat cleaning up what the bot keeps.
+    #[test]
+    fn a_delay_can_be_chosen_for_a_group_the_bot_keeps() {
+        let config = enabled(SelfDestructionConfig::default());
+        let settings = chose(MessageGroup::Event, 5);
+        assert_eq!(config.delay_for_chat(MessageGroup::Event, &settings), Some(Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn a_chat_cant_choose_anything_in_a_disabled_bot() {
+        let config = SelfDestructionConfig {
+            mode: DeletionMode::Disabled,
+            ..Default::default()
+        };
+        let settings = chose(MessageGroup::Event, 5);
+        assert_eq!(config.delay_for_chat(MessageGroup::Event, &settings), None);
+        assert!(!config.configurable());
+        assert!(!config.enabled());
+    }
+
+    /// Nothing stops a stored value from outliving the list it was picked from, so the cap has to
+    /// hold on the way out as well.
+    #[test]
+    fn a_chosen_delay_is_cut_down_too() {
+        let config = enabled(SelfDestructionConfig::default());
+        let settings = chose(MessageGroup::Event, 72 * 60);
+        assert_eq!(config.delay_for_chat(MessageGroup::Event, &settings), Some(MAX_DELAY));
+    }
+
+    /// A chat that said nothing about inline messages gets the operator's list, with its own delay
+    /// applied inside it.
+    #[test]
+    fn inline_follows_the_bots_list_until_the_chat_says_otherwise() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            report: Duration::from_secs(120),
+            inline_groups: "notice".parse().expect("couldn't parse the groups"),
+            ..Default::default()
+        });
+        let untouched = ChatCleanupSettings::default();
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &untouched),
+                   Some(Duration::from_secs(120)));
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Report, &untouched), None);
+
+        let chose = chose(MessageGroup::Notice, 5);
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &chose),
+                   Some(Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn a_chat_that_asked_for_inline_gets_every_group_it_cleans_up() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            inline_groups: InlineGroups::default(),   // the bot itself opens nothing
+            ..Default::default()
+        });
+        let compressing = ChatCleanupSettings::new(
+            [(MessageGroup::Report, DelayMinutes::new(5))].into(), Some(true));
+
+        // Not in the bot's list, and yet cleaned up: the chat asked for it.
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Report, &compressing),
+                   Some(Duration::from_secs(300)));
+        // The flag says whether inline messages are touched at all, not how soon: a group the chat
+        // chose nothing for still runs on the bot's delay.
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &compressing),
+                   Some(Duration::from_secs(120)));
+        // And a group nobody gave a delay to stays for good, flag or no flag.
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Event, &compressing), None);
+    }
+
+    #[test]
+    fn a_chat_that_refused_inline_keeps_them_whatever_the_bot_says() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            inline_groups: "notice".parse().expect("couldn't parse the groups"),
+            ..Default::default()
+        });
+        let refusing = ChatCleanupSettings::new(BTreeMap::new(), Some(false));
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &refusing), None);
+    }
+
+    #[test]
+    fn delay_options_are_parsed_sorted_and_deduped() {
+        let options: DelayOptions = "60, 5,15,5".parse().expect("couldn't parse the options");
+        assert_eq!(options.iter().collect::<Vec<_>>(),
+                   [5, 15, 60].map(DelayMinutes::new));
+        assert_eq!(options.to_string(), "5,15,60");
+        assert!(!options.is_empty());
+    }
+
+    /// A zero says nothing the picker doesn't offer anyway, and a delay past the cap could never
+    /// be honored — both are dropped rather than turning the whole variable down.
+    #[test]
+    fn unusable_delay_options_are_dropped() {
+        let options: DelayOptions = "0,5,,4000".parse().expect("couldn't parse the options");
+        assert_eq!(options.iter().collect::<Vec<_>>(), [DelayMinutes::new(5)]);
+    }
+
+    #[test]
+    fn an_empty_list_of_delay_options_leaves_nothing_to_choose() {
+        let options: DelayOptions = "".parse().expect("couldn't parse the options");
+        assert!(options.is_empty());
+        assert_eq!(options.to_string(), "");
+    }
+
+    #[test]
+    fn a_delay_option_that_is_not_a_number_is_an_error() {
+        assert!("5,soon".parse::<DelayOptions>().is_err());
     }
 
     #[test]

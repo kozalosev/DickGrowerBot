@@ -29,6 +29,39 @@ commands:
     errors:
       not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
       admins_only: "Only chat administrators can choose the topics I work in."
+  cleanup:
+    description: "Choose how long my messages stay in this chat"
+    state:
+      header: "Here is how long my messages stay in this chat:"
+      cleaned: "🧹 %{group} — <b>%{delay}</b>"
+      kept: "📌 %{group} — kept for good"
+      inline_compressed: "🗜 I shrink my inline messages here too."
+      inline_kept: "📌 I leave my inline messages alone here."
+    pick:
+      prompt: "How long should messages in <b>%{group}</b> stay in this chat?"
+    groups:
+      notice: "Tips and refusals"
+      report: "Leaderboards"
+      event: "Results"
+      application: "Challenges and offers"
+    delays:
+      minutes: "%{count} min"
+      hours: "%{count} h"
+      kept: "kept"
+    buttons:
+      group: "%{group}: %{delay}"
+      keep: "📌 Keep them for good"
+      follow: "↩️ Use the default"
+      back: "⬅️ Back"
+      inline_on: "🗜 Shrink the inline messages"
+      inline_off: "📌 Leave the inline messages alone"
+      reset: "↩️ Everything back to default"
+      confirm: "🧹 Set it anyway"
+    warning:
+      no_rights: "I'm not allowed to delete messages here, so the commands you send me will stay while my answers to them disappear. Make me an administrator with the right to delete messages, and I'll take both away.\n\nSet this for <b>%{group}</b> anyway?"
+      no_rights_strict: "I'm not allowed to delete messages here, and I only remove an answer together with the command that asked for it — so nothing will disappear until I'm an administrator with the right to delete messages.\n\nSet this for <b>%{group}</b> anyway?"
+    errors:
+      admins_only: "Only chat administrators can choose which messages self-destruct."
   privacy:
     description: "Privacy Policy detailing what data we store"
   support:
@@ -37,7 +70,6 @@ commands:
     sent: "Your message is sent. The answer will come from my owner in a private chat."
     cancelled: "The request is cancelled."
     too_often: "You've just sent a message. Please wait a minute before the next one."
-    disabled: "This feature is currently unavailable."
   grow:
     description: "Grow your dick!"
     result: "Your dick has %{event} by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."

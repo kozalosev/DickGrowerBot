@@ -16,19 +16,52 @@ commands:
       reset: "انجام شد! زبان گفتگو پاک شد — دوباره به هر کس به زبان خودش پاسخ می‌دهم."
       auto_button: "🌐 خودکار (زبان هر کاربر)"
   topics:
-    description: "Choose the topics the bot works in"
+    description: "انتخاب موضوع‌هایی که ربات توشون کار می‌کنه"
     state:
-      unrestricted: "I work in <b>every topic</b> of this chat."
-      allowed_here: "I work <b>in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
-      forbidden_here: "I <b>don't work in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+      unrestricted: "من توی <b>همهٔ موضوع‌های</b> این چت کار می‌کنم."
+      allowed_here: "من <b>توی این موضوع</b> کار می‌کنم. تعداد موضوع‌های مجاز: <b>%{count}</b>."
+      forbidden_here: "من <b>توی این موضوع کار نمی‌کنم</b>. تعداد موضوع‌های مجاز: <b>%{count}</b>."
     buttons:
-      only_here: "🔒 Work in this topic only"
-      allow_here: "✅ Allow in this topic"
-      forbid_here: "🚫 Forbid in this topic"
-      allow_everywhere: "🌍 Allow in all topics"
+      only_here: "🔒 فقط توی همین موضوع کار کن"
+      allow_here: "✅ توی این موضوع مجاز باش"
+      forbid_here: "🚫 توی این موضوع ممنوع باش"
+      allow_everywhere: "🌍 توی همهٔ موضوع‌ها مجاز باش"
     errors:
-      not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
-      admins_only: "Only chat administrators can choose the topics I work in."
+      not_a_forum: "این چت موضوعی نداره، پس چیزی نیست که محدودم کنه."
+      admins_only: "فقط ادمین‌ها می‌تونن انتخاب کنن من توی کدوم موضوع‌ها کار کنم."
+  cleanup:
+    description: "انتخاب کن پیام‌هام چقدر توی این چت بمونن"
+    state:
+      header: "پیام‌هام این‌قدر توی این چت می‌مونن:"
+      cleaned: "🧹 %{group} — <b>%{delay}</b>"
+      kept: "📌 %{group} — همیشه می‌مونن"
+      inline_compressed: "🗜 پیام‌های اینلاینم رو هم اینجا جمع می‌کنم."
+      inline_kept: "📌 پیام‌های اینلاینم رو اینجا دست نمی‌زنم."
+    pick:
+      prompt: "پیام‌های دستهٔ «%{group}» چقدر باید توی این چت بمونن؟"
+    groups:
+      notice: "راهنما و ردها"
+      report: "جدول‌ها"
+      event: "نتیجه‌ها"
+      application: "چالش‌ها و پیشنهادها"
+    delays:
+      minutes: "%{count} دقیقه"
+      hours: "%{count} ساعت"
+      kept: "همیشه"
+    buttons:
+      group: "%{group}: %{delay}"
+      keep: "📌 همیشه بمونن"
+      follow: "↩️ هر طور ربات صلاح بدونه"
+      back: "⬅️ بازگشت"
+      inline_on: "🗜 پیام‌های اینلاین جمع بشن"
+      inline_off: "📌 پیام‌های اینلاین دست نخورن"
+      reset: "↩️ همه‌چیز هر طور ربات صلاح بدونه"
+      confirm: "🧹 با این حال تنظیم کن"
+    warning:
+      no_rights: "من اجازهٔ حذف پیام توی این چت رو ندارم، پس دستورهایی که برام می‌فرستید می‌مونه و فقط جواب‌های من پاک می‌شه. منو ادمین کن با دسترسی حذف پیام تا هر دوش رو ببرم.\n\nبا این حال برای <b>%{group}</b> تنظیم بشه؟"
+      no_rights_strict: "من اجازهٔ حذف پیام توی این چت رو ندارم، و جواب رو فقط همراه با دستوری که صداش زده پاک می‌کنم — پس تا ادمین نشم با دسترسی حذف پیام، هیچی پاک نمی‌شه.\n\nبا این حال برای <b>%{group}</b> تنظیم بشه؟"
+    errors:
+      admins_only: "فقط ادمین‌ها می‌تونن انتخاب کنن کدوم پیام‌ها خودشون پاک بشن."
   privacy:
     description: "سیاست حفظ حریم خصوصی و اینکه چه اطلاعاتی ذخیره می‌کنیم"
   support:
@@ -37,7 +70,6 @@ commands:
     sent: "پیامت ارسال شد. پاسخ از طرف صاحب ربات در پیام خصوصی می‌آید."
     cancelled: "درخواست لغو شد."
     too_often: "همین الان یک پیام فرستادی. یک دقیقه صبر کن."
-    disabled: "این قابلیت در حال حاضر در دسترس نیست."
   grow:
     description: "کیرتو کلفت کن!"
     result: "کیرت %{event} و <b>%{incr} سانت</b> تغییر کرده، الان طولش <b>%{length} سانت</b> شده."
@@ -182,8 +214,8 @@ migration:
   lost: "این گروه همین الان به سوپرگروه تبدیل شد و تلگرام یه شناسه‌ی کاملاً جدید بهش داد — دیگه نمی‌تونم اون گروه قبلی رو توش تشخیص بدم.\n\nاگه اینجا کسی با حالت اینلاین بازی کرده بود، اون تاریخچه متأسفانه دیگه در دسترس نیست و امتیازها از نو شروع می‌شن. اگه کسی بازی نکرده بود، چیزی هم از دست نرفته. از این به بعد همه‌چیز مثل همیشه کار می‌کنه و این اتفاق دیگه تکرار نمی‌شه. 🍆"
   lost_inline: "این گروه همین الان به سوپرگروه تبدیل شد. هر چیزی که با دستورها بازی شده بود همراهش اومد و سر جاشه.\n\nاما نتیجه‌های حالت اینلاین هیچ‌وقت به این گروه گره نخورده بودن — برای این کار باید قبل از تبدیل شدن، دکمه‌ی فعال‌سازی زده می‌شد. متأسفانه دیگه در دسترس نیستن. اگه کسی اینجا با اینلاین بازی نکرده بود، چیزی هم از دست نرفته. از این به بعد همه‌چیز مثل همیشه کار می‌کنه. 🍆"
 errors:
-  forbidden_topic_callback: "I don't work in this topic."
-  forbidden_topic: "I don't work in this topic. An administrator can change that with /topics."
+  forbidden_topic_callback: "من توی این موضوع کار نمی‌کنم."
+  forbidden_topic: "من توی این موضوع کار نمی‌کنم. ادمین می‌تونه با /topics عوضش کنه."
   not_group_chat: "این بات فقط توی گروه‌ها کار می‌کنه!"
   group_account: "نمی‌تونی به‌جای گروه یا کانال بازی کنی — حالت ناشناس رو خاموش کن و دوباره امتحان کن!"
   feature_disabled: "این قابلیت فعلاً غیرفعاله."

@@ -19,7 +19,6 @@ commands:
     sent: "留言已發送。主人會在私聊中回覆你。"
     cancelled: "請求已取消。"
     too_often: "你剛剛已經發過留言了，請等一分鐘再發。"
-    disabled: "此功能目前無法使用。"
   grow:
     result: "你的老二已經<b>%{incr} 公分</b> %{event}，現在長度為<b>%{length} 公分</b>。"
     direction:
@@ -120,19 +119,52 @@ commands:
     inline:
       switch_button: "啟用神秘代碼 '%{code}'…"
   topics:
-    description: "Choose the topics the bot works in"
+    description: "選擇我在哪些主題裡幹活"
     state:
-      unrestricted: "I work in <b>every topic</b> of this chat."
-      allowed_here: "I work <b>in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
-      forbidden_here: "I <b>don't work in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+      unrestricted: "本群<b>所有主題</b>我都幹活。"
+      allowed_here: "我<b>在這個主題裡幹活</b>。允許我出沒的主題共 <b>%{count}</b> 個。"
+      forbidden_here: "我<b>不在這個主題裡幹活</b>。允許我出沒的主題共 <b>%{count}</b> 個。"
     buttons:
-      only_here: "🔒 Work in this topic only"
-      allow_here: "✅ Allow in this topic"
-      forbid_here: "🚫 Forbid in this topic"
-      allow_everywhere: "🌍 Allow in all topics"
+      only_here: "🔒 只在這個主題裡幹活"
+      allow_here: "✅ 允許在這個主題"
+      forbid_here: "🚫 禁止在這個主題"
+      allow_everywhere: "🌍 所有主題都允許"
     errors:
-      not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
-      admins_only: "Only chat administrators can choose the topics I work in."
+      not_a_forum: "本群沒有主題，沒什麼可以限制我的。"
+      admins_only: "只有群組管理員才能選擇我在哪些主題裡幹活。"
+  cleanup:
+    description: "設定我的訊息在本群留多久"
+    state:
+      header: "我的訊息在本群會留這麼久："
+      cleaned: "🧹 %{group} — <b>%{delay}</b>"
+      kept: "📌 %{group} —— 永久保留"
+      inline_compressed: "🗜 這裡我也會壓縮自己的內聯訊息。"
+      inline_kept: "📌 這裡我不動自己的內聯訊息。"
+    pick:
+      prompt: "「%{group}」這類訊息在本群要留多久？"
+    groups:
+      notice: "提示與拒絕"
+      report: "排行榜"
+      event: "成長與戰績"
+      application: "挑戰與邀約"
+    delays:
+      minutes: "%{count} 分鐘"
+      hours: "%{count} 小時"
+      kept: "永久"
+    buttons:
+      group: "%{group}: %{delay}"
+      keep: "📌 永久保留"
+      follow: "↩️ 聽機器人的"
+      back: "⬅️ 返回"
+      inline_on: "🗜 壓縮內聯訊息"
+      inline_off: "📌 不動內聯訊息"
+      reset: "↩️ 全部聽機器人的"
+      confirm: "🧹 仍然設定"
+    warning:
+      no_rights: "我在本群沒有刪除訊息的權限，所以大家發給我的指令會留著，只有我的回覆會消失。把我設為可以刪除訊息的管理員，我就把兩邊都清掉。\n\n仍然為<b>%{group}</b>設定嗎？"
+      no_rights_strict: "我在本群沒有刪除訊息的權限，而回覆我只會連同觸發它的指令一起刪——所以在我成為可以刪除訊息的管理員之前，什麼都不會消失。\n\n仍然為<b>%{group}</b>設定嗎？"
+    errors:
+      admins_only: "只有群組管理員才能選擇哪些訊息會自動消失。"
 inline:
   results:
     text: "由於我無法透過內聯查詢確定聊天，你應該點擊下面的按鈕以取得結果。"
@@ -169,8 +201,8 @@ migration:
   lost: "本群剛剛升級為超級群組，Telegram 為它分配了全新的識別碼——我已經無法把它認作原來的那個群了。\n\n如果之前有人在這裡透過內聯模式遊玩，那些紀錄很遺憾已經無法找回，成績將從頭開始。如果沒有人玩過，那就什麼也沒丟。從現在起一切照常運作，而且這種情況不會再發生了。🍆"
   lost_inline: "本群剛剛升級為超級群組。透過指令遊玩的一切都隨之遷移過來了，完好無損。\n\n但內聯模式的結果從未與本群綁定——那需要在升級之前點擊啟用按鈕。它們很遺憾已經無法找回。如果沒有人在這裡透過內聯模式遊玩，那就什麼也沒丟。從現在起一切照常運作。🍆"
 errors:
-  forbidden_topic_callback: "I don't work in this topic."
-  forbidden_topic: "I don't work in this topic. An administrator can change that with /topics."
+  forbidden_topic_callback: "我不在這個主題裡幹活。"
+  forbidden_topic: "我不在這個主題裡幹活。管理員可以用 /topics 更改。"
   not_group_chat: "此機器人僅在群聊中執行任務！"
   group_account: "不能以群組或頻道的身份遊玩——請關閉匿名模式後重試！"
   feature_disabled: "此功能當前暫時禁用。"
