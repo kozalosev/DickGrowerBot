@@ -198,6 +198,30 @@ impl SelfDestructionConfig {
         }
     }
 
+    /// How long an inline message of this group lives in a chat, or `None` when it is left alone.
+    ///
+    /// An inline message can't be deleted, only rewritten into the placeholder, so a chat that said
+    /// nothing about them follows [`Self::inline_groups`] — the operator's list of what may be
+    /// touched at all. A chat that did say something decides for itself, and the delay is its own
+    /// either way.
+    pub fn inline_delay_for_chat(
+        &self,
+        group: MessageGroup,
+        settings: &ChatCleanupSettings,
+    ) -> Option<Duration> {
+        let allowed = settings.compresses_inline()
+            .unwrap_or_else(|| self.inline_groups.contains(group));
+        allowed.then(|| self.delay_for_chat(group, settings)).flatten()
+    }
+
+    /// Whether this chat's inline messages are shrunk at all — the position the picker's switch
+    /// shows. A chat that said nothing is summed up by whether the bot opened any group for inline
+    /// at all, because a switch has no room for "some of them".
+    pub fn compresses_inline_for_chat(&self, settings: &ChatCleanupSettings) -> bool {
+        settings.compresses_inline()
+            .unwrap_or_else(|| !self.inline_groups.is_empty())
+    }
+
     /// Whether anything at all may self-destruct — used to decide if the worker is worth spawning.
     ///
     /// A chat may pick a delay for a group the bot itself keeps for ever, so the offered list
@@ -242,6 +266,7 @@ impl SelfDestructionConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use super::*;
 
     fn enabled(config: SelfDestructionConfig) -> SelfDestructionConfig {
@@ -308,7 +333,7 @@ mod tests {
     }
 
     fn chose(group: MessageGroup, minutes: u32) -> ChatCleanupSettings {
-        ChatCleanupSettings::new([(group, DelayMinutes::new(minutes))].into())
+        ChatCleanupSettings::new([(group, DelayMinutes::new(minutes))].into(), None)
     }
 
     #[test]
@@ -371,6 +396,58 @@ mod tests {
         assert_eq!(config.delay_for_chat(MessageGroup::Event, &settings), Some(MAX_DELAY));
     }
 
+    /// A chat that said nothing about inline messages gets the operator's list, with its own delay
+    /// applied inside it.
+    #[test]
+    fn inline_follows_the_bots_list_until_the_chat_says_otherwise() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            report: Duration::from_secs(120),
+            inline_groups: "notice".parse().expect("couldn't parse the groups"),
+            ..Default::default()
+        });
+        let untouched = ChatCleanupSettings::default();
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &untouched),
+                   Some(Duration::from_secs(120)));
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Report, &untouched), None);
+
+        let chose = chose(MessageGroup::Notice, 5);
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &chose),
+                   Some(Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn a_chat_that_asked_for_inline_gets_every_group_it_cleans_up() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            inline_groups: InlineGroups::default(),   // the bot itself opens nothing
+            ..Default::default()
+        });
+        let compressing = ChatCleanupSettings::new(
+            [(MessageGroup::Report, DelayMinutes::new(5))].into(), Some(true));
+
+        // Not in the bot's list, and yet cleaned up: the chat asked for it.
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Report, &compressing),
+                   Some(Duration::from_secs(300)));
+        // The flag says whether inline messages are touched at all, not how soon: a group the chat
+        // chose nothing for still runs on the bot's delay.
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &compressing),
+                   Some(Duration::from_secs(120)));
+        // And a group nobody gave a delay to stays for good, flag or no flag.
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Event, &compressing), None);
+    }
+
+    #[test]
+    fn a_chat_that_refused_inline_keeps_them_whatever_the_bot_says() {
+        let config = enabled(SelfDestructionConfig {
+            notice: Duration::from_secs(120),
+            inline_groups: "notice".parse().expect("couldn't parse the groups"),
+            ..Default::default()
+        });
+        let refusing = ChatCleanupSettings::new(BTreeMap::new(), Some(false));
+        assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &refusing), None);
+    }
+
     #[test]
     fn delay_options_are_parsed_sorted_and_deduped() {
         let options: DelayOptions = "60, 5,15,5".parse().expect("couldn't parse the options");
@@ -381,7 +458,7 @@ mod tests {
     }
 
     /// A zero says nothing the picker doesn't offer anyway, and a delay past the cap could never
-    /// be honoured — both are dropped rather than turning the whole variable down.
+    /// be honored — both are dropped rather than turning the whole variable down.
     #[test]
     fn unusable_delay_options_are_dropped() {
         let options: DelayOptions = "0,5,,4000".parse().expect("couldn't parse the options");

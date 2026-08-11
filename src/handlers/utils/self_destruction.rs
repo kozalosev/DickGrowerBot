@@ -1,25 +1,24 @@
 use std::time::Duration;
 use chrono::Utc;
-use domain_types::traits::SaturatingInto;
 use teloxide::Bot;
 use teloxide::prelude::Requester;
 use teloxide::types::{ChatId, Message, MessageId, UserId as TeloxideUserId};
 use crate::config::{MessageGroup, SelfDestructionConfig, MAX_DELAY};
 use crate::handlers::rights;
-use crate::domain::primitives::LanguageCode;
-use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
+use crate::domain::primitives::{CharCount, LanguageCode};
+use crate::domain::objects::ChatCleanupSettings;
+use crate::domain::primitives::chat::{ChatIdKind, InlineMessageId, TelegramChatId, TelegramMessageId};
 use crate::cache::Cache;
 use crate::cleanup::CleanupPolicy;
 use crate::repo::{DeletionTarget, MessageKind, NewDeletion, ScheduledDeletions};
 
 /// Estimated time needed to read `char_count` visible characters at `cpm` characters per
 /// minute. Returns zero when `cpm` is zero (reading-time adjustment disabled).
-fn reading_time(char_count: usize, cpm: u64) -> Duration {
+fn reading_time(char_count: CharCount, cpm: u64) -> Duration {
     if cpm == 0 {
         return Duration::ZERO
     }
-    let char_count: u64 = char_count.saturating_into();
-    Duration::from_secs(char_count * 60 / cpm)
+    Duration::from_secs(u64::from(char_count.value()) * 60 / cpm)
 }
 
 /// Writes down the messages that are to disappear on their own (see [`MessageGroup`]) and hands
@@ -75,7 +74,7 @@ impl SelfDestructionService {
         let Some(base_delay) = self.config.delay_for_chat(group, &settings) else {
             return
         };
-        let char_count = sent.text().map_or(0, |t| t.chars().count());
+        let char_count = CharCount::of(sent.text().unwrap_or_default());
         let delay = base_delay
             .max(reading_time(char_count, self.config.reading_speed_cpm))
             .min(MAX_DELAY);
@@ -112,20 +111,35 @@ impl SelfDestructionService {
             .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't schedule the self-destruction"));
     }
 
-    /// Schedules an inline message to be replaced with the placeholder. Applies only to the groups
-    /// the placeholder is enabled for — an inline message can never be deleted, so the whole chat
-    /// keeps whatever is put there instead, and that is worth being conservative about.
-    #[tracing::instrument(skip_all, fields(group = %group, inline_message_id = %inline_message_id))]
-    pub async fn schedule_inline(&self, inline_message_id: &str, group: MessageGroup, lang_code: &LanguageCode) {
-        if !self.config.inline_groups.contains(group) {
-            return
-        }
-        let Some(delay) = self.config.delay_for(group) else {
+    /// Schedules an inline message to be replaced with the placeholder, on the terms of the chat it
+    /// went to — its delay, and its say in whether inline messages are touched at all. An inline
+    /// message can never be deleted, so the chat keeps whatever is put there instead, which is why
+    /// a chat that said nothing follows the operator's list rather than its own delays.
+    ///
+    /// `chat` is `None` where the update doesn't name one: a legacy group without an anchor, or a
+    /// chosen result whose `inline_message_id` encodes no chat. Then the bot's own settings apply.
+    #[tracing::instrument(skip_all, fields(group = %group, inline_message_id = %inline_message_id, chat_id = ?chat))]
+    pub async fn schedule_inline(
+        &self,
+        inline_message_id: InlineMessageId,
+        chat: Option<ChatIdKind>,
+        group: MessageGroup,
+        char_count: CharCount,
+        lang_code: &LanguageCode,
+    ) {
+        let settings = match &chat {
+            Some(chat) => self.cleanup.settings(chat).await,
+            None => ChatCleanupSettings::default(),
+        };
+        let Some(base_delay) = self.config.inline_delay_for_chat(group, &settings) else {
             return
         };
+        let delay = base_delay
+            .max(reading_time(char_count, self.config.reading_speed_cpm))
+            .min(MAX_DELAY);
 
         let row = NewDeletion {
-            target: DeletionTarget::InlineMessage(InlineMessageId::new(inline_message_id.to_owned())),
+            target: DeletionTarget::InlineMessage(inline_message_id),
             kind: MessageKind::Inline,
             group,
             lang_code: lang_code.clone(),
@@ -139,11 +153,11 @@ impl SelfDestructionService {
     /// Calls off the placeholdering of an inline message that has become worth keeping — an
     /// application answered before it could expire.
     #[tracing::instrument(skip_all, fields(inline_message_id = %inline_message_id))]
-    pub async fn cancel_inline(&self, inline_message_id: &str) {
+    pub async fn cancel_inline(&self, inline_message_id: InlineMessageId) {
         if self.config.inline_groups.is_empty() {
             return
         }
-        self.cancel(DeletionTarget::InlineMessage(InlineMessageId::new(inline_message_id.to_owned()))).await
+        self.cancel(DeletionTarget::InlineMessage(inline_message_id)).await
     }
 
     /// The same for a message of a chat: an application that has just been answered is no longer
@@ -228,13 +242,13 @@ mod tests {
     #[test]
     fn reading_time_scales_with_length() {
         // 1000 chars/min => 1000 chars take a minute, 2000 take two.
-        assert_eq!(reading_time(0, 1000), Duration::ZERO);
-        assert_eq!(reading_time(1000, 1000), Duration::from_secs(60));
-        assert_eq!(reading_time(2000, 1000), Duration::from_secs(120));
+        assert_eq!(reading_time(CharCount::new(0), 1000), Duration::ZERO);
+        assert_eq!(reading_time(CharCount::new(1000), 1000), Duration::from_secs(60));
+        assert_eq!(reading_time(CharCount::new(2000), 1000), Duration::from_secs(120));
     }
 
     #[test]
     fn reading_time_zero_speed_disables_adjustment() {
-        assert_eq!(reading_time(5000, 0), Duration::ZERO);
+        assert_eq!(reading_time(CharCount::new(5000), 0), Duration::ZERO);
     }
 }

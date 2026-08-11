@@ -15,8 +15,8 @@ use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::objects::InlineMessageIdInfo;
-use crate::domain::primitives::{LanguageCode, Page, UserId as DomainUserId, Username};
-use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, TelegramChatInstanceId};
+use crate::domain::primitives::{CharCount, LanguageCode, Page, UserId as DomainUserId, Username};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, InlineMessageId, TelegramChatInstanceId};
 use crate::handlers::{banned_until_of, dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
@@ -251,13 +251,16 @@ pub async fn inline_chosen_handler(
 
             let inline_message_id = result.inline_message_id
                 .ok_or("inline_message_id must be set if the chat_in_sync_future exists")?;
-            let mut request = bot.edit_message_text_inline(inline_message_id.as_str(), inline_result.text);
+            let inline_message_id = InlineMessageId::new(inline_message_id);
+            let char_count = CharCount::of(&inline_result.text);
+            let mut request = bot.edit_message_text_inline(inline_message_id.value(), inline_result.text);
             request.reply_markup = inline_result.keyboard;
             request.parse_mode.replace(Html);
             request.disable_web_page_preview.replace(true);
             request.await?;
 
-            self_destruction.schedule_inline(&inline_message_id, inline_result.group, &lang_code).await;
+            self_destruction.schedule_inline(inline_message_id, Some(chat_id.kind()),
+                inline_result.group, char_count, &lang_code).await;
         }
     }
 
@@ -297,6 +300,7 @@ pub async fn inline_callback_handler(
         if let Ok(CallbackDataParseResult::Ok(cmd)) = parse_res {
             let from_refs = FromRefs(&query.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs, &lang_code).await?;
+            let char_count = CharCount::of(&inline_result.text);
             let mut edit = bot.edit_message_text_inline(inline_msg_id, inline_result.text);
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
@@ -306,7 +310,8 @@ pub async fn inline_callback_handler(
             // Legacy groups send no chosen result. For them this is the first place the bot sees
             // the id. If the message is already scheduled, the insert does nothing, so paging does
             // not move the time it will go at.
-            self_destruction.schedule_inline(inline_msg_id, inline_result.group, &lang_code).await;
+            self_destruction.schedule_inline(InlineMessageId::new(inline_msg_id.clone()),
+                Some(chat_id.kind()), inline_result.group, char_count, &lang_code).await;
         } else {
             let key = match parse_res {
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",

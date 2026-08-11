@@ -114,6 +114,7 @@ pub async fn cleanup_callback_handler(
         CleanupAction::Set(group, minutes) | CleanupAction::SetConfirmed(group, minutes) =>
             cleanup.set_group(&chat_id, group, minutes).await?,
         CleanupAction::Follow(group) => cleanup.follow_the_bot(&chat_id, group).await?,
+        CleanupAction::Inline(compress) => cleanup.set_inline(&chat_id, compress).await?,
         CleanupAction::Reset => cleanup.reset(&chat_id).await?,
         CleanupAction::Pick(_) | CleanupAction::Back => cleanup.settings(&chat_id.kind()).await,
     };
@@ -159,15 +160,24 @@ fn overview(
         })
         .unzip();
 
+    // An inline message can only be rewritten, never deleted, so it gets a switch of its own
+    // instead of following the delays quietly.
+    let compressed = config.compresses_inline_for_chat(settings);
+    let inline = row![button.of(
+        if compressed { ButtonKind::InlineOff } else { ButtonKind::InlineOn },
+        CleanupAction::Inline(!compressed))];
+
     // Only a chat that decided something of its own can be offered to take it back.
     let take_back = (!settings.is_default())
         .then(|| row![button.of(ButtonKind::Reset, CleanupAction::Reset)]);
 
     let header = t!("commands.cleanup.state.header", locale = lang_code);
+    let inline_line = t!(if compressed { "commands.cleanup.state.inline_compressed" }
+        else { "commands.cleanup.state.inline_kept" }, locale = lang_code);
     let lines = lines.join("\n");
     Screen {
-        text: format!("{header}\n\n{lines}"),
-        keyboard: InlineKeyboardMarkup::new(rows.into_iter().chain(take_back)),
+        text: format!("{header}\n\n{lines}\n\n{inline_line}"),
+        keyboard: InlineKeyboardMarkup::new(rows.into_iter().chain([inline]).chain(take_back)),
     }
 }
 
@@ -258,8 +268,8 @@ fn group_name(group: MessageGroup, lang_code: &LanguageCode) -> String {
 /// The buttons whose label is a fixed line of the locale file rather than something built from the
 /// chat's settings. Each one is named after its key under `commands.cleanup.buttons`, so a label
 /// that doesn't exist can't be asked for.
-#[derive(Clone, Copy, strum_macros::Display)]
-#[strum(serialize_all = "lowercase")]
+#[derive(Clone, Copy, strum_macros::Display, strum_macros::EnumIter)]
+#[strum(serialize_all = "snake_case")]
 enum ButtonKind {
     /// Keep this group for good.
     Keep,
@@ -267,6 +277,10 @@ enum ButtonKind {
     Follow,
     /// Return to the list of groups.
     Back,
+    /// Start shrinking the inline messages to the placeholder.
+    InlineOn,
+    /// Stop touching the inline messages.
+    InlineOff,
     /// Hand every group back at once.
     Reset,
     /// Set the delay after the warning about the commands the bot may not delete.
@@ -313,6 +327,8 @@ enum CleanupAction {
     SetConfirmed(MessageGroup, DelayMinutes),
     #[display("follow:{_0}")]
     Follow(MessageGroup),
+    #[display("inline:{}", if *_0 { "on" } else { "off" })]
+    Inline(bool),
     #[display("reset")]
     Reset,
     #[display("back")]
@@ -353,6 +369,11 @@ impl TryFrom<String> for CleanupCallbackData {
                 callbacks::parse_part(&mut parts, &err, "group")?,
                 callbacks::parse_part(&mut parts, &err, "minutes")?),
             "follow" => CleanupAction::Follow(callbacks::parse_part(&mut parts, &err, "group")?),
+            "inline" => match parts.next().ok_or_else(|| err.missing_part("state"))? {
+                "on" => CleanupAction::Inline(true),
+                "off" => CleanupAction::Inline(false),
+                _ => return Err(err.split_err()),
+            },
             "reset" => CleanupAction::Reset,
             "back" => CleanupAction::Back,
             _ => return Err(err.split_err()),
@@ -379,7 +400,7 @@ mod test {
 
     fn settings(choices: [(MessageGroup, u32); 1]) -> ChatCleanupSettings {
         ChatCleanupSettings::new(BTreeMap::from(choices.map(|(group, minutes)|
-            (group, DelayMinutes::new(minutes)))))
+            (group, DelayMinutes::new(minutes)))), None)
     }
 
     fn round_trip(action: CleanupAction) -> CleanupCallbackData {
@@ -410,6 +431,9 @@ mod test {
 
         let data = CleanupCallbackData { uid: UserId(12345), action: CleanupAction::Follow(MessageGroup::Event) };
         assert_eq!(data.to_data_string(), "cleanup:12345:follow:event");
+
+        let data = CleanupCallbackData { uid: UserId(12345), action: CleanupAction::Inline(true) };
+        assert_eq!(data.to_data_string(), "cleanup:12345:inline:on");
 
         let data = CleanupCallbackData { uid: UserId(12345), action: CleanupAction::Reset };
         assert_eq!(data.to_data_string(), "cleanup:12345:reset");
@@ -442,7 +466,8 @@ mod test {
         let lang = english();
         let screen = overview(&config(), &ChatCleanupSettings::default(), &viewer(&lang));
         assert_eq!(actions_of(screen.keyboard), vec!["cleanup:1:pick:notice", "cleanup:1:pick:report",
-                                              "cleanup:1:pick:event", "cleanup:1:pick:application"]);
+                                              "cleanup:1:pick:event", "cleanup:1:pick:application",
+                                              "cleanup:1:inline:on"]);
     }
 
     #[test]
@@ -451,7 +476,26 @@ mod test {
         let screen = overview(&config(), &settings([(MessageGroup::Notice, 0)]), &viewer(&lang));
         assert_eq!(actions_of(screen.keyboard), vec!["cleanup:1:pick:notice", "cleanup:1:pick:report",
                                               "cleanup:1:pick:event", "cleanup:1:pick:application",
-                                              "cleanup:1:reset"]);
+                                              "cleanup:1:inline:on", "cleanup:1:reset"]);
+    }
+
+    /// The switch always offers the opposite of what the chat has now, and a chat that only touched
+    /// it still counts as having decided something.
+    #[test]
+    fn test_the_inline_switch_offers_the_opposite() {
+        let lang = english();
+        let compressing = ChatCleanupSettings::new(BTreeMap::new(), Some(true));
+        let screen = overview(&config(), &compressing, &viewer(&lang));
+        assert_eq!(actions_of(screen.keyboard).split_off(4),
+                   vec!["cleanup:1:inline:off", "cleanup:1:reset"]);
+
+        // The bot's own list stands in for a chat that said nothing about inline.
+        let config = SelfDestructionConfig {
+            inline_groups: "notice".parse().expect("couldn't parse the groups"),
+            ..config()
+        };
+        let screen = overview(&config, &ChatCleanupSettings::default(), &viewer(&lang));
+        assert_eq!(actions_of(screen.keyboard).split_off(4), vec!["cleanup:1:inline:off"]);
     }
 
     /// The suggested delays, then the two answers that are always on offer — the second of which is
@@ -496,6 +540,30 @@ mod test {
         assert_eq!(widths, vec![3, 2, 1, 1, 1]);
     }
 
+    /// Every label the picker asks for exists. A key that doesn't resolve isn't an error anywhere:
+    /// rust-i18n hands back the key itself, and it goes onto the button as `…buttons.inline_off`.
+    /// Which is what happened when `ButtonKind` spelled its two-word variants without the
+    /// underscore the locale files have.
+    #[test]
+    fn test_every_button_and_group_has_a_label() {
+        let lang = english();
+        for kind in ButtonKind::iter() {
+            let label = button_of(kind, &lang);
+            assert!(!label.contains("commands.cleanup"), "{kind} has no label: {label}");
+        }
+        for group in MessageGroup::iter() {
+            let name = group_name(group, &lang);
+            assert!(!name.contains("commands.cleanup"), "{group} has no name: {name}");
+        }
+    }
+
+    /// The label of a button, whatever action it happens to carry.
+    fn button_of(kind: ButtonKind, lang_code: &LanguageCode) -> String {
+        let keyboard = InlineKeyboardMarkup::new([row![
+            viewer(lang_code).of(kind, CleanupAction::Back)]]);
+        keyboard.inline_keyboard.concat().remove(0).text
+    }
+
     /// An hour reads as an hour rather than as sixty minutes, and anything that doesn't divide
     /// stays in minutes.
     #[test]
@@ -514,6 +582,8 @@ mod test {
                        CleanupAction::Set(MessageGroup::Notice, DelayMinutes::new(0)),
                        CleanupAction::SetConfirmed(MessageGroup::Report, DelayMinutes::new(5)),
                        CleanupAction::Follow(MessageGroup::Event),
+                       CleanupAction::Inline(true),
+                       CleanupAction::Inline(false),
                        CleanupAction::Reset,
                        CleanupAction::Back] {
             let parsed = round_trip(action);

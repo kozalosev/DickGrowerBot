@@ -10,6 +10,10 @@ use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, 
 use crate::repo::ensure_only_one_row_updated;
 use crate::repository;
 
+/// The one key of the `cleanup` object that isn't a message group. A group can never be called
+/// this, so the two live side by side.
+const INLINE_KEY: &str = "inline";
+
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct Chat {
     pub internal_id: InternalChatId,
@@ -76,11 +80,16 @@ fn parse_allowed_topics(value: sqlx::types::JsonValue) -> AllowedTopics {
 /// but this module writes there, but a hand-edited row must not take the whole setting down with
 /// it.
 fn parse_cleanup_settings(value: sqlx::types::JsonValue) -> ChatCleanupSettings {
-    let sqlx::types::JsonValue::Object(entries) = value else {
+    let sqlx::types::JsonValue::Object(mut entries) = value else {
         tracing::warn!(value = ?value, "the cleanup settings of a chat are not an object");
         return ChatCleanupSettings::default()
     };
-    let choices = entries.into_iter()
+
+    // Taken out first, so that everything left is a message group.
+    let inline = entries.remove(INLINE_KEY)
+        .and_then(|flag| flag.as_bool()
+            .or_else(|| { tracing::warn!(value = ?flag, "the inline cleanup flag is not a boolean"); None }));
+    let delays = entries.into_iter()
         .filter_map(|(name, delay)| {
             let group = MessageGroup::from_str(&name)
                 .inspect_err(|_| tracing::warn!(group = %name, "an unknown message group is stored for the chat"))
@@ -91,7 +100,7 @@ fn parse_cleanup_settings(value: sqlx::types::JsonValue) -> ChatCleanupSettings 
             Some((group, DelayMinutes::new(minutes)))
         })
         .collect();
-    ChatCleanupSettings::new(choices)
+    ChatCleanupSettings::new(delays, inline)
 }
 
 impl ChatMigrationOutcome {
@@ -327,6 +336,23 @@ repository!(Chats, with_feature_toggles,
             .execute(&self.pool)
             .await
             .context(format!("couldn't set the cleanup delay of the {group} messages of the chat {chat_id}"))?;
+        Ok(())
+    }
+,
+    /// Writes down whether the chat wants its inline messages shrunk to the placeholder, leaving
+    /// the delays of the groups as they are.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, compress = %compress))]
+    pub async fn set_cleanup_inline(&self, chat_id: &ChatIdPartiality, compress: bool) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        sqlx::query!(
+                "UPDATE Chats SET settings = jsonb_set(settings, '{cleanup}',
+                    COALESCE(settings->'cleanup', '{}'::jsonb) || jsonb_build_object('inline', $2::bool))
+                    WHERE id = $1",
+                internal_id as InternalChatId, compress)
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't set the inline cleanup of the chat {chat_id}"))?;
         Ok(())
     }
 ,

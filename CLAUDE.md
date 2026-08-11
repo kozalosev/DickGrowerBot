@@ -228,9 +228,29 @@ mode-dependent `may_delete_commands` the answering path uses. Keeping a group, o
 to the bot, takes nothing away and asks nothing.
 
 The setting is cached in this process, like the chat language and the allowed topics, not in the
-Redis `Cache`: that one is flag-shaped and is never a source of truth. Inline messages keep the
-bot's own settings, since an `InlineQuery` carries no chat to look the setting up by — the same
-half of issue #76 that `/topics` runs into.
+Redis `Cache`: that one is flag-shaped and is never a source of truth.
+
+**Inline messages obey the chat too, where the chat can be named.** An inline message can only be
+rewritten into the placeholder, never deleted, so it gets a switch of its own in the picker rather
+than following the delays quietly — the `inline` key of the same jsonb object, a boolean beside the
+group names (a group can never be called that, so the two live together). It is a tri-state like the
+delays: absent means the chat said nothing and `MSG_SELFDESTRUCT_INLINE_GROUPS` decides which groups
+are touched, `true` means every group the chat cleans up, `false` means none.
+`SelfDestructionConfig::inline_delay_for_chat` is where the two meet, and the delay is the chat's
+either way.
+
+Naming the chat is the part that isn't always possible. `inline_chosen_handler` already works only
+for anchored groups (it filters on a row holding both the id and the instance), and
+`inline_callback_handler` resolves one for the command itself — both simply pass what they hold.
+`pvp_inline_chosen_handler` has to decode the id out of the `inline_message_id`
+(`utils::try_resolve_chat_id`, under the same `CHATS_MERGING_ENABLED` its neighbours use). Where
+none of that yields a chat — a legacy group without an anchor, an id that encodes none — the bot's
+own settings apply, which is the half of issue #76 that `/topics` runs into as well.
+
+Inline messages are stretched by the reading time now, the same as the others: `schedule_inline`
+takes the character count from the text the handler is about to send. The battle offer is the
+exception and passes zero — Telegram builds that text out of the `InlineQueryResultArticle`, so the
+bot never sees it, and it is one line long anyway.
 
 **Everything goes through the database**, short-lived groups included: `SelfDestructionService`
 (`handlers/utils/self_destruction.rs`) only writes rows into `Scheduled_Message_Deletions`

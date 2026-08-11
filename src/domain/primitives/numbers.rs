@@ -1,3 +1,4 @@
+use domain_types::traits::SaturatingInto;
 use domain_types_macro::domain_type;
 use crate::number;
 
@@ -48,6 +49,18 @@ struct RateLimit(u32);
 /// a list, stored in jsonb and shown on a button, and all three want a plain number.
 #[domain_type(number)]
 struct DelayMinutes(u32);
+
+/// The visible characters of a message — what its reading time is estimated from. A Telegram
+/// message holds at most a few thousand of them, so the width is never in question.
+#[domain_type(number)]
+struct CharCount(u32);
+
+impl CharCount {
+    /// What a reader actually gets through: characters, not bytes.
+    pub fn of(text: &str) -> Self {
+        Self(text.chars().count().saturating_into())
+    }
+}
 
 #[cfg(test)]
 mod deserialize_tests {

@@ -138,6 +138,8 @@ commands:
       header: "我的訊息在本群會留這麼久："
       cleaned: "🧹 %{group} — <b>%{delay}</b>"
       kept: "📌 %{group} —— 永久保留"
+      inline_compressed: "🗜 這裡我也會壓縮自己的內聯訊息。"
+      inline_kept: "📌 這裡我不動自己的內聯訊息。"
     pick:
       prompt: "「%{group}」這類訊息在本群要留多久？"
     groups:
@@ -154,6 +156,8 @@ commands:
       keep: "📌 永久保留"
       follow: "↩️ 聽機器人的"
       back: "⬅️ 返回"
+      inline_on: "🗜 壓縮內聯訊息"
+      inline_off: "📌 不動內聯訊息"
       reset: "↩️ 全部聽機器人的"
       confirm: "🧹 仍然設定"
     warning:

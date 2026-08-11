@@ -35,6 +35,8 @@ commands:
       header: "Вот сколько живут мои сообщения в этом чате:"
       cleaned: "🧹 %{group} — <b>%{delay}</b>"
       kept: "📌 %{group} — остаются навсегда"
+      inline_compressed: "🗜 Свои inline-сообщения я тут тоже сжимаю."
+      inline_kept: "📌 Свои inline-сообщения я тут не трогаю."
     pick:
       prompt: "Как долго должны жить в этом чате мои сообщения из категории «%{group}»?"
     groups:
@@ -51,6 +53,8 @@ commands:
       keep: "📌 Оставлять навсегда"
       follow: "↩️ По умолчанию"
       back: "⬅️ Назад"
+      inline_on: "🗜 Сжимать inline-сообщения"
+      inline_off: "📌 Не трогать inline-сообщения"
       reset: "↩️ Всё по умолчанию"
       confirm: "🧹 Всё равно установить"
     warning:

@@ -35,6 +35,8 @@ commands:
       header: "我的消息在本群会留这么久："
       cleaned: "🧹 %{group} — <b>%{delay}</b>"
       kept: "📌 %{group} —— 永久保留"
+      inline_compressed: "🗜 这里我也会压缩自己的内联消息。"
+      inline_kept: "📌 这里我不动自己的内联消息。"
     pick:
       prompt: "「%{group}」这类消息在本群要留多久？"
     groups:
@@ -51,6 +53,8 @@ commands:
       keep: "📌 永久保留"
       follow: "↩️ 听机器人的"
       back: "⬅️ 返回"
+      inline_on: "🗜 压缩内联消息"
+      inline_off: "📌 不动内联消息"
       reset: "↩️ 全部听机器人的"
       confirm: "🧹 仍然设置"
     warning:

@@ -35,6 +35,8 @@ commands:
       header: "Ecco quanto restano i miei messaggi in questa chat:"
       cleaned: "🧹 %{group} — <b>%{delay}</b>"
       kept: "📌 %{group} — restano per sempre"
+      inline_compressed: "🗜 Qui restringo anche i miei messaggi inline."
+      inline_kept: "📌 Qui lascio stare i miei messaggi inline."
     pick:
       prompt: "Quanto devono restare in questa chat i miei messaggi della categoria «%{group}»?"
     groups:
@@ -51,6 +53,8 @@ commands:
       keep: "📌 Tenerli per sempre"
       follow: "↩️ Come preferisce il bot"
       back: "⬅️ Indietro"
+      inline_on: "🗜 Restringi i messaggi inline"
+      inline_off: "📌 Lascia stare i messaggi inline"
       reset: "↩️ Tutto come preferisce il bot"
       confirm: "🧹 Imposta comunque"
     warning:

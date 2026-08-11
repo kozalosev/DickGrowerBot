@@ -70,6 +70,15 @@ impl CleanupPolicy {
         self.refresh(chat_id).await
     }
 
+    pub async fn set_inline(
+        &self,
+        chat_id: &ChatIdPartiality,
+        compress: bool,
+    ) -> anyhow::Result<ChatCleanupSettings> {
+        self.chats.set_cleanup_inline(chat_id, compress).await?;
+        self.refresh(chat_id).await
+    }
+
     /// Takes back the chat's choice about one group, leaving the rest of them as they are.
     pub async fn follow_the_bot(
         &self,

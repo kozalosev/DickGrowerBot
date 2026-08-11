@@ -35,6 +35,8 @@ commands:
       header: "Here is how long my messages stay in this chat:"
       cleaned: "🧹 %{group} — <b>%{delay}</b>"
       kept: "📌 %{group} — kept for good"
+      inline_compressed: "🗜 I shrink my inline messages here too."
+      inline_kept: "📌 I leave my inline messages alone here."
     pick:
       prompt: "How long should messages in <b>%{group}</b> stay in this chat?"
     groups:
@@ -51,6 +53,8 @@ commands:
       keep: "📌 Keep them for good"
       follow: "↩️ Use the default"
       back: "⬅️ Back"
+      inline_on: "🗜 Shrink the inline messages"
+      inline_off: "📌 Leave the inline messages alone"
       reset: "↩️ Everything back to default"
       confirm: "🧹 Set it anyway"
     warning:

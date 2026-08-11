@@ -155,15 +155,31 @@ async fn cleanup_settings_roundtrip() {
         .await.expect("couldn't read the cleanup settings");
     assert!(settings.is_default());
 
-    // And the whole thing goes back at once.
+    // The inline flag shares the key with the delays and neither writer touches the other.
+    chats.set_cleanup_inline(&partiality, true)
+        .await.expect("couldn't ask for the inline messages to be shrunk");
     chats.set_cleanup_group(&partiality, MessageGroup::Event, DelayMinutes::new(15))
         .await.expect("couldn't set the delay of the events again");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert_eq!(settings.compresses_inline(), Some(true));
+    assert_eq!(settings.get(MessageGroup::Event), Some(DelayMinutes::new(15)));
+
+    chats.set_cleanup_inline(&partiality, false)
+        .await.expect("couldn't ask for the inline messages to be left alone");
+    let settings = chats.get_cleanup_settings(&kind)
+        .await.expect("couldn't read the cleanup settings");
+    assert_eq!(settings.compresses_inline(), Some(false));
+    assert_eq!(settings.get(MessageGroup::Event), Some(DelayMinutes::new(15)));
+
+    // And the whole thing goes back at once.
     chats.reset_cleanup(&partiality)
         .await.expect("couldn't reset the cleanup settings");
     let settings = chats.get_cleanup_settings(&kind)
         .await.expect("couldn't read the cleanup settings");
     assert!(settings.is_default());
     assert_eq!(settings.get(MessageGroup::Event), None);
+    assert_eq!(settings.compresses_inline(), None);
 }
 
 /// All three settings live in the same jsonb column, so each one's writes must leave the others
