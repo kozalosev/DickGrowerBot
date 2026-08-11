@@ -1,6 +1,7 @@
 use std::time::Duration;
 use autometrics::autometrics;
 use chrono::Utc;
+use futures::{stream, StreamExt};
 use rust_i18n::t;
 use teloxide::{ApiError, Bot, RequestError};
 use teloxide::adaptors::Throttle;
@@ -57,38 +58,57 @@ pub async fn run_pending_deletions(
     }
     tracing::debug!(count = due.len(), "acting on the messages due for self-destruction");
 
-    for deletion in due {
-        let id = deletion.id;
-        let group = deletion.group;
-        let kind = deletion.kind;
-        let failures = deletion.attempts;
-        let outcome = act(bot, cache, config, deletion).await;
-
-        // Only an ending is counted, and each one only once, so the outcomes add up to the number
-        // of messages. A warning and a retry are steps, not endings; retries have their own counter.
-        let result = match outcome {
-            Outcome::Removed => finish(repos, id, group, kind, DeletionState::Removed).await,
-            Outcome::RemovedBefore => finish(repos, id, group, kind, DeletionState::RemovedBefore).await,
-            Outcome::Expired => finish(repos, id, group, kind, DeletionState::Expired).await,
-            Outcome::Failed => finish(repos, id, group, kind, DeletionState::Failed).await,
-            Outcome::Warned => repos.deletions.mark_warned(id, Utc::now() + config.warning).await,
-            Outcome::Retry => {
-                metrics::SELF_DESTRUCTION_RETRIES.record(group, kind);
-                let next_attempt = Utc::now() + backoff(config.retry_delay, failures, config.max_retry_delay);
-                match repos.deletions.postpone(id, next_attempt).await {
-                    Ok(attempts) if attempts >= config.max_attempts => {
-                        tracing::warn!(id = %id, attempts = %attempts, "giving up on a self-destructing message");
-                        finish(repos, id, group, kind, DeletionState::Failed).await
-                    },
-                    other => other.map(|_| ()),
-                }
-            },
-        };
-        if let Err(e) = result {
-            tracing::error!(id = %id, error = format!("{e:#}"), "couldn't record the outcome of a self-destruction");
-        }
-    }
+    // Concurrently, because what one run gets through would otherwise be one message per round
+    // trip to Telegram however large the batch. `delete_message` and `edit_message_text` are not
+    // subject to the limits on sending — teloxide's `Throttle` passes both straight through — so
+    // the bound here is our own connection and database pools, not Telegram's patience. If that
+    // turns out to be wrong, a 429 is not final: the row is postponed and tried again, and it
+    // shows up as `telegram_request_errors_total{kind="rate_limited"}`.
+    stream::iter(due)
+        .for_each_concurrent(usize::from(config.concurrency), |deletion| async move {
+            act_and_record(bot, repos, cache, config, deletion).await
+        })
+        .await;
     Ok(())
+}
+
+/// Acts on one message and writes down what became of it.
+async fn act_and_record(
+    bot: &Throttle<Bot>,
+    repos: &Repositories,
+    cache: &Cache,
+    config: &SelfDestructionConfig,
+    deletion: ScheduledDeletion,
+) {
+    let id = deletion.id;
+    let group = deletion.group;
+    let kind = deletion.kind;
+    let failures = deletion.attempts;
+    let outcome = act(bot, cache, config, deletion).await;
+
+    // Only an ending is counted, and each one only once, so the outcomes add up to the number of
+    // messages. A warning and a retry are steps, not endings; retries have their own counter.
+    let result = match outcome {
+        Outcome::Removed => finish(repos, id, group, kind, DeletionState::Removed).await,
+        Outcome::RemovedBefore => finish(repos, id, group, kind, DeletionState::RemovedBefore).await,
+        Outcome::Expired => finish(repos, id, group, kind, DeletionState::Expired).await,
+        Outcome::Failed => finish(repos, id, group, kind, DeletionState::Failed).await,
+        Outcome::Warned => repos.deletions.mark_warned(id, Utc::now() + config.warning).await,
+        Outcome::Retry => {
+            metrics::SELF_DESTRUCTION_RETRIES.record(group, kind);
+            let next_attempt = Utc::now() + backoff(config.retry_delay, failures, config.max_retry_delay);
+            match repos.deletions.postpone(id, next_attempt).await {
+                Ok(attempts) if attempts >= config.max_attempts => {
+                    tracing::warn!(id = %id, attempts = %attempts, "giving up on a self-destructing message");
+                    finish(repos, id, group, kind, DeletionState::Failed).await
+                },
+                other => other.map(|_| ()),
+            }
+        },
+    };
+    if let Err(e) = result {
+        tracing::error!(id = %id, error = format!("{e:#}"), "couldn't record the outcome of a self-destruction");
+    }
 }
 
 /// Stores the state a row ended in and counts that ending. Both happen here, so the table and the

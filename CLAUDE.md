@@ -180,6 +180,7 @@ MSG_SELFDESTRUCT_WARNING_SECONDS=15     # grace period showing "will be deleted 
 MSG_SELFDESTRUCT_MODE=WITHOUT_COMMAND   # DISABLED | ENABLED | ONLY_WITH_COMMAND | WITHOUT_COMMAND
 MSG_SELFDESTRUCT_POLL_SECS=5            # how often the worker looks for the due messages
 MSG_SELFDESTRUCT_BATCH_SIZE=50          # messages one run takes on
+MSG_SELFDESTRUCT_CONCURRENCY=8          # how many of them it acts on at once
 MSG_SELFDESTRUCT_LEASE_SECS=300         # how long a claimed batch is held out of reach
 MSG_SELFDESTRUCT_INLINE_GROUPS=         # comma-separated groups; empty => inline messages are kept
 MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS=60 # the first wait after a failure; it doubles with each one
@@ -282,8 +283,14 @@ batch limit. Read together:
 | duration | batch size | what it means |
 |---|---|---|
 | under the interval | any | the queue keeps up; leave it alone |
-| at or over it | hitting the limit | saturated — raise `MSG_SELFDESTRUCT_BATCH_SIZE`; a longer interval makes it worse |
+| at or over it | hitting the limit | saturated — raise `MSG_SELFDESTRUCT_CONCURRENCY`, and the batch size with it if a run then empties the queue early; a longer interval makes it worse |
 | at or over it | well under it | Telegram is slow, not the queue — a longer interval costs nothing |
+
+**The knob for throughput is `MSG_SELFDESTRUCT_CONCURRENCY`, not the batch size.** A run gets
+through that many messages per round trip to Telegram; the batch size only bounds how much it
+claims, so raising it alone lengthens the run and drains the queue no faster. Keep the concurrency
+under `DATABASE_MAX_CONNECTIONS` — every finished message writes a row — and watch
+`telegram_request_errors_total{kind="rate_limited"}` after raising it.
 
 Changing `MSG_SELFDESTRUCT_BATCH_SIZE` needs no other change. The buckets go up to 500, well past
 any sane limit, and the limit itself is exported as `self_destruction_batch_limit`
@@ -329,9 +336,17 @@ stopped being an offer, and its outcome is kept like any other event.
 
 ### One throttle for the schedulers
 
-The daily shrink and the deletion worker both send to many chats at once, so both go through
+The daily shrink and the deletion worker both reach many chats at once, and both hold
 `teloxide`'s `Throttle`. They share **one**, built by `scheduler::throttled` and cloned into both
 (`main.rs`).
+
+**It only governs the shrink.** The adaptor throttles the message-*sending* methods and passes
+everything else through, so the deletion worker — which only deletes and edits — is not bounded by
+it at all. That is teloxide's judgement, not an oversight: the documented limits (30 a second, one
+a second per chat) are about sending, and a deletion produces no message and no notification. What
+bounds the worker is `MSG_SELFDESTRUCT_CONCURRENCY`. If that judgement is ever wrong, a 429 is not
+final — the row is postponed and tried again, and it shows as
+`telegram_request_errors_total{kind="rate_limited"}`.
 
 Sharing is not a nicety. The adaptor counts requests inside a worker task that the wrapper spawns,
 and a clone only adds a handle to that same worker. Two wrappers would be two workers with two

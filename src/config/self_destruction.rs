@@ -38,11 +38,11 @@ pub enum DeletionMode {
     /// Nothing self-destructs, whatever the delays say.
     Disabled,
     /// The answer always goes; the command goes too when the bot is allowed to remove it.
+    #[default]
     Enabled,
     /// The answer goes only together with its command — all or nothing.
     OnlyWithCommand,
     /// The answer goes, the command is never touched and Telegram is never asked about the rights.
-    #[default]
     WithoutCommand,
 }
 
@@ -110,6 +110,10 @@ pub struct SelfDestructionConfig {
     pub poll_interval: Duration,
     /// How many messages one run of the worker takes on.
     pub batch_size: Limit,
+    /// How many of them it acts on at once. What one run gets through is this many messages per
+    /// round trip to Telegram, so this is the knob for throughput and `batch_size` only bounds how
+    /// much a run claims.
+    pub concurrency: Limit,
     /// How long a claimed batch stays out of every other worker's reach.
     pub lease: Duration,
     pub inline_groups: InlineGroups,

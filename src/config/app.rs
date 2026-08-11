@@ -67,6 +67,7 @@ impl AppConfig {
             mode: get_optional_env_value("MSG_SELFDESTRUCT_MODE"),
             poll_interval: EnvDuration::seconds("MSG_SELFDESTRUCT_POLL_SECS").or(5).at_least(1).read(),
             batch_size: env_value!("MSG_SELFDESTRUCT_BATCH_SIZE": Limit, or = 50, at_least = 1),
+            concurrency: env_value!("MSG_SELFDESTRUCT_CONCURRENCY": Limit, or = 8, at_least = 1),
             lease: EnvDuration::seconds("MSG_SELFDESTRUCT_LEASE_SECS").or(300).at_least(1).read(),
             inline_groups: get_optional_env_value("MSG_SELFDESTRUCT_INLINE_GROUPS"),
             retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS").or(60).at_least(1).read(),
