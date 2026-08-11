@@ -16,19 +16,48 @@ commands:
       reset: "完成！群聊语言已清除 —— 我会重新按每个人自己的语言回复。"
       auto_button: "🌐 自动（各自的语言）"
   topics:
-    description: "Choose the topics the bot works in"
+    description: "选择我在哪些话题里干活"
     state:
-      unrestricted: "I work in <b>every topic</b> of this chat."
-      allowed_here: "I work <b>in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
-      forbidden_here: "I <b>don't work in this topic</b>. Topics I am allowed in: <b>%{count}</b>."
+      unrestricted: "本群<b>所有话题</b>我都干活。"
+      allowed_here: "我<b>在这个话题里干活</b>。允许我出没的话题共 <b>%{count}</b> 个。"
+      forbidden_here: "我<b>不在这个话题里干活</b>。允许我出没的话题共 <b>%{count}</b> 个。"
     buttons:
-      only_here: "🔒 Work in this topic only"
-      allow_here: "✅ Allow in this topic"
-      forbid_here: "🚫 Forbid in this topic"
-      allow_everywhere: "🌍 Allow in all topics"
+      only_here: "🔒 只在这个话题里干活"
+      allow_here: "✅ 允许在这个话题"
+      forbid_here: "🚫 禁止在这个话题"
+      allow_everywhere: "🌍 所有话题都允许"
     errors:
-      not_a_forum: "This chat has no topics, so there is nothing to restrict me to."
-      admins_only: "Only chat administrators can choose the topics I work in."
+      not_a_forum: "本群没有话题，没什么可以限制我的。"
+      admins_only: "只有群管理员才能选择我在哪些话题里干活。"
+  cleanup:
+    description: "设置我的消息在本群留多久"
+    state:
+      header: "我的消息在本群会留这么久："
+      cleaned: "🧹 %{group} — <b>%{delay}</b>"
+      kept: "📌 %{group} —— 永久保留"
+    pick:
+      prompt: "「%{group}」这类消息在本群要留多久？"
+    groups:
+      notice: "提示与拒绝"
+      report: "排行榜"
+      event: "成长与战绩"
+      application: "挑战与邀约"
+    delays:
+      minutes: "%{count} 分钟"
+      hours: "%{count} 小时"
+      kept: "永久"
+    buttons:
+      group: "%{group}: %{delay}"
+      keep: "📌 永久保留"
+      follow: "↩️ 听机器人的"
+      back: "⬅️ 返回"
+      reset: "↩️ 全部听机器人的"
+      confirm: "🧹 仍然设置"
+    warning:
+      no_rights: "我在本群没有删除消息的权限，所以大家发给我的命令会留着，只有我的回复会消失。把我设为可以删除消息的管理员，我就把两边都清掉。\n\n仍然为<b>%{group}</b>设置吗？"
+      no_rights_strict: "我在本群没有删除消息的权限，而回复我只会连同触发它的命令一起删——所以在我成为可以删除消息的管理员之前，什么都不会消失。\n\n仍然为<b>%{group}</b>设置吗？"
+    errors:
+      admins_only: "只有群管理员才能选择哪些消息会自动消失。"
   privacy:
     description: "存储数据说明详见隐私政策，"
   support:
@@ -37,7 +66,6 @@ commands:
     sent: "留言已发送。主人会在私聊中回复你。"
     cancelled: "请求已取消。"
     too_often: "你刚刚已经发过留言了，请等一分钟再发。"
-    disabled: "此功能当前不可用。"
   grow:
     description: "让你的丁丁变大！"
     result: "你的丁丁已经<b>%{incr} 厘米</b> %{event}，现在长度为<b>%{length} 厘米</b>。"
@@ -181,8 +209,8 @@ migration:
   lost: "本群刚刚升级为超级群组，Telegram 为它分配了全新的标识——我已经无法把它认作原来的那个群了。\n\n如果之前有人在这里通过内联模式游玩，那些记录很遗憾已经无法找回，成绩将从头开始。如果没有人玩过，那就什么也没丢。从现在起一切照常运作，而且这种情况不会再发生了。🍆"
   lost_inline: "本群刚刚升级为超级群组。通过命令游玩的一切都随之迁移过来了，完好无损。\n\n但内联模式的结果从未与本群绑定——那需要在升级之前点击激活按钮。它们很遗憾已经无法找回。如果没有人在这里通过内联模式游玩，那就什么也没丢。从现在起一切照常运作。🍆"
 errors:
-  forbidden_topic_callback: "I don't work in this topic."
-  forbidden_topic: "I don't work in this topic. An administrator can change that with /topics."
+  forbidden_topic_callback: "我不在这个话题里干活。"
+  forbidden_topic: "我不在这个话题里干活。管理员可以用 /topics 更改。"
   not_group_chat: "此机器人仅在群聊中执行任务！"
   group_account: "不能以群组或频道的身份游玩——请关闭匿名模式后重试！"
   feature_disabled: "此功能当前暂时禁用。"

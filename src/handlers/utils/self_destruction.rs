@@ -9,6 +9,7 @@ use crate::handlers::rights;
 use crate::domain::primitives::LanguageCode;
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
 use crate::cache::Cache;
+use crate::cleanup::CleanupPolicy;
 use crate::repo::{DeletionTarget, MessageKind, NewDeletion, ScheduledDeletions};
 
 /// Estimated time needed to read `char_count` visible characters at `cpm` characters per
@@ -31,6 +32,7 @@ fn reading_time(char_count: usize, cpm: u64) -> Duration {
 pub struct SelfDestructionService {
     config: SelfDestructionConfig,
     deletions: ScheduledDeletions,
+    cleanup: CleanupPolicy,
     cache: Cache,
     bot_id: TeloxideUserId,
     /// How long what the cache learns about the bot's rights here stays worth believing.
@@ -41,11 +43,12 @@ impl SelfDestructionService {
     pub fn new(
         config: SelfDestructionConfig,
         deletions: ScheduledDeletions,
+        cleanup: CleanupPolicy,
         cache: Cache,
         bot_id: TeloxideUserId,
         bot_admin_ttl: Duration,
     ) -> Self {
-        Self { config, deletions, cache, bot_id, bot_admin_ttl }
+        Self { config, deletions, cleanup, cache, bot_id, bot_admin_ttl }
     }
 
     /// Schedules the answer `sent` and, when the configuration and the bot's rights allow it, the
@@ -68,7 +71,8 @@ impl SelfDestructionService {
         if sent.chat.is_private() {
             return
         }
-        let Some(base_delay) = self.config.delay_for(group) else {
+        let settings = self.cleanup.settings(&sent.chat.id.into()).await;
+        let Some(base_delay) = self.config.delay_for_chat(group, &settings) else {
             return
         };
         let char_count = sent.text().map_or(0, |t| t.chars().count());
@@ -170,9 +174,7 @@ impl SelfDestructionService {
     ///   request, marks the row `failed` and teaches the cache, and no one sees any of it.
     /// * [`DeletionMode::OnlyWithCommand`] can't guess. The answer is deleted *before* its command,
     ///   so a refusal would leave the command sitting alone in the chat — the very thing the mode
-    ///   exists to prevent. Only here is Telegram asked, and only when nothing is known.
-    ///
-    /// A failed request answers "no": keeping both messages is the harmless outcome.
+    ///   exists to prevent. Only there is Telegram asked, and only when nothing is known.
     ///
     /// [`DeletionMode::Enabled`]: crate::config::DeletionMode::Enabled
     /// [`DeletionMode::OnlyWithCommand`]: crate::config::DeletionMode::OnlyWithCommand
@@ -183,7 +185,23 @@ impl SelfDestructionService {
         if !self.config.requires_command() {
             return true
         }
+        self.ask_about_the_rights(bot, chat_id).await
+    }
 
+    /// The same question without the guessing, for the one caller that has to know: the picker of
+    /// `/cleanup`, which warns an admin whose chat is about to lose the answers while keeping the
+    /// commands. A press is rare enough to be worth the request, and the answer it stores serves
+    /// every message that follows.
+    pub async fn may_delete_here(&self, bot: &Bot, chat_id: ChatId) -> bool {
+        match rights::cached_deletion_right(&self.cache, chat_id).await {
+            Some(known) => known,
+            None => self.ask_about_the_rights(bot, chat_id).await,
+        }
+    }
+
+    /// Asks Telegram and remembers the answer. A failed request answers "no": keeping both
+    /// messages is the harmless outcome.
+    async fn ask_about_the_rights(&self, bot: &Bot, chat_id: ChatId) -> bool {
         let is_admin = match bot.get_chat_member(chat_id, self.bot_id).await {
             Ok(member) => member.can_delete_messages(),
             Err(e) => {

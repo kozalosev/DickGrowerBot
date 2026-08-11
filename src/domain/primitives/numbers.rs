@@ -43,6 +43,12 @@ struct AttemptsCount(u32);
 #[domain_type(number)]
 struct RateLimit(u32);
 
+/// How long a message lives before it is taken away. Zero means it is never taken away at all,
+/// which is what makes this a count of minutes rather than a `Duration`: the value is chosen from
+/// a list, stored in jsonb and shown on a button, and all three want a plain number.
+#[domain_type(number)]
+struct DelayMinutes(u32);
+
 #[cfg(test)]
 mod deserialize_tests {
     use super::{Counter, DaysCount};

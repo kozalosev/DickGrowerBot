@@ -3,8 +3,9 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use anyhow::{bail, Context};
 use sqlx::{Postgres, Transaction};
-use crate::domain::objects::AllowedTopics;
-use crate::domain::primitives::SupportedLanguage;
+use crate::domain::enums::MessageGroup;
+use crate::domain::objects::{AllowedTopics, ChatCleanupSettings};
+use crate::domain::primitives::{DelayMinutes, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::repo::ensure_only_one_row_updated;
 use crate::repository;
@@ -65,6 +66,32 @@ fn parse_allowed_topics(value: sqlx::types::JsonValue) -> AllowedTopics {
             .ok())
         .collect();
     AllowedTopics::new(topics)
+}
+
+/// Reads the `cleanup` object of `Chats.settings` — a group-keyed map of the delays the chat chose,
+/// in minutes, `{"notice": 5}`. Zero means the group is kept for ever, and a group that isn't there
+/// follows the bot's own configuration.
+///
+/// A key that isn't a group name, or a value that isn't a number of minutes, is skipped: nothing
+/// but this module writes there, but a hand-edited row must not take the whole setting down with
+/// it.
+fn parse_cleanup_settings(value: sqlx::types::JsonValue) -> ChatCleanupSettings {
+    let sqlx::types::JsonValue::Object(entries) = value else {
+        tracing::warn!(value = ?value, "the cleanup settings of a chat are not an object");
+        return ChatCleanupSettings::default()
+    };
+    let choices = entries.into_iter()
+        .filter_map(|(name, delay)| {
+            let group = MessageGroup::from_str(&name)
+                .inspect_err(|_| tracing::warn!(group = %name, "an unknown message group is stored for the chat"))
+                .ok()?;
+            let minutes = delay.as_u64()
+                .and_then(|minutes| u32::try_from(minutes).ok())
+                .or_else(|| { tracing::warn!(group = %name, value = ?delay, "a cleanup delay is not a number of minutes"); None })?;
+            Some((group, DelayMinutes::new(minutes)))
+        })
+        .collect();
+    ChatCleanupSettings::new(choices)
 }
 
 impl ChatMigrationOutcome {
@@ -259,6 +286,86 @@ repository!(Chats, with_feature_toggles,
             .execute(&self.pool)
             .await
             .context(format!("couldn't allow all the topics of the chat {chat_id}"))?;
+        Ok(())
+    }
+,
+    /// What the chat decided about the self-destruction of each message group. An empty
+    /// [`ChatCleanupSettings`] means it decided nothing and follows the bot's own configuration,
+    /// which is the default.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn get_cleanup_settings(&self, chat_id: &ChatIdKind) -> anyhow::Result<ChatCleanupSettings> {
+        let settings = sqlx::query_scalar!(
+                "SELECT settings->'cleanup' FROM Chats
+                    WHERE chat_id = $1::bigint OR chat_instance = $1::text",
+                chat_id.value() as String)
+            .fetch_optional(&self.pool)
+            .await
+            .context(format!("couldn't get the cleanup settings of the chat with id = {chat_id}"))?
+            .flatten();
+        Ok(settings.map(parse_cleanup_settings).unwrap_or_default())
+    }
+,
+    /// Writes down how long the chat wants one message group to live, leaving the other three as
+    /// they were — including as undecided. Zero minutes means it wants them kept for ever.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, group = %group, minutes = %minutes))]
+    pub async fn set_cleanup_group(
+        &self,
+        chat_id: &ChatIdPartiality,
+        group: MessageGroup,
+        minutes: DelayMinutes,
+    ) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        // Merging into the existing object rather than reading it first keeps two admins pressing
+        // the buttons at once from overwriting each other.
+        sqlx::query!(
+                "UPDATE Chats SET settings = jsonb_set(settings, '{cleanup}',
+                    COALESCE(settings->'cleanup', '{}'::jsonb) || jsonb_build_object($2::text, $3::int))
+                    WHERE id = $1",
+                internal_id as InternalChatId, group.to_string(), minutes as DelayMinutes)
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't set the cleanup delay of the {group} messages of the chat {chat_id}"))?;
+        Ok(())
+    }
+,
+    /// Drops the chat's choice about one group, leaving the others as they are. Removing the last
+    /// one takes the whole key with it, so a chat that follows the bot in everything looks like a
+    /// chat that never chose — which is what it has become.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, group = %group))]
+    pub async fn forget_cleanup_group(
+        &self,
+        chat_id: &ChatIdPartiality,
+        group: MessageGroup,
+    ) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        // The parentheses are load-bearing: `-` binds tighter than `->`, so without them the
+        // key would be subtracted from the path instead of from the object it points at.
+        sqlx::query!(
+                "UPDATE Chats SET settings = CASE
+                    WHEN (settings->'cleanup') - $2::text = '{}'::jsonb THEN settings - 'cleanup'
+                    ELSE jsonb_set(settings, '{cleanup}', (settings->'cleanup') - $2::text)
+                    END
+                    WHERE id = $1 AND settings->'cleanup' IS NOT NULL",
+                internal_id as InternalChatId, group.to_string())
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't forget the cleanup delay of the {group} messages of the chat {chat_id}"))?;
+        Ok(())
+    }
+,
+    /// Drops every choice the chat made: it follows the bot's configuration again.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn reset_cleanup(&self, chat_id: &ChatIdPartiality) -> anyhow::Result<()> {
+        let internal_id = self.upsert_chat(chat_id).await?;
+        sqlx::query!("UPDATE Chats SET settings = settings - 'cleanup' WHERE id = $1",
+                internal_id as InternalChatId)
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't reset the cleanup settings of the chat {chat_id}"))?;
         Ok(())
     }
 ,

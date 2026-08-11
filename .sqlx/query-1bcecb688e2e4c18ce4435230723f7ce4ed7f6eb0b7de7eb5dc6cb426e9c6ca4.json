@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Chats SET settings = settings - 'cleanup' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1bcecb688e2e4c18ce4435230723f7ce4ed7f6eb0b7de7eb5dc6cb426e9c6ca4"
+}
