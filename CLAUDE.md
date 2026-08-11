@@ -68,8 +68,8 @@ after a bounded time instead of blocking update processing. Both vars are option
 overrides only its own knob; leaving **both** unset keeps teloxide's stock client:
 
 ```
-BOT_HTTP_CONNECT_TIMEOUT_SECS=5  # teloxide default when unset
-BOT_HTTP_TIMEOUT_SECS=17         # total per-request timeout; teloxide default when unset
+BOT_HTTP_CONNECT_TIMEOUT_SECONDS=5  # teloxide default when unset
+BOT_HTTP_TIMEOUT_SECONDS=17         # total per-request timeout; teloxide default when unset
 ```
 
 Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are auto-detected by
@@ -80,7 +80,7 @@ reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read
 
 ```
 SUPPORT_CHAT_ID=-1001234567890  # where /support relays messages; unset => command hidden and disabled
-BAN_LIST_REFRESH_SECS=900       # how often the in-memory ban list is re-read from the DB
+BAN_LIST_REFRESH_SECONDS=900       # how often the in-memory ban list is re-read from the DB
 ```
 
 `Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
@@ -120,8 +120,8 @@ Only the keys carry meaning; an object is used rather than an array because it m
 in one statement and dedupes for free.
 
 ```
-CHAT_TOPICS_CACHE_TIME_SECS=3600   # optional TTL for the per-chat allowed-topics cache
-BOT_ADMIN_CACHE_TIME_SECS=3600     # optional TTL for what is known about the bot's rights in a chat
+CHAT_TOPICS_CACHE_TIME_SECONDS=3600   # optional TTL for the per-chat allowed-topics cache
+BOT_ADMIN_CACHE_TIME_SECONDS=3600     # optional TTL for what is known about the bot's rights in a chat
 ```
 
 `checks::reject_forbidden_topic()` sits at the very top of the dispatcher tree, above even the ban
@@ -172,29 +172,29 @@ waiting for an answer) — and each group has a delay of its own, zero meaning p
 chats are never cleaned up; they aren't noisy.
 
 ```
-MSG_SELFDESTRUCT_DELAY_NOTICE=2         # minutes; 0 or unset => the group is permanent
-MSG_SELFDESTRUCT_DELAY_REPORT=5
-MSG_SELFDESTRUCT_DELAY_EVENT=0          # the chat's history — permanent by default
-MSG_SELFDESTRUCT_DELAY_APPLICATION=60
+MSG_SELFDESTRUCT_DELAY_NOTICE_MINUTES=2         # minutes; 0 or unset => the group is permanent
+MSG_SELFDESTRUCT_DELAY_REPORT_MINUTES=5
+MSG_SELFDESTRUCT_DELAY_EVENT_MINUTES=0          # the chat's history — permanent by default
+MSG_SELFDESTRUCT_DELAY_APPLICATION_MINUTES=60
 MSG_SELFDESTRUCT_READING_SPEED_CPM=500  # a long message lives at least as long as it takes to read
 MSG_SELFDESTRUCT_WARNING_SECONDS=15     # grace period showing "will be deleted in N seconds"
 MSG_SELFDESTRUCT_MODE=WITHOUT_COMMAND   # DISABLED | ENABLED | ONLY_WITH_COMMAND | WITHOUT_COMMAND
-MSG_SELFDESTRUCT_POLL_SECS=5            # how often the worker looks for the due messages
+MSG_SELFDESTRUCT_POLL_SECONDS=5            # how often the worker looks for the due messages
 MSG_SELFDESTRUCT_BATCH_SIZE=50          # messages one run takes on
 MSG_SELFDESTRUCT_CONCURRENCY=8          # how many of them it acts on at once
-MSG_SELFDESTRUCT_LEASE_SECS=300         # how long a claimed batch is held out of reach
+MSG_SELFDESTRUCT_LEASE_SECONDS=300         # how long a claimed batch is held out of reach
 MSG_SELFDESTRUCT_INLINE_GROUPS=         # comma-separated groups; empty => inline messages are kept
 MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS=60 # the first wait after a failure; it doubles with each one
-MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECS=3600  # the cap that doubling stops at
+MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS=3600  # the cap that doubling stops at
 MSG_SELFDESTRUCT_MAX_ATTEMPTS=3         # attempts before the row is marked `failed` and left alone
-MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY=1440  # minutes a finished row is kept; 0 => for ever
+MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES=1440  # minutes a finished row is kept; 0 => for ever
 ```
 
 **Everything goes through the database**, short-lived groups included: `SelfDestructionService`
 (`handlers/utils/self_destruction.rs`) only writes rows into `Scheduled_Message_Deletions`
 (migration 37), and the worker in `scheduler/deletions.rs` claims what is due and acts on it. The
 claim *leases* its batch — one `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING`
-that pushes `fire_after` `MSG_SELFDESTRUCT_LEASE_SECS` out. The lease, not the lock, is what makes the claim
+that pushes `fire_after` `MSG_SELFDESTRUCT_LEASE_SECONDS` out. The lease, not the lock, is what makes the claim
 exclusive: the row's lock lives only as long as that statement, while the requests it leads to take
 much longer. A worker killed mid-batch leaves its messages to be claimed again once the lease runs
 out. That is what a restart between an answer and its
@@ -259,13 +259,13 @@ warned into the void and found missing again a grace period later — the notice
 edit costs, but a message that is gone is not coming back.
 `SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
 stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
-`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY` minutes
+`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES` minutes
 later — a task of its own, because clearing the history must never be part of the run that wrote it.
 **A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
 on a busy bot.
 
 The wait between attempts is **exponential** — `MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS` doubled once
-per failure already recorded, capped at `MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECS`
+per failure already recorded, capped at `MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS`
 (`scheduler::deletions::backoff`). The count comes from the claimed row's `attempts`, not from the
 `postpone` that follows: the delay has to be known before it is written. Keep the cap well under
 Telegram's 48 hours. Without a cap the doubling would push an old row past that limit, and every
@@ -276,7 +276,7 @@ setting for it would be a knob that changes nothing. Everything else the worker 
 size and the lease too — is an environment variable, because the right value depends on how busy
 the bot is, and finding it should not need a rebuild.
 
-**Deciding on `MSG_SELFDESTRUCT_POLL_SECS`** takes two metrics, not one, because a long tick has two
+**Deciding on `MSG_SELFDESTRUCT_POLL_SECONDS`** takes two metrics, not one, because a long tick has two
 opposite causes. `run_pending_deletions` carries `#[autometrics]`, so how long a run took is
 `function_calls_duration_seconds{function="run_pending_deletions"}` — and the default buckets
 include `5.0`, the stock interval, so "the share of runs that fit into one tick" needs no
@@ -509,7 +509,7 @@ microservice (gRPC) to read/update a user's preferred language across all of Koz
 
 ```
 GRPC_ADDR_USER_SERVICE=host:port   # unset => integration disabled, personal /language hidden in PMs
-USER_CACHE_TIME_SECS=360           # optional cache TTL for fetched users
+USER_CACHE_TIME_SECONDS=360           # optional cache TTL for fetched users
 ```
 
 `/language` is overloaded: in a private chat it changes the caller's personal language (via
@@ -518,7 +518,7 @@ everyone and overrides each user's own preference. The chat-wide setting is stor
 `Chats.settings` (jsonb) column, so it works even when user-service is disabled:
 
 ```
-CHAT_LANGUAGE_CACHE_TIME_SECS=3600 # optional TTL for the per-chat language cache (we own the data)
+CHAT_LANGUAGE_CACHE_TIME_SECONDS=3600 # optional TTL for the per-chat language cache (we own the data)
 ```
 
 The proto contract is vendored as the `user-service-proto` git submodule and compiled by

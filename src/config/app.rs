@@ -58,22 +58,22 @@ impl AppConfig {
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
         let self_destruction = SelfDestructionConfig {
-            notice: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_NOTICE").read(),
-            report: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_REPORT").read(),
-            event: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_EVENT").read(),
-            application: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_APPLICATION").read(),
+            notice: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_NOTICE_MINUTES").read(),
+            report: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_REPORT_MINUTES").read(),
+            event: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_EVENT_MINUTES").read(),
+            application: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_APPLICATION_MINUTES").read(),
             reading_speed_cpm: get_env_value_or_default("MSG_SELFDESTRUCT_READING_SPEED_CPM", 500),
             warning: EnvDuration::seconds("MSG_SELFDESTRUCT_WARNING_SECONDS").read(),
             mode: get_optional_env_value("MSG_SELFDESTRUCT_MODE"),
-            poll_interval: EnvDuration::seconds("MSG_SELFDESTRUCT_POLL_SECS").or(5).at_least(1).read(),
+            poll_interval: EnvDuration::seconds("MSG_SELFDESTRUCT_POLL_SECONDS").or(5).at_least(1).read(),
             batch_size: env_value!("MSG_SELFDESTRUCT_BATCH_SIZE": Limit, or = 50, at_least = 1),
             concurrency: env_value!("MSG_SELFDESTRUCT_CONCURRENCY": Limit, or = 8, at_least = 1),
-            lease: EnvDuration::seconds("MSG_SELFDESTRUCT_LEASE_SECS").or(300).at_least(1).read(),
+            lease: EnvDuration::seconds("MSG_SELFDESTRUCT_LEASE_SECONDS").or(300).at_least(1).read(),
             inline_groups: get_optional_env_value("MSG_SELFDESTRUCT_INLINE_GROUPS"),
             retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS").or(60).at_least(1).read(),
-            max_retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECS").or(3600).at_least(1).read(),
+            max_retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS").or(3600).at_least(1).read(),
             max_attempts: env_value!("MSG_SELFDESTRUCT_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
-            retention: EnvDuration::minutes("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY").or(1440).read(),
+            retention: EnvDuration::minutes("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES").or(1440).read(),
         };
         let support_chat_id = get_optional_chat_id("SUPPORT_CHAT_ID");
         Self {

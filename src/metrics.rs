@@ -76,7 +76,7 @@ pub static SELF_DESTRUCTION_PENDING: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_pending", "number of messages waiting for their self-destruction; a number that only grows means the worker stopped draining the queue"));
 pub static SELF_DESTRUCTION_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
     Histogram::new("self_destruction_batch_size",
-        "how many messages one run of the worker took. Read it together with the duration of that run: short batches and long runs mean Telegram is slow, while batches that reach self_destruction_batch_limit mean the queue is full. The two need opposite changes to MSG_SELFDESTRUCT_POLL_SECS",
+        "how many messages one run of the worker took. Read it together with the duration of that run: short batches and long runs mean Telegram is slow, while batches that reach self_destruction_batch_limit mean the queue is full. The two need opposite changes to MSG_SELFDESTRUCT_POLL_SECONDS",
         &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
 pub static SELF_DESTRUCTION_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_batch_limit", "the value of MSG_SELFDESTRUCT_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));

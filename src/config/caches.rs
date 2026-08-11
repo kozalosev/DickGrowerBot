@@ -29,10 +29,10 @@ pub struct CachesConfig {
 impl CachesConfig {
     pub fn from_env() -> Self {
         Self {
-            chat_language: EnvDuration::seconds("CHAT_LANGUAGE_CACHE_TIME_SECS").or(3600).read(),
-            chat_topics: EnvDuration::seconds("CHAT_TOPICS_CACHE_TIME_SECS").or(3600).read(),
-            ban_list_refresh: EnvDuration::seconds("BAN_LIST_REFRESH_SECS").or(900).at_least(1).read(),
-            bot_admin: EnvDuration::seconds("BOT_ADMIN_CACHE_TIME_SECS").or(3600).at_least(1).read(),
+            chat_language: EnvDuration::seconds("CHAT_LANGUAGE_CACHE_TIME_SECONDS").or(3600).read(),
+            chat_topics: EnvDuration::seconds("CHAT_TOPICS_CACHE_TIME_SECONDS").or(3600).read(),
+            ban_list_refresh: EnvDuration::seconds("BAN_LIST_REFRESH_SECONDS").or(900).at_least(1).read(),
+            bot_admin: EnvDuration::seconds("BOT_ADMIN_CACHE_TIME_SECONDS").or(3600).at_least(1).read(),
         }
     }
 }

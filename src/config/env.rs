@@ -159,6 +159,17 @@ impl<'a> EnvDuration<'a> {
     }
 }
 
+/// A whole number of seconds, or nothing at all when the variable is unset or empty — for a knob
+/// whose default belongs to something else than this configuration. An unparsable value is warned
+/// about and counts as unset, which is the only thing left to do with it.
+pub(super) fn get_optional_env_seconds(key: &str) -> Option<Duration> {
+    get_optional_env_string(key)?
+        .parse::<u64>()
+        .inspect_err(|e| tracing::warn!(key = %key, error = %e, "invalid value of an environment variable"))
+        .ok()
+        .map(Duration::from_secs)
+}
+
 pub(super) fn get_optional_env_ratio(key: &str) -> Option<Ratio> {
     let value = get_env_value_or_default(key, -1.0);
     Ratio::new(value)
