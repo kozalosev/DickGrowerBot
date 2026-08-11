@@ -4,6 +4,7 @@ use crate::domain::primitives::{Percentage, Username};
 use crate::handlers::perks::HelpPussiesPerk;
 use crate::handlers::utils::Incrementor;
 use crate::help;
+use domain_types::literal;
 
 pub fn build_context_for_help_messages(
     me: &Me,
@@ -29,6 +30,6 @@ pub fn build_context_for_help_messages(
         git_repo: get_env_mandatory_value("HELP_GIT_REPO")?,
         help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
             .map(Percentage::from)
-            .unwrap_or(Percentage::literal(0))
+            .unwrap_or(literal!(Percentage = 0))
     })
 }

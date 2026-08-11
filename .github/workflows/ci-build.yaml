@@ -22,6 +22,8 @@ jobs:
 
       - name: Set up Rust
         uses: hecrj/setup-rust-action@v2
+        with:
+          components: clippy
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
@@ -31,6 +33,11 @@ jobs:
 
       - name: Test
         run: cargo test --verbose
+
+      # Among other things, this is what enforces `literal!` (see clippy.toml): a bare `literal`
+      # constructor is only reported by clippy, so without this step the rule binds nobody.
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
 
       - run: echo "🍏 This job's status is ${{ job.status }}."
 

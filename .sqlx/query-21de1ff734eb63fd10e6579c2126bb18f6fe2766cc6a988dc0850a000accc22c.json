@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Scheduled_Message_Deletions (chat_id, message_id, inline_message_id,\n                                                      message_kind, message_group, lang_code, fire_after)\n                SELECT * FROM UNNEST($1::bigint[], $2::int[], $3::text[],\n                                     $4::message_kind[], $5::message_group[], $6::text[], $7::timestamptz[])\n                ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Int4Array",
+        "TextArray",
+        {
+          "Custom": {
+            "name": "message_kind[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "message_kind",
+                  "kind": {
+                    "Enum": [
+                      "reply",
+                      "command",
+                      "inline"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "message_group[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "message_group",
+                  "kind": {
+                    "Enum": [
+                      "notice",
+                      "report",
+                      "event",
+                      "application"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "TextArray",
+        "TimestamptzArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "21de1ff734eb63fd10e6579c2126bb18f6fe2766cc6a988dc0850a000accc22c"
+}

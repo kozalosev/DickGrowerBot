@@ -43,7 +43,7 @@ impl AllowedTopics {
 mod test {
     use super::*;
 
-    fn topics(ids: &[i32]) -> AllowedTopics {
+    fn topics(ids: &[u32]) -> AllowedTopics {
         AllowedTopics::new(ids.iter().map(|id| TopicId::new(*id)).collect())
     }
 

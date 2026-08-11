@@ -137,7 +137,7 @@ mod tests {
 
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u128;
+        let seq = u128::from(COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         nanos ^ (seq << 100)
     }
 
@@ -151,7 +151,7 @@ texts:
   ru: |
     <a href="https://t.me/kozaloru/712">Что нового?</a>
 "#);
-        assert_eq!(config.max_shows, Counter::literal(3));
+        assert_eq!(config.max_shows, Counter::new(3));
         let en = config.announcements.get(&SupportedLanguage::EN)
             .expect("no English announcement");
         assert_eq!(en.text.as_str(), r#"<a href="https://t.me/kozalo_blog/20">What's new?</a>"#);
@@ -169,7 +169,7 @@ texts:
   # a comment inside the map
   en: hello    # trailing comment
 "#);
-        assert_eq!(config.max_shows, Counter::literal(2));
+        assert_eq!(config.max_shows, Counter::new(2));
         let en = config.announcements.get(&SupportedLanguage::EN)
             .expect("no English announcement");
         assert_eq!(en.text.as_str(), "hello");
@@ -181,7 +181,7 @@ texts:
 texts:
   en: hello
 "#);
-        assert_eq!(config.max_shows, Counter::literal(0));
+        assert_eq!(config.max_shows, Counter::new(0));
         assert!(config.announcements.contains_key(&SupportedLanguage::EN));
     }
 
@@ -210,7 +210,7 @@ texts:
     #[test]
     fn missing_file_yields_empty_config() {
         let config = AnnouncementsConfig::load("definitely/does/not/exist.yml");
-        assert_eq!(config.max_shows, Counter::literal(0));
+        assert_eq!(config.max_shows, Counter::new(0));
         assert!(config.announcements.is_empty());
     }
 
@@ -231,7 +231,7 @@ texts:
   en: hello
 "#);
         assert!(config.announcements.is_empty());
-        assert_eq!(config.max_shows, Counter::literal(0));
+        assert_eq!(config.max_shows, Counter::new(0));
     }
 
     mod fallback {

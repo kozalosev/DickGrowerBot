@@ -1,8 +1,9 @@
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio, UserId, Username};
+use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio, Username};
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
-use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, NAME, fresh_db, UID, USER_ID};
+use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, NAME, fresh_db, UID, USER_ID};
+use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
 
@@ -101,29 +102,29 @@ async fn test_perform_daily_shrink() {
 
     // A stale, positive dick — the only expected victim.
     let victim_uid = UID + 1;
-    users.create_or_update(UserId::literal(victim_uid), "stale-victim")
+    users.create_or_update(user_id(victim_uid), "stale-victim")
         .await.expect("couldn't create the victim user");
     seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
     let victim_updated_at_before = updated_at_of(&db, victim_uid, chat_id).await;
 
     // A stale but zero-length dick — must be left alone (only length > 0 shrinks).
     let zero_uid = UID + 2;
-    users.create_or_update(UserId::literal(zero_uid), "zero-length")
+    users.create_or_update(user_id(zero_uid), "zero-length")
         .await.expect("couldn't create the zero-length user");
     seed_aged_dick(&db, chat_id, zero_uid, 0, 10).await;
 
     // A stale, positive dick with a pending bonus attempt — shrinking it must not silently burn
     // the bonus attempt (the Dicks trigger decrements it on every update unless counteracted).
     let bonus_uid = UID + 3;
-    users.create_or_update(UserId::literal(bonus_uid), "has-bonus")
+    users.create_or_update(user_id(bonus_uid), "has-bonus")
         .await.expect("couldn't create the bonus user");
     seed_aged_dick_with_bonus_attempts(&db, chat_id, bonus_uid, 100, 10, 1).await;
 
-    let events = shrinks.perform_daily_shrink(Ratio::literal(0.1), GRACE_DAYS, NO_RAMP)
+    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP)
         .await.expect("couldn't perform the daily shrink");
 
     assert_eq!(events.len(), 2, "the two stale, positive dicks should have shrunk");
-    let event = events.iter().find(|e| e.uid == UserId::literal(victim_uid))
+    let event = events.iter().find(|e| e.uid == user_id(victim_uid))
         .expect("the victim's shrink event is missing");
     assert_eq!(event.owner_name, Username::from("stale-victim"));
     assert_eq!(event.lost_length, 10, "loss = ceil(100 * 0.1)");
@@ -161,14 +162,14 @@ async fn test_perform_daily_shrink_reports_unreachable_chats() {
     let chat_id = internal_chat_id(&db).await;
 
     let victim_uid = UID + 1;
-    users.create_or_update(UserId::literal(victim_uid), "stale-victim")
+    users.create_or_update(user_id(victim_uid), "stale-victim")
         .await.expect("couldn't create the victim user");
     seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
 
     chats.mark_unreachable(&TelegramChatId::new(CHAT_ID))
         .await.expect("couldn't mark the chat as unreachable");
 
-    let events = shrinks.perform_daily_shrink(Ratio::literal(0.1), GRACE_DAYS, NO_RAMP)
+    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP)
         .await.expect("couldn't perform the daily shrink");
 
     assert_eq!(events.len(), 1);
@@ -196,29 +197,29 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
     // Just past the grace period (7 days): the first overdue day, so the ramp (over 4 days)
     // is at its smallest step — 1/4 of the full ratio.
     let just_overdue_uid = UID + 1;
-    users.create_or_update(UserId::literal(just_overdue_uid), "just-overdue")
+    users.create_or_update(user_id(just_overdue_uid), "just-overdue")
         .await.expect("couldn't create the just-overdue user");
     seed_aged_dick(&db, chat_id, just_overdue_uid, 1000, 7).await;
 
     // Overdue for exactly the ramp's length (grace + ramp = 11 days): the ramp has fully
     // kicked in, so the full ratio applies.
     let fully_ramped_uid = UID + 2;
-    users.create_or_update(UserId::literal(fully_ramped_uid), "fully-ramped")
+    users.create_or_update(user_id(fully_ramped_uid), "fully-ramped")
         .await.expect("couldn't create the fully-ramped user");
     seed_aged_dick(&db, chat_id, fully_ramped_uid, 1000, 10).await;
 
     // Way overdue: the ramp is capped, so this must lose the same as the fully-ramped dick above,
     // not more.
     let way_overdue_uid = UID + 3;
-    users.create_or_update(UserId::literal(way_overdue_uid), "way-overdue")
+    users.create_or_update(user_id(way_overdue_uid), "way-overdue")
         .await.expect("couldn't create the way-overdue user");
     seed_aged_dick(&db, chat_id, way_overdue_uid, 1000, 20).await;
 
-    let events = shrinks.perform_daily_shrink(Ratio::literal(0.5), GRACE_DAYS, DaysCount::new(4))
+    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.5), GRACE_DAYS, DaysCount::new(4))
         .await.expect("couldn't perform the daily shrink");
 
     let loss_of = |uid: i64| events.iter()
-        .find(|e| e.uid == UserId::literal(uid))
+        .find(|e| e.uid == user_id(uid))
         .unwrap_or_else(|| panic!("no shrink event for uid {uid}"))
         .lost_length;
     assert_eq!(loss_of(just_overdue_uid), 125, "1/4 of the ramp: ceil(1000 * 0.5 * 1/4)");
@@ -245,15 +246,15 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
     let chat_id = internal_chat_id(&db).await;
 
     let victim_uid = UID + 1;
-    users.create_or_update(UserId::literal(victim_uid), "one-cm-left")
+    users.create_or_update(user_id(victim_uid), "one-cm-left")
         .await.expect("couldn't create the victim");
     seed_aged_dick(&db, chat_id, victim_uid, 1, 100).await;
 
     // ratio * length rounds down to 0 cm on its own — GREATEST(1, ...) must still floor it at 1.
-    let events = shrinks.perform_daily_shrink(Ratio::literal(0.01), GRACE_DAYS, NO_RAMP)
+    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.01), GRACE_DAYS, NO_RAMP)
         .await.expect("couldn't perform the daily shrink");
 
-    let event = events.iter().find(|e| e.uid == UserId::literal(victim_uid))
+    let event = events.iter().find(|e| e.uid == user_id(victim_uid))
         .expect("the 1cm dick must still shrink despite the tiny ratio");
     assert_eq!(event.lost_length, 1, "the floor must apply even though ratio * length rounds to 0");
     assert_eq!(event.new_length, 0);
@@ -282,12 +283,12 @@ async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wra
     let chat_id = internal_chat_id(&db).await;
 
     let victim_uid = UID + 1;
-    users.create_or_update(UserId::literal(victim_uid), "hundred-days-old")
+    users.create_or_update(user_id(victim_uid), "hundred-days-old")
         .await.expect("couldn't create the victim");
     seed_aged_dick(&db, chat_id, victim_uid, 100, 100).await;
 
     let absurd_grace_days = DaysCount::new(3_000_000_000); // > i32::MAX (~2.15 billion), valid u32
-    let result = shrinks.perform_daily_shrink(Ratio::literal(0.5), absurd_grace_days, NO_RAMP).await;
+    let result = shrinks.perform_daily_shrink(literal!(Ratio = 0.5), absurd_grace_days, NO_RAMP).await;
 
     assert!(result.is_err(), "an out-of-range grace_days must error, not silently wrap to negative");
     assert_eq!(length_of(&db, victim_uid, chat_id).await, 100,
@@ -308,18 +309,18 @@ async fn test_get_shrinks_for_date_only_returns_that_day() {
     let chat_id = internal_chat_id(&db).await;
 
     let victim_uid = UID + 1;
-    users.create_or_update(UserId::literal(victim_uid), "victim")
+    users.create_or_update(user_id(victim_uid), "victim")
         .await.expect("couldn't create the victim");
     seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
 
     // Today's shrink (logged with created_at = current_date).
-    shrinks.perform_daily_shrink(Ratio::literal(0.1), GRACE_DAYS, NO_RAMP)
+    shrinks.perform_daily_shrink(literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP)
         .await.expect("couldn't perform the daily shrink");
     // An older shrink, on a different day — must not leak into today's exact-date query.
     seed_old_shrink(&db, chat_id, UID, 5, 8).await;
 
     let today = chrono::Utc::now().date_naive();
-    let recent = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, today, Offset::new(0), Limit::literal(10)).await
+    let recent = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, today, Offset::new(0), Limit::new(10)).await
         .expect("couldn't fetch today's shrinks");
     assert_eq!(recent.len(), 1, "only today's shrink should be returned, not the older one");
     assert_eq!(recent[0].lost_length, 10);
@@ -345,17 +346,17 @@ async fn test_get_shrinks_for_date_pages() {
     // Three shrinks logged on the same day (days_ago 1), with distinct lost_length so ordering is
     // unambiguous (get_shrinks_for_date orders by lost_length DESC).
     for (n, lost) in [(1i32, 30i64), (2, 20), (3, 10)] {
-        let uid = UID + n as i64;
-        users.create_or_update(UserId::literal(uid), &format!("victim-{n}"))
+        let uid = UID + i64::from(n);
+        users.create_or_update(user_id(uid), &format!("victim-{n}"))
             .await.expect("couldn't create a victim");
         seed_aged_dick(&db, chat_id, uid, 100, 10).await;
         seed_old_shrink(&db, chat_id, uid, lost, 1).await;
     }
 
     let date = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
-    let page0 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(0), Limit::literal(2)).await
+    let page0 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(0), Limit::new(2)).await
         .expect("couldn't fetch page 0");
-    let page1 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(2), Limit::literal(2)).await
+    let page1 = shrinks.get_shrinks_for_date(&CHAT_ID_KIND, date, Offset::new(2), Limit::new(2)).await
         .expect("couldn't fetch page 1");
 
     assert_eq!(page0.len(), 2, "page 0 must be full");
@@ -405,8 +406,8 @@ async fn test_get_latest_and_adjacent_shrink_dates() {
     // Non-consecutive days: 1, 3, and 8 days ago. Two shrinks on the same day (1 day ago) to also
     // confirm MAX/MIN collapse duplicates rather than erroring.
     for (n, days_ago) in [(1i32, 1i32), (2, 1), (3, 3), (4, 8)] {
-        let uid = UID + n as i64;
-        users.create_or_update(UserId::literal(uid), &format!("victim-{n}"))
+        let uid = UID + i64::from(n);
+        users.create_or_update(user_id(uid), &format!("victim-{n}"))
             .await.expect("couldn't create a victim");
         seed_old_shrink(&db, chat_id, uid, 10, days_ago).await;
     }
@@ -450,7 +451,7 @@ async fn test_get_player_uids() {
 
     for n in 1..=2 {
         let uid = UID + n;
-        users.create_or_update(UserId::literal(uid), &format!("player-{n}"))
+        users.create_or_update(user_id(uid), &format!("player-{n}"))
             .await.expect("couldn't create a player");
         seed_aged_dick(&db, chat_id, uid, 10, 1).await;
     }
@@ -460,7 +461,7 @@ async fn test_get_player_uids() {
     uids.sort_by_key(|u| u.value());
     assert_eq!(uids, vec![
         USER_ID,
-        UserId::literal(UID + 1),
-        UserId::literal(UID + 2),
+        user_id(UID + 1),
+        user_id(UID + 2),
     ]);
 }

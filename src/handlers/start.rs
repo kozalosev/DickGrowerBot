@@ -53,7 +53,7 @@ pub async fn start_cmd_handler(
 fn decode_promo_code(promo_code_base64: &str) -> anyhow::Result<PromoCode> {
     let bytes = URL_SAFE_NO_PAD.decode(promo_code_base64)?;
     let promo_code = String::from_utf8(bytes)?;
-    Ok(PromoCode::new(promo_code))
+    Ok(PromoCode::new(promo_code)?)
 }
 
 #[cfg(test)]

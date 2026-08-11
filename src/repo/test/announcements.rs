@@ -21,7 +21,7 @@ async fn test_configured_impl(db: &Pool<Postgres>, attempt: u8) {
     // Ensure our announcement will be shown once only:
 
     let announcements_config = config::AnnouncementsConfig {
-        max_shows: Counter::literal(1),
+        max_shows: Counter::new(1),
         announcements: get_announcements_as_map(attempt)
     };
     let ann_repo = repo::Announcements::new(db.clone(), announcements_config);
@@ -57,7 +57,7 @@ async fn test_no_announcements() {
     // Ensure we get nothing if properties are not set:
 
     let announcements_config = config::AnnouncementsConfig {
-        max_shows: Counter::literal(1),
+        max_shows: Counter::new(1),
         announcements: Default::default()
     };
     let ann_repo = repo::Announcements::new(db.clone(), announcements_config);
@@ -69,7 +69,7 @@ async fn test_no_announcements() {
     // Ensure max_shows == 0 disables announcements completely:
 
     let announcements_config = config::AnnouncementsConfig {
-        max_shows: Counter::literal(0),
+        max_shows: Counter::new(0),
         announcements: get_announcements_as_map(1)
     };
     let ann_repo = repo::Announcements::new(db.clone(), announcements_config);

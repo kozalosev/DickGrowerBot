@@ -1,10 +1,10 @@
 use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use crate::config::FeatureToggles;
-use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position, UserId};
+use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
-use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, get_chat_id_and_dicks, NAME, fresh_db, UID, USER_ID};
+use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, get_chat_id_and_dicks, NAME, fresh_db, UID, USER_ID};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
@@ -41,7 +41,7 @@ async fn test_all() {
     let user_id = USER_ID;
     let chat_id = CHAT_ID_KIND;
     let chat_id_partiality = chat_id.clone().into();
-    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
+    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::new(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the empty top");
     assert_eq!(d.len(), 0);
 
@@ -77,7 +77,7 @@ async fn test_all_with_top_pagination_disabled() {
     let user_id = USER_ID;
     let chat_id = CHAT_ID_KIND;
     let chat_id_partiality = chat_id.clone().into();
-    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
+    let d = dicks.get_top(&chat_id, Offset::new(0), Limit::new(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the empty top");
     assert_eq!(d.len(), 0);
 
@@ -112,13 +112,13 @@ async fn test_top_page() {
     // create user and dick #2
     create_user_and_dick_2(&db, &chat_id_partiality, &user2_name).await;
 
-    let top_with_user2_only = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
+    let top_with_user2_only = dicks.get_top(&chat_id, Offset::new(0), Limit::new(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
     assert_eq!(top_with_user2_only.len(), 1);
     assert_eq!(top_with_user2_only[0].owner_name, user2_name);
     assert_eq!(top_with_user2_only[0].length, 1);
 
-    let top_with_user1_only = dicks.get_top(&chat_id, Offset::new(1), Limit::literal(1), INACTIVITY_DAYS)
+    let top_with_user1_only = dicks.get_top(&chat_id, Offset::new(1), Limit::new(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
     assert_eq!(top_with_user1_only.len(), 1);
     assert_eq!(top_with_user1_only[0].owner_name, NAME);
@@ -141,18 +141,18 @@ async fn test_hide_inactive_zero_length_from_top() {
 
     // A stale, zero-length dick (settled there by the shrink job) — hidden by the toggle.
     let stale_uid = UID + 1;
-    users.create_or_update(UserId::literal(stale_uid), "stale-zero")
+    users.create_or_update(user_id(stale_uid), "stale-zero")
         .await.expect("couldn't create the stale user");
     seed_stale_zero_length_dick(&db, internal_chat_id, stale_uid, 10).await;
 
     // A fresh, zero-length dick (just created today) — must stay visible despite length = 0.
     let fresh_uid = UID + 2;
-    users.create_or_update(UserId::literal(fresh_uid), "fresh-zero")
+    users.create_or_update(user_id(fresh_uid), "fresh-zero")
         .await.expect("couldn't create the fresh user");
-    dicks.create_or_grow(UserId::literal(fresh_uid), &chat_id_partiality, increment_of(0))
+    dicks.create_or_grow(user_id(fresh_uid), &chat_id_partiality, increment_of(0))
         .await.expect("couldn't create the fresh zero-length dick");
 
-    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(10), INACTIVITY_DAYS)
+    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::new(10), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
 
     assert_eq!(top.len(), 2, "the stale zero-length dick must be hidden");
@@ -182,11 +182,11 @@ async fn test_hide_inactive_zero_length_from_top_disabled() {
     let internal_chat_id = internal_chat_id(&db).await;
 
     let stale_uid = UID + 1;
-    users.create_or_update(UserId::literal(stale_uid), "stale-zero")
+    users.create_or_update(user_id(stale_uid), "stale-zero")
         .await.expect("couldn't create the stale user");
     seed_stale_zero_length_dick(&db, internal_chat_id, stale_uid, 10).await;
 
-    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(10), INACTIVITY_DAYS)
+    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::new(10), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
 
     assert_eq!(top.len(), 2, "the stale zero-length dick must remain visible when the toggle is off");
@@ -200,7 +200,7 @@ async fn test_pvp() {
     let chat_id_part: &ChatIdPartiality = &chat_id.clone().into();
     let uid = USER_ID;
     {
-        let enough = dicks.check_dick(&chat_id_part.kind(), uid, Bet::literal(1))
+        let enough = dicks.check_dick(&chat_id_part.kind(), uid, Bet::new(1))
             .await.expect("couldn't check the dick #1");
         assert!(!enough);
     }
@@ -210,19 +210,19 @@ async fn test_pvp() {
             .await
             .expect("couldn't create a dick");
 
-        let enough = dicks.check_dick(&chat_id_part.kind(), uid, Bet::literal(1))
+        let enough = dicks.check_dick(&chat_id_part.kind(), uid, Bet::new(1))
             .await.expect("couldn't check the dick #2");
         assert!(enough);
     }
     {
-        let enough = dicks.check_dick(&chat_id_part.kind(), uid, Bet::literal(2))
+        let enough = dicks.check_dick(&chat_id_part.kind(), uid, Bet::new(2))
             .await.expect("couldn't check the dick #3");
         assert!(!enough);
     }
     {
         create_user_and_dick_2(&db, chat_id_part, Default::default()).await;
-        let uid2 = UserId::literal(UID + 1);
-        let (gr1, gr2) = dicks.move_length(chat_id_part, uid, uid2, Bet::literal(1))
+        let uid2 = user_id(UID + 1);
+        let (gr1, gr2) = dicks.move_length(chat_id_part, uid, uid2, Bet::new(1))
             .await.expect("couldn't move the length");
 
         assert_eq!(gr1.new_length, 0);
@@ -254,7 +254,7 @@ pub async fn create_another_user_and_dick(
 
     let users = repo::Users::new(db.clone());
     let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let uid2 = UserId::literal(UID + n - 1);
+    let uid2 = user_id(UID + n - 1);
     users.create_or_update(uid2, name)
         .await.unwrap_or_else(|_| panic!("couldn't create a user #{n}"));
     dicks.create_or_grow(uid2, chat_id, increment_of(increment))
@@ -270,7 +270,7 @@ pub async fn create_dick(db: &Pool<Postgres>) {
 
 pub async fn check_dick(db: &Pool<Postgres>, length: Length) {
     let (chat_id, dicks) = get_chat_id_and_dicks(db);
-    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::literal(2), INACTIVITY_DAYS)
+    let top = dicks.get_top(&chat_id, Offset::new(0), Limit::new(2), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].length, length);
@@ -278,7 +278,7 @@ pub async fn check_dick(db: &Pool<Postgres>, length: Length) {
 }
 
 async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i64) {
-    let d = dicks.get_top(chat_id, Offset::new(0), Limit::literal(1), INACTIVITY_DAYS)
+    let d = dicks.get_top(chat_id, Offset::new(0), Limit::new(1), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top again");
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].length, length);

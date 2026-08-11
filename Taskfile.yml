@@ -9,16 +9,18 @@
 # services over the Compose network, so they pass `-f docker-compose.yml` to skip that
 # dev-only port forwarding.
 #
-# The bundled `user-service` container and the observability stack (`jaeger` for the traces,
-# `victoria-logs` for the log records) are optional — each sits behind a Compose profile
-# (`user-service`, `tracing`). The `infra`/`infra:full` tasks start them by naming them explicitly
-# (naming a service activates its profile); a bare `docker compose up` / `task up` starts them only
-# when COMPOSE_PROFILES lists the profile (see .env.example).
+# The bundled `user-service` container, the cache (`redis`, running Valkey) and the observability
+# stack (`jaeger` for the traces, `victoria-logs` for the log records) are optional — each sits
+# behind a Compose profile (`user-service`, `redis`, `tracing`). The `infra`/`infra:full` tasks start
+# them by naming them explicitly (naming a service activates its profile); a bare
+# `docker compose up` / `task up` starts them only when COMPOSE_PROFILES lists the profile
+# (see .env.example).
 #
 # Because the in-Docker bot uses the Compose network (not localhost), `task up` needs a
 # Docker-oriented .env — the opposite of the local-binary flow:
 #   POSTGRES_HOST=postgres
-#   COMPOSE_PROFILES=user-service                                   # to start the bundled user-service
+#   REDIS_HOST=redis                                                # only if the cache is on
+#   COMPOSE_PROFILES=user-service,redis                             # to start the bundled services
 #   GRPC_ADDR_USER_SERVICE=user-service:${USER_SERVICE_GRPC_PORT}   # only if the integration is on
 # The default .env.example ships localhost values tuned for `task run` (bot as a binary).
 version: '3'
@@ -38,29 +40,29 @@ tasks:
       - task: infra:full
 
   infra:full:
-    desc: Start PostgreSQL + user-service in Docker, ports forwarded to localhost.
+    desc: Start PostgreSQL + Redis + user-service in Docker, ports forwarded to localhost.
     cmds:
-      - docker compose up -d --wait postgres user-service jaeger victoria-logs
+      - docker compose up -d --wait postgres redis user-service jaeger victoria-logs
 
   infra:min:
-    desc: Start only PostgreSQL in Docker (no user-service), ports forwarded to localhost.
+    desc: Start only PostgreSQL in Docker (no Redis, no user-service), ports forwarded to localhost.
     cmds:
       - docker compose up -d --wait postgres
 
   infra:down:
     desc: Stop the Docker infrastructure (keeps data).
     cmds:
-      - docker compose stop postgres user-service jaeger victoria-logs
+      - docker compose stop postgres redis user-service jaeger victoria-logs
 
   test:clean:
-    desc: Remove the Postgres container the tests reuse between runs.
+    desc: Remove the containers the tests reuse between runs (Postgres and the cache).
     cmds:
-      # The tests share one container and keep it running on purpose, so that the next run reuses
-      # it instead of paying the startup again (see repo::test::SharedPostgres) — this task is the
-      # only thing that removes it. Worth running when it holds a port you need, or after changing
-      # how the container itself is built. The label keeps this from touching the infra
-      # containers, which use the same images.
-      - docker ps -aq --filter label=dickgrowerbot.test=true | xargs -r docker rm -fv
+      # The tests share one container per service and keep them running on purpose, so that the next
+      # run reuses them instead of paying the startup again (see src/test_containers.rs) — this
+      # task is the only thing that removes them. Worth running when one holds a port you need, or
+      # after changing how a container is built. The label keeps this from touching the infra
+      # containers, which use the same images; it is matched by key, so every value is swept.
+      - docker ps -aq --filter label=dickgrowerbot.test | xargs -r docker rm -fv
 
   migrate:
     desc: Apply pending database migrations to the bot database (requires sqlx-cli).

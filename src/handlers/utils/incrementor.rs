@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
+use domain_types::traits::SaturatingInto;
 use std::sync::Arc;
 use async_trait::async_trait;
 use derive_more::Display;
@@ -12,6 +13,7 @@ use crate::repo;
 use crate::config::IncrementorConfig;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::{DaysCount, Length, LengthChange, Ratio, SignedLengthChange, UserId};
+use domain_types::literal;
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -114,7 +116,7 @@ impl Incrementor {
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
             self.config.grow_shrink_ratio
         } else {
-            Ratio::literal(1.0)
+            literal!(Ratio = 1.0)
         };
         let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
         self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into())).await
@@ -196,7 +198,8 @@ fn get_base_increment<T>(range: RangeInclusive<T>, sign_ratio: Ratio) -> T
 where
     T: PrimInt + PartialOrd + SampleUniform + From<i8>
 {
-    let sign_ratio_percent = match (sign_ratio.value() * 100.0).round() as u32 {
+    let percent: u32 = (sign_ratio.value() * 100.0).round().saturating_into();
+    let sign_ratio_percent = match percent {
         ..=0 => 0,
         100.. => 100,
         x => x
@@ -220,13 +223,14 @@ where
 
 #[cfg(test)]
 mod test {
+    use domain_types::literal;
     use crate::domain::primitives::Ratio;
     use super::get_base_increment;
 
     #[test]
     fn test_gen_increment() {
         let increments: Vec<i32> = (0..100)
-            .map(|_| get_base_increment(-5..=10, Ratio::literal(0.5)))
+            .map(|_| get_base_increment(-5..=10, literal!(Ratio = 0.5)))
             .collect();
         assert!(increments.iter().any(|n| n > &0));
         assert!(increments.iter().any(|n| n < &0));
@@ -238,7 +242,7 @@ mod test {
     #[test]
     fn test_gen_increment_with_positive_range() {
         let increments: Vec<i32> = (0..100)
-            .map(|_| get_base_increment(5..=10, Ratio::literal(0.5)))
+            .map(|_| get_base_increment(5..=10, literal!(Ratio = 0.5)))
             .collect();
         assert!(increments.iter().all(|n| n <= &10));
         assert!(increments.iter().all(|n| n >= &5));
@@ -247,6 +251,7 @@ mod test {
 
 #[cfg(test)]
 mod test_incrementor {
+    use domain_types::literal;
     use std::iter::zip;
 
     use async_trait::async_trait;
@@ -264,7 +269,7 @@ mod test_incrementor {
         let incr = Incrementor {
             config: IncrementorConfig {
                 growth_range: -1..=1,
-                grow_shrink_ratio: Ratio::literal(0.5),
+                grow_shrink_ratio: literal!(Ratio = 0.5),
                 newcomers_grace_days: DaysCount::new(1),
                 dod_bonus_range: 1..=2,
                 perks: Default::default(),

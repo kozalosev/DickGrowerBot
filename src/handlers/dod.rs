@@ -1,12 +1,11 @@
 use autometrics::autometrics;
 use std::borrow::Cow;
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::payloads::SendMessageSetters;
 use teloxide::types::{LinkPreviewOptions, Message};
-use crate::{metrics, repo};
+use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::{LanguageCode, Username};
@@ -39,11 +38,9 @@ pub async fn dod_cmd_handler(
     let from_refs = FromRefs(from, &chat_id);
     // A real election is a permanent event; the "already chosen"/"no candidates" statuses
     // are scheduled (as a Notice). `dick_of_day_impl` tells them apart via the reply group.
-    let reply = dick_of_day_impl(cfg, &repos, incr, from_refs, lang_code.clone()).await?;
-    let sent = reply_html(bot.clone(), &msg, reply.text)
-        .link_preview_options(disabled_link_preview())
-        .await.context(format!("failed for {msg:?}"))?;
-    self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
+    let reply = dick_of_day_impl(cfg, &repos, incr, from_refs, &lang_code).await?;
+    reply_html_ephemeral!(bot, msg, reply.text, self_destruction, reply.group, lang_code,
+        link_preview_options = disabled_link_preview());
     Ok(())
 }
 
@@ -52,7 +49,7 @@ pub(crate) async fn dick_of_day_impl(
     repos: &repo::Repositories,
     incr: Incrementor,
     from_refs: FromRefs<'_>,
-    lang_code: LanguageCode,
+    lang_code: &LanguageCode,
 ) -> anyhow::Result<TaggedReply> {
     let chat_id = from_refs.1;
     let winner = match cfg.features.dod_selection_mode {
@@ -71,11 +68,11 @@ pub(crate) async fn dick_of_day_impl(
             let dod_result = repos.dicks.set_dod_winner(chat_id, winner.uid, increment.total).await;
             let (main_part, group) = match dod_result {
                 Ok(Some(GrowthResult { new_length, pos_in_top })) => {
-                    let answer = t!("commands.dod.result", locale = &lang_code,
+                    let answer = t!("commands.dod.result", locale = lang_code,
                         uid = winner.uid, name = winner.name.escaped(), growth = increment.total, length = new_length);
-                    let perks_part = increment.perks_part_of_answer(&lang_code);
+                    let perks_part = increment.perks_part_of_answer(lang_code);
                     let text = if let Some(pos) = pos_in_top {
-                        let position = t!("commands.dod.position", locale = &lang_code, pos = pos);
+                        let position = t!("commands.dod.position", locale = lang_code, pos = pos);
                         format!("{answer}\n{position}{perks_part}")
                     } else {
                         format!("{answer}{perks_part}")
@@ -85,7 +82,7 @@ pub(crate) async fn dick_of_day_impl(
                 Ok(None) => {
                     tracing::error!(uid = %winner.uid, chat_id = %chat_id,
                         "there was an attempt to set a non-existent dick as a winner");
-                    let text = t!("commands.dod.no_candidates", locale = &lang_code).to_string();
+                    let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
                     (text, MessageGroup::Notice)
                 }
                 Err(e) => {
@@ -93,19 +90,19 @@ pub(crate) async fn dick_of_day_impl(
                         sqlx::Error::Database(e)
                         if e.code() == Some(Cow::Borrowed(DOD_ALREADY_CHOSEN_SQL_CODE)) => {
                             let name = Username::new(e.message().to_owned()).escaped();
-                            let text = t!("commands.dod.already_chosen", locale = &lang_code, name = name).to_string();
+                            let text = t!("commands.dod.already_chosen", locale = lang_code, name = name).to_string();
                             (text, MessageGroup::Notice)
                         }
                         e => Err(e)?
                     }
                 }
             };
-            let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
+            let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
             (format!("{main_part}{time_left_part}"), group)
         },
-        None => (t!("commands.dod.no_candidates", locale = &lang_code).to_string(), MessageGroup::Notice)
+        None => (t!("commands.dod.no_candidates", locale = lang_code).to_string(), MessageGroup::Notice)
     };
-    let announcement = repos.announcements.get_new(&chat_id.kind(), &lang_code).await?
+    let announcement = repos.announcements.get_new(&chat_id.kind(), lang_code).await?
         .inspect(|_| metrics::ANNOUNCEMENT_SHOWN.record(lang_code.to_supported_language()))
         .map(|announcement| format!("\n\n<i>{announcement}</i>"))
         .unwrap_or_default();

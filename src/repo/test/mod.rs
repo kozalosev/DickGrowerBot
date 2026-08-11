@@ -13,25 +13,18 @@ mod bans;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use once_cell::sync::Lazy;
-use tokio::runtime::{Builder, Runtime};
 use tokio::sync::OnceCell;
 use reqwest::Url;
+use domain_types::traits::SaturatingInto;
 use sqlx::{Pool, Postgres};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::AssertSqlSafe;
-use testcontainers::{ContainerAsync, GenericImage, ImageExt, ReuseDirective};
-use testcontainers::core::{IntoContainerPort, WaitFor};
-use testcontainers::runners::AsyncRunner;
 use crate::config::DatabaseConfig;
 use crate::domain::primitives::UserId;
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::ChatIdKind;
-
-/// Put on the container the tests share; `task test:clean` finds it by this and is the only thing
-/// that ever removes it.
-pub const TEST_CONTAINER_LABEL: &str = "dickgrowerbot.test";
+use crate::test_containers::{self, SharedContainer};
 
 const POSTGRES_USER: &str = "test";
 const POSTGRES_PASSWORD: &str = "test_pw";
@@ -42,26 +35,24 @@ const TEMPLATE_DB: &str = "test_template";
 const TEST_DB_PREFIX: &str = "test_run";
 const POSTGRES_PORT: u16 = 5432;
 
+/// The raw column value, so that a test can do arithmetic on it and hand it to a query. The domain
+/// value is [`USER_ID`], and [`user_id`] makes one out of a computed number.
 pub const UID: i64 = 12345;
 pub const CHAT_ID: i64 = -67890;
 pub const NAME: &str = "test";
 
-pub const USER_ID: UserId = UserId::literal(UID);
+pub const USER_ID: UserId = UserId::new(UID as u64);
 pub const CHAT_ID_KIND: ChatIdKind = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
 
-/// The runtime that owns the shared container and its maintenance pool.
-///
-/// A `#[tokio::test]` builds a runtime of its own and tears it down when the test ends, and a sqlx
-/// pool dies with the runtime that created it. So the shared parts live here instead, on a runtime
-/// that outlives every test. Tests reach it with [`Runtime::spawn`] — `block_on` would panic,
-/// being called from inside a runtime already.
-static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-    Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("couldn't build the shared test runtime")
-});
+static CONTAINER: SharedContainer = SharedContainer::new(
+        "postgres", "postgres", "latest", POSTGRES_PORT,
+        // Postgres prints this while setting itself up and again when it is really up.
+        &["PostgreSQL init process complete; ready for start up.",
+          "PostgreSQL init process complete; ready for start up."])
+    .with_settle_millis(300)
+    .with_env(&[("POSTGRES_USER", POSTGRES_USER),
+                ("POSTGRES_PASSWORD", POSTGRES_PASSWORD),
+                ("POSTGRES_DB", POSTGRES_DB)]);
 
 static POSTGRES: OnceCell<SharedPostgres> = OnceCell::const_new();
 
@@ -70,18 +61,27 @@ static POSTGRES: OnceCell<SharedPostgres> = OnceCell::const_new();
 /// The pool is built on the caller's runtime, so it dies with the test that made it; everything
 /// shared stays on [`RUNTIME`].
 pub async fn fresh_db() -> Pool<Postgres> {
-    let url = RUNTIME
-        .spawn(async { POSTGRES.get_or_init(SharedPostgres::start).await.create_database().await })
+    let url = test_containers::spawn(
+        async { POSTGRES.get_or_init(SharedPostgres::start).await.create_database().await })
         .await
         .expect("the shared Postgres task failed");
     connect_and_migrate(url).await
 }
 
+/// A user id a test computes instead of writing down, like `UID + 1` or an id taken from a loop.
+/// Such a value is not known while the code is compiled, so `literal!` does not fit.
+pub fn user_id(value: i64) -> UserId {
+    UserId::new(value.saturating_into())
+}
+
+pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
+    (chat_id, dicks)
+}
+
 /// One Postgres for the whole binary, reused across runs, with a database per test.
 struct SharedPostgres {
-    /// Never dropped — [`RUNTIME`] is a `static`. That is deliberate here: the container is marked
-    /// reusable, so the next run finds this one instead of paying the startup again.
-    _container: ContainerAsync<GenericImage>,
     port: u16,
     pool: Pool<Postgres>,
     /// Distinguishes this run's databases from those of an earlier one in the reused container.
@@ -91,7 +91,7 @@ struct SharedPostgres {
 
 impl SharedPostgres {
     async fn start() -> Self {
-        let (container, port) = start_container().await;
+        let port = CONTAINER.port().await;
         let pool = PgPoolOptions::new()
             // Every test asks for its database through this one pool, and they all start at once,
             // so a single connection would make them queue up until one times out.
@@ -115,7 +115,7 @@ impl SharedPostgres {
         // `CREATE DATABASE ... TEMPLATE` refuses to run while anyone is connected to the template.
         template.close().await;
 
-        Self { _container: container, port, pool, run: std::process::id(), databases_created: AtomicU32::new(0) }
+        Self { port, pool, run: std::process::id(), databases_created: AtomicU32::new(0) }
     }
 
     async fn create_database(&self) -> Url {
@@ -159,34 +159,3 @@ async fn connect_and_migrate(url: Url) -> Pool<Postgres> {
         .await.expect("couldn't establish a database connection")
 }
 
-async fn start_container() -> (ContainerAsync<GenericImage>, u16) {
-    let postgres_container = GenericImage::new("postgres", "latest")
-        .with_exposed_port(POSTGRES_PORT.tcp())
-        .with_wait_for(WaitFor::message_on_stdout("PostgreSQL init process complete; ready for start up."))
-        .with_wait_for(WaitFor::message_on_stdout("PostgreSQL init process complete; ready for start up."))
-        .with_wait_for(WaitFor::millis(300))
-        .with_env_var("POSTGRES_USER", POSTGRES_USER)
-        .with_env_var("POSTGRES_PASSWORD", POSTGRES_PASSWORD)
-        .with_env_var("POSTGRES_DB", POSTGRES_DB)
-        // Marks the container as ours, so `task test:clean` can find it without touching anything
-        // else running on the machine. It is now the only way it ever gets removed.
-        .with_label(TEST_CONTAINER_LABEL, "true")
-        // The container outlives the run on purpose: the next one finds this same container
-        // instead of paying the startup again. `task test:clean` removes it.
-        .with_reuse(ReuseDirective::Always)
-        .start()
-        .await
-        .expect("couldn't start Postgres database");
-
-    let postgres_port = postgres_container.get_host_port_ipv4(POSTGRES_PORT)
-        .await
-        .expect("couldn't fetch port from PostgreSQL server");
-    (postgres_container, postgres_port)
-}
-
-#[inline]
-pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
-    (chat_id, dicks)
-}

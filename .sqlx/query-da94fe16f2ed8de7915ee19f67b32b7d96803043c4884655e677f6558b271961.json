@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id",
+  "query": "INSERT INTO Chats (chat_id, chat_instance) VALUES ($1, $2) RETURNING id AS \"id: InternalChatId\"",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "id: InternalChatId",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -25,5 +25,5 @@
       false
     ]
   },
-  "hash": "c65be916421be9a70eb769b5b1b8a5461478608ca5d0fb4e85d4fd4723773982"
+  "hash": "da94fe16f2ed8de7915ee19f67b32b7d96803043c4884655e677f6558b271961"
 }

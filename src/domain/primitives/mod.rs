@@ -1,5 +1,7 @@
 mod validators;
 mod macros;
+#[cfg(test)]
+mod literal;
 
 use crate::pub_use_modules;
 
@@ -13,4 +15,5 @@ pub_use_modules!(
     length,
     hash,
     pagination,
-    promo);
+    promo,
+    count);

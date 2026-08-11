@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::time::Instant;
-use crate::config::IntegrationsConfig;
 use crate::domain::objects::AllowedTopics;
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TopicId};
 use crate::metrics;
@@ -27,11 +26,11 @@ struct CachedTopics {
 }
 
 impl TopicPolicy {
-    pub fn new(config: &IntegrationsConfig, chats: Chats) -> Self {
+    pub fn new(ttl: Duration, chats: Chats) -> Self {
         Self {
             chats,
             cache: Arc::new(Mutex::new(HashMap::new())),
-            ttl: Duration::from_secs(config.chat_topics_cache_time_secs),
+            ttl,
         }
     }
 

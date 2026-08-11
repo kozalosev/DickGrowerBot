@@ -26,6 +26,6 @@ pub async fn help_cmd_handler(
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_HELP_COUNTER.inc();
     let help = container.get_help_message(&lang_code);
-    reply_html_ephemeral!(bot, msg, help, self_destruction, Notice, &lang_code);
+    reply_html_ephemeral!(bot, msg, help, self_destruction, Notice, lang_code);
     Ok(())
 }

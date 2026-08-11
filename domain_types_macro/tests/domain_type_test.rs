@@ -7,6 +7,7 @@
 //! since-removed `not_database_type` flag.
 
 use std::str::FromStr;
+use domain_types::literal;
 use domain_types_macro::domain_type;
 
 const fn ge_zero(value: &i32) -> bool {
@@ -77,6 +78,13 @@ impl std::fmt::Display for Opaque {
 // Unsigned inner types: `SqlxMode::Bumped` for u8/u16/u32 (bumped to i16/i32/i64 respectively —
 // see `sqlx_embeddable_for_every_bump_width` below), `SqlxMode::None` for u64 (no signed Postgres
 // type wide enough to bump into, so no `sqlx` impls at all — it just can't bind into a query).
+// The narrow signed widths, so that their rows of the exact-widening table are compiled too.
+#[domain_type(number)]
+struct Tiny(i8);
+
+#[domain_type(number)]
+struct Small(i16);
+
 #[domain_type(number)]
 struct TinyCount(u8);
 
@@ -174,14 +182,14 @@ mod validated_integer_arithmetic {
 
     #[test]
     fn literal_works_in_const_context() {
-        const THREE: Positive = Positive::literal(3);
+        const THREE: Positive = literal!(Positive = 3);
         assert_eq!(THREE, 3);
     }
 
     #[test]
     fn operators_return_results() {
-        let p = Positive::literal(2);
-        assert_eq!((p + Positive::literal(3)).unwrap(), 5);
+        let p = literal!(Positive = 2);
+        assert_eq!((p + literal!(Positive = 3)).unwrap(), 5);
         assert_eq!((p * 4).unwrap(), 8);
         // Subtraction below zero violates the invariant
         assert!((p - 5).is_err());
@@ -189,7 +197,7 @@ mod validated_integer_arithmetic {
 
     #[test]
     fn overflow_becomes_an_error() {
-        let max = Positive::literal(i32::MAX);
+        let max = literal!(Positive = i32::MAX);
         assert!(max.overflowing_add_primitive(1).is_err());
         // The saturating flavor clamps to a still-valid value
         assert_eq!(max.saturating_add_primitive(1).unwrap(), i32::MAX);
@@ -215,7 +223,7 @@ mod validated_value_types {
 
     #[test]
     fn literal_works_in_const_context() {
-        const ID: PositiveId = PositiveId::literal(7);
+        const ID: PositiveId = literal!(PositiveId = 7);
         assert_eq!(ID, 7);
     }
 
@@ -223,14 +231,14 @@ mod validated_value_types {
     fn eq_ord_hash_usable_without_arithmetic() {
         use std::collections::HashSet;
 
-        let a = PositiveId::literal(1);
-        let b = PositiveId::literal(2);
+        let a = literal!(PositiveId = 1);
+        let b = literal!(PositiveId = 2);
         assert!(a < b);
         assert_ne!(a, b);
 
         let mut set = HashSet::new();
         set.insert(a);
-        set.insert(PositiveId::literal(1));
+        set.insert(literal!(PositiveId = 1));
         assert_eq!(set.len(), 1);
     }
 
@@ -268,7 +276,7 @@ mod float_types {
         assert!(Ratio::new(1.5).is_err());
         assert!(Ratio::new(-0.1).is_err());
 
-        let half = Ratio::literal(0.5);
+        let half = literal!(Ratio = 0.5);
         assert_eq!((half + 0.25).unwrap(), 0.75);
         assert_eq!((half + half).unwrap(), 1.0);
         assert!((half + 0.75).is_err());
@@ -287,6 +295,107 @@ mod float_types {
         assert_eq!(s + Speed::new(1.5), 4.0);
         assert_eq!(s / 2.0, 1.25);
     }
+}
+
+/// The two conversions that lose something. Each generated impl only forwards, so what is proven
+/// here is that it reaches the primitive impl — the clamping itself is tested in `domain_types`.
+mod lossy_conversions {
+    use domain_types::traits::{ApproxInto, SaturatingInto};
+    use super::*;
+
+    #[test]
+    fn a_value_the_target_can_hold_comes_through_untouched() {
+        let value: i64 = HugeCount::new(1234).saturating_into();
+        assert_eq!(value, 1234);
+    }
+
+    #[test]
+    fn a_value_too_large_for_the_target_stops_at_its_top() {
+        let value: i64 = HugeCount::new(u64::MAX).saturating_into();
+        assert_eq!(value, i64::MAX);
+    }
+
+    #[test]
+    fn a_negative_value_stops_at_the_bottom_of_an_unsigned_target() {
+        let value: u32 = Id::new(-5).saturating_into();
+        assert_eq!(value, 0);
+    }
+
+    /// An id-like type is not a `number` and has no arithmetic, but it still crosses into foreign
+    /// APIs, so it converts like the rest.
+    #[test]
+    fn an_id_like_type_converts_too() {
+        let value: i32 = Id::new(7).saturating_into();
+        assert_eq!(value, 7);
+    }
+
+    /// An `f64` holds every `i32`, so this one is exact and `ApproxInto` is not implemented for
+    /// it — the widening says `From`, like any conversion that loses nothing.
+    /// The widenings that lose nothing, so `ApproxInto` and `SaturatingInto` are not implemented
+    /// for them at all: the conversion is `From`, taking the domain type itself.
+    #[test]
+    fn an_exact_widening_is_a_from() {
+        assert_eq!(i64::from(Count::new(3)), 3);
+        assert_eq!(f64::from(Count::new(3)), 3.0);
+        assert_eq!(usize::from(MediumCount::new(7)), 7);
+        assert_eq!(i64::from(LargeCount::new(9)), 9);
+        assert_eq!(isize::from(Tiny::new(-1)), -1);
+        assert_eq!(i32::from(Small::new(-2)), -2);
+    }
+
+    /// The narrowing that does lose something: `f32` has 24 bits of mantissa against `f64`'s 53.
+    #[test]
+    fn a_float_type_narrows_to_the_smaller_float() {
+        let exact: f32 = Speed::new(2.5).approx_into();
+        assert_eq!(exact, 2.5, "a value both can hold comes through unchanged");
+
+        let rounded: f32 = Speed::new(0.1).approx_into();
+        assert_ne!(f64::from(rounded), 0.1, "0.1 is not the same number in the two widths");
+        assert_eq!(rounded, 0.1_f32);
+
+        let too_large: f32 = Speed::new(f64::MAX).approx_into();
+        assert!(too_large.is_infinite());
+    }
+
+    #[test]
+    fn a_float_type_reaches_an_integer_by_truncating() {
+        let value: i64 = Speed::new(7.9).saturating_into();
+        assert_eq!(value, 7);
+    }
+}
+
+const fn tag_format(value: &str) -> bool {
+    let len = value.len();
+    len >= 2 && len <= 8
+}
+
+#[domain_type(validated(tag_format, error_message("must be 2 to 8 bytes long")))]
+struct Tag(String);
+
+/// A string type validates at both ends: `literal!` refuses a bad literal while the code is
+/// compiled, and `new` refuses a bad value when it arrives.
+mod validated_strings {
+    use super::*;
+
+    #[test]
+    fn a_literal_the_validator_accepts_is_built() {
+        let tag = literal!(Tag = "release");
+        assert_eq!(tag.value(), "release");
+    }
+
+    #[test]
+    fn a_runtime_value_is_checked_too() {
+        assert!(Tag::new("ok".to_owned()).is_ok());
+        assert!(Tag::new("x".to_owned()).is_err());
+        assert!(Tag::new("far too long to fit".to_owned()).is_err());
+    }
+
+    #[test]
+    fn of_carries_the_refusal_as_well() {
+        assert!(Tag::of("fine").is_ok());
+        assert!(Tag::of("!").is_err());
+    }
+
 }
 
 mod division_result {

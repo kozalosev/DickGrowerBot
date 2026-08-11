@@ -49,7 +49,6 @@ pub mod date {
     use rust_i18n::t;
     use crate::domain::primitives::LanguageCode;
 
-    #[inline]
     fn now_utc() -> DateTime<Utc> {
         if cfg!(test) {
             DateTime::parse_from_rfc3339("2023-10-21T22:10:57+00:00")

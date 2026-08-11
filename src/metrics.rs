@@ -5,8 +5,10 @@ use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
 use strum::IntoEnumIterator;
 use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
-use crate::domain::primitives::SupportedLanguage;
-use crate::repo::ChatMigrationOutcome;
+use domain_types::traits::SaturatingInto;
+use crate::config::MessageGroup;
+use crate::domain::primitives::{Count, SupportedLanguage};
+use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
 static REGISTRY: Lazy<prometheus::Registry> = Lazy::new(prometheus::Registry::new);
@@ -52,6 +54,14 @@ pub static CMD_TOPICS: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_topics_usage_total", "count of /topics invocations and changes of the setting", ["invoked", "finished"]));
 pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
+pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
+    CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
+pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
+    BroadcastLanguageCounter::new("broadcast_language_total", "count of proactive broadcasts by where their language came from: chat when the chat has one of its own, tally when the players' own languages decided it, default when neither did and English was used. A tally share of nearly zero means the round trip it costs is buying nothing"));
+pub static USER_SERVICE_LANGUAGES_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("user_service_languages_batch_size",
+        "how many users one batch language lookup asked about — the size of the chat, as the tally sees it. Kept apart from user_service_get_total, which counts resolutions of a single user and would otherwise mix one user with forty",
+        &[0.0, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
 pub static TOPIC_RESTRICTED: Lazy<Counter> = Lazy::new(||
     Counter::new("topic_restricted_total", "count of updates dropped because they came from a forum topic the chat doesn't let the bot work in"));
 pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
@@ -59,17 +69,31 @@ pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
 pub static UPDATE_KIND: Lazy<UpdateKindCounter> = Lazy::new(||
     UpdateKindCounter::new("update_kind_total", "count of all updates received from Telegram, by update kind — the total is the bot's real update rate, and the breakdown shows how much of it is traffic no handler acts on"));
 pub static SELF_DESTRUCTION: Lazy<SelfDestructionCounters> = Lazy::new(||
-    SelfDestructionCounters::new("self_destruction_total", "count of the bot's own messages removed by the self-destruction feature, split by message group and outcome (deleted/failed)"));
+    SelfDestructionCounters::new("self_destruction_total", "count of the messages the self-destruction feature has finished with, by message group, kind (reply/command/inline) and the state the message ended in. These are the same four states as in self_destruction_finished, but counted once per message instead of shown as a current number"));
+pub static SELF_DESTRUCTION_RETRIES: Lazy<SelfDestructionRetryCounters> = Lazy::new(||
+    SelfDestructionRetryCounters::new("self_destruction_retries_total", "count of the attempts that failed but were worth trying again, by message group and kind. Kept out of self_destruction_total because a message can be retried many times and still end as removed"));
+pub static SELF_DESTRUCTION_PENDING: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("self_destruction_pending", "number of messages waiting for their self-destruction; a number that only grows means the worker stopped draining the queue"));
+pub static SELF_DESTRUCTION_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("self_destruction_batch_size",
+        "how many messages one run of the worker took. Read it together with the duration of that run: short batches and long runs mean Telegram is slow, while batches that reach self_destruction_batch_limit mean the queue is full. The two need opposite changes to MSG_SELFDESTRUCT_POLL_SECONDS",
+        &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
+pub static SELF_DESTRUCTION_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("self_destruction_batch_limit", "the value of MSG_SELFDESTRUCT_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
+pub static SELF_DESTRUCTION_FINISHED: Lazy<SelfDestructionFinishedGauges> = Lazy::new(||
+    SelfDestructionFinishedGauges::new("self_destruction_finished", "number of self-destructions that are done with and kept for inspection until the cleaning process runs, by state: removed (the bot took the message down), removed_before (someone else had already done it), expired (the message outlived Telegram's 48-hour limit while it waited) or failed (every attempt was refused)"));
 pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
     AnnouncementCounter::new("announcement_shown_total", "count of announcements shown at the end of the Dick of the Day message, split by the recipient's language"));
 pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
 pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
-    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/other) — a spike of connect/timeout is the DPI-stalling signal"));
+    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/rate_limited/other). A spike of connect/timeout is the DPI-stalling signal; rate_limited means Telegram asked the bot to slow down, so the THROTTLE_* limits are set too high"));
 pub static TELEGRAM_REQUEST_DURATION: Lazy<TelegramRequestDuration> = Lazy::new(||
     TelegramRequestDuration::new("telegram_request_duration_seconds",
         "how long a request to the Telegram Bot API took, by method and outcome — the failed ones are measured too, so that a timeout (the slowest case there is) is not missing from the histogram"));
+pub static TELEGRAM_THROTTLE_QUEUE_FULL: Lazy<Counter> = Lazy::new(||
+    Counter::new("telegram_throttle_queue_full_total", "how many times the throttle worker found its queue full, which means the schedulers are asking for more requests than Telegram's limits allow and the extra ones are waiting. Teloxide reports this at most once every 4 seconds, so this counts moments, not requests"));
 
 pub static DB_POOL_CONNECTIONS_OPENED: Lazy<Counter> = Lazy::new(||
     Counter::new("db_pool_connections_opened_total", "count of new physical connections opened by the sqlx pool"));
@@ -87,6 +111,7 @@ pub static TASK_POLLING_DISPATCHER: Lazy<TaskMonitor> = Lazy::new(|| task_monito
 pub static TASK_METRICS_SERVER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("metrics_http_server"));
 pub static TASK_DAILY_SHRINK: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("daily_shrink"));
 pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
+pub static TASK_SELF_DESTRUCTION_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction_cleaning"));
 pub static TASK_USER_SERVICE_CACHE_CLEANUP: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("user_service_cache_cleanup"));
 
 pub fn init() -> (axum::Router, PrometheusMetricLayer<'static>) {
@@ -144,15 +169,20 @@ fn force_registration() {
     Lazy::force(&CHAT_LANGUAGE);
     Lazy::force(&CMD_TOPICS);
     Lazy::force(&CHAT_TOPICS);
+    Lazy::force(&BOT_ADMIN_LOOKUP);
+    Lazy::force(&BROADCAST_LANGUAGE);
+    Lazy::force(&USER_SERVICE_LANGUAGES_BATCH_SIZE);
     Lazy::force(&TOPIC_RESTRICTED);
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&UPDATE_KIND);
     Lazy::force(&SELF_DESTRUCTION);
+    Lazy::force(&SELF_DESTRUCTION_RETRIES);
     Lazy::force(&ANNOUNCEMENT_SHOWN);
     Lazy::force(&CHAT_MIGRATION);
     Lazy::force(&DAILY_SHRINK);
     Lazy::force(&TELEGRAM_REQUEST_ERRORS);
     Lazy::force(&TELEGRAM_REQUEST_DURATION);
+    Lazy::force(&TELEGRAM_THROTTLE_QUEUE_FULL);
 
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
@@ -205,10 +235,10 @@ impl prometheus::core::Collector for DbPoolCollector {
     fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
         let size = prometheus::IntGauge::new("db_pool_size", "current number of connections in the sqlx pool (in use + idle)")
             .expect("invalid db_pool_size gauge");
-        size.set(self.pool.size() as i64);
+        size.set(i64::from(self.pool.size()));
         let idle = prometheus::IntGauge::new("db_pool_idle_connections", "current number of idle connections in the sqlx pool")
             .expect("invalid db_pool_idle_connections gauge");
-        idle.set(self.pool.num_idle() as i64);
+        idle.set(self.pool.num_idle().saturating_into());
 
         let mut out = size.collect();
         out.extend(idle.collect());
@@ -217,6 +247,8 @@ impl prometheus::core::Collector for DbPoolCollector {
 }
 
 pub struct Counter(IntCounter);
+pub struct Gauge(prometheus::IntGauge);
+pub struct GaugeVec(prometheus::IntGaugeVec);
 pub struct CounterVec(IntCounterVec);
 pub struct Histogram(prometheus::Histogram);
 pub struct HistogramVec(prometheus::HistogramVec);
@@ -255,6 +287,12 @@ pub struct CacheSourceCounters {
     cache: Counter,
     db: Counter,
 }
+/// Whether a cache knew the answer. A miss is not a failure — it means the caller fell back to
+/// doing the work itself, which is what every cache here is allowed to assume.
+pub struct CacheLookupCounters {
+    cache: Counter,
+    miss: Counter,
+}
 
 impl Counter {
     fn new(name: &str, help: &str) -> Self {
@@ -271,6 +309,38 @@ impl Counter {
 
     pub fn inc_by(&self, count: u64) {
         self.0.inc_by(count)
+    }
+}
+
+impl Gauge {
+    fn new(name: &str, help: &str) -> Self {
+        let inner = prometheus::IntGauge::with_opts(Opts::new(name, help))
+            .unwrap_or_else(|e| panic!("unable to create the {name} gauge: {e}"));
+        REGISTRY.register(Box::new(inner.clone()))
+            .unwrap_or_else(|e| panic!("unable to register the {name} gauge: {e}"));
+        Self(inner)
+    }
+
+    /// A gauge is a `float64` on the wire whatever is put in it; `IntGauge` holds an `i64` only
+    /// to keep the arithmetic exact in the process.
+    pub fn set(&self, value: i64) {
+        self.0.set(value)
+    }
+}
+
+impl GaugeVec {
+    fn new(name: &str, help: &str, labels: &[&str]) -> Self {
+        let inner = prometheus::IntGaugeVec::new(Opts::new(name, help), labels)
+            .unwrap_or_else(|e| panic!("unable to create the {name} gauge vec: {e}"));
+        REGISTRY.register(Box::new(inner.clone()))
+            .unwrap_or_else(|e| panic!("unable to register the {name} gauge vec: {e}"));
+        Self(inner)
+    }
+
+    /// Returns the child gauge identified by these label values, given in the same order as the
+    /// labels passed to [`GaugeVec::new`].
+    fn gauge(&self, label_values: &[&str]) -> Gauge {
+        Gauge(self.0.with_label_values(label_values))
     }
 }
 
@@ -448,6 +518,56 @@ impl CacheSourceCounters {
     }
 }
 
+impl CacheLookupCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        Self {
+            cache: vec.counter(&["cache"]),
+            miss: vec.counter(&["miss"]),
+        }
+    }
+
+    /// The cache knew the answer.
+    pub fn cache_hit(&self) {
+        self.cache.inc()
+    }
+
+    /// It didn't, so the caller did the work instead.
+    pub fn miss(&self) {
+        self.miss.inc()
+    }
+}
+
+/// Where a proactive broadcast got its language.
+pub struct BroadcastLanguageCounter(CounterVec);
+
+impl BroadcastLanguageCounter {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        // All three from the start: the interesting reading is the ratio between them, and a
+        // share that is missing entirely looks the same as one that is zero.
+        for source in ["chat", "tally", "default"] {
+            vec.counter(&[source]);
+        }
+        Self(vec)
+    }
+
+    /// The chat has a language of its own.
+    pub fn decided_by_chat(&self) {
+        self.0.counter(&["chat"]).inc()
+    }
+
+    /// The players' own languages decided it.
+    pub fn decided_by_tally(&self) {
+        self.0.counter(&["tally"]).inc()
+    }
+
+    /// Neither did, so English was used.
+    pub fn defaulted(&self) {
+        self.0.counter(&["default"]).inc()
+    }
+}
+
 /// Counts updates by the sender's Telegram `language_code` (see [`language_label`]).
 pub struct SpokenLanguageCounter(CounterVec);
 
@@ -529,26 +649,74 @@ fn update_kind_label(kind: &UpdateKind) -> &'static str {
     }
 }
 
-/// Counts the bot's own messages removed by the self-destruction feature, labeled by
-/// message group (the lowercase `MessageGroup` Display string) and outcome.
+/// Counts the messages the self-destruction feature took care of, labeled by message group and
+/// kind (the lowercase `MessageGroup` and `MessageKind` Display strings) and by outcome. An
+/// inline message is never deleted, only replaced, so its `removed` means "the placeholder is up".
 pub struct SelfDestructionCounters(CounterVec);
 
 impl SelfDestructionCounters {
     fn new(name: &str, help: &str) -> Self {
-        let vec = CounterVec::new(name, help, &["group", "outcome"]);
-        for group in ["notice", "report"] {
-            for outcome in ["deleted", "failed"] {
-                vec.counter(&[group, outcome]);
+        let vec = CounterVec::new(name, help, &["group", "kind", "outcome"]);
+        for group in MessageGroup::iter() {
+            for kind in MessageKind::iter() {
+                for state in DeletionState::TERMINAL {
+                    vec.counter(&[&group.to_string(), &kind.to_string(), &state.to_string()]);
+                }
             }
         }
         Self(vec)
     }
 
-    /// Record the result of one self-destruction deletion for `group` (its lowercase
-    /// `MessageGroup` Display string): `deleted` when the message was removed, otherwise failed.
-    pub fn record(&self, group: &str, deleted: bool) {
-        let outcome = if deleted { "deleted" } else { "failed" };
-        self.0.counter(&[group, outcome]).inc()
+    /// Records how one message ended. Called once per message, with the state its row is left in.
+    /// So the sum of all outcomes is the number of messages the worker finished with, and the
+    /// share of each outcome means something on its own.
+    pub fn record(&self, group: MessageGroup, kind: MessageKind, state: DeletionState) {
+        self.0.counter(&[&group.to_string(), &kind.to_string(), &state.to_string()]).inc()
+    }
+}
+
+/// The attempts that failed but were worth making again. The outcome above says nothing about
+/// them, so they are counted here.
+pub struct SelfDestructionRetryCounters(CounterVec);
+
+impl SelfDestructionRetryCounters {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["group", "kind"]);
+        for group in MessageGroup::iter() {
+            for kind in MessageKind::iter() {
+                vec.counter(&[&group.to_string(), &kind.to_string()]);
+            }
+        }
+        Self(vec)
+    }
+
+    pub fn record(&self, group: MessageGroup, kind: MessageKind) {
+        self.0.counter(&[&group.to_string(), &kind.to_string()]).inc()
+    }
+}
+
+/// The rows the self-destruction is done with, by the state they were left in — the queue's own
+/// history, kept until the cleaning process removes it.
+pub struct SelfDestructionFinishedGauges(GaugeVec);
+
+impl SelfDestructionFinishedGauges {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = GaugeVec::new(name, help, &["state"]);
+        for state in DeletionState::TERMINAL {
+            vec.gauge(&[&state.to_string()]).set(0);
+        }
+        Self(vec)
+    }
+
+    /// Publishes one count per terminal state. Every state is written on each call, so one that has
+    /// just been cleaned away goes back to zero instead of keeping its last value for ever.
+    pub fn set_all(&self, counts: &[(DeletionState, Count<ScheduledDeletion>)]) {
+        for state in DeletionState::TERMINAL {
+            let count = counts.iter()
+                .find(|(counted, _)| *counted == state)
+                .map_or(Count::default(), |(_, count)| *count);
+            self.0.gauge(&[&state.to_string()]).set(count.saturating_into());
+        }
     }
 }
 
@@ -692,7 +860,7 @@ pub struct TelegramRequestErrorCounters(CounterVec);
 impl TelegramRequestErrorCounters {
     fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["kind"]);
-        for kind in ["connect", "timeout", "network", "api", "other"] {
+        for kind in ["connect", "timeout", "network", "api", "rate_limited", "other"] {
             vec.counter(&[kind]);
         }
         Self(vec)
@@ -751,9 +919,13 @@ pub(crate) fn render_metrics() -> String {
 mod tests {
     use once_cell::sync::Lazy;
     use strum::IntoEnumIterator;
-    use crate::repo::ChatMigrationOutcome;
+    use crate::config::MessageGroup;
+    use crate::domain::primitives::Count;
+    use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-                DB_POOL_CONNECTION_AGE_SECONDS, TASK_DAILY_SHRINK, language_label, render_metrics};
+                BROADCAST_LANGUAGE, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
+                SELF_DESTRUCTION_FINISHED, SELF_DESTRUCTION_RETRIES,
+                SelfDestructionFinishedGauges, TASK_DAILY_SHRINK, language_label, render_metrics};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.
@@ -766,6 +938,105 @@ mod tests {
             let series = format!("chat_migration_total{{outcome=\"{outcome}\"}}");
             assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
         }
+    }
+
+    /// The dashboard watches the failure rate here, and a ratio needs all of its series from the
+    /// start. If the `failed` one appeared only with the first refused deletion, there would be
+    /// nothing to compare it against before that.
+    ///
+    /// The outcomes are the terminal states, so this also keeps the two metrics on the same words:
+    /// what `self_destruction_finished` shows as a current number, this one counts as a rate.
+    #[test]
+    fn every_self_destruction_series_is_exported() {
+        Lazy::force(&SELF_DESTRUCTION);
+        Lazy::force(&SELF_DESTRUCTION_RETRIES);
+        let rendered = render_metrics();
+
+        for group in MessageGroup::iter() {
+            for kind in MessageKind::iter() {
+                for state in DeletionState::TERMINAL {
+                    let series = format!("self_destruction_total{{group=\"{group}\",kind=\"{kind}\",outcome=\"{state}\"}}");
+                    assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+                }
+                let series = format!("self_destruction_retries_total{{group=\"{group}\",kind=\"{kind}\"}}");
+                assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+            }
+        }
+    }
+
+    /// A retry is an attempt, not an ending, so it must not land in the same counter: a message
+    /// retried twice and then removed is one `removed` plus two retries.
+    #[test]
+    fn a_retry_is_counted_apart_from_the_outcomes() {
+        Lazy::force(&SELF_DESTRUCTION);
+        Lazy::force(&SELF_DESTRUCTION_RETRIES);
+        let group = MessageGroup::Notice;
+        let kind = MessageKind::Reply;
+
+        SELF_DESTRUCTION_RETRIES.record(group, kind);
+        SELF_DESTRUCTION_RETRIES.record(group, kind);
+        SELF_DESTRUCTION.record(group, kind, DeletionState::Removed);
+        let rendered = render_metrics();
+
+        assert!(rendered.contains("self_destruction_retries_total{group=\"notice\",kind=\"reply\"} 2"),
+            "the retries are miscounted in:\n{rendered}");
+        assert!(rendered.contains("self_destruction_total{group=\"notice\",kind=\"reply\",outcome=\"removed\"} 1"),
+            "the outcome is miscounted in:\n{rendered}");
+    }
+
+    /// The buckets have to cover every batch size the setting allows, not only the default one.
+    /// A run that lands in `+Inf` says nothing about how full the batch was.
+    #[test]
+    fn the_batch_size_is_bucketed_around_its_limit() {
+        Lazy::force(&SELF_DESTRUCTION_BATCH_SIZE);
+        let rendered = render_metrics();
+
+        for le in ["0", "1", "5", "10", "25", "50", "100", "250", "500", "+Inf"] {
+            let series = format!("self_destruction_batch_size_bucket{{le=\"{le}\"}}");
+            assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
+    }
+
+    /// The reading is the ratio between the three, and a share that is missing entirely looks the
+    /// same as one that is zero — which is exactly the answer worth seeing for the tally.
+    #[test]
+    fn every_source_of_a_broadcast_language_is_exported() {
+        Lazy::force(&BROADCAST_LANGUAGE);
+        let rendered = render_metrics();
+
+        for source in ["chat", "tally", "default"] {
+            let series = format!("broadcast_language_total{{source=\"{source}\"}}");
+            assert!(rendered.contains(&series), "{series} is missing from:
+{rendered}");
+        }
+    }
+
+    /// The ratio between these states is what tells a healthy queue from a stuck one, so all of
+    /// them have to be there from the start — including on a bot that has never failed a deletion.
+    #[test]
+    fn every_finished_self_destruction_state_is_exported() {
+        Lazy::force(&SELF_DESTRUCTION_FINISHED);
+        let rendered = render_metrics();
+
+        for state in DeletionState::TERMINAL {
+            let series = format!("self_destruction_finished{{state=\"{state}\"}}");
+            assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
+    }
+
+    /// A state that has just been cleaned away must fall back to zero rather than keep the last
+    /// number it was given.
+    #[test]
+    fn a_cleaned_state_goes_back_to_zero() {
+        let gauges = SelfDestructionFinishedGauges::new("test_self_destruction_finished",
+            "the finished self-destructions of the test");
+
+        gauges.set_all(&[(DeletionState::Failed, Count::<ScheduledDeletion>::new(3))]);
+        assert_eq!(gauges.0.gauge(&["failed"]).0.get(), 3);
+        assert_eq!(gauges.0.gauge(&["expired"]).0.get(), 0);
+
+        gauges.set_all(&[]);
+        assert_eq!(gauges.0.gauge(&["failed"]).0.get(), 0);
     }
 
     /// We alert on counters that stop growing, so every series must exist from the start.

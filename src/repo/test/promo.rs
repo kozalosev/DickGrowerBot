@@ -1,6 +1,8 @@
 use chrono::Utc;
+use domain_types::traits::SaturatingInto;
+use domain_types::literal;
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode};
+use crate::domain::primitives::{Length, PromoBonus, PromoCapacity, PromoCode, UserId};
 use crate::repo;
 use crate::repo::PromoCodeParams;
 use crate::repo::test::{fresh_db, USER_ID};
@@ -19,9 +21,9 @@ async fn activate() {
 
     let promo = repo::Promo::new(db.clone());
     promo.create_promo_code(PromoCodeParams{
-        code: PromoCode::of(PROMO_CODE),
+        code: literal!(PromoCode = PROMO_CODE),
         bonus_length: PromoBonus::new(PROMO_BONUS),
-        capacity: PromoCapacity::literal(1),
+        capacity: PromoCapacity::new(1),
     }).await.expect("couldn't create a promo code");
 
     create_user(&db).await;
@@ -44,9 +46,9 @@ async fn activate_with_negative_bonus() {
 
     let promo = repo::Promo::new(db.clone());
     promo.create_promo_code(PromoCodeParams{
-        code: PromoCode::of(PENALTY_PROMO_CODE),
+        code: literal!(PromoCode = PENALTY_PROMO_CODE),
         bonus_length: PromoBonus::new(PENALTY_PROMO_BONUS),
-        capacity: PromoCapacity::literal(1),
+        capacity: PromoCapacity::new(1),
     }).await.expect("couldn't create a promo code");
 
     create_user(&db).await;
@@ -64,11 +66,12 @@ async fn check_promo_code_activations(db: &Pool<Postgres>) {
     let row = sqlx::query!(
             r#"SELECT uid, code, affected_chats, activated_at as "activated_at!"
                 FROM Promo_Code_Activations WHERE uid = $1 AND code = $2"#,
-            i64::from(USER_ID), PROMO_CODE)
+            USER_ID as UserId, PROMO_CODE)
         .fetch_one(db)
         .await
         .expect("couldn't fetch the promo code activation");
-    assert_eq!(row.uid, USER_ID.value());
+    let uid: i64 = USER_ID.saturating_into();
+    assert_eq!(row.uid, uid);
     assert_eq!(row.code, PROMO_CODE);
     assert_eq!(row.affected_chats, 1);
     assert_eq!(row.activated_at.date_naive(), Utc::now().date_naive());

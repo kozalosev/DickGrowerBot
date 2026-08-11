@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use autometrics::autometrics;
 use chrono::Utc;
+use domain_types::traits::SaturatingInto;
 use teloxide::{ApiError, Bot, RequestError};
 use teloxide::adaptors::Throttle;
 use teloxide::payloads::SendMessageSetters;
@@ -50,7 +51,7 @@ pub async fn run_daily_shrink(
     // to. Captured once so every chat's broadcast pins the same date its shrinks were logged under.
     let today = Utc::now().date_naive();
 
-    let total = events.len() as u64;
+    let total: u64 = events.len().saturating_into();
     let mut by_chat: HashMap<TelegramChatId, Vec<ShrinkEvent>> = HashMap::new();
     // Chats the bot is known to have lost access to are dropped here rather than at the broadcast:
     // there's no point holding their events, and skipping is counted per chat, not per victim.
@@ -64,12 +65,14 @@ pub async fn run_daily_shrink(
             None => {}
         }
     }
-    let to_broadcast_count: u64 = by_chat.values().map(|victims| victims.len() as u64).sum();
+    let to_broadcast_count: u64 = by_chat.values()
+        .map(|victims| -> u64 { victims.len().saturating_into() })
+        .sum();
     let unreachable_victims_count: u64 = unreachable_victims_count_by_chat.values().sum();
     metrics::DAILY_SHRINK.victims_to_broadcast(to_broadcast_count);
     metrics::DAILY_SHRINK.victims_unreachable(unreachable_victims_count);
     metrics::DAILY_SHRINK.victims_inline_only(total - to_broadcast_count - unreachable_victims_count);
-    metrics::DAILY_SHRINK.broadcast_skipped(unreachable_victims_count_by_chat.len() as u64);
+    metrics::DAILY_SHRINK.broadcast_skipped(unreachable_victims_count_by_chat.len().saturating_into());
     if !unreachable_victims_count_by_chat.is_empty() {
         tracing::info!(chats = unreachable_victims_count_by_chat.len(), victims = unreachable_victims_count,
             "skipped the unreachable chats");
@@ -161,7 +164,7 @@ async fn broadcast_shrink(
     let lang = resolve_broadcast_language(deps, &chat).await;
     let lang_code = LanguageCode::new(lang.to_string());
 
-    let has_more_pages = victims.len() > config.top_limit.value() as usize;
+    let has_more_pages = victims.len() > usize::from(config.top_limit);
     let page = render_shrinks_page(victims, config, &lang_code, ShrinkView::Broadcast, has_more_pages);
     // A single day by definition, so day-navigation (`adjacent`) is always `None`.
     let keyboard = build_shrink_keyboard(ShrinkView::Broadcast, date, Page::first(), page.has_more_pages, None);
@@ -199,7 +202,10 @@ struct BroadcastDeps<'a> {
 async fn resolve_broadcast_language(deps: &BroadcastDeps<'_>, chat: &ChatIdKind) -> SupportedLanguage {
     let BroadcastDeps { repos, language_service, config, .. } = deps;
     match repos.chats.get_chat_language(chat).await {
-        Ok(Some(lang)) => return lang,
+        Ok(Some(lang)) => {
+            metrics::BROADCAST_LANGUAGE.decided_by_chat();
+            return lang
+        }
         Ok(None) => {}
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the language of the chat"),
     }
@@ -212,9 +218,11 @@ async fn resolve_broadcast_language(deps: &BroadcastDeps<'_>, chat: &ChatIdKind)
             .map(Into::into)
             .collect();
         if let Some(lang) = language_service.popular_language(&uids).await {
+            metrics::BROADCAST_LANGUAGE.decided_by_tally();
             return lang;
         }
     }
+    metrics::BROADCAST_LANGUAGE.defaulted();
     SupportedLanguage::EN
 }
 

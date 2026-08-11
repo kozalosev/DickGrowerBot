@@ -164,22 +164,24 @@ fn resource() -> Resource {
 mod tests {
     use std::time::Duration;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
-    use testcontainers::{ContainerAsync, GenericImage, ImageExt};
-    use testcontainers::core::{IntoContainerPort, WaitFor};
-    use testcontainers::runners::AsyncRunner;
     use tracing_opentelemetry::OpenTelemetrySpanExt;
     use tracing_subscriber::layer::SubscriberExt;
     use super::*;
+    use crate::test_containers::SharedContainer;
 
     const VICTORIA_LOGS_PORT: u16 = 9428;
     const INGESTION_PATH: &str = "/insert/opentelemetry/v1/logs";
+
+    static CONTAINER: SharedContainer = SharedContainer::new(
+        "victoria-logs", "victoriametrics/victoria-logs", "latest", VICTORIA_LOGS_PORT, &[])
+        .with_settle_millis(500);
 
     /// The record must carry the ids of the span it was written in, put there by the SDK. Everything
     /// here is the real pipeline: the tracing bridge, the OTLP/HTTP exporter, and the same log database
     /// the server runs. The fields must survive as fields, not as text inside the message.
     #[tokio::test]
     async fn an_exported_record_carries_the_trace_id_and_the_fields() {
-        let (_container, base_url) = start_victoria_logs().await;
+        let base_url = victoria_logs().await;
         let logger_provider = build_logger_provider(format!("{base_url}{INGESTION_PATH}"))
             .expect("couldn't build the logger provider");
 
@@ -200,7 +202,7 @@ mod tests {
         logger_provider.force_flush()
             .expect("couldn't flush the log records");
 
-        let logs = query_logs(&base_url).await;
+        let logs = query_logs(&base_url, &trace_id).await;
         assert!(logs.contains("a message from the test"), "the record is missing from:\n{logs}");
         assert!(logs.contains(&trace_id), "the trace id {trace_id} is missing from:\n{logs}");
         assert!(logs.contains("-100500"), "the chat_id field is missing from:\n{logs}");
@@ -212,43 +214,38 @@ mod tests {
             "unexpected stream fields in:\n{logs}");
     }
 
-    async fn start_victoria_logs() -> (ContainerAsync<GenericImage>, String) {
-        let container = GenericImage::new("victoriametrics/victoria-logs", "latest")
-            .with_exposed_port(VICTORIA_LOGS_PORT.tcp())
-            .with_wait_for(WaitFor::millis(500))
-            .with_label(crate::repo::test::TEST_CONTAINER_LABEL, "true")
-            .start()
-            .await
-            .expect("couldn't start VictoriaLogs");
-        let port = container.get_host_port_ipv4(VICTORIA_LOGS_PORT)
-            .await
-            .expect("couldn't fetch the port of VictoriaLogs");
-        let base_url = format!("http://localhost:{port}");
+    /// Where to reach it, once it answers.
+    async fn victoria_logs() -> String {
+        let base_url = format!("http://localhost:{}", CONTAINER.port().await);
 
         // The container is up before the HTTP server inside it is.
         let client = reqwest::Client::new();
         for _ in 0..50 {
             let response = client.get(format!("{base_url}/health")).send().await;
             if response.is_ok_and(|r| r.status().is_success()) {
-                return (container, base_url);
+                return base_url;
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         panic!("VictoriaLogs didn't become healthy in time");
     }
 
-    /// Everything stored, as JSON lines. Ingestion is asynchronous, hence the retries.
-    async fn query_logs(base_url: &str) -> String {
+    /// Everything stored, as JSON lines, once `awaited` is among it.
+    ///
+    /// Ingestion is asynchronous, hence the retries — and the wait is for that needle rather than
+    /// for any answer at all, because the container outlives the run: a non-empty answer may be
+    /// entirely the previous run's records.
+    async fn query_logs(base_url: &str, awaited: &str) -> String {
         let client = reqwest::Client::new();
         for _ in 0..50 {
             let body = client.get(format!("{base_url}/select/logsql/query?query=*"))
                 .send().await.expect("couldn't query VictoriaLogs")
                 .text().await.expect("couldn't read the answer of VictoriaLogs");
-            if !body.trim().is_empty() {
+            if body.contains(awaited) {
                 return body;
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        panic!("nothing was stored in VictoriaLogs in time");
+        panic!("{awaited} didn't reach VictoriaLogs in time");
     }
 }

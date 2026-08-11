@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Message_Deletions SET state = $2, finished_at = current_timestamp WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        {
+          "Custom": {
+            "name": "deletion_state",
+            "kind": {
+              "Enum": [
+                "created",
+                "warned",
+                "removed",
+                "removed_before",
+                "expired",
+                "failed"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d118ef9cf63971ceecf663e4fe0c5aa657b84b7af36f155df53a46478e73b71a"
+}

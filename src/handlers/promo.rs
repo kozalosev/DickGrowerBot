@@ -1,7 +1,6 @@
 use autometrics::autometrics;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use once_cell::sync::Lazy;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::dispatching::dialogue::InMemStorage;
@@ -15,11 +14,6 @@ use crate::domain::primitives::{AffectedRows, LanguageCode, PromoCode, UserId};
 use crate::repo::ActivationError;
 
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
-
-static PROMO_CODE_FORMAT_REGEXP: Lazy<regex::Regex> = Lazy::new(||
-    regex::Regex::new("^[a-zA-Zа-яА-ЯёЁ0-9_\\-]{4,16}$")
-        .expect("promo code format regular expression must be valid")
-);
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -59,7 +53,7 @@ pub async fn promo_cmd_handler(
         PromoCommands::Promo(code) => {
             dialogue.exit().await?;
 
-            promo_activation_impl(repos.promo, user, &PromoCode::new(code), lang_code).await?
+            activate_or_refuse(repos.promo, user, code, lang_code).await?
         },
     };
     reply_html!(bot, msg, answer);
@@ -81,7 +75,7 @@ pub async fn promo_requested_handler(
             dialogue.exit().await?;
 
             let user = msg.from.as_ref().ok_or("no from user")?;
-            promo_activation_impl(repos.promo, user, &PromoCode::of(code), lang_code).await?
+            activate_or_refuse(repos.promo, user, code.to_owned(), lang_code).await?
         },
         None => {
             t!("commands.promo.request", locale = &lang_code).to_string()
@@ -92,7 +86,7 @@ pub async fn promo_requested_handler(
 }
 
 pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
-    PROMO_CODE_FORMAT_REGEXP.is_match(&query)
+    PromoCode::new(query).is_ok()
 }
 
 #[autometrics]
@@ -155,6 +149,22 @@ pub(crate) async fn promo_activation_impl(
     Ok(answer)
 }
 
+/// A code the type refuses never reaches the database.
+async fn activate_or_refuse(
+    promo_repo: repo::Promo,
+    user: &User,
+    code: String,
+    lang_code: LanguageCode,
+) -> anyhow::Result<String> {
+    match PromoCode::new(code) {
+        Ok(code) => promo_activation_impl(promo_repo, user, &code, lang_code).await,
+        Err(e) => {
+            tracing::info!(error = %e, "the promo code doesn't fit the format");
+            Ok(t!("commands.promo.errors.invalid_format", locale = &lang_code).to_string())
+        }
+    }
+}
+
 fn get_chats_in_russian(count: AffectedRows) -> String {
     if count.single() {
         "чате"
@@ -166,17 +176,37 @@ fn get_chats_in_russian(count: AffectedRows) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::handlers::promo::PROMO_CODE_FORMAT_REGEXP;
+    use teloxide::types::{InlineQuery, InlineQueryId, User, UserId};
+    use super::promo_inline_filter;
 
+    fn query(text: &str) -> InlineQuery {
+        InlineQuery {
+            id: InlineQueryId("1".to_owned()),
+            from: User {
+                id: UserId(1),
+                is_bot: false,
+                first_name: "test".to_owned(),
+                last_name: None,
+                username: None,
+                language_code: None,
+                is_premium: false,
+                added_to_attachment_menu: false,
+            },
+            query: text.to_owned(),
+            offset: String::default(),
+            chat_type: None,
+            location: None,
+        }
+    }
+
+    /// The inline button is offered for what the type would accept, and for nothing else.
     #[test]
-    fn test_regex() {
-        assert!(PROMO_CODE_FORMAT_REGEXP.is_match("TESTPROMO"));
-        assert!(PROMO_CODE_FORMAT_REGEXP.is_match("test-11_1"));
-        assert!(PROMO_CODE_FORMAT_REGEXP.is_match("промо-код"));
-        assert!(PROMO_CODE_FORMAT_REGEXP.is_match("тест1234"));
-
-        assert!(!PROMO_CODE_FORMAT_REGEXP.is_match("T34"));
-        assert!(!PROMO_CODE_FORMAT_REGEXP.is_match("PROMO!"));
-        assert!(!PROMO_CODE_FORMAT_REGEXP.is_match("VERYVERYLONGLONGPROMOCODE"));
+    fn only_a_well_formed_code_is_offered() {
+        for accepted in ["TESTPROMO", "test-11_1", "промо-код", "тест1234"] {
+            assert!(promo_inline_filter(query(accepted)), "{accepted} should be offered");
+        }
+        for refused in ["T34", "PROMO!", "VERYVERYLONGLONGPROMOCODE"] {
+            assert!(!promo_inline_filter(query(refused)), "{refused} should not be offered");
+        }
     }
 }

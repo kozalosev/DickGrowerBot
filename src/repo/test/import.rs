@@ -4,7 +4,7 @@ use crate::domain::objects::ExternalUser;
 use crate::domain::primitives::{Length, LengthChange, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{CHAT_ID, CHAT_ID_KIND, fresh_db, UID, USER_ID};
+use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, fresh_db, UID, USER_ID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user, create_user_and_dick_2};
 
 /// A chat the import is not asked about, used to check it stays untouched.
@@ -48,7 +48,7 @@ mod import_semantics {
         let db = fresh_db().await;
         let import = repo::Import::new(db.clone());
         let dicks = repo::Dicks::new(db.clone(), Default::default());
-        let uid2 = UserId::literal(UID + 1);
+        let uid2 = user_id(UID + 1);
 
         create_user(&db).await;
         create_dick(&db).await;
@@ -122,7 +122,7 @@ async fn read_dick(db: &Pool<Postgres>, uid: UserId, chat_id: i64) -> StoredDick
     let row = sqlx::query!(
             "SELECT d.length, d.bonus_attempts FROM Dicks d JOIN Chats c ON c.id = d.chat_id
                 WHERE c.chat_id = $1 AND d.uid = $2",
-            chat_id, uid.value())
+            chat_id, uid as UserId)
         .fetch_one(db)
         .await
         .expect("couldn't read the dick");

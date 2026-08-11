@@ -1,7 +1,7 @@
 use domain_types_macro::domain_type;
-use crate::positive_number;
+use crate::number;
 
-positive_number!(Counter, i16);
+number!(Counter, u16);
 
 #[domain_type(number)]
 struct DaysCount(u32);
@@ -15,8 +15,6 @@ struct BattlesCount(u32);
 #[domain_type(number)]
 struct WinStreak(u16);
 
-// u64 has no signed Postgres-representable "bump" type (see SqlxMode in domain_types_macro), so
-// these ones stay Rust-only values — can't be bound into a query directly.
 #[domain_type(number)]
 struct Position(u64);
 
@@ -37,6 +35,14 @@ impl AffectedRows {
     }
 }
 
+#[domain_type(number)]
+struct AttemptsCount(u32);
+
+/// How many requests are allowed in one period of time. Which period, and to whom, is up to the
+/// field that holds it.
+#[domain_type(number)]
+struct RateLimit(u32);
+
 #[cfg(test)]
 mod deserialize_tests {
     use super::{Counter, DaysCount};
@@ -44,7 +50,7 @@ mod deserialize_tests {
     #[test]
     fn validated_type_round_trips_and_rejects_invalid() {
         let valid: Counter = serde_saphyr::from_str("5").expect("5 must deserialize");
-        assert_eq!(valid, Counter::literal(5));
+        assert_eq!(valid, Counter::new(5));
 
         let invalid = serde_saphyr::from_str::<Counter>("-1");
         assert!(invalid.is_err(), "negative value must be rejected by the validator");

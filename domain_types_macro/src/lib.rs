@@ -39,7 +39,7 @@ struct NumberKind {
 #[derive(PartialEq, Eq)]
 enum DomainTypeKind {
     Number(NumberKind),
-    String,
+    String { validated: bool },
 }
 
 enum InnerTypeKind {
@@ -50,15 +50,11 @@ enum InnerTypeKind {
 }
 
 /// How a domain type maps onto `sqlx`. Postgres has no unsigned wire type, so an unsigned inner
-/// type can't `#[sqlx(transparent)]`-derive directly; instead it's encoded/decoded through the
-/// smallest signed integer type that can always represent its full range (see `bump_signed_type`).
-/// An unsigned type with no such "bump" type available (`u64` — `i128` isn't a Postgres wire type)
-/// gets no `sqlx` impls at all: it simply can't be bound into a query, and callers convert at the
-/// query boundary as needed.
+/// type can't `#[sqlx(transparent)]`-derive directly; it goes through a signed type instead (see
+/// [`signed_counterpart`]), which the generated `Encode`/`Decode` convert to and from.
 enum SqlxMode {
     Transparent,
-    Bumped(Box<Type>),
-    None,
+    Signed(Box<Type>),
 }
 
 struct TypeInfo<'a> {
@@ -139,6 +135,7 @@ fn parse_validated(input: ParseStream) -> syn::Result<(syn::Expr, syn::LitStr)> 
     let msg_content;
     syn::parenthesized!(msg_content in content);
     let error_msg = msg_content.parse()?;
+    content.parse::<syn::Token![,]>().ok();
 
     Ok((validator, error_msg))
 }
@@ -164,22 +161,79 @@ fn parse_features(input: ParseStream) -> syn::Result<bool> {
     Ok(no_auto_display)
 }
 
-/// The smallest signed integer type that can always represent the full range of `unsigned_ident`
-/// (`"u8"`, `"u16"`, ...), for `SqlxMode::Bumped`. `None` for `u64` (and anything unrecognized) —
-/// see `SqlxMode` for why.
-fn bump_signed_type(ty: &Type) -> Option<Type> {
+/// The signed integer type an unsigned one is stored as, for [`SqlxMode::Signed`].
+///
+/// The width is kept, so a domain type's column stays the column it already is: `u16` goes into an
+/// `int2`, `u32` into an `int4`, `u64` into an `int8`. Only `u8` widens, because Postgres has no
+/// one-byte integer. Half of the unsigned range has no signed counterpart, which is why encoding
+/// converts rather than casts — but a value in that half would not have fit the column either.
+fn signed_counterpart(ty: &Type) -> Option<Type> {
     if let Type::Group(group) = ty {
-        return bump_signed_type(&group.elem);
+        return signed_counterpart(&group.elem);
     }
     let Type::Path(type_path) = ty else { return None };
     let ident = &type_path.path.segments.last()?.ident;
-    let bumped = match ident.to_string().as_str() {
-        "u8" => "i16",
-        "u16" => "i32",
-        "u32" => "i64",
+    let signed = match ident.to_string().as_str() {
+        "u8" | "u16" => "i16",
+        "u32" => "i32",
+        "u64" => "i64",
         _ => return None,
     };
-    syn::parse_str(bumped).ok()
+    syn::parse_str(signed).ok()
+}
+
+/// The name of the primitive, for the two decisions below that depend on which one it is.
+fn primitive_name(ty: &Type) -> Option<String> {
+    if let Type::Group(group) = ty {
+        return primitive_name(&group.elem);
+    }
+    let Type::Path(type_path) = ty else { return None };
+    Some(type_path.path.segments.last()?.ident.to_string())
+}
+
+/// The types every value of this one converts into without losing anything — std's `From` impls,
+/// which is also what decides the other half: a pair absent here is one `SaturatingInto` keeps,
+/// because it is a pair that can lose something.
+///
+/// Only the widths this workspace uses are listed. A target std has no `From` for would fail to
+/// compile in [`generate_exact_widening_impls`], which is what keeps this honest.
+fn exact_widenings(ty: &Type) -> Vec<Type> {
+    let targets: &[&str] = match primitive_name(ty).as_deref() {
+        Some("u8") => &["u16", "u32", "u64", "usize", "i16", "i32", "i64", "isize", "f32", "f64"],
+        Some("u16") => &["u32", "u64", "usize", "i32", "i64", "f32", "f64"],
+        Some("u32") => &["u64", "i64", "f64"],
+        Some("i8") => &["i16", "i32", "i64", "isize", "f32", "f64"],
+        Some("i16") => &["i32", "i64", "isize", "f32", "f64"],
+        Some("i32") => &["i64", "f64"],
+        Some("f32") => &["f64"],
+        _ => &[],
+    };
+    targets.iter().filter_map(|name| syn::parse_str(name).ok()).collect()
+}
+
+/// `From<#name> for T` for each of them, so that a conversion which loses nothing says so.
+///
+/// The orphan rule is satisfied by the local type sitting in the trait's parameter, which is why
+/// the target may be a foreign primitive.
+fn generate_exact_widening_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    let impls = exact_widenings(inner_type).into_iter().map(|target| quote! {
+        #[automatically_derived]
+        impl ::std::convert::From<#name> for #target {
+            fn from(value: #name) -> Self {
+                <#target as ::std::convert::From<#inner_type>>::from(value.0)
+            }
+        }
+    });
+    quote! { #(#impls)* }
+}
+
+/// Whether every value of this type is exactly representable in an `f64`. An `f64` holds every
+/// 32-bit integer and every `f32`; it does not hold every `i64` or `u64`, whose values run past its
+/// 53 bits of mantissa. The exact ones widen with `From`, the rest have to name what they lose.
+fn exact_in_f64(ty: &Type) -> bool {
+    primitive_name(ty).is_some_and(|name|
+        matches!(name.as_str(), "i8" | "i16" | "i32" | "u8" | "u16" | "u32" | "f32"))
 }
 
 #[proc_macro_attribute]
@@ -207,7 +261,7 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
             is_number: args.number,
             validated: args.validator.is_some(),
         }),
-        InnerTypeKind::String => DomainTypeKind::String,
+        InnerTypeKind::String => DomainTypeKind::String { validated: args.validator.is_some() },
         InnerTypeKind::Unsupported => panic!("unsupported domain type"),
     };
 
@@ -220,10 +274,9 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
 
     let sqlx_mode = match &variant {
         DomainTypeKind::Number(NumberKind { primitive: PrimitiveKind::Integer(IntegerSignedness::Unsigned), .. }) => {
-            match bump_signed_type(&inner_type) {
-                Some(bump) => SqlxMode::Bumped(Box::new(bump)),
-                None => SqlxMode::None,
-            }
+            let signed = signed_counterpart(&inner_type)
+                .unwrap_or_else(|| panic!("no signed type to store {} in", quote!(#inner_type)));
+            SqlxMode::Signed(Box::new(signed))
         }
         _ => SqlxMode::Transparent,
     };
@@ -234,66 +287,115 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
     let derives = generate_derives(&info);
     let impls = generate_impls(&info);
 
-    let (sqlx_transparent, bumped_sqlx_impls) = match &info.sqlx_mode {
+    let (sqlx_transparent, signed_sqlx_impls) = match &info.sqlx_mode {
         SqlxMode::Transparent => (quote! { #[sqlx(transparent)] }, TokenStream::new()),
-        SqlxMode::Bumped(bump) => (quote! {}, generate_bumped_sqlx_impls(&info, bump)),
-        SqlxMode::None => (quote! {}, TokenStream::new()),
+        SqlxMode::Signed(signed) => (quote! {}, generate_signed_sqlx_impls(&info, signed)),
     };
 
     let TypeInfo { name, inner_type, .. } = info;
+    // Everything written above the struct is carried over: its documentation, and any attribute
+    // the derives below read — `#[display(...)]` above all, which `derive_more::Display` takes.
+    let attrs = &input.attrs;
     // Generate the final struct with a conditional 'sqlx' attribute
     let output = quote! {
+        #(#attrs)*
         #[derive(#(#derives),*)]
         #sqlx_transparent
         pub struct #name(#inner_type);
 
         #impls
-        #bumped_sqlx_impls
+        #signed_sqlx_impls
     };
 
     proc_macro::TokenStream::from(output)
 }
 
-/// Hand-written `Type`/`Encode`/`Decode`, delegating to `bump` (the smallest signed integer that
-/// always fits the unsigned inner type — see `bump_signed_type`). `#[sqlx(transparent)]` can't be
-/// used here since it requires the wrapped field's own type to already implement these traits,
-/// with no substitution; unsigned integers never do (Postgres has no unsigned wire type).
-fn generate_bumped_sqlx_impls(info: &TypeInfo, bump: &Type) -> TokenStream {
+/// Hand-written `Type`/`Encode`/`Decode` for an unsigned inner type, going through `signed` (see
+/// [`signed_counterpart`]). `#[sqlx(transparent)]` can't be used here since it requires the wrapped
+/// field's own type to already implement these traits, with no substitution; unsigned integers never
+/// do, as Postgres has no unsigned wire type.
+///
+/// Both directions convert instead of casting, and both can refuse: a value above the signed half
+/// of the range going out, a negative one coming back. Neither is reachable through a column that
+/// holds what this type writes.
+fn generate_signed_sqlx_impls(info: &TypeInfo, signed: &Type) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
     quote! {
         #[automatically_derived]
         impl<DB: ::sqlx::Database> ::sqlx::Type<DB> for #name
-        where #bump: ::sqlx::Type<DB>
+        where #signed: ::sqlx::Type<DB>
         {
             fn type_info() -> DB::TypeInfo {
-                <#bump as ::sqlx::Type<DB>>::type_info()
+                <#signed as ::sqlx::Type<DB>>::type_info()
+            }
+
+            fn compatible(ty: &DB::TypeInfo) -> bool {
+                <#signed as ::sqlx::Type<DB>>::compatible(ty)
             }
         }
 
         #[automatically_derived]
         impl<'q, DB: ::sqlx::Database> ::sqlx::Encode<'q, DB> for #name
-        where #bump: ::sqlx::Encode<'q, DB>
+        where #signed: ::sqlx::Encode<'q, DB>
         {
             fn encode_by_ref(
                 &self,
                 buf: &mut <DB as ::sqlx::Database>::ArgumentBuffer,
             ) -> ::std::result::Result<::sqlx::encode::IsNull, ::sqlx::error::BoxDynError> {
-                // Always lossless: `bump` is chosen to be wide enough for the full range of
-                // #inner_type.
-                <#bump as ::sqlx::Encode<DB>>::encode_by_ref(&(self.0 as #bump), buf)
+                let value = <#signed as ::std::convert::TryFrom<#inner_type>>::try_from(self.0)?;
+                <#signed as ::sqlx::Encode<DB>>::encode_by_ref(&value, buf)
             }
         }
 
         #[automatically_derived]
         impl<'r, DB: ::sqlx::Database> ::sqlx::Decode<'r, DB> for #name
-        where #bump: ::sqlx::Decode<'r, DB>
+        where #signed: ::sqlx::Decode<'r, DB>
         {
             fn decode(
                 value: <DB as ::sqlx::Database>::ValueRef<'r>,
             ) -> ::std::result::Result<Self, ::sqlx::error::BoxDynError> {
-                let raw = <#bump as ::sqlx::Decode<DB>>::decode(value)?;
-                // Only fails for genuinely corrupted/out-of-range column data.
-                Ok(Self(<#inner_type as ::std::convert::TryFrom<#bump>>::try_from(raw)?))
+                let raw = <#signed as ::sqlx::Decode<DB>>::decode(value)?;
+                Ok(Self(<#inner_type as ::std::convert::TryFrom<#signed>>::try_from(raw)?))
+            }
+        }
+
+        // What `#[sqlx(transparent)]` would have derived. Without it the type can be bound on its
+        // own but not as an array, which is how a batch insert passes its rows.
+        #[automatically_derived]
+        impl ::sqlx::postgres::PgHasArrayType for #name {
+            fn array_type_info() -> ::sqlx::postgres::PgTypeInfo {
+                <#signed as ::sqlx::postgres::PgHasArrayType>::array_type_info()
+            }
+        }
+    }
+}
+
+/// The two conversions that lose something, forwarded to the inner type.
+///
+/// Both are bounded by what the inner type itself serves, so each impl covers exactly the targets
+/// that make sense for this wrapper and no branching is needed here: a float-backed type ends up
+/// with `ApproxInto<f32>`, an integer-backed one with `SaturatingInto<i64>`. Which end a value is
+/// clamped to, and how a float is rounded, is decided once in `domain_types::traits`.
+///
+/// The lossless direction is `From<#name> for #inner_type`, generated with the other basics.
+fn generate_lossy_conversion_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, inner_type, .. } = info;
+    quote! {
+        #[automatically_derived]
+        impl<T> ::domain_types::traits::SaturatingInto<T> for #name
+        where #inner_type: ::domain_types::traits::SaturatingInto<T>
+        {
+            fn saturating_into(self) -> T {
+                ::domain_types::traits::SaturatingInto::saturating_into(self.0)
+            }
+        }
+
+        #[automatically_derived]
+        impl<T> ::domain_types::traits::ApproxInto<T> for #name
+        where #inner_type: ::domain_types::traits::ApproxInto<T>
+        {
+            fn approx_into(self) -> T {
+                ::domain_types::traits::ApproxInto::approx_into(self.0)
             }
         }
     }
@@ -313,13 +415,14 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
     // construct `Self(value)` directly, bypassing the range validator (the same hazard as
     // `Neg` and the plain `FromStr`). They get a hand-written impl routing through `Self::new`
     // in `generate_validated_domain_number_impls` instead.
-    let is_validated = matches!(&info.variant, DomainTypeKind::Number(NumberKind { validated: true, .. }));
+    let is_validated = matches!(&info.variant,
+        DomainTypeKind::Number(NumberKind { validated: true, .. }) | DomainTypeKind::String { validated: true });
     if !is_validated {
         derives.push(quote! { ::serde::Deserialize });
     }
 
     match &info.variant {
-        DomainTypeKind::String => {
+        DomainTypeKind::String { .. } => {
             derives.push(quote! { Eq });
             derives.push(quote! { Ord });
             derives.push(quote! { Hash });
@@ -453,8 +556,16 @@ fn generate_validated_domain_number_impls(info: &TypeInfo) -> TokenStream {
                 }
             }
 
-            pub const fn literal(value: #inner_type) -> Self {
+            /// Validates and hands the value straight back. `literal!` calls this inside a `const`
+            /// block, which is what makes a value the type would refuse fail the build.
+            pub const fn check_literal(value: #inner_type) -> #inner_type {
                 assert!(#validator(&value), #error_msg);
+                value
+            }
+
+            /// Wraps what [`Self::check_literal`] approved. Never call it directly — on its own it
+            /// skips the check entirely, which is why `clippy.toml` forbids it.
+            pub const fn from_literal(value: #inner_type) -> Self {
                 Self(value)
             }
         }
@@ -821,12 +932,17 @@ fn generate_domain_float_number_impls(info: &TypeInfo, validated: bool) -> Token
 /// For integer domain numbers annotated with `division_result(SomeFloatDomainType)`:
 /// the `/` operator performs a float division and produces the specified float domain type
 /// (or a `Result` of it, if that type is validated — see the `DivisionResult` trait).
-// TODO: `self.0 as f64` loses precision for 64-bit integers above 2^53;
-//       consider rejecting `division_result` on i64/u64 domain types at macro-expansion time.
+// TODO: an f64 holds integers exactly only up to 2^53, so a 64-bit domain number divides at
+//       reduced precision; consider rejecting `division_result` on i64/u64 at expansion time.
 fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, args, .. } = info;
     let Some(result_type) = &args.division_result else {
         return TokenStream::new();
+    };
+    let widen = if exact_in_f64(inner_type) {
+        quote! { f64::from }
+    } else {
+        quote! { ::domain_types::traits::ApproxInto::approx_into }
     };
     quote! {
         #[automatically_derived]
@@ -834,7 +950,9 @@ fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
             type Output = <#result_type as ::domain_types::traits::DivisionResult>::Output;
 
             fn div(self, rhs: #inner_type) -> Self::Output {
-                <#result_type as ::domain_types::traits::DivisionResult>::from_division(self.0 as f64 / rhs as f64)
+                let dividend: f64 = #widen(self.0);
+                let divisor: f64 = #widen(rhs);
+                <#result_type as ::domain_types::traits::DivisionResult>::from_division(dividend / divisor)
             }
         }
 
@@ -852,6 +970,12 @@ fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
 /// Makes a float domain type usable as the target of `division_result(...)` on integer types.
 fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
+    // An `f64` result needs no conversion at all; only a narrower float loses anything.
+    let narrow = if exact_in_f64(inner_type) {
+        quote! { ::domain_types::traits::ApproxInto::approx_into(value) }
+    } else {
+        quote! { value }
+    };
     if validated {
         quote! {
             #[automatically_derived]
@@ -859,7 +983,7 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
                 type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self::new(value as #inner_type)
+                    Self::new(#narrow)
                 }
             }
         }
@@ -872,7 +996,7 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
                 type Output = Self;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self(value as #inner_type)
+                    Self(#narrow)
                 }
             }
         }
@@ -928,13 +1052,77 @@ fn generate_domain_number_marker_impls(info: &TypeInfo, kind: &NumberKind) -> To
     quote! { #value_marker #number_markers }
 }
 
-fn generate_domain_string_impls(info: &TypeInfo) -> TokenStream {
-    let TypeInfo { name, .. } = info;
+/// A validated string type, checked either while the code is compiled or when the value arrives.
+///
+/// The validator takes a `&str`, not a `&String`: a `String` cannot exist in a `const` context, so
+/// only the borrowed form can be checked there. One validator then serves both paths — the literals
+/// written in the source and the values coming from the database, the environment and Telegram.
+///
+/// There is no `const` on `from_literal` here, and there cannot be: that is where the allocation
+/// happens. Only the check is forced early, which is the half that matters.
+fn generate_validated_domain_string_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, args, .. } = info;
+    let validator = args.validator.as_ref().expect("a validator must be given");
+    let error_msg = args.error_msg.as_ref().expect("an error message must be given");
     quote! {
         impl #name {
+            pub fn new(value: String) -> Result<Self, ::domain_types::errors::DomainAssertionError<String>> {
+                if #validator(value.as_str()) {
+                    Ok(Self(value))
+                } else {
+                    Err(::domain_types::errors::DomainAssertionError::new(
+                        value,
+                        ::std::borrow::Cow::from(concat!(stringify!(#name), ' ', #error_msg))
+                    ))
+                }
+            }
+
+            /// Validates and hands the literal straight back. `literal!` calls this inside a
+            /// `const` block, which is what makes a value the type would refuse fail the build.
+            pub const fn check_literal(value: &'static str) -> &'static str {
+                assert!(#validator(value), #error_msg);
+                value
+            }
+
+            /// Wraps what [`Self::check_literal`] approved. Never call it directly — on its own it
+            /// skips the check entirely, which is why `clippy.toml` forbids it.
+            pub fn from_literal(value: &'static str) -> Self {
+                Self(value.to_owned())
+            }
+        }
+
+        // Hand-written instead of derived so deserialization can't bypass the validator.
+        #[automatically_derived]
+        impl<'de> ::serde::Deserialize<'de> for #name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: ::serde::Deserializer<'de>,
+            {
+                let value = <String as ::serde::Deserialize>::deserialize(deserializer)?;
+                Self::new(value).map_err(::serde::de::Error::custom)
+            }
+        }
+    }
+}
+
+fn generate_domain_string_impls(info: &TypeInfo) -> TokenStream {
+    let TypeInfo { name, variant, .. } = info;
+    let of = if matches!(variant, DomainTypeKind::String { validated: true }) {
+        quote! {
+            pub fn of(value: impl ToString) -> Result<Self, ::domain_types::errors::DomainAssertionError<String>> {
+                Self::new(value.to_string())
+            }
+        }
+    } else {
+        quote! {
             pub fn of(value: impl ToString) -> Self {
                 Self::new(value.to_string())
             }
+        }
+    };
+    quote! {
+        impl #name {
+            #of
 
             pub fn value(&self) -> &str {
                 self.0.as_str()
@@ -1000,7 +1188,8 @@ fn determine_inner_type_kind(ty: &Type) -> InnerTypeKind {
 fn generate_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
 
-    let is_validated = matches!(&info.variant, DomainTypeKind::Number(NumberKind { validated: true, .. }));
+    let is_validated = matches!(&info.variant,
+        DomainTypeKind::Number(NumberKind { validated: true, .. }) | DomainTypeKind::String { validated: true });
     // An inherent constructor, so that call sites don't have to import the traits.
     // Validated types get their own inherent `new` returning a Result instead
     // (generated along with the other validated impls); it shadows the infallible trait method.
@@ -1008,13 +1197,16 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
         TokenStream::new()
     } else {
         match &info.variant {
-            DomainTypeKind::String => quote! {
+            DomainTypeKind::String { .. } => quote! {
                 impl #name {
                     pub fn new(value: #inner_type) -> Self {
                         Self(value)
                     }
                 }
             },
+            // No `literal` here. It exists to force a validator to run while the code is compiled,
+            // and this type has none — `new` is `const` and infallible, so it is already everything
+            // a constant needs.
             _ => quote! {
                 impl #name {
                     pub const fn new(value: #inner_type) -> Self {
@@ -1048,13 +1240,24 @@ fn generate_impls(info: &TypeInfo) -> TokenStream {
 
     let DomainTypeKind::Number(kind) = &info.variant else {
         let domain_string_impls = generate_domain_string_impls(info);
+        let validated_impls = if is_validated {
+            generate_validated_domain_string_impls(info)
+        } else {
+            TokenStream::new()
+        };
         return quote! {
             #domain_type_impl
             #domain_string_impls
+            #validated_impls
         };
     };
 
-    let mut pieces = vec![domain_type_impl, generate_domain_value_impls(info)];
+    let mut pieces = vec![
+        domain_type_impl,
+        generate_domain_value_impls(info),
+        generate_exact_widening_impls(info),
+        generate_lossy_conversion_impls(info),
+    ];
 
     if kind.validated {
         pieces.push(generate_validated_domain_number_impls(info));

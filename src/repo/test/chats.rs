@@ -1,6 +1,6 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, SupportedLanguage};
-use crate::domain::primitives::chat::{TelegramChatId, TelegramChatInstanceId, TopicId};
+use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
@@ -276,7 +276,7 @@ async fn unreachable_flag_lifecycle() {
         .await.expect("couldn't fetch after a command")
         .expect("the chat should exist");
     assert!(!chat.is_unreachable, "a command in the chat clears the mark");
-    assert_eq!(chat.chat_instance, Some(instance.to_string()), "the rows should have been merged");
+    assert_eq!(chat.chat_instance, Some(instance.clone()), "the rows should have been merged");
 }
 
 #[tokio::test]
@@ -313,7 +313,7 @@ async fn migrate_chat_id() {
     assert_eq!(migrated.internal_id, internal_id.value());
     assert!(chats.get_chat(old.into()).await.expect("couldn't fetch").is_none());
 
-    let top = dicks.get_top(&ChatIdKind::ID(new), Offset::new(0), Limit::literal(1), DaysCount::new(7))
+    let top = dicks.get_top(&ChatIdKind::ID(new), Offset::new(0), Limit::new(1), DaysCount::new(7))
         .await.expect("couldn't fetch the top");
     assert_eq!(top.len(), 1);
     assert_eq!(top[0].length, 5);
@@ -333,7 +333,7 @@ async fn migrate_chat_id() {
 
     // the journal keeps both ids; this chat had never been anchored, so it had no instance to keep
     let journal = sqlx::query!("SELECT old_chat_id, old_chat_instance, new_chat_id FROM Chat_Migrations WHERE internal_id = $1",
-            internal_id.value())
+            internal_id as InternalChatId)
         .fetch_one(&db)
         .await.expect("the migration must be journaled");
     assert_eq!((journal.old_chat_id, journal.new_chat_id), (old.value(), new.value()));
@@ -622,7 +622,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
     check_chat(chats, id, inst).await;
 
     let chat_id_kind = chat_id.kind();
-    let dick = dicks.get_top(&chat_id_kind, Offset::new(0), Limit::literal(1), DaysCount::new(7))
+    let dick = dicks.get_top(&chat_id_kind, Offset::new(0), Limit::new(1), DaysCount::new(7))
         .await.expect("couldn't fetch the dick");
     assert_eq!(dick.len(), 1);
     assert_eq!(dick[0].length, 3);

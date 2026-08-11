@@ -1,7 +1,8 @@
 use autometrics::autometrics;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use chrono::{Datelike, Utc};
+use domain_types::traits::SaturatingInto;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -9,7 +10,7 @@ use teloxide::macros::BotCommands;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
-use crate::{metrics, reply_html, repo};
+use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
@@ -47,21 +48,17 @@ pub async fn dick_cmd_handler(
             // A real growth is a permanent event; only the "come back tomorrow" status is
             // scheduled (as a Notice). `grow_impl` tells the two apart via the reply group.
             metrics::CMD_GROW_COUNTER.chat.inc();
-            let reply = grow_impl(&repos, incr, from_refs, lang_code.clone()).await?;
-            let sent = reply_html!(bot.clone(), msg, reply.text);
-            self_destruction.schedule(&bot, &sent, reply.group, &lang_code);
+            let reply = grow_impl(&repos, incr, from_refs, &lang_code).await?;
+            reply_html_ephemeral!(bot, msg, reply.text, self_destruction, reply.group, lang_code);
         },
         DickCommands::Top => {
             metrics::CMD_TOP_COUNTER.chat.inc();
-            let top = top_impl(&repos, &config, from_refs, lang_code.clone(), Page::first()).await?;
-            let mut request = reply_html(bot.clone(), &msg, top.lines);
-            if top.has_more_pages && config.features.top_unlimited {
-                let keyboard = ReplyMarkup::InlineKeyboard(
-                    build_pagination_keyboard(Page::first(), top.has_more_pages));
-                request.reply_markup.replace(keyboard);
-            }
-            let sent = request.await.context(format!("failed for {msg:?}"))?;
-            self_destruction.schedule(&bot, &sent, MessageGroup::Report, &lang_code);
+            let top = top_impl(&repos, &config, from_refs, &lang_code, Page::first()).await?;
+            let keyboard = (top.has_more_pages && config.features.top_unlimited)
+                .then(|| ReplyMarkup::InlineKeyboard(
+                    build_pagination_keyboard(Page::first(), top.has_more_pages)));
+            reply_html_ephemeral!(bot, msg, top.lines, self_destruction, MessageGroup::Report, lang_code,
+                reply_markup = keyboard);
         }
     };
     Ok(())
@@ -73,7 +70,7 @@ pub(crate) async fn grow_impl(
     repos: &repo::Repositories,
     incr: Incrementor,
     from_refs: FromRefs<'_>,
-    lang_code: LanguageCode,
+    lang_code: &LanguageCode,
 ) -> anyhow::Result<TaggedReply> {
     let (from, chat_id) = (from_refs.0, from_refs.1);
     let uid = UserId::from(from);
@@ -81,7 +78,7 @@ pub(crate) async fn grow_impl(
     let user = match repos.users.create_or_update(uid, &name).await {
         Ok(user) => user,
         Err(e) if let Some(date) = banned_until_of(&e) => {
-            let text = t!("errors.banned", locale = &lang_code, date = date).to_string();
+            let text = t!("errors.banned", locale = lang_code, date = date).to_string();
             return Ok(TaggedReply { text, group: MessageGroup::Notice })
         },
         Err(e) => return Err(e)
@@ -97,12 +94,12 @@ pub(crate) async fn grow_impl(
         Ok(GrowthResult { new_length, pos_in_top }) => {
             let event_key = if increment.total.value().is_negative() { "shrunk" } else { "grown" };
             let event_template = format!("commands.grow.direction.{event_key}");
-            let event = t!(&event_template, locale = &lang_code);
-            let answer = t!("commands.grow.result", locale = &lang_code,
+            let event = t!(&event_template, locale = lang_code);
+            let answer = t!("commands.grow.result", locale = lang_code,
                 event = event, incr = increment.total.value().abs(), length = new_length);
-            let perks_part = increment.perks_part_of_answer(&lang_code);
+            let perks_part = increment.perks_part_of_answer(lang_code);
             let text = if let Some(pos) = pos_in_top {
-                let position = t!("commands.grow.position", locale = &lang_code, pos = pos);
+                let position = t!("commands.grow.position", locale = lang_code, pos = pos);
                 format!("{answer}\n{position}{perks_part}")
             } else {
                 format!("{answer}{perks_part}")
@@ -114,7 +111,7 @@ pub(crate) async fn grow_impl(
             if let sqlx::Error::Database(e) = db_err {
                 let text = e.code()
                     .filter(|c| c == TOMORROW_SQL_CODE)
-                    .map(|_| t!("commands.grow.tomorrow", locale = &lang_code).to_string())
+                    .map(|_| t!("commands.grow.tomorrow", locale = lang_code).to_string())
                     .ok_or(anyhow!(e))?;
                 (text, MessageGroup::Notice)
             } else {
@@ -122,7 +119,7 @@ pub(crate) async fn grow_impl(
             }
         }
     };
-    let time_left_part = utils::date::get_time_till_next_day_string(&lang_code);
+    let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
     Ok(TaggedReply { text: format!("{main_part}{time_left_part}"), group })
 }
 
@@ -151,17 +148,17 @@ pub(crate) async fn top_impl(
     repos: &repo::Repositories,
     config: &AppConfig,
     from_refs: FromRefs<'_>,
-    lang_code: LanguageCode,
+    lang_code: &LanguageCode,
     page: Page,
 ) -> anyhow::Result<Top> {
     let (from, chat_id) = (from_refs.0, from_refs.1.kind());
     let offset = Offset::calculate(page, config.top_limit);
-    let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
+    let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
-    let has_more_pages = dicks.len() > config.top_limit.value() as usize;
+    let has_more_pages = dicks.len() > usize::from(config.top_limit);
     let mut any_inactive = false;
     let lines = dicks.into_iter()
-        .take(config.top_limit.value() as usize)
+        .take(usize::from(config.top_limit))
         .enumerate()
         .map(|(i, d)| {
             let escaped_name = Username::new(d.owner_name).escaped();
@@ -171,9 +168,10 @@ pub(crate) async fn top_impl(
                 escaped_name
             };
             let now = Utc::now();
-            let inactive = (now - d.grown_at).num_days() > config.inactivity_days.value() as i64;
+            let inactive = (now - d.grown_at).num_days() > i64::from(config.inactivity_days);
             let can_grow = now.num_days_from_ce() > d.grown_at.num_days_from_ce();
-            let pos = d.position.map(|p| p.value() as i64).unwrap_or((i+1) as i64);
+            let pos: i64 = d.position.map(|p| p.saturating_into())
+                .unwrap_or_else(|| (i + 1).saturating_into());
             let mut line = t!("commands.top.line", locale = &lang_code,
                 n = pos, name = name, length = d.length).to_string();
             if inactive {
@@ -231,15 +229,14 @@ pub async fn page_callback_handler(
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
             .map(str::to_owned)
             .ok_or(InvalidPage::for_value(d, "invalid prefix")))
-        .and_then(|r| r.parse::<i16>()
+        .and_then(|r| r.parse::<u16>()
+            .map(Page::new)
             .map_err(|e| InvalidPage::for_value(&r, e)))
-        .and_then(|value| Page::new(value)
-            .map_err(|e| InvalidPage::for_value(&value.to_string(), e)))
         .map_err(|e| anyhow!(e))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
     let from_refs = FromRefs(&q.from, &chat_id_partiality);
-    let top = top_impl(&repos, &config, from_refs, lang_code, page).await?;
+    let top = top_impl(&repos, &config, from_refs, &lang_code, page).await?;
 
     let keyboard = build_pagination_keyboard(page, top.has_more_pages);
     callbacks::answer_and_edit_page(&bot, &q, &edit_msg_req_params, top.lines, keyboard).await?;
@@ -249,11 +246,11 @@ pub async fn page_callback_handler(
 pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> InlineKeyboardMarkup {
     let mut buttons = Vec::new();
     if page > 0 {
-        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
+        let prev_page = page - 1;
         buttons.push(InlineKeyboardButton::callback("⬅️", format!("{CALLBACK_PREFIX_TOP_PAGE}{prev_page}")))
     }
     if has_more_pages {
-        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
+        let next_page = page + 1;
         buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
     InlineKeyboardMarkup::new(vec![buttons])

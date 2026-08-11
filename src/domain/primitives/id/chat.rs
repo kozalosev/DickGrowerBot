@@ -2,10 +2,8 @@ use teloxide::types::{ChatId, MessageId, ThreadId};
 use domain_types_macro::domain_type;
 use crate::*;
 
-id! {
-    InternalChatId,
-    TelegramChatId
-}
+id!(InternalChatId);
+signed_id!(TelegramChatId);
 
 #[domain_type]
 struct TelegramChatInstanceId(String);
@@ -15,16 +13,43 @@ struct TelegramChatInstanceId(String);
 /// Telegram omits `message_thread_id` for the General topic, so [`TopicId::GENERAL`] stands for
 /// its absence.
 #[domain_type]
-struct TopicId(i32);
+struct TopicId(u32);
 
 impl TopicId {
     /// The topic every forum has and no one created — the one Telegram reports as no topic at all.
     pub const GENERAL: Self = Self(0);
 }
 
+/// A message inside a chat. Unique for that chat only, which is why nothing addresses a message
+/// by it alone.
+#[domain_type]
+struct TelegramMessageId(u32);
+
+/// The opaque handle Telegram gives an inline message. It's the only way to address one — such a
+/// message has no chat and no message id of its own, and can never be deleted, only edited.
+#[domain_type]
+struct InlineMessageId(String);
+
+// Telegram numbers messages from 1, but teloxide keeps a `MessageId` as `i32`, so converting in
+// either direction has a branch that can't be reached. Both say so rather than hide it behind a
+// cast that would turn a bad value into a plausible one.
+const MESSAGE_ID_IS_POSITIVE: &str = "Telegram numbers messages from 1";
+
+impl From<MessageId> for TelegramMessageId {
+    fn from(message_id: MessageId) -> Self {
+        Self(u32::try_from(message_id.0).expect(MESSAGE_ID_IS_POSITIVE))
+    }
+}
+
+impl From<TelegramMessageId> for MessageId {
+    fn from(message_id: TelegramMessageId) -> Self {
+        Self(i32::try_from(message_id.value()).expect(MESSAGE_ID_IS_POSITIVE))
+    }
+}
+
 impl From<ThreadId> for TopicId {
     fn from(thread_id: ThreadId) -> Self {
-        Self(thread_id.0.0)
+        Self(u32::try_from(thread_id.0.0).expect(MESSAGE_ID_IS_POSITIVE))
     }
 }
 
@@ -36,7 +61,7 @@ impl From<Option<ThreadId>> for TopicId {
 
 impl From<TopicId> for ThreadId {
     fn from(topic_id: TopicId) -> Self {
-        Self(MessageId(topic_id.value()))
+        Self(MessageId(i32::try_from(topic_id.value()).expect(MESSAGE_ID_IS_POSITIVE)))
     }
 }
 

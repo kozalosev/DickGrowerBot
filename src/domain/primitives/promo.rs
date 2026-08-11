@@ -1,8 +1,14 @@
 use domain_types_macro::domain_type;
-use crate::{positive_number, signed_number};
+use crate::domain::primitives::validators::promo_code_validator;
+use crate::number;
 
-#[domain_type]
+#[domain_type(
+    validated(
+        promo_code_validator,
+        error_message("must be 4 to 16 letters, digits, underscores or hyphens"),
+    ),
+)]
 struct PromoCode(String);
 
-signed_number!(PromoBonus, i32);
-positive_number!(PromoCapacity, i32);
+number!(PromoBonus, i32);
+number!(PromoCapacity, u32);

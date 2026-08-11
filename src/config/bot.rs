@@ -1,9 +1,7 @@
 use std::time::Duration;
+use crate::config::env::get_optional_env_seconds;
 use teloxide::Bot;
 use crate::telegram_observer::TelegramObserver;
-
-const ENV_CONNECT_TIMEOUT_SECS: &str = "BOT_HTTP_CONNECT_TIMEOUT_SECS";
-const ENV_TIMEOUT_SECS: &str = "BOT_HTTP_TIMEOUT_SECS";
 
 /// Configuration of the bot's HTTP client (the one talking to the Telegram Bot API).
 ///
@@ -23,8 +21,8 @@ pub struct BotConfig {
 impl BotConfig {
     fn from_env() -> Self {
         Self {
-            connect_timeout: read_optional_secs(ENV_CONNECT_TIMEOUT_SECS),
-            timeout: read_optional_secs(ENV_TIMEOUT_SECS),
+            connect_timeout: get_optional_env_seconds("BOT_HTTP_CONNECT_TIMEOUT_SECONDS"),
+            timeout: get_optional_env_seconds("BOT_HTTP_TIMEOUT_SECONDS"),
         }
     }
 
@@ -49,16 +47,4 @@ impl BotConfig {
         };
         Ok(bot.set_observer(TelegramObserver))
     }
-}
-
-/// Reads an optional environment variable holding a whole number of seconds and returns it as a
-/// [`Duration`]. A missing, empty, or unparseable value yields `None`.
-fn read_optional_secs(key: &str) -> Option<Duration> {
-    std::env::var(key)
-        .ok()
-        .filter(|value| !value.is_empty())
-        .and_then(|value| value.parse::<u64>()
-            .inspect_err(|e| tracing::warn!(key = %key, error = %e, "invalid value of an environment variable"))
-            .ok())
-        .map(Duration::from_secs)
 }

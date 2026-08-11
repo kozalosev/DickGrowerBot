@@ -1,5 +1,7 @@
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
+use domain_types::traits::SaturatingInto;
+use crate::domain::primitives::Coefficient;
 use futures::join;
 use rand::RngExt;
 use rust_i18n::t;
@@ -10,8 +12,8 @@ use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
 use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackResult, HandlerDeps, HandlerResult};
-use crate::{metrics, reply_html, repo};
-use crate::config::BattlesFeatureToggles;
+use crate::{metrics, reply_html, reply_html_ephemeral, repo};
+use crate::config::{BattlesFeatureToggles, MessageGroup};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
 use crate::domain::primitives::{Bet, LanguageCode, LengthChange, LoanPayout, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, TelegramChatId};
@@ -84,10 +86,8 @@ impl TryFrom<String> for BattleCallbackData {
     fn try_from(data: String) -> Result<Self, Self::Error> {
         let err = InvalidCallbackDataBuilder(&data);
         let mut parts = data.split(':');
-        let initiator = callbacks::parse_part(&mut parts, &err, "uid")
-            .and_then(|value: i64| UserId::new(value).map_err(|e| err.parsing_err(e)))?;
-        let bet = callbacks::parse_part(&mut parts, &err, "bet")
-            .and_then(|value: i32| Bet::new(value).map_err(|e| err.parsing_err(e)))?;
+        let initiator = callbacks::parse_part(&mut parts, &err, "uid").map(UserId::new)?;
+        let bet = callbacks::parse_part(&mut parts, &err, "bet").map(Bet::new)?;
         let timestamp = callbacks::parse_optional_part(&mut parts, &err)?;
         Ok(Self { initiator, bet, timestamp })
     }
@@ -101,7 +101,7 @@ pub async fn pvp_cmd_handler(
     cmd: BattleCommands,
     deps: HandlerDeps,
 ) -> HandlerResult {
-    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
 
@@ -110,14 +110,13 @@ pub async fn pvp_cmd_handler(
         repos,
         features: config.features.pvp,
         chat_id: msg.chat.id.into(),
-        lang_code,
+        lang_code: lang_code.clone(),
     };
-    let bet = Bet::new(cmd.bet().into()).map_err(|e| anyhow!(e))?;
+    let bet = Bet::new(cmd.bet().into());
     let (text, keyboard) = pvp_impl_start(params, user, bet).await?;
 
-    let mut answer = reply_html(bot, &msg, text);
-    answer.reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard);
-    answer.await?;
+    reply_html_ephemeral!(bot, msg, text, self_destruction, MessageGroup::Application, lang_code,
+        reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard));
     Ok(())
 }
 
@@ -149,8 +148,7 @@ pub async fn pvp_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps)
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
-    let bet = Bet::new(query.query.parse()?)
-        .map_err(|e| anyhow!(e))?;
+    let bet = Bet::new(query.query.parse()?);
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
@@ -184,13 +182,20 @@ pub(super) fn build_inline_keyboard_article_result(
 }
 
 #[autometrics]
-#[tracing::instrument(skip_all)]
-pub async fn pvp_inline_chosen_handler() -> HandlerResult {
+#[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
+pub async fn pvp_inline_chosen_handler(result: ChosenInlineResult, deps: HandlerDeps) -> HandlerResult {
+    let HandlerDeps { self_destruction, lang_resolver, .. } = deps;
     metrics::INLINE_COUNTER.finished();
+
+    // The offer is built by Telegram out of the article, so this is the first (and only) moment the
+    // bot learns which message carries it.
+    if let Some(inline_message_id) = result.inline_message_id {
+        let lang_code = lang_resolver.execute().await;
+        self_destruction.schedule_inline(&inline_message_id, MessageGroup::Application, &lang_code).await;
+    }
     Ok(())
 }
 
-#[inline]
 pub fn callback_filter(query: CallbackQuery) -> bool {
     BattleCallbackData::check_prefix(query)
 }
@@ -203,7 +208,7 @@ pub async fn pvp_callback_handler(
     mut battle_locker: LockCallbackServiceFacade,
     deps: HandlerDeps,
 ) -> HandlerResult {
-    let HandlerDeps { repos, config, lang_resolver, .. } = deps;
+    let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     let chat_id: ChatIdPartiality = query.message.as_ref()
         .map(|msg| msg.chat().id)
@@ -236,6 +241,12 @@ pub async fn pvp_callback_handler(
         chat_id: chat_id.clone(),
     };
     let attack_result = pvp_impl_attack(params, callback_data.initiator, query.from.clone().into(), callback_data.bet).await?;
+    // A fought battle is a record of itself, not an offer waiting to expire.
+    match (query.message.as_ref(), query.inline_message_id.as_ref()) {
+        (Some(message), _) => self_destruction.cancel_message(message.chat().id, message.id()).await,
+        (None, Some(inline_message_id)) => self_destruction.cancel_inline(inline_message_id).await,
+        (None, None) => {},
+    };
     attack_result.apply(bot, query).await?;
 
     metrics::CMD_PVP_COUNTER.inline.inc();
@@ -317,7 +328,7 @@ async fn pvp_impl_attack(
     let chat_id_kind = p.chat_id.kind();
     let (enough_initiator, enough_acceptor) = join!(
        p.repos.dicks.check_dick(&chat_id_kind, initiator, bet),
-       p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { Bet::literal(0) }),
+       p.repos.dicks.check_dick(&chat_id_kind, acceptor.uid, if p.features.check_acceptor_length { bet } else { Bet::new(0) }),
     );
     let (enough_initiator, enough_acceptor) = (enough_initiator?, enough_acceptor?);
 
@@ -410,10 +421,9 @@ async fn pay_for_loan_if_needed(
         None => return Ok(None)
     };
     // the ratio is within [0; 1], so the payout never exceeds the award
-    let payout_value = (loan.payout_ratio.value() * f64::from(award.value())).round() as i64;
-    let payout_value = payout_value.min(loan.debt.value());
-    let payout = LoanPayout::new(payout_value.clamp(0, i32::MAX as i64) as i32)
-        .expect("loan payout is non-negative by construction");
+    let payout_value: i64 = loan.payout_ratio.scale(award.value().into()).round().saturating_into();
+    let payout_value = payout_value.min(loan.debt.saturating_into());
+    let payout = LoanPayout::new(payout_value.saturating_into());
 
     p.repos.loans.pay(winner_id, &chat_id_kind, payout).await?;
 

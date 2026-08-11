@@ -1,26 +1,25 @@
 use autometrics::autometrics;
 use anyhow::Context;
+use domain_types::traits::SaturatingInto;
 use sqlx::{Postgres, Transaction};
 
 use crate::config;
 use crate::domain::objects::Loan;
-use crate::domain::primitives::{Debt, LengthChange, LoanId, LoanPayout, Ratio, UserId};
+use crate::domain::primitives::{Debt, LengthChange, LoanId, LoanPayout, PayoutRatio, UserId};
 use crate::domain::primitives::chat::InternalChatId;
 use crate::repo::{ensure_only_one_row_updated, ChatIdKind, Chats, Dicks};
 
 struct LoanEntity {
     id: LoanId,
     debt: Debt,
-    // the column is REAL (f32) in the database; converted to Ratio at the boundary
-    payout_ratio: f32,
+    payout_ratio: PayoutRatio,
 }
 
 impl From<LoanEntity> for Loan {
     fn from(entity: LoanEntity) -> Self {
         Loan {
             debt: entity.debt,
-            payout_ratio: Ratio::new(entity.payout_ratio.into())
-                .expect("payout_ratio, fetched from the database, must be a valid ratio"),
+            payout_ratio: entity.payout_ratio,
         }
     }
 }
@@ -35,7 +34,7 @@ pub enum BorrowResult {
 pub struct Loans {
     pool: sqlx::Pool<Postgres>,
     chats: Chats,
-    payout_ratio: Ratio,
+    payout_ratio: PayoutRatio,
 }
 
 impl Loans {
@@ -49,7 +48,7 @@ impl Loans {
     #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id))]
     pub async fn get_active_loan(&self, uid: UserId, chat_id: &ChatIdKind) -> anyhow::Result<Option<Loan>> {
         let maybe_loan = sqlx::query_as!(LoanEntity,
-            r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio FROM loans
+            r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio AS "payout_ratio: PayoutRatio" FROM loans
                     WHERE uid = $1 AND
                     chat_id = (SELECT id FROM Chats WHERE chat_id = $2::bigint OR chat_instance = $2::text)
                     AND repaid_at IS NULL"#,
@@ -78,7 +77,7 @@ impl Loans {
             Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, value, self.payout_ratio).await?,
             None => create_loan(&mut tx, chat_internal_id, user_id, value, self.payout_ratio).await?
         };
-        let borrowed_length = LengthChange::signed(value.value());
+        let borrowed_length = LengthChange::signed(value.saturating_into());
         Dicks::grow_no_attempts_check_internal(&mut *tx, chat_internal_id, user_id, borrowed_length).await?;
 
         tx.commit().await?;
@@ -123,7 +122,7 @@ async fn get_active_loan_in_tx(
     chat_internal_id: InternalChatId,
 ) -> anyhow::Result<Option<LoanEntity>> {
     let maybe_loan = sqlx::query_as!(LoanEntity,
-            r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio FROM loans
+            r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio AS "payout_ratio: PayoutRatio" FROM loans
                     WHERE uid = $1 AND chat_id = $2
                     AND repaid_at IS NULL"#,
                 uid as UserId, chat_internal_id as InternalChatId)
@@ -140,10 +139,10 @@ async fn create_loan(
     chat_internal_id: InternalChatId,
     uid: UserId,
     value: Debt,
-    payout_ratio: Ratio,
+    payout_ratio: PayoutRatio,
 ) -> anyhow::Result<()> {
     sqlx::query!("INSERT INTO Loans (chat_id, uid, debt, payout_ratio) VALUES ($1, $2, $3, $4)",
-                chat_internal_id as InternalChatId, uid as UserId, value as Debt, payout_ratio.value() as f32)
+                chat_internal_id as InternalChatId, uid as UserId, value as Debt, payout_ratio as PayoutRatio)
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)
@@ -156,10 +155,10 @@ async fn refinance_loan(
     tx: &mut Transaction<'_, Postgres>,
     id: LoanId,
     value: Debt,
-    payout_ratio: Ratio,
+    payout_ratio: PayoutRatio,
 ) -> anyhow::Result<()> {
     sqlx::query!("UPDATE Loans l SET debt = l.debt + $2, payout_ratio = $3 WHERE id = $1",
-                id as LoanId, value as Debt, payout_ratio.value() as f32)
+                id as LoanId, value as Debt, payout_ratio as PayoutRatio)
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)

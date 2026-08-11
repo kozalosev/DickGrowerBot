@@ -13,6 +13,7 @@ use generated::user_service_client::UserServiceClient as GrpcClient;
 use generated::update_user_request::Target;
 use generated::{GetUserRequest, GetUsersRequest, UpdateUserRequest, User};
 use crate::config::IntegrationsConfig;
+use domain_types::traits::{ApproxInto, SaturatingInto};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::handlers::utils::try_resolve_chat_id;
@@ -80,13 +81,12 @@ pub struct UserServiceClientGrpc {
 }
 
 impl UserServiceClientGrpc {
-    pub async fn connect(address: String, cache_time_secs: u64, timeout_secs: u64) -> anyhow::Result<Self> {
+    pub async fn connect(address: String, cache_ttl: Duration, timeout: Duration) -> anyhow::Result<Self> {
         let endpoint = if address.contains("://") {
             address
         } else {
             format!("http://{address}")
         };
-        let timeout = Duration::from_secs(timeout_secs);
         let channel = Channel::from_shared(endpoint)?
             .timeout(timeout)          // bounds each request, so a hanging service can't stall us
             .connect_timeout(timeout)
@@ -95,7 +95,7 @@ impl UserServiceClientGrpc {
         Ok(Self {
             inner: GrpcClient::new(OtelGrpcLayer.layer(channel)),
             cache: Arc::new(Mutex::new(HashMap::new())),
-            cache_ttl: Duration::from_secs(cache_time_secs),
+            cache_ttl,
         })
     }
 
@@ -147,7 +147,7 @@ impl UserServiceClient for UserServiceClientGrpc {
 
         metrics::USER_SERVICE.request_sent();
         let resp = self.inner.clone().get(GetUserRequest {
-            id: uid.0 as i64,
+            id: uid.0.saturating_into(),
             by_external_id: true,
         }).await;
         match resp {
@@ -171,8 +171,8 @@ impl UserServiceClient for UserServiceClientGrpc {
         // wrong internal id. Nor is the cache worth *reading* here: this is one round-trip whatever
         // the id count, so serving part of the batch from the cache would only shorten the request,
         // not avoid it — every member would have to be cached to skip the wire at all.
-        metrics::USER_SERVICE.request_sent();
-        let ids = uids.iter().map(|uid| uid.0 as i64).collect();
+        metrics::USER_SERVICE_LANGUAGES_BATCH_SIZE.observe(uids.len().approx_into());
+        let ids: Vec<i64> = uids.iter().map(|uid| uid.0.saturating_into()).collect();
         let resp = self.inner.clone().get_many(GetUsersRequest {
             ids,
             by_external_id: true,
@@ -183,7 +183,7 @@ impl UserServiceClient for UserServiceClientGrpc {
 
         let result = uids.iter()
             .filter_map(|&uid| {
-                let code = resp.users.get(&(uid.0 as i64))?
+                let code = resp.users.get(&uid.0.saturating_into())?
                     .options.as_ref()?
                     .language_code.clone()?;
                 Some((uid, LanguageCode::new(code)))
@@ -387,6 +387,7 @@ impl<C: UserServiceClient> LanguageService<C> {
 /// languages only) when it's not configured or unreachable — the chat-language part keeps working.
 pub async fn init_language_service(
     config: &IntegrationsConfig,
+    chat_ttl: Duration,
     chats: Chats,
     chats_merging: bool,
 ) -> LanguageService<UserServiceClientGrpc> {
@@ -395,7 +396,7 @@ pub async fn init_language_service(
         users,
         chats,
         chat_cache: Arc::new(Mutex::new(HashMap::new())),
-        chat_ttl: Duration::from_secs(config.chat_language_cache_time_secs),
+        chat_ttl,
         chats_merging,
     }
 }
@@ -405,10 +406,10 @@ async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserSe
         tracing::warn!("the user-service integration is disabled (GRPC_ADDR_USER_SERVICE is not set)");
         return UserService::Disabled;
     };
-    match UserServiceClientGrpc::connect(cfg.address.clone(), cfg.cache_time_secs, cfg.timeout_secs).await {
+    match UserServiceClientGrpc::connect(cfg.address.clone(), cfg.cache_ttl, cfg.timeout).await {
         Ok(client) => {
             tracing::info!(address = %cfg.address, "connected to the user-service");
-            spawn_cache_cleanup(client.clone(), cfg.cache_time_secs);
+            spawn_cache_cleanup(client.clone(), cfg.cache_ttl);
             UserService::Connected(client)
         }
         Err(e) => {
@@ -418,9 +419,9 @@ async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserSe
     }
 }
 
-fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_time_secs: u64) {
+fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_ttl: Duration) {
     tokio::spawn(metrics::TASK_USER_SERVICE_CACHE_CLEANUP.instrument(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(cache_time_secs.max(1)));
+        let mut interval = tokio::time::interval(cache_ttl);
         interval.tick().await; // consume the immediate first tick
         loop {
             interval.tick().await;

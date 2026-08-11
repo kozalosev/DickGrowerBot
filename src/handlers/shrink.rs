@@ -114,7 +114,7 @@ pub(crate) fn render_shrinks_page<T: ShrinkLine>(
     let prefix = view.template_prefix();
     let line_key = format!("{prefix}.line");
     let lines = rows.iter()
-        .take(config.top_limit.value() as usize)
+        .take(usize::from(config.top_limit))
         .map(|s| {
             let name = s.owner_name().escaped();
             t!(&line_key, locale = lang_code, uid = s.uid(), name = name, lost = s.lost_length(), length = s.length())
@@ -136,11 +136,11 @@ pub(crate) async fn shrinks_page_impl(
     page: Page,
 ) -> anyhow::Result<ShrinksPage> {
     let offset = Offset::calculate(page, config.top_limit);
-    let query_limit = (config.top_limit + 1)?; // fetch +1 row to know whether more rows exist or not
+    let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let shrinks = repos.shrinks
         .get_shrinks_for_date(chat_id, date, offset, query_limit)
         .await?;
-    let has_more_pages = shrinks.len() > config.top_limit.value() as usize;
+    let has_more_pages = shrinks.len() > usize::from(config.top_limit);
     Ok(render_shrinks_page(&shrinks, config, lang_code, view, has_more_pages))
 }
 
@@ -156,12 +156,10 @@ pub(crate) fn build_shrink_keyboard(
 
     let mut user_row = Vec::new();
     if page > 0 {
-        let prev_page = (page - 1).expect("the page is positive here, so the previous one is valid");
-        user_row.push(InlineKeyboardButton::callback("⬅️", callback(date, prev_page)));
+        user_row.push(InlineKeyboardButton::callback("⬅️", callback(date, page - 1)));
     }
     if has_more_pages {
-        let next_page = (page + 1).expect("the page increment saturates, so it always stays valid");
-        user_row.push(InlineKeyboardButton::callback("➡️", callback(date, next_page)));
+        user_row.push(InlineKeyboardButton::callback("➡️", callback(date, page + 1)));
     }
 
     let day_row = adjacent.map(|AdjacentDates { older, newer }| {

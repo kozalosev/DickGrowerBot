@@ -44,19 +44,39 @@ services:
       - DOD_RICH_EXCLUSION_RATIO
       - ANNOUNCEMENTS_FILE
       - GRPC_ADDR_USER_SERVICE
-      - USER_CACHE_TIME_SECS
-      - USER_SERVICE_TIMEOUT_SECS
-      - CHAT_LANGUAGE_CACHE_TIME_SECS
-      - CHAT_TOPICS_CACHE_TIME_SECS
+      - USER_CACHE_TIME_SECONDS
+      - USER_SERVICE_TIMEOUT_SECONDS
+      - CHAT_LANGUAGE_CACHE_TIME_SECONDS
+      - CHAT_TOPICS_CACHE_TIME_SECONDS
+      - BOT_ADMIN_CACHE_TIME_SECONDS
       - MOST_POPULAR_LANGUAGE_ENABLED
-      - MSG_SELFDESTRUCT_DELAY_NOTICE
-      - MSG_SELFDESTRUCT_DELAY_REPORT
+      - THROTTLE_MESSAGES_PER_SEC_OVERALL
+      - THROTTLE_MESSAGES_PER_SEC_CHAT
+      - THROTTLE_MESSAGES_PER_MIN_CHAT
+      - THROTTLE_MESSAGES_PER_MIN_SUPERGROUP
+      - MSG_SELFDESTRUCT_DELAY_NOTICE_MINUTES
+      - MSG_SELFDESTRUCT_DELAY_REPORT_MINUTES
+      - MSG_SELFDESTRUCT_DELAY_EVENT_MINUTES
+      - MSG_SELFDESTRUCT_DELAY_APPLICATION_MINUTES
       - MSG_SELFDESTRUCT_READING_SPEED_CPM
       - MSG_SELFDESTRUCT_WARNING_SECONDS
-      - BOT_HTTP_CONNECT_TIMEOUT_SECS
-      - BOT_HTTP_TIMEOUT_SECS
+      - MSG_SELFDESTRUCT_MODE
+      - MSG_SELFDESTRUCT_POLL_SECONDS
+      - MSG_SELFDESTRUCT_BATCH_SIZE
+      - MSG_SELFDESTRUCT_CONCURRENCY
+      - MSG_SELFDESTRUCT_LEASE_SECONDS
+      - MSG_SELFDESTRUCT_INLINE_GROUPS
+      - MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS
+      - MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS
+      - MSG_SELFDESTRUCT_MAX_ATTEMPTS
+      - MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES
+      - BOT_HTTP_CONNECT_TIMEOUT_SECONDS
+      - BOT_HTTP_TIMEOUT_SECONDS
       - SUPPORT_CHAT_ID
-      - BAN_LIST_REFRESH_SECS
+      - BAN_LIST_REFRESH_SECONDS
+      - REDIS_HOST
+      - REDIS_PORT
+      - REDIS_PASSWORD
     expose:
       - 8080
     volumes:
@@ -65,6 +85,7 @@ services:
       - postgres-network
       - user-service-network
       - tracing-network
+      - redis-network
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     logging:
@@ -99,6 +120,37 @@ services:
     restart: unless-stopped
     networks:
       - postgres-network
+    logging:
+      driver: local
+  # The cache the bot keeps its short-lived values in. Optional: gated behind the `redis` Compose
+  # profile, and the bot runs without it (REDIS_HOST unset) by doing the work a hit would have
+  # saved. The image is Valkey — the BSD-licensed fork of Redis — but the protocol is Redis, which
+  # is what the service, the network and the REDIS_* variables are named after. Its binaries are
+  # `valkey-server` and `valkey-cli`.
+  redis:
+    image: valkey/valkey:9-alpine
+    container_name: dickgrowerbot-redis
+    profiles: ["redis"]
+    restart: unless-stopped
+    environment:
+      - REDIS_PORT
+      - REDIS_PASSWORD
+    # The variables are expanded by the container's shell, not by Compose (hence `$$`), so that a
+    # .env without them still lets every other Compose command run — this service is optional, and
+    # a `:?error` here would stop even `task infra:min`. No password set means no `--requirepass`.
+    command: sh -c 'exec valkey-server --save 20 1 --loglevel warning --port "$${REDIS_PORT:-6379}" $${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}'
+    healthcheck:
+      test: [ "CMD-SHELL", "valkey-cli -p \"$${REDIS_PORT:-6379}\" $${REDIS_PASSWORD:+-a \"$$REDIS_PASSWORD\"} ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    expose:
+      - ${REDIS_PORT:-6379}
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - redis-network
     logging:
       driver: local
   # Optional user-service integration (personal /language, cross-bot user languages).
@@ -168,4 +220,6 @@ networks:
   user-service-network:
     driver: bridge
   tracing-network:
+    driver: bridge
+  redis-network:
     driver: bridge

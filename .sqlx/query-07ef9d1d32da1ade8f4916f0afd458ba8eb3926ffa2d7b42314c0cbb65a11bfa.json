@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Scheduled_Message_Deletions WHERE chat_id = $1 AND message_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07ef9d1d32da1ade8f4916f0afd458ba8eb3926ffa2d7b42314c0cbb65a11bfa"
+}

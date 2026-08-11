@@ -1,6 +1,7 @@
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use futures::TryFutureExt;
+use domain_types::traits::SaturatingInto;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
 use crate::domain::objects::{Dick, GrowthResult};
@@ -27,7 +28,7 @@ impl From<DickEntity> for Dick {
             owner_uid: entity.owner_uid,
             owner_name: entity.owner_name,
             grown_at: entity.grown_at,
-            position: entity.position.map(|pos| Position::new(pos as u64)),
+            position: entity.position.map(|pos| Position::new(pos.saturating_into())),
         }
     }
 }
@@ -61,7 +62,7 @@ impl Dicks {
             "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
                 ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
                 RETURNING length",
-                uid as UserId, internal_chat_id as InternalChatId, increment.value() as i64)
+                uid as UserId, internal_chat_id as InternalChatId, increment.value())
             .fetch_one(&self.pool)
             .await
             .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
@@ -219,7 +220,7 @@ impl Dicks {
         change: LengthChange,
     ) -> anyhow::Result<Length> {
         sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
-                    chat_id_internal as InternalChatId, user_id as UserId, change.value() as i64)
+                    chat_id_internal as InternalChatId, user_id as UserId, change.value())
             .fetch_one(&mut **tx)
             .await
             .map(Length::new)
@@ -247,7 +248,7 @@ impl Dicks {
                 chat_id_internal as InternalChatId, uid as UserId)
             .fetch_one(&self.pool)
             .await
-            .map(|pos| Some(Position::new(pos as u64)))
+            .map(|pos| Some(Position::new(pos.saturating_into())))
             .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
     }
     
@@ -282,7 +283,7 @@ impl Dicks {
             "UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $3)
                 WHERE chat_id = $1 AND uid = $2
                 RETURNING length",
-                chat_id_internal as InternalChatId, user_id as UserId, bonus.value() as i64)
+                chat_id_internal as InternalChatId, user_id as UserId, bonus.value())
             .fetch_optional(executor)
             .await
             .map(|maybe_length| maybe_length.map(Length::new))
