@@ -25,6 +25,7 @@ use crate::repo::{DeletionState, DeletionTarget, MessageKind, Repositories, Sche
 const MAX_AGE: Duration = Duration::from_secs(48 * 60 * 60);
 
 /// What the worker decided to do with a row once it had acted on its message.
+#[derive(Debug, PartialEq, Eq)]
 enum Outcome {
     /// The message is dealt with — deleted or replaced by its placeholder.
     Removed,
@@ -186,15 +187,7 @@ async fn act(
                 let notice = t!("self_destruction.warning", locale = &deletion.lang_code,
                                 seconds = config.warning.as_secs());
                 let request = bot.edit_message_text(chat, message, notice).parse_mode(Html);
-                return match request.await {
-                    Ok(_) => Outcome::Warned,
-                    // A message that can't be warned is still worth deleting on time.
-                    Err(e) => {
-                        tracing::warn!(chat_id = %chat, message_id = %message, error = %e,
-                            "couldn't edit the message with the warning");
-                        Outcome::Warned
-                    }
-                }
+                return outcome_of_warning(request.await.map(|_| ()), chat, message)
             }
             outcome_of(bot.delete_message(chat, message).await.map(|_| ()), &deletion, cache).await
         },
@@ -232,6 +225,25 @@ async fn outcome_of(
 
     tracing::warn!(kind = %deletion.kind, error = %error, "couldn't remove the self-destructing message");
     Outcome::Retry
+}
+
+/// What the warning attempt means for the row.
+///
+/// A message that is already gone will not come back, so the row ends here rather than a grace
+/// period and a certain-to-fail deletion later. Any other failure carries on: a message that could
+/// not be warned is still worth deleting on time, and the notice is the part worth losing.
+fn outcome_of_warning(result: Result<(), RequestError>, chat: ChatId, message: MessageId) -> Outcome {
+    let error = match result {
+        Ok(()) => return Outcome::Warned,
+        Err(e) => e,
+    };
+    if is_gone(&error) {
+        tracing::debug!(chat_id = %chat, message_id = %message, "the message was gone before its warning");
+        return Outcome::RemovedBefore
+    }
+    tracing::warn!(chat_id = %chat, message_id = %message, error = %error,
+        "couldn't edit the message with the warning");
+    Outcome::Warned
 }
 
 /// The wordings Telegram uses for a bot that may not delete that message and that teloxide has no
@@ -297,6 +309,33 @@ mod tests {
         assert_eq!(backoff(base, AttemptsCount::new(30), MAX), MAX);
         // The shift that would overflow must give the cap, not a wrapped-around delay of nothing.
         assert_eq!(backoff(base, AttemptsCount::new(u32::MAX), MAX), MAX);
+    }
+
+    /// A message someone else removed used to be warned first and only found missing a grace
+    /// period later, at the cost of two requests and a warn-level line for a normal event.
+    #[test]
+    fn a_message_gone_before_its_warning_ends_there() {
+        let chat = ChatId(-1001);
+        let message = MessageId(1);
+        for gone in [ApiError::MessageToEditNotFound, ApiError::MessageToDeleteNotFound, ApiError::MessageIdInvalid] {
+            let outcome = outcome_of_warning(Err(RequestError::Api(gone)), chat, message);
+            assert_eq!(outcome, Outcome::RemovedBefore);
+        }
+    }
+
+    /// Anything else is transient as far as the warning is concerned: the notice is lost, the
+    /// deletion is not.
+    #[test]
+    fn a_warning_that_merely_failed_still_leads_to_a_deletion() {
+        let chat = ChatId(-1001);
+        let message = MessageId(1);
+        assert_eq!(outcome_of_warning(Ok(()), chat, message), Outcome::Warned);
+
+        let transient = RequestError::Api(ApiError::Unknown("Bad Gateway".to_owned()));
+        assert_eq!(outcome_of_warning(Err(transient), chat, message), Outcome::Warned);
+
+        let rate_limited = RequestError::RetryAfter(teloxide::types::Seconds::from_seconds(5));
+        assert_eq!(outcome_of_warning(Err(rate_limited), chat, message), Outcome::Warned);
     }
 
     #[test]

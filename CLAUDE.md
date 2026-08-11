@@ -253,7 +253,9 @@ A finished row is stamped with `finished_at` and left where it is, so
 which is what makes a failure rate readable from the table itself rather than only from Prometheus.
 `removed_before` is kept apart from `removed` on purpose: a chat where it is the usual ending
 already has a human or another bot doing the cleaning, and the delays configured here are only
-getting in their way.
+getting in their way. A message found missing at its **warning** ends there too, rather than being
+warned into the void and found missing again a grace period later — the notice is what a failed
+edit costs, but a message that is gone is not coming back.
 `SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
 stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
 `scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY` minutes
