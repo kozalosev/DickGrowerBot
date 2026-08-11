@@ -202,7 +202,10 @@ struct BroadcastDeps<'a> {
 async fn resolve_broadcast_language(deps: &BroadcastDeps<'_>, chat: &ChatIdKind) -> SupportedLanguage {
     let BroadcastDeps { repos, language_service, config, .. } = deps;
     match repos.chats.get_chat_language(chat).await {
-        Ok(Some(lang)) => return lang,
+        Ok(Some(lang)) => {
+            metrics::BROADCAST_LANGUAGE.decided_by_chat();
+            return lang
+        }
         Ok(None) => {}
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the language of the chat"),
     }
@@ -215,9 +218,11 @@ async fn resolve_broadcast_language(deps: &BroadcastDeps<'_>, chat: &ChatIdKind)
             .map(Into::into)
             .collect();
         if let Some(lang) = language_service.popular_language(&uids).await {
+            metrics::BROADCAST_LANGUAGE.decided_by_tally();
             return lang;
         }
     }
+    metrics::BROADCAST_LANGUAGE.defaulted();
     SupportedLanguage::EN
 }
 

@@ -56,6 +56,12 @@ pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
 pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
     CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
+pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
+    BroadcastLanguageCounter::new("broadcast_language_total", "count of proactive broadcasts by where their language came from: chat when the chat has one of its own, tally when the players' own languages decided it, default when neither did and English was used. A tally share of nearly zero means the round trip it costs is buying nothing"));
+pub static USER_SERVICE_LANGUAGES_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("user_service_languages_batch_size",
+        "how many users one batch language lookup asked about — the size of the chat, as the tally sees it. Kept apart from user_service_get_total, which counts resolutions of a single user and would otherwise mix one user with forty",
+        &[0.0, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
 pub static TOPIC_RESTRICTED: Lazy<Counter> = Lazy::new(||
     Counter::new("topic_restricted_total", "count of updates dropped because they came from a forum topic the chat doesn't let the bot work in"));
 pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
@@ -164,6 +170,8 @@ fn force_registration() {
     Lazy::force(&CMD_TOPICS);
     Lazy::force(&CHAT_TOPICS);
     Lazy::force(&BOT_ADMIN_LOOKUP);
+    Lazy::force(&BROADCAST_LANGUAGE);
+    Lazy::force(&USER_SERVICE_LANGUAGES_BATCH_SIZE);
     Lazy::force(&TOPIC_RESTRICTED);
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&UPDATE_KIND);
@@ -530,6 +538,36 @@ impl CacheLookupCounters {
     }
 }
 
+/// Where a proactive broadcast got its language.
+pub struct BroadcastLanguageCounter(CounterVec);
+
+impl BroadcastLanguageCounter {
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        // All three from the start: the interesting reading is the ratio between them, and a
+        // share that is missing entirely looks the same as one that is zero.
+        for source in ["chat", "tally", "default"] {
+            vec.counter(&[source]);
+        }
+        Self(vec)
+    }
+
+    /// The chat has a language of its own.
+    pub fn decided_by_chat(&self) {
+        self.0.counter(&["chat"]).inc()
+    }
+
+    /// The players' own languages decided it.
+    pub fn decided_by_tally(&self) {
+        self.0.counter(&["tally"]).inc()
+    }
+
+    /// Neither did, so English was used.
+    pub fn defaulted(&self) {
+        self.0.counter(&["default"]).inc()
+    }
+}
+
 /// Counts updates by the sender's Telegram `language_code` (see [`language_label`]).
 pub struct SpokenLanguageCounter(CounterVec);
 
@@ -885,7 +923,7 @@ mod tests {
     use crate::domain::primitives::Count;
     use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-                DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
+                BROADCAST_LANGUAGE, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
                 SELF_DESTRUCTION_FINISHED, SELF_DESTRUCTION_RETRIES,
                 SelfDestructionFinishedGauges, TASK_DAILY_SHRINK, language_label, render_metrics};
 
@@ -956,6 +994,20 @@ mod tests {
         for le in ["0", "1", "5", "10", "25", "50", "100", "250", "500", "+Inf"] {
             let series = format!("self_destruction_batch_size_bucket{{le=\"{le}\"}}");
             assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
+    }
+
+    /// The reading is the ratio between the three, and a share that is missing entirely looks the
+    /// same as one that is zero — which is exactly the answer worth seeing for the tally.
+    #[test]
+    fn every_source_of_a_broadcast_language_is_exported() {
+        Lazy::force(&BROADCAST_LANGUAGE);
+        let rendered = render_metrics();
+
+        for source in ["chat", "tally", "default"] {
+            let series = format!("broadcast_language_total{{source=\"{source}\"}}");
+            assert!(rendered.contains(&series), "{series} is missing from:
+{rendered}");
         }
     }
 

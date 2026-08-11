@@ -13,7 +13,7 @@ use generated::user_service_client::UserServiceClient as GrpcClient;
 use generated::update_user_request::Target;
 use generated::{GetUserRequest, GetUsersRequest, UpdateUserRequest, User};
 use crate::config::IntegrationsConfig;
-use domain_types::traits::SaturatingInto;
+use domain_types::traits::{ApproxInto, SaturatingInto};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::handlers::utils::try_resolve_chat_id;
@@ -171,7 +171,7 @@ impl UserServiceClient for UserServiceClientGrpc {
         // wrong internal id. Nor is the cache worth *reading* here: this is one round-trip whatever
         // the id count, so serving part of the batch from the cache would only shorten the request,
         // not avoid it — every member would have to be cached to skip the wire at all.
-        metrics::USER_SERVICE.request_sent();
+        metrics::USER_SERVICE_LANGUAGES_BATCH_SIZE.observe(uids.len().approx_into());
         let ids: Vec<i64> = uids.iter().map(|uid| uid.0.saturating_into()).collect();
         let resp = self.inner.clone().get_many(GetUsersRequest {
             ids,
