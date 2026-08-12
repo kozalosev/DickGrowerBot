@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lost_length FROM Stale_Dick_Shrinks WHERE uid = $1 AND created_at = current_date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lost_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "stale_dick_shrinks",
+            "name": "lost_length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f553c3867e0f2588eb2ad57099ecf079eccafd28e0789f0fa8fcd4ae54c65a85"
+}

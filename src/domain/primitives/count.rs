@@ -69,6 +69,14 @@ where i64: sqlx::Decode<'r, DB>
     }
 }
 
+/// Counts of the same thing add up — a total over several batches is still a count of `T`. It
+/// saturates like every other domain number, so a total can't wrap into a smaller one.
+impl <T> std::ops::AddAssign for Count<T> {
+    fn add_assign(&mut self, other: Self) {
+        self.value = self.value.saturating_add(other.value);
+    }
+}
+
 impl <T> Deref for Count<T> {
     type Target = u64;
 

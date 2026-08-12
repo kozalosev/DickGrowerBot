@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!: Count<ScheduledBroadcast>\"\n                FROM Scheduled_Shrink_Broadcasts WHERE finished_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!: Count<ScheduledBroadcast>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "71439e937c0a8d818607f39a4280fa9312ba797efa7b96e06de25107dc4dc582"
+}

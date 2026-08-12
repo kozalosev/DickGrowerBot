@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Scheduled_Shrink_Broadcasts WHERE finished_at IS NOT NULL AND finished_at < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11d39aa11337ffe6a385e41f4db05c28cfc8e40e35b6339d1d9b9ccdf5585468"
+}

@@ -42,7 +42,7 @@ use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCo
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::LockCallbackServiceFacade;
-use crate::error_handler::MetricsErrorHandler;
+use crate::error_handler::ContextLoggingErrorHandler;
 use crate::repo::Repositories;
 use crate::users::LanguageService;
 
@@ -175,8 +175,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // one would count a second budget and let twice as much through.
     // TODO: [#153] Use a common `Throttle` object shared between handlers and schedulers
     let throttled_bot = scheduler::throttled(bot.clone(), config::ThrottleConfig::from_env());
-    scheduler::spawn_daily_shrink(throttled_bot.clone(), repos.clone(), language_service.clone(),
-                                  topic_policy.clone(), app_config.clone());
+    scheduler::spawn_daily_shrink(repos.clone(), app_config.clone());
+    scheduler::spawn_broadcast_worker(throttled_bot.clone(), repos.clone(), language_service.clone(),
+                                      topic_policy.clone(), app_config.clone());
+    scheduler::spawn_broadcast_cleaner(repos.clone(), app_config.clone());
     scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
@@ -211,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let error_handler = LoggingErrorHandler::with_custom_text("An error from the update listener");
             let mut dispatcher = Dispatcher::builder(bot, handler)
                 .default_handler(ignore_unknown_updates)
-                .error_handler(MetricsErrorHandler::new("An error in a handler"))
+                .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
                 .dependencies(deps)
                 .build();
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
@@ -237,10 +239,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
                 let listener = polling_default(bot.clone()).await;
-                let listener_error_handler = MetricsErrorHandler::new("An error from the update listener");
+                let listener_error_handler = ContextLoggingErrorHandler::new("An error from the update listener");
                 Dispatcher::builder(bot, handler)
                     .default_handler(ignore_unknown_updates)
-                    .error_handler(MetricsErrorHandler::new("An error in a handler"))
+                    .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
                     .dependencies(deps)
                     .enable_ctrlc_handler()
                     .build()

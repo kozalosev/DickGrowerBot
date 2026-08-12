@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (max(created_at)::timestamp AT TIME ZONE 'UTC') AS \"at?\" FROM Stale_Dick_Shrinks",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "at?",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0e43b34d1b6419cae1d9df4db15c076bca67fee99b0bdcfc01570277ad1b9a25"
+}

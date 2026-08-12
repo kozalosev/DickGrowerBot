@@ -165,8 +165,8 @@ repository!(Chats, with_feature_toggles,
             .context(format!("couldn't check whether the chat with id = {chat_id} is anchored"))
     }
 ,
-    /// Remembers that the bot couldn't post to this chat, so the daily shrink stops trying to
-    /// broadcast there. Cleared by [`Self::upsert_chat`] on the next command in the chat.
+    /// Remembers that the bot couldn't post to this chat, so the daily shrink stops queueing
+    /// summaries for it.
     ///
     /// Keyed by the Telegram id: that's what the broadcast holds, and a chat known only by its
     /// `chat_instance` is never a broadcast target anyway. Updating no row is fine — the chat may
@@ -180,6 +180,20 @@ repository!(Chats, with_feature_toggles,
             .await
             .map(|_| ())
             .context(format!("couldn't mark the chat with id = {chat_id} as unreachable"))
+    }
+,
+    /// Takes the mark off again, and says whether there was one. Keyed by the Telegram id, so that
+    /// the moment Telegram says the bot may post here again can clear it — which is the only signal
+    /// that ever means it: time alone never un-kicks a bot.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn clear_unreachable(&self, chat_id: &TelegramChatId) -> anyhow::Result<bool> {
+        sqlx::query!("UPDATE Chats SET is_unreachable = false WHERE chat_id = $1 AND is_unreachable",
+                chat_id as &TelegramChatId)
+            .execute(&self.pool)
+            .await
+            .map(|result| result.rows_affected() > 0)
+            .context(format!("couldn't clear the unreachable mark of the chat with id = {chat_id}"))
     }
 ,
     #[autometrics]

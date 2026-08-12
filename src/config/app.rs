@@ -4,7 +4,7 @@ use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
 use crate::config::self_destruction::*;
-use crate::config::shrink::DailyShrinkConfig;
+use crate::config::shrink::{BroadcastConfig, DailyShrinkConfig};
 use crate::config::incrementor::IncrementorConfig;
 use crate::domain::primitives::{AttemptsCount, Bet, DaysCount, Limit, PayoutRatio, Ratio};
 use crate::domain::primitives::chat::TelegramChatId;
@@ -55,6 +55,18 @@ impl AppConfig {
             ratio: env_value!("DAILY_SHRINK_RATIO": Ratio),
             inactivity_days: env_value!("DAILY_SHRINK_INACTIVITY_DAYS": DaysCount, or = 7),
             ramp_up_days: env_value!("DAILY_SHRINK_RAMP_UP_DAYS": DaysCount, or = 7),
+            batch_size: env_value!("DAILY_SHRINK_BATCH_SIZE": Limit, or = 100, at_least = 1),
+            broadcast: BroadcastConfig {
+                poll_interval: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_POLL_SECONDS").or(5).at_least(1).read(),
+                batch_size: env_value!("DAILY_SHRINK_BROADCAST_BATCH_SIZE": Limit, or = 200, at_least = 1),
+                concurrency: env_value!("DAILY_SHRINK_BROADCAST_CONCURRENCY": Limit, or = 16, at_least = 1),
+                lease: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_LEASE_SECONDS").or(300).at_least(1).read(),
+                retry_delay: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_RETRY_DELAY_SECONDS").or(60).at_least(1).read(),
+                max_retry_delay: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY_SECONDS").or(3600).at_least(1).read(),
+                max_attempts: env_value!("DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
+                max_age: EnvDuration::hours("DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS").or(48).at_least(1).read(),
+                retention: EnvDuration::days("DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_MINUTES").or(3).read(),
+            },
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
         let self_destruction = SelfDestructionConfig {
@@ -74,7 +86,7 @@ impl AppConfig {
             retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS").or(60).at_least(1).read(),
             max_retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS").or(3600).at_least(1).read(),
             max_attempts: env_value!("MSG_SELFDESTRUCT_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
-            retention: EnvDuration::minutes("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES").or(1440).read(),
+            retention: EnvDuration::days("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES").or(1).read(),
         };
         let support_chat_id = get_optional_chat_id("SUPPORT_CHAT_ID");
         Self {

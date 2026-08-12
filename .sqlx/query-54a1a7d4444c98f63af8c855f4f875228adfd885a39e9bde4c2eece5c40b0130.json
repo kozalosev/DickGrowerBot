@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT state AS \"state: BroadcastState\", count(*) AS \"count!: Count<ScheduledBroadcast>\"\n                FROM Scheduled_Shrink_Broadcasts WHERE finished_at IS NOT NULL GROUP BY state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state: BroadcastState",
+        "type_info": {
+          "Custom": {
+            "name": "broadcast_state",
+            "kind": {
+              "Enum": [
+                "created",
+                "sent",
+                "unreachable",
+                "expired",
+                "failed"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "scheduled_shrink_broadcasts",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "count!: Count<ScheduledBroadcast>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "54a1a7d4444c98f63af8c855f4f875228adfd885a39e9bde4c2eece5c40b0130"
+}

@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH victims AS (\n                    SELECT d.uid, d.chat_id,\n                           LEAST(d.length, GREATEST(1, CEIL(d.length * $1::double precision * LEAST(1.0,\n                               (EXTRACT(DAY FROM (current_timestamp - d.updated_at))::int - $2::bigint::int + 1)::double precision\n                                   / GREATEST($3::bigint::int, 1)\n                           ))::bigint)) AS loss\n                    FROM Dicks d\n                    WHERE d.chat_id = ANY($4)\n                      AND d.length > 0\n                      AND d.updated_at <= current_timestamp - make_interval(days => $2::bigint::int)\n                ),\n                updated AS (\n                    UPDATE Dicks d SET length = d.length - v.loss, bonus_attempts = d.bonus_attempts + 1\n                    FROM victims v WHERE d.uid = v.uid AND d.chat_id = v.chat_id\n                    RETURNING d.uid, d.chat_id, v.loss AS loss\n                ),\n                logged AS (\n                    INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length)\n                    SELECT chat_id, uid, loss FROM updated\n                ),\n                classified AS (\n                    SELECT u.uid, u.chat_id, c.chat_id IS NOT NULL AS messageable, c.is_unreachable\n                    FROM updated u JOIN Chats c ON c.id = u.chat_id\n                ),\n                queued AS (\n                    INSERT INTO Scheduled_Shrink_Broadcasts (chat_id, shrink_date)\n                    SELECT DISTINCT chat_id, current_date FROM classified\n                    WHERE messageable AND NOT is_unreachable\n                    ON CONFLICT DO NOTHING\n                    RETURNING chat_id\n                )\n                SELECT count(*) AS \"victims!: Count<RecentShrink>\",\n                       count(*) FILTER (WHERE messageable AND NOT is_unreachable) AS \"to_broadcast!: Count<RecentShrink>\",\n                       count(*) FILTER (WHERE NOT messageable) AS \"inline_only!: Count<RecentShrink>\",\n                       count(*) FILTER (WHERE messageable AND is_unreachable) AS \"unreachable!: Count<RecentShrink>\",\n                       (SELECT count(*) FROM queued) AS \"chats_queued!: Count<Chat>\",\n                       count(DISTINCT chat_id) FILTER (WHERE messageable AND is_unreachable) AS \"chats_skipped!: Count<Chat>\"\n                FROM classified",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "victims!: Count<RecentShrink>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "to_broadcast!: Count<RecentShrink>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "inline_only!: Count<RecentShrink>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "unreachable!: Count<RecentShrink>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "chats_queued!: Count<Chat>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "chats_skipped!: Count<Chat>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Int8",
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f1eeee66f9502a559fc1741a89c7b58127cd7814e3eaf8bfff7d96f85bddd489"
+}

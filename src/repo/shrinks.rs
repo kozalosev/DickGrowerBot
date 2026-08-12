@@ -1,22 +1,43 @@
 use autometrics::autometrics;
 use anyhow::Context;
-use chrono::NaiveDate;
-use crate::domain::primitives::{DaysCount, Length, Limit, Offset, Ratio, UserId, Username};
-use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
+use chrono::{DateTime, NaiveDate, Utc};
+use crate::domain::primitives::{Count, DaysCount, Length, Limit, Offset, Ratio, UserId, Username};
+use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
+use crate::repo::Chat;
 use crate::repository;
 
-/// A single shrink applied during the daily job. Carries the post-shrink length (from the
-/// `UPDATE ... RETURNING`) and the nullable messageable Telegram chat id used to address the
-/// broadcast — `None` for inline-only chats the bot can't message proactively.
-pub struct ShrinkEvent {
-    pub uid: UserId,
-    pub owner_name: Username,
-    pub lost_length: Length,
-    pub new_length: Length,
-    pub messageable_chat_id: Option<TelegramChatId>,
-    /// The bot couldn't post to this chat last time it tried, so the broadcast skips it. Unrelated
-    /// to `messageable_chat_id`: a chat can be messageable in principle and still unreachable.
-    pub is_unreachable: bool,
+/// What one batch of the daily shrink did. The shrinks themselves are in `Stale_Dick_Shrinks` and
+/// the summaries they owe are in `Scheduled_Shrink_Broadcasts`, so nothing but the counts has to
+/// travel back: at a million victims a day, the rows would be the run's whole memory footprint.
+///
+/// The three delivery counts partition `victims`, and they are what the daily-shrink metrics are
+/// split by. A victim is one shrunk dick, not one user: the same person is counted once per chat
+/// they play in, which is also how the summaries are addressed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShrinkBatchOutcome {
+    pub victims: Count<RecentShrink>,
+    /// Victims whose chat got a row in the broadcast queue.
+    pub to_broadcast: Count<RecentShrink>,
+    /// Victims of chats the bot can't message proactively at all; the `shrinks` command is the only
+    /// way they get to see it.
+    pub inline_only: Count<RecentShrink>,
+    /// Victims of chats the bot couldn't post to last time it tried.
+    pub unreachable: Count<RecentShrink>,
+    /// Chats that got a row, which is how many messages the broadcast will send.
+    pub chats_queued: Count<Chat>,
+    /// Chats the bot is known to have lost access to, so nothing was queued for them.
+    pub chats_skipped: Count<Chat>,
+}
+
+impl std::ops::AddAssign for ShrinkBatchOutcome {
+    fn add_assign(&mut self, other: Self) {
+        self.victims += other.victims;
+        self.to_broadcast += other.to_broadcast;
+        self.inline_only += other.inline_only;
+        self.unreachable += other.unreachable;
+        self.chats_queued += other.chats_queued;
+        self.chats_skipped += other.chats_skipped;
+    }
 }
 
 /// The log only stores how much was lost, so `length` (the owner's *current* length) comes from a
@@ -37,9 +58,32 @@ pub struct AdjacentDates {
 }
 
 repository!(Shrinks,
-    /// Shrinks every dick that is still positive and hasn't been grown for `grace_days`, logging
-    /// each shrink into `Stale_Dick_Shrinks` and returning the events for the broadcast. The whole thing
-    /// is one statement: Postgres runs the unreferenced `logged` data-modifying CTE to completion.
+    /// The chats holding a dick the next run would shrink. Read-only and served by
+    /// `dicks_idx_updated_at`, so the one scan of the whole table happens here, holding no locks and
+    /// keeping no transaction open, and every statement that writes is then addressed by chat.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(grace_days = %grace_days))]
+    pub async fn select_shrink_candidates(&self, grace_days: DaysCount) -> anyhow::Result<Vec<InternalChatId>> {
+        sqlx::query_scalar!(
+            r#"SELECT DISTINCT chat_id AS "chat_id: InternalChatId" FROM Dicks
+                WHERE length > 0 AND updated_at <= current_timestamp - make_interval(days => $1::bigint::int)"#,
+                grace_days as DaysCount)
+            .fetch_all(&self.pool)
+            .await
+            .context("couldn't select the chats due for a shrink")
+    },
+
+    /// Shrinks the stale dicks of `chat_ids`, logs each shrink into `Stale_Dick_Shrinks` and queues
+    /// one broadcast per chat that can be messaged. The whole thing is one statement: Postgres runs
+    /// the unreferenced data-modifying CTEs to completion.
+    ///
+    /// Queueing in the same statement is the durability of the broadcast: there is no moment at
+    /// which a shrink is committed and the summary it owes is not. What the queue then does with
+    /// the row — when to send it, how often to retry — is nobody's business here.
+    ///
+    /// Taking the chats as an argument bounds both the locks and the result: the run walks them in
+    /// batches, so a `/grow` at midnight waits behind one batch instead of behind every victim in
+    /// the database, and a batch that fails costs its own chats rather than the whole day.
     ///
     /// The full `ratio` doesn't apply from day one of staleness: it ramps up linearly over
     /// `ramp_up_days`, starting at `ratio / ramp_up_days` on the first overdue day and reaching
@@ -47,14 +91,15 @@ repository!(Shrinks,
     /// afterwards) — so neglect is punished gradually rather than with one abrupt cut the moment
     /// the grace period lapses. `ramp_up_days <= 1` reproduces the old instant-full-ratio behavior.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(ratio = %ratio, grace_days = %grace_days, ramp_up_days = %ramp_up_days))]
+    #[tracing::instrument(skip_all, fields(chats = chat_ids.len(), ratio = %ratio, grace_days = %grace_days, ramp_up_days = %ramp_up_days))]
     pub async fn perform_daily_shrink(
         &self,
+        chat_ids: &[InternalChatId],
         ratio: Ratio,
         grace_days: DaysCount,
         ramp_up_days: DaysCount,
-    ) -> anyhow::Result<Vec<ShrinkEvent>> {
-        sqlx::query_as!(ShrinkEvent,
+    ) -> anyhow::Result<ShrinkBatchOutcome> {
+        let outcome = sqlx::query_as!(ShrinkBatchOutcome,
             r#"WITH victims AS (
                     SELECT d.uid, d.chat_id,
                            LEAST(d.length, GREATEST(1, CEIL(d.length * $1::double precision * LEAST(1.0,
@@ -62,28 +107,58 @@ repository!(Shrinks,
                                    / GREATEST($3::bigint::int, 1)
                            ))::bigint)) AS loss
                     FROM Dicks d
-                    WHERE d.length > 0
+                    WHERE d.chat_id = ANY($4)
+                      AND d.length > 0
                       AND d.updated_at <= current_timestamp - make_interval(days => $2::bigint::int)
                 ),
                 updated AS (
                     UPDATE Dicks d SET length = d.length - v.loss, bonus_attempts = d.bonus_attempts + 1
                     FROM victims v WHERE d.uid = v.uid AND d.chat_id = v.chat_id
-                    RETURNING d.uid, d.chat_id, v.loss AS loss, d.length AS new_length
+                    RETURNING d.uid, d.chat_id, v.loss AS loss
                 ),
                 logged AS (
                     INSERT INTO Stale_Dick_Shrinks (chat_id, uid, lost_length)
                     SELECT chat_id, uid, loss FROM updated
+                ),
+                classified AS (
+                    SELECT u.uid, u.chat_id, c.chat_id IS NOT NULL AS messageable, c.is_unreachable
+                    FROM updated u JOIN Chats c ON c.id = u.chat_id
+                ),
+                queued AS (
+                    INSERT INTO Scheduled_Shrink_Broadcasts (chat_id, shrink_date)
+                    SELECT DISTINCT chat_id, current_date FROM classified
+                    WHERE messageable AND NOT is_unreachable
+                    ON CONFLICT DO NOTHING
+                    RETURNING chat_id
                 )
-                SELECT u.uid AS "uid: UserId", usr.name AS "owner_name: Username",
-                       u.loss AS "lost_length!: Length", u.new_length AS "new_length!: Length",
-                       c.chat_id AS "messageable_chat_id: TelegramChatId", c.is_unreachable
-                FROM updated u
-                JOIN Users usr USING (uid)
-                JOIN Chats c ON c.id = u.chat_id"#,
-                ratio as Ratio, grace_days as DaysCount, ramp_up_days as DaysCount)
-            .fetch_all(&self.pool)
+                SELECT count(*) AS "victims!: Count<RecentShrink>",
+                       count(*) FILTER (WHERE messageable AND NOT is_unreachable) AS "to_broadcast!: Count<RecentShrink>",
+                       count(*) FILTER (WHERE NOT messageable) AS "inline_only!: Count<RecentShrink>",
+                       count(*) FILTER (WHERE messageable AND is_unreachable) AS "unreachable!: Count<RecentShrink>",
+                       (SELECT count(*) FROM queued) AS "chats_queued!: Count<Chat>",
+                       count(DISTINCT chat_id) FILTER (WHERE messageable AND is_unreachable) AS "chats_skipped!: Count<Chat>"
+                FROM classified"#,
+                ratio as Ratio, grace_days as DaysCount, ramp_up_days as DaysCount,
+                chat_ids as &[InternalChatId])
+            .fetch_one(&self.pool)
             .await
-            .context("couldn't perform the daily shrink")
+            .context("couldn't perform the daily shrink")?;
+        Ok(outcome)
+    },
+
+    /// When the last shrink was logged, as the moment of the UTC midnight it belongs to. `None`
+    /// before the first run ever.
+    ///
+    /// Published as a gauge, which is the only shape that answers "is the scheduler still alive?"
+    /// across a restart: the table remembers, where a counter in this process does not.
+    #[autometrics]
+    #[tracing::instrument(skip_all)]
+    pub async fn get_last_shrink_timestamp(&self) -> anyhow::Result<Option<DateTime<Utc>>> {
+        sqlx::query_scalar!(
+            r#"SELECT (max(created_at)::timestamp AT TIME ZONE 'UTC') AS "at?" FROM Stale_Dick_Shrinks"#)
+            .fetch_one(&self.pool)
+            .await
+            .context("couldn't read the time of the last shrink")
     },
 
     #[autometrics]
