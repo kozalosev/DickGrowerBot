@@ -188,7 +188,7 @@ MSG_SELFDESTRUCT_INLINE_GROUPS=         # comma-separated groups; empty => inlin
 MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS=60 # the first wait after a failure; it doubles with each one
 MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS=3600  # the cap that doubling stops at
 MSG_SELFDESTRUCT_MAX_ATTEMPTS=3         # attempts before the row is marked `failed` and left alone
-MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES=1440  # minutes a finished row is kept; 0 => for ever
+MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS=1        # days a finished row is kept; 0 => for ever
 ```
 
 **Every chat may overrule all of that** with `/cleanup` (issue #128), an admins-only picker that
@@ -321,7 +321,7 @@ warned into the void and found missing again a grace period later — the notice
 edit costs, but a message that is gone is not coming back.
 `SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
 stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
-`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES` minutes
+`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS` days
 later — a task of its own, because clearing the history must never be part of the run that wrote it.
 **A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
 on a busy bot.
@@ -462,7 +462,7 @@ DAILY_SHRINK_BROADCAST_RETRY_DELAY_SECONDS=60
 DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY_SECONDS=3600
 DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
 DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS=48  # older than this and the summary is `expired` unsent
-DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_MINUTES=4320  # 0 => finished rows are kept for ever
+DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_DAYS=3        # 0 => finished rows are kept for ever
 ```
 
 **Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from

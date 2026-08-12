@@ -65,7 +65,7 @@ impl AppConfig {
                 max_retry_delay: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY_SECONDS").or(3600).at_least(1).read(),
                 max_attempts: env_value!("DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
                 max_age: EnvDuration::hours("DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS").or(48).at_least(1).read(),
-                retention: EnvDuration::days("DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_MINUTES").or(3).read(),
+                retention: EnvDuration::days("DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_DAYS").or(3).read(),
             },
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
@@ -86,7 +86,7 @@ impl AppConfig {
             retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS").or(60).at_least(1).read(),
             max_retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS").or(3600).at_least(1).read(),
             max_attempts: env_value!("MSG_SELFDESTRUCT_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
-            retention: EnvDuration::days("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES").or(1).read(),
+            retention: EnvDuration::days("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS").or(1).read(),
         };
         let support_chat_id = get_optional_chat_id("SUPPORT_CHAT_ID");
         Self {

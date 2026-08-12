@@ -57,12 +57,12 @@ impl Default for BroadcastConfig {
             poll_interval: Duration::from_secs(5),
             batch_size: Limit::new(200),
             concurrency: Limit::new(16),
-            lease: Duration::from_secs(300),
-            retry_delay: Duration::from_secs(60),
-            max_retry_delay: Duration::from_secs(3600),
+            lease: Duration::from_mins(5),
+            retry_delay: Duration::from_mins(1),
+            max_retry_delay: Duration::from_hours(1),
             max_attempts: AttemptsCount::new(3),
             max_age: Duration::from_hours(48),
-            retention: Duration::from_mins(4320),
+            retention: Duration::from_hours(72),
         }
     }
 }
