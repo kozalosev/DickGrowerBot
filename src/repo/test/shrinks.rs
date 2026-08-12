@@ -7,8 +7,8 @@ use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
 
-/// Small, so every test here crosses a page boundary instead of fitting into one page.
-const PAGE_SIZE: Limit = Limit::new(2);
+/// Small, so every test here crosses a batch boundary instead of fitting into one batch.
+const BATCH_SIZE: Limit = Limit::new(2);
 
 /// `<= 1` disables the ramp, applying the full ratio from the first overdue day — the old,
 /// pre-ramp behavior that most tests want so their expected losses stay simple round numbers.
@@ -92,19 +92,19 @@ async fn queued_broadcasts(db: &Pool<Postgres>) -> Vec<(i64, String)> {
         .collect()
 }
 
-/// Every chat, walked one page at a time — what the run does, with a page size small enough that
-/// these tests cross a page boundary rather than fitting into one.
+/// Every chat, walked one batch at a time — what the run does, with a batch size small enough that
+/// these tests cross a batch boundary rather than fitting into one.
 async fn shrink_all(shrinks: &repo::Shrinks, ratio: Ratio, grace_days: DaysCount, ramp_up_days: DaysCount)
     -> repo::ShrinkBatchOutcome
 {
     let mut total = repo::ShrinkBatchOutcome::default();
     let mut after = None;
     loop {
-        let page = shrinks.select_chats_page(after, PAGE_SIZE)
-            .await.expect("couldn't read a page of chats");
-        let Some(last) = page.last().copied() else { break };
+        let batch = shrinks.select_chats_batch(after, BATCH_SIZE)
+            .await.expect("couldn't read a batch of chats");
+        let Some(last) = batch.last().copied() else { break };
         after = Some(last);
-        total += shrinks.perform_daily_shrink(&page, ratio, grace_days, ramp_up_days)
+        total += shrinks.perform_daily_shrink(&batch, ratio, grace_days, ramp_up_days)
             .await.expect("couldn't perform the daily shrink");
     }
     total
@@ -250,9 +250,9 @@ async fn test_perform_daily_shrink_queues_one_summary_per_chat_and_day() {
 
     // The second run aborts on Stale_Dick_Shrinks' primary key, so nothing of it lands — neither a
     // second length change nor a second summary.
-    let page = shrinks.select_chats_page(None, PAGE_SIZE)
-        .await.expect("couldn't read a page of chats");
-    let repeated = shrinks.perform_daily_shrink(&page, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
+    let batch = shrinks.select_chats_batch(None, BATCH_SIZE)
+        .await.expect("couldn't read a batch of chats");
+    let repeated = shrinks.perform_daily_shrink(&batch, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
     assert!(repeated.is_err(), "shrinking the same chat twice in one day must not go through");
 
     assert_eq!(length_of(&db, victim_uid, chat_id).await, 90);
@@ -521,16 +521,16 @@ async fn test_get_player_uids() {
     ]);
 }
 
-/// The run walks the chats by their primary key, a page at a time. An off-by-one in the keyset
-/// would silently skip a chat every page — nobody's dick would shrink there and no summary would
-/// be owed — so this seeds more chats than fit in one page and insists that every one of them was
+/// The run walks the chats by their primary key, a batch at a time. An off-by-one in the keyset
+/// would silently skip a chat every batch — nobody's dick would shrink there and no summary would
+/// be owed — so this seeds more chats than fit in one batch and insists that every one of them was
 /// reached.
 #[tokio::test]
-async fn every_chat_is_reached_across_the_pages() {
+async fn every_chat_is_reached_across_the_batches() {
     let db = fresh_db().await;
     let repo::Repositories { shrinks, users, .. } = repos(&db);
 
-    // Five chats against a page of two: the last page is a partial one, which is where an
+    // Five chats against a batch of two: the last batch is a partial one, which is where an
     // off-by-one usually hides.
     let mut seeded = Vec::new();
     for i in 0..5i64 {

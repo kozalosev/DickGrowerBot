@@ -82,6 +82,7 @@ pub async fn run_pending_broadcasts(deps: BroadcastDeps<'_>) -> anyhow::Result<(
 #[tracing::instrument(skip_all)]
 pub async fn clean_finished_broadcasts(repos: &Repositories, retention: Duration) -> anyhow::Result<()> {
     let older_than = Utc::now() - retention;
+    tracing::debug!(%older_than, ?retention, "cleaning the finished shrink summaries up");
     let removed = repos.broadcasts.delete_finished(older_than).await?;
     if removed > 0 {
         tracing::info!(removed, "cleaned the finished shrink summaries up");
@@ -96,6 +97,7 @@ async fn send_and_record(deps: BroadcastDeps<'_>, broadcast: ScheduledBroadcast)
     let id = broadcast.id;
     let failures = broadcast.attempts;
     let outcome = send(deps, &broadcast).await;
+    tracing::debug!(?outcome, "the shrink summary is dealt with");
 
     // Only an ending is counted, and each one only once, so the outcomes add up to the number of
     // summaries. A retry is a step, not an ending, and has a counter of its own.

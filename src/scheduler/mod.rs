@@ -46,6 +46,8 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
         tracing::info!("the daily shrink is disabled (set DAILY_SHRINK_RATIO and DAILY_SHRINK_INACTIVITY_DAYS to enable it)");
         return;
     }
+    tracing::info!(batch_size = %config.daily_shrink.batch_size, ratio = %config.daily_shrink.ratio,
+        inactivity_days = %config.daily_shrink.inactivity_days, "the daily shrink scheduler has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK.instrument(async move {
         // A failed run is logged and forgotten: the next midnight tries again, and one bad day
         // must not stop the scheduler for good.
@@ -66,6 +68,7 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
                 tracing::error!("couldn't compute a valid duration till the next UTC midnight, stopping the daily shrink scheduler");
                 return;
             };
+            tracing::debug!(sleeping_for = ?till_next_day, "waiting for the next UTC midnight");
             tokio::time::sleep(till_next_day).await;
 
             run().await;
@@ -92,6 +95,10 @@ pub fn spawn_broadcast_worker(
     // Published so that a graph of the batch size can be read against the limit it may reach,
     // instead of against a number written into the dashboard.
     metrics::DAILY_SHRINK_BROADCAST_BATCH_LIMIT.set(i64::from(config.daily_shrink.broadcast.batch_size));
+    tracing::info!(poll_interval = ?config.daily_shrink.broadcast.poll_interval,
+        batch_size = %config.daily_shrink.broadcast.batch_size,
+        concurrency = %config.daily_shrink.broadcast.concurrency,
+        "the shrink broadcast worker has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK_BROADCAST.instrument(async move {
         let mut ticker = tokio::time::interval(config.daily_shrink.broadcast.poll_interval);
         loop {
@@ -117,9 +124,15 @@ pub fn spawn_broadcast_worker(
 /// retention says — zero keeps it for ever, which is what to set while debugging the worker itself.
 pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
     let retention = config.daily_shrink.broadcast.retention;
-    if !config.daily_shrink.enabled() || retention.is_zero() {
+    if !config.daily_shrink.enabled() {
         return;
     }
+    if retention.is_zero() {
+        tracing::info!(variable = "DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_DAYS",
+            "the finished shrink summaries are kept for ever");
+        return;
+    }
+    tracing::info!(?retention, "the shrink broadcast cleaner has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK_BROADCAST_CLEANING.instrument(async move {
         // Runs as often as it keeps, so a row lives between one and two retention periods. There's
         // nothing to gain from looking more often: nothing becomes stale in between.
@@ -146,6 +159,9 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
     // Published so that a graph of the batch size can be read against the limit it may reach,
     // instead of against a number written into the dashboard.
     metrics::SELF_DESTRUCTION_BATCH_LIMIT.set(i64::from(self_destruction.batch_size));
+    tracing::info!(poll_interval = ?self_destruction.poll_interval, batch_size = %self_destruction.batch_size,
+        concurrency = %self_destruction.concurrency, mode = %self_destruction.mode,
+        "the self-destruction worker has started");
     tokio::spawn(metrics::TASK_SELF_DESTRUCTION.instrument(async move {
         let mut ticker = tokio::time::interval(self_destruction.poll_interval);
         loop {
@@ -167,9 +183,15 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
 /// zero keeps it for ever, which is what to set while debugging the worker itself.
 pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
     let retention = config.self_destruction.retention;
-    if !config.self_destruction.enabled() || retention.is_zero() {
+    if !config.self_destruction.enabled() {
         return;
     }
+    if retention.is_zero() {
+        tracing::info!(variable = "MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS",
+            "the finished self-destructions are kept for ever");
+        return;
+    }
+    tracing::info!(?retention, "the self-destruction cleaner has started");
     tokio::spawn(metrics::TASK_SELF_DESTRUCTION_CLEANING.instrument(async move {
         // Runs as often as it keeps, so a row lives between one and two retention periods. There's
         // nothing to gain from looking more often: nothing becomes stale in between.

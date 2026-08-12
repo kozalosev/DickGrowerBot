@@ -232,7 +232,7 @@ pub async fn create_another_user_and_dick(
     assert!(n > 1);
     let n = n.to_i64().expect("couldn't convert n to i64");
 
-    let repo::Repositories { users, dicks, .. } = repos(&db);
+    let repo::Repositories { users, dicks, .. } = repos(db);
     let uid2 = user_id(UID + n - 1);
     users.create_or_update(uid2, name)
         .await.unwrap_or_else(|_| panic!("couldn't create a user #{n}"));

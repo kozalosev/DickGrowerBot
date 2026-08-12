@@ -416,16 +416,16 @@ growing. Everything below follows from that.
   committed and its summary is not owed. `Scheduled_Shrink_Broadcasts` (migration 38) is a
   transactional outbox, and that is the property a message broker could not provide: publishing
   after committing is a dual write, and a crash in between loses exactly what this exists to keep.
-* **The run walks the chats in pages** of `DAILY_SHRINK_BATCH_SIZE`, read from `Chats` by keyset
-  on the primary key (`select_chats_page`), so it holds one page at a time however many chats there
-  are. Per chat is the right granularity because that is the granularity a summary has: each page
-  is shrunk by one atomic statement, the locks and the memory are bounded, and a failed page costs
-  its own chats instead of the day. A `/grow` at midnight then waits behind one page rather than
-  behind every stale dick in the database.
+* **The run walks the chats in batches** of `DAILY_SHRINK_BATCH_SIZE`, read from `Chats` by keyset
+  on the primary key (`select_chats_batch`), so it holds one batch at a time however many chats
+  there are. Per chat is the right granularity because that is the granularity a summary has: each
+  batch is shrunk by one atomic statement, the locks and the memory are bounded, and a failed batch
+  costs its own chats instead of the day. A `/grow` at midnight then waits behind one batch rather
+  than behind every stale dick in the database.
 
   It reads *every* chat rather than only the ones with something to shrink, on purpose: that
   question needs a `DISTINCT` over about a million stale dicks, and it would exclude roughly one
-  chat in eight, because nearly every chat has a neglected dick in it. A page whose chats have
+  chat in eight, because nearly every chat has a neglected dick in it. A batch whose chats have
   nothing stale shrinks nothing and costs an index lookup.
 * **Nothing comes back from the statement but counts.** The shrinks are in `Stale_Dick_Shrinks` and
   `get_shrinks_for_date` already reads exactly the page a summary needs, so the worker re-reads

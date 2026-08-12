@@ -58,17 +58,17 @@ pub struct AdjacentDates {
 }
 
 repository!(Shrinks,
-    /// One page of chats, in id order, for the run to walk. `after` is the last id of the previous
-    /// page, so the caller keeps nothing but that number.
+    /// One batch of chats, in id order, for the run to walk. `after` is the last id of the previous
+    /// batch, so the caller keeps nothing but that number.
     ///
     /// Deliberately not "the chats that have something to shrink": that question needs a `DISTINCT`
     /// over every stale dick in the database — around a million rows aggregated down to a couple of
     /// hundred thousand ids — and it excludes about one chat in eight, because nearly every chat has
-    /// a neglected dick in it. Reading the primary key instead is an index scan, and a page whose
+    /// a neglected dick in it. Reading the primary key instead is an index scan, and a batch whose
     /// chats turn out to have nothing stale simply shrinks nothing.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(after = ?after, limit = %limit))]
-    pub async fn select_chats_page(
+    pub async fn select_chats_batch(
         &self,
         after: Option<InternalChatId>,
         limit: Limit,
@@ -79,7 +79,7 @@ repository!(Shrinks,
                 after.unwrap_or(InternalChatId::new(0)) as InternalChatId, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context("couldn't read a page of chats to shrink")
+            .context("couldn't read a batch of chats to shrink")
     },
 
     /// Shrinks the stale dicks of `chat_ids`, logs each shrink into `Stale_Dick_Shrinks` and queues

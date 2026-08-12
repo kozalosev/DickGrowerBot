@@ -185,7 +185,7 @@ fn check_member_with_name(members: &[User], name: &str) {
 }
 
 async fn create_member(db: &Pool<Postgres>) {
-    let repo::Repositories { users, dicks, .. } = repos(&db);
+    let repo::Repositories { users, dicks, .. } = repos(db);
 
     let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
     let uid = USER_ID;

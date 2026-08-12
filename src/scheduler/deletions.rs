@@ -89,6 +89,7 @@ async fn act_and_record(
     let kind = deletion.kind;
     let failures = deletion.attempts;
     let outcome = act(bot, cache, config, bot_admin_ttl, deletion).await;
+    tracing::debug!(id = %id, group = %group, kind = %kind, ?outcome, "the message is dealt with");
 
     // Only an ending is counted, and each one only once, so the outcomes add up to the number of
     // messages. A warning and a retry are steps, not endings; retries have their own counter.
@@ -137,6 +138,7 @@ async fn finish(
 #[tracing::instrument(skip_all)]
 pub async fn clean_finished_deletions(repos: &Repositories, retention: Duration) -> anyhow::Result<()> {
     let older_than = Utc::now() - retention;
+    tracing::debug!(%older_than, ?retention, "cleaning the finished self-destructions up");
     let removed = repos.deletions.delete_finished(older_than).await?;
     if removed > 0 {
         tracing::info!(removed, "cleaned the finished self-destructions up");

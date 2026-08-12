@@ -22,24 +22,25 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
     let mut failed_batches = 0u32;
     let mut after = None;
 
-    // A page of chats is read, shrunk and forgotten before the next one is asked for, so the run
-    // holds one page at a time however many chats there are.
+    // A batch of chats is read, shrunk and forgotten before the next one is asked for, so the run
+    // holds one batch at a time however many chats there are.
     loop {
-        let page = repos.shrinks.select_chats_page(after, shrink_config.batch_size)
+        let batch = repos.shrinks.select_chats_batch(after, shrink_config.batch_size)
             .await
             .inspect_err(|_| metrics::DAILY_SHRINK.run_failed())?;
-        let Some(last) = page.last().copied() else { break };
+        let Some(last) = batch.last().copied() else { break };
+        tracing::debug!(chats = batch.len(), up_to = %last, "shrinking a batch of chats");
         after = Some(last);
-        chats += page.len();
+        chats += batch.len();
 
-        match repos.shrinks.perform_daily_shrink(&page, shrink_config.ratio,
+        match repos.shrinks.perform_daily_shrink(&batch, shrink_config.ratio,
                                                  shrink_config.inactivity_days, shrink_config.ramp_up_days).await {
             // A batch that fails takes its own chats down and nothing else: the ones already
             // shrunk keep their summaries, and the rest are still ahead. Nothing retries it, so
             // those chats have lost the day — an error, not a warning.
             Err(e) => {
                 failed_batches += 1;
-                tracing::error!(chats = page.len(), error = format!("{e:#}"), "a batch of the daily shrink failed");
+                tracing::error!(chats = batch.len(), error = format!("{e:#}"), "a batch of the daily shrink failed");
             },
             Ok(outcome) => total += outcome,
         }
