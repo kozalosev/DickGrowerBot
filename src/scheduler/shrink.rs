@@ -17,26 +17,29 @@ use crate::repo::{Repositories, ShrinkBatchOutcome};
 #[tracing::instrument(skip_all)]
 pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow::Result<()> {
     let shrink_config = &config.daily_shrink;
-    let candidates = repos.shrinks
-        .select_shrink_candidates(shrink_config.inactivity_days)
-        .await
-        .inspect_err(|_| metrics::DAILY_SHRINK.run_failed())?;
-    if candidates.is_empty() {
-        metrics::DAILY_SHRINK.run_empty();
-        tracing::info!("nothing to shrink today");
-        return Ok(())
-    }
-
     let mut total = ShrinkBatchOutcome::default();
+    let mut chats = 0usize;
     let mut failed_batches = 0u32;
-    for chats in candidates.chunks(usize::from(shrink_config.batch_size)) {
-        match repos.shrinks.perform_daily_shrink(chats, shrink_config.ratio,
+    let mut after = None;
+
+    // A page of chats is read, shrunk and forgotten before the next one is asked for, so the run
+    // holds one page at a time however many chats there are.
+    loop {
+        let page = repos.shrinks.select_chats_page(after, shrink_config.batch_size)
+            .await
+            .inspect_err(|_| metrics::DAILY_SHRINK.run_failed())?;
+        let Some(last) = page.last().copied() else { break };
+        after = Some(last);
+        chats += page.len();
+
+        match repos.shrinks.perform_daily_shrink(&page, shrink_config.ratio,
                                                  shrink_config.inactivity_days, shrink_config.ramp_up_days).await {
             // A batch that fails takes its own chats down and nothing else: the ones already
-            // shrunk keep their summaries, and the rest are still ahead.
+            // shrunk keep their summaries, and the rest are still ahead. Nothing retries it, so
+            // those chats have lost the day — an error, not a warning.
             Err(e) => {
                 failed_batches += 1;
-                tracing::warn!(chats = chats.len(), error = format!("{e:#}"), "a batch of the daily shrink failed");
+                tracing::error!(chats = page.len(), error = format!("{e:#}"), "a batch of the daily shrink failed");
             },
             Ok(outcome) => total += outcome,
         }
@@ -47,19 +50,20 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
     metrics::DAILY_SHRINK.victims_unreachable(total.unreachable.value());
     metrics::DAILY_SHRINK.broadcast_skipped(total.chats_skipped.value());
 
-    // A run that lost a batch is a failed run even if the others went through: it is the signal
-    // that something needs looking at, and a partial day must not read like a whole one.
+    // A run that lost a batch is a failed run even if the others went through: a partial day must
+    // not read like a whole one. Each batch has already said so in its own line, with the error;
+    // this only counts the day.
     if failed_batches > 0 {
         metrics::DAILY_SHRINK.run_failed();
-        tracing::error!(failed_batches, chats = candidates.len(), "some batches of the daily shrink failed");
     } else if total.victims.value() == 0 {
         metrics::DAILY_SHRINK.run_empty();
-        tracing::info!("nothing to shrink today");
+        tracing::info!(chats, "nothing to shrink today");
         return Ok(())
     } else {
         metrics::DAILY_SHRINK.run_succeeded();
     }
-    tracing::info!(victims = total.victims.value(), queued = total.chats_queued.value(),
-        skipped = total.chats_skipped.value(), "the daily shrink is done");
+    tracing::info!(chats, failed_batches, victims = total.victims.value(),
+        queued = total.chats_queued.value(), skipped = total.chats_skipped.value(),
+        "the daily shrink is done");
     Ok(())
 }

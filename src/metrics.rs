@@ -8,7 +8,7 @@ use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
 use crate::config::MessageGroup;
 use crate::domain::primitives::{Count, SupportedLanguage};
-use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind, ScheduledBroadcast, ScheduledDeletion};
+use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
 static REGISTRY: Lazy<prometheus::Registry> = Lazy::new(prometheus::Registry::new);
@@ -101,8 +101,6 @@ pub static DAILY_SHRINK_BROADCAST_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
         &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]));
 pub static DAILY_SHRINK_BROADCAST_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_broadcast_batch_limit", "the value of DAILY_SHRINK_BROADCAST_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
-pub static DAILY_SHRINK_BROADCAST_FINISHED: Lazy<DailyShrinkBroadcastFinishedGauges> = Lazy::new(||
-    DailyShrinkBroadcastFinishedGauges::new("daily_shrink_broadcast_finished", "number of shrink summaries that are done with and kept for inspection until the cleaning process runs, by state: sent, unreachable (the bot can't post to that chat at all), expired (it waited until it stopped being worth sending) or failed (every attempt was refused)"));
 pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
     TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/rate_limited/other). A spike of connect/timeout is the DPI-stalling signal; rate_limited means Telegram asked the bot to slow down, so the THROTTLE_* limits are set too high"));
 pub static TELEGRAM_REQUEST_DURATION: Lazy<TelegramRequestDuration> = Lazy::new(||
@@ -200,7 +198,6 @@ fn force_registration() {
     Lazy::force(&ANNOUNCEMENT_SHOWN);
     Lazy::force(&CHAT_MIGRATION);
     Lazy::force(&DAILY_SHRINK);
-    Lazy::force(&DAILY_SHRINK_BROADCAST_FINISHED);
     Lazy::force(&TELEGRAM_REQUEST_ERRORS);
     Lazy::force(&TELEGRAM_REQUEST_DURATION);
     Lazy::force(&TELEGRAM_THROTTLE_QUEUE_FULL);
@@ -344,6 +341,11 @@ impl Gauge {
 
     /// A gauge is a `float64` on the wire whatever is put in it; `IntGauge` holds an `i64` only
     /// to keep the arithmetic exact in the process.
+    ///
+    /// Takes a bare `i64` rather than a conversion: `domain_types` implements `SaturatingInto`
+    /// only for the pairs that can lose something, so a caller already holding an `i64` — a Unix
+    /// timestamp, say — could not satisfy such a bound at all. The narrowing is named where it
+    /// happens instead.
     pub fn set(&self, value: i64) {
         self.0.set(value)
     }
@@ -741,31 +743,6 @@ impl SelfDestructionFinishedGauges {
     }
 }
 
-/// The same for the shrink summaries: how many rows sit in each terminal state, waiting for the
-/// cleaning process. What `SELECT state, count(*) … WHERE finished_at IS NOT NULL` says, as a graph.
-pub struct DailyShrinkBroadcastFinishedGauges(GaugeVec);
-
-impl DailyShrinkBroadcastFinishedGauges {
-    fn new(name: &str, help: &str) -> Self {
-        let vec = GaugeVec::new(name, help, &["state"]);
-        for state in BroadcastState::TERMINAL {
-            vec.gauge(&[&state.to_string()]).set(0);
-        }
-        Self(vec)
-    }
-
-    /// Publishes one count per terminal state. Every state is written on each call, so one that has
-    /// just been cleaned away goes back to zero instead of keeping its last value for ever.
-    pub fn set_all(&self, counts: &[(BroadcastState, Count<ScheduledBroadcast>)]) {
-        for state in BroadcastState::TERMINAL {
-            let count = counts.iter()
-                .find(|(counted, _)| *counted == state)
-                .map_or(Count::default(), |(_, count)| *count);
-            self.0.gauge(&[&state.to_string()]).set(count.saturating_into());
-        }
-    }
-}
-
 /// Counts announcements actually shown at the end of the Dick of the Day message, labeled by the
 /// recipient's resolved [`SupportedLanguage`] (with fallback, the audience's language — not
 /// necessarily the language the borrowed text is written in).
@@ -965,12 +942,11 @@ mod tests {
     use strum::IntoEnumIterator;
     use crate::config::MessageGroup;
     use crate::domain::primitives::Count;
-    use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind, ScheduledBroadcast, ScheduledDeletion};
+    use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
                 BROADCAST_LANGUAGE, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
-                SELF_DESTRUCTION_FINISHED, SELF_DESTRUCTION_RETRIES, DAILY_SHRINK_BROADCAST_FINISHED,
-                SelfDestructionFinishedGauges, DailyShrinkBroadcastFinishedGauges,
-                TASK_DAILY_SHRINK, language_label, render_metrics};
+                SELF_DESTRUCTION_FINISHED, SELF_DESTRUCTION_RETRIES,
+                SelfDestructionFinishedGauges, TASK_DAILY_SHRINK, language_label, render_metrics};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.
@@ -1090,14 +1066,12 @@ mod tests {
     #[test]
     fn every_daily_shrink_series_is_exported() {
         Lazy::force(&DAILY_SHRINK);
-        Lazy::force(&DAILY_SHRINK_BROADCAST_FINISHED);
-        let rendered = render_metrics();
+            let rendered = render_metrics();
 
         let expected = [
             ("daily_shrink_run_total", "outcome", ["succeeded", "empty", "failed"].as_slice()),
             ("daily_shrink_victims_total", "delivery", ["broadcast", "inline_only", "unreachable"].as_slice()),
             ("daily_shrink_broadcast_total", "outcome", ["sent", "unreachable", "expired", "failed", "skipped"].as_slice()),
-            ("daily_shrink_broadcast_finished", "state", ["sent", "unreachable", "expired", "failed"].as_slice()),
         ];
         for (metric, label, values) in expected {
             for value in values {
@@ -1105,35 +1079,6 @@ mod tests {
                 assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
             }
         }
-    }
-
-    /// The queue's own account and the counter of endings are written side by side, so a state
-    /// added to the table must show up in both. Comparing them here is what keeps a new state from
-    /// reaching the database without ever reaching Prometheus.
-    #[test]
-    fn every_terminal_broadcast_state_is_counted_and_gauged() {
-        Lazy::force(&DAILY_SHRINK);
-        Lazy::force(&DAILY_SHRINK_BROADCAST_FINISHED);
-        let rendered = render_metrics();
-
-        for state in BroadcastState::TERMINAL {
-            let counter = format!("daily_shrink_broadcast_total{{outcome=\"{state}\"}}");
-            assert!(rendered.contains(&counter), "{counter} is missing from:\n{rendered}");
-            let gauge = format!("daily_shrink_broadcast_finished{{state=\"{state}\"}}");
-            assert!(rendered.contains(&gauge), "{gauge} is missing from:\n{rendered}");
-        }
-    }
-
-    #[test]
-    fn the_finished_broadcast_gauges_are_reset_on_every_publication() {
-        let gauges = DailyShrinkBroadcastFinishedGauges::new("test_daily_shrink_broadcast_finished", "help");
-
-        gauges.set_all(&[(BroadcastState::Failed, Count::<ScheduledBroadcast>::new(3))]);
-        assert_eq!(gauges.0.gauge(&["failed"]).0.get(), 3);
-        assert_eq!(gauges.0.gauge(&["sent"]).0.get(), 0);
-
-        gauges.set_all(&[]);
-        assert_eq!(gauges.0.gauge(&["failed"]).0.get(), 0);
     }
 
     /// The sqlx pool hook metrics and the tokio task monitors are both registered lazily; this

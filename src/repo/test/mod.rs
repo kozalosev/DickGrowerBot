@@ -9,6 +9,8 @@ mod stats;
 mod shrinks;
 mod announcements;
 mod bans;
+mod broadcasts;
+mod deletions;
 
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};

@@ -11,11 +11,12 @@ use teloxide::types::{ChatId, ReplyMarkup, UserId as TeloxideUserId};
 use teloxide::types::ParseMode::Html;
 use domain_types::traits::ApproxInto;
 use crate::config::AppConfig;
-use crate::domain::primitives::{AttemptsCount, LanguageCode, Page, ScheduledBroadcastId, SupportedLanguage};
+use crate::domain::primitives::{LanguageCode, Page, ScheduledBroadcastId, SupportedLanguage};
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::handlers::shrink::{build_shrink_keyboard, shrinks_page_impl, ShrinkView};
 use crate::metrics;
 use crate::repo::{BroadcastState, Repositories, ScheduledBroadcast};
+use super::backoff;
 use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
 
@@ -129,14 +130,6 @@ async fn finish(
 ) -> anyhow::Result<()> {
     metrics::DAILY_SHRINK.broadcast_finished(state);
     repos.broadcasts.finish(id, state).await
-}
-
-/// How long a summary rests before the next attempt: the base delay doubled once per failure it
-/// already has, up to `max`. A chat that answers slowly is asked less and less often, instead of at
-/// a steady beat for as many attempts as it is given.
-fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
-    let factor = 1u32.checked_shl(failures.value()).unwrap_or(u32::MAX);
-    base.saturating_mul(factor).min(max)
 }
 
 /// Sends page 0 of the chat's shrink list for the day the row names, and says what became of it.
@@ -295,12 +288,8 @@ async fn resolve_broadcast_language(deps: BroadcastDeps<'_>, chat: &ChatIdKind) 
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use teloxide::{ApiError, RequestError};
-    use crate::domain::primitives::AttemptsCount;
-    use super::{backoff, is_chat_unreachable};
-
-    const MAX: Duration = Duration::from_hours(1);
+    use super::is_chat_unreachable;
 
     #[test]
     fn known_api_errors_make_a_chat_unreachable() {
@@ -346,20 +335,5 @@ mod tests {
         // A migrated chat is alive under its new id; the migration handler repoints its row.
         let migrated = RequestError::MigrateToChatId(teloxide::types::ChatId(-100));
         assert!(!is_chat_unreachable(&migrated));
-    }
-
-    #[test]
-    fn the_wait_doubles_with_every_failure() {
-        let base = Duration::from_secs(60);
-        assert_eq!(backoff(base, AttemptsCount::new(0), MAX), base);
-        assert_eq!(backoff(base, AttemptsCount::new(1), MAX), Duration::from_secs(120));
-        assert_eq!(backoff(base, AttemptsCount::new(2), MAX), Duration::from_secs(240));
-    }
-
-    #[test]
-    fn the_wait_never_passes_the_cap() {
-        let base = Duration::from_secs(60);
-        assert_eq!(backoff(base, AttemptsCount::new(30), MAX), MAX);
-        assert_eq!(backoff(base, AttemptsCount::new(u32::MAX), MAX), MAX);
     }
 }

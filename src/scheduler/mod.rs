@@ -2,11 +2,13 @@ mod shrink;
 mod deletions;
 mod broadcasts;
 
-use domain_types::traits::SaturatingInto;
+use std::time::Duration;
 use teloxide::Bot;
 use teloxide::adaptors::throttle::{Settings, Throttle};
+use domain_types::traits::SaturatingInto;
 use crate::cache::Cache;
 use crate::config::{get_env_value_or_default, AppConfig, ThrottleConfig};
+use crate::domain::primitives::AttemptsCount;
 use crate::handlers::utils::date::duration_till_next_day;
 use crate::metrics;
 use crate::repo::Repositories;
@@ -50,8 +52,7 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
         let run = || async {
             run_daily_shrink(repos.clone(), config.clone())
                 .await
-                .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"));
-            report_shrink_queue(&repos).await;
+                .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
         };
         // Puts the feature into effect at once instead of hours later. Re-running the same day is
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and
@@ -128,7 +129,6 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
 
             clean_finished_broadcasts(&repos, retention).await
                 .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished shrink summaries failed"));
-            report_shrink_queue(&repos).await;
         }
     }));
 }
@@ -184,21 +184,34 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
     }));
 }
 
-/// Publishes the depth of the broadcast queue, its backlog of finished rows, and the day of the
-/// last shrink. All three are read from the same database the run just used, so a failure here is
-/// only logged.
+/// How long a row rests before the next attempt: the base delay doubled once per failure it already
+/// has, up to `max`. A chat that answers slowly is asked less and less often, instead of at a steady
+/// beat for as many attempts as it is given.
 ///
-/// The last one is a gauge rather than a counter because it has to survive a restart: a counter
-/// incremented once a day reads zero both when nothing happened and when nobody scraped it in
-/// time, and there is no telling those apart afterwards.
+/// Shared by both queues, which want the same curve out of the same three settings.
+fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
+    let factor = 1u32.checked_shl(failures.value()).unwrap_or(u32::MAX);
+    base.saturating_mul(factor).min(max)
+}
+
+/// Publishes how much the broadcast queue still owes and when the last shrink was.
+///
+/// Only these two, and only from the worker's tick: they are what the alerts read, and vmalert
+/// can't ask the database itself. Everything a human looks at — which chats failed and why, the
+/// states over time — is a panel over `Scheduled_Shrink_Broadcasts` instead, which costs nothing
+/// when nobody is looking at it.
+///
+/// The day of the last shrink is a gauge rather than a counter because it has to survive a restart:
+/// a counter incremented once a day reads zero both when nothing happened and when nobody scraped
+/// it in time, and there is no telling those apart afterwards.
+///
+/// A failure here loses one sample of a gauge and nothing else — the queue, the rows and the worker
+/// are untouched, and the next tick publishes again — so it is a `warn`. It also runs every few
+/// seconds, and a database that is down has already been reported by the run that failed.
 async fn report_shrink_queue(repos: &Repositories) {
     match repos.broadcasts.count_pending().await {
         Ok(pending) => metrics::DAILY_SHRINK_BROADCAST_PENDING.set(pending.saturating_into()),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending shrink summaries"),
-    }
-    match repos.broadcasts.count_finished().await {
-        Ok(finished) => metrics::DAILY_SHRINK_BROADCAST_FINISHED.set_all(&finished),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the finished shrink summaries"),
     }
     match repos.shrinks.get_last_shrink_timestamp().await {
         Ok(Some(at)) => metrics::DAILY_SHRINK_LAST_RUN_TIMESTAMP.set(at.timestamp()),
@@ -217,5 +230,29 @@ async fn report_queue(repos: &Repositories) {
     match repos.deletions.count_finished().await {
         Ok(finished) => metrics::SELF_DESTRUCTION_FINISHED.set_all(&finished),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the finished self-destructions"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MAX: Duration = Duration::from_hours(1);
+
+    #[test]
+    fn the_back_off_doubles_with_every_failure() {
+        let base = Duration::from_secs(60);
+        assert_eq!(backoff(base, AttemptsCount::new(0), MAX), Duration::from_secs(60));
+        assert_eq!(backoff(base, AttemptsCount::new(1), MAX), Duration::from_secs(120));
+        assert_eq!(backoff(base, AttemptsCount::new(2), MAX), Duration::from_secs(240));
+        assert_eq!(backoff(base, AttemptsCount::new(3), MAX), Duration::from_secs(480));
+    }
+
+    #[test]
+    fn the_back_off_never_grows_past_its_cap() {
+        let base = Duration::from_secs(60);
+        assert_eq!(backoff(base, AttemptsCount::new(30), MAX), MAX);
+        // The shift that would overflow must give the cap, not a wrapped-around delay of nothing.
+        assert_eq!(backoff(base, AttemptsCount::new(u32::MAX), MAX), MAX);
     }
 }

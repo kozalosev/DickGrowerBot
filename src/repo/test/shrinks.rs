@@ -7,6 +7,10 @@ use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
 
+/// Two chats per page, so every test here walks more than one and an off-by-one in the keyset
+/// cannot pass unnoticed.
+const PAGE: Limit = Limit::new(2);
+
 /// `<= 1` disables the ramp, applying the full ratio from the first overdue day — the old,
 /// pre-ramp behavior that most tests want so their expected losses stay simple round numbers.
 const NO_RAMP: DaysCount = DaysCount::new(0);
@@ -109,14 +113,22 @@ async fn queued_broadcasts(db: &Pool<Postgres>) -> Vec<(i64, String)> {
         .collect()
 }
 
-/// Every chat with something to shrink, which is what the run walks in batches.
+/// Every chat, walked one page at a time — what the run does, with a page size small enough that
+/// these tests cross a page boundary rather than fitting into one.
 async fn shrink_all(shrinks: &repo::Shrinks, ratio: Ratio, grace_days: DaysCount, ramp_up_days: DaysCount)
     -> repo::ShrinkBatchOutcome
 {
-    let candidates = shrinks.select_shrink_candidates(grace_days)
-        .await.expect("couldn't select the chats due for a shrink");
-    shrinks.perform_daily_shrink(&candidates, ratio, grace_days, ramp_up_days)
-        .await.expect("couldn't perform the daily shrink")
+    let mut total = repo::ShrinkBatchOutcome::default();
+    let mut after = None;
+    loop {
+        let page = shrinks.select_chats_page(after, PAGE)
+            .await.expect("couldn't read a page of chats");
+        let Some(last) = page.last().copied() else { break };
+        after = Some(last);
+        total += shrinks.perform_daily_shrink(&page, ratio, grace_days, ramp_up_days)
+            .await.expect("couldn't perform the daily shrink");
+    }
+    total
 }
 
 #[tokio::test]
@@ -267,9 +279,9 @@ async fn test_perform_daily_shrink_queues_one_summary_per_chat_and_day() {
 
     // The second run aborts on Stale_Dick_Shrinks' primary key, so nothing of it lands — neither a
     // second length change nor a second summary.
-    let candidates = shrinks.select_shrink_candidates(GRACE_DAYS)
-        .await.expect("couldn't select the chats due for a shrink");
-    let repeated = shrinks.perform_daily_shrink(&candidates, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
+    let page = shrinks.select_chats_page(None, PAGE)
+        .await.expect("couldn't read a page of chats");
+    let repeated = shrinks.perform_daily_shrink(&page, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
     assert!(repeated.is_err(), "shrinking the same chat twice in one day must not go through");
 
     assert_eq!(length_of(&db, victim_uid, chat_id).await, 90);
@@ -551,4 +563,42 @@ async fn test_get_player_uids() {
         user_id(UID + 1),
         user_id(UID + 2),
     ]);
+}
+
+/// The run walks the chats by their primary key, a page at a time. An off-by-one in the keyset
+/// would silently skip a chat every page — nobody's dick would shrink there and no summary would
+/// be owed — so this seeds more chats than fit in one page and insists that every one of them was
+/// reached.
+#[tokio::test]
+async fn every_chat_is_reached_across_the_pages() {
+    let db = fresh_db().await;
+    let shrinks = repo::Shrinks::new(db.clone());
+    let users = repo::Users::new(db.clone());
+
+    // Five chats against a page of two: the last page is a partial one, which is where an
+    // off-by-one usually hides.
+    let mut seeded = Vec::new();
+    for i in 0..5i64 {
+        let chat_id = sqlx::query_scalar!("INSERT INTO Chats (chat_id) VALUES ($1) RETURNING id", -1000 - i)
+            .fetch_one(&db).await.expect("couldn't create the chat");
+        let uid = UID + 100 + i;
+        users.create_or_update(user_id(uid), "stale-victim")
+            .await.expect("couldn't create the victim user");
+        seed_aged_dick(&db, chat_id, uid, 100, 10).await;
+        seeded.push((chat_id, uid));
+    }
+
+    let outcome = shrink_all(&shrinks, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
+
+    assert_eq!(outcome.victims, 5, "every chat's dick must have shrunk");
+    assert_eq!(outcome.chats_queued, 5, "every chat must be owed a summary");
+    for (chat_id, uid) in &seeded {
+        assert_eq!(length_of(&db, *uid, *chat_id).await, 90, "the dick in chat {chat_id} was skipped");
+    }
+
+    let mut queued: Vec<i64> = queued_broadcasts(&db).await.into_iter().map(|(id, _)| id).collect();
+    queued.sort_unstable();
+    let mut expected: Vec<i64> = seeded.into_iter().map(|(chat_id, _)| chat_id).collect();
+    expected.sort_unstable();
+    assert_eq!(queued, expected);
 }

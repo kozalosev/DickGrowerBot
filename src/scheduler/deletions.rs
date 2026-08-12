@@ -14,9 +14,10 @@ use crate::config::MessageGroup;
 use domain_types::traits::ApproxInto;
 use crate::cache::Cache;
 use crate::handlers::rights;
-use crate::domain::primitives::{AttemptsCount, ScheduledDeletionId};
+use crate::domain::primitives::ScheduledDeletionId;
 use crate::metrics;
 use crate::repo::{DeletionState, DeletionTarget, MessageKind, Repositories, ScheduledDeletion};
+use super::backoff;
 
 /// The age at which Telegram stops letting a bot delete a message. This is the real limit;
 /// [`crate::config::MAX_DELAY`] caps the delays an hour below it. Nothing is scheduled this late,
@@ -125,14 +126,6 @@ async fn finish(
 ) -> anyhow::Result<()> {
     metrics::SELF_DESTRUCTION.record(group, kind, state);
     repos.deletions.finish(id, state).await
-}
-
-/// How long a message rests before the next attempt: the base delay doubled once per failure it
-/// already has, up to `max`. A chat that answers slowly is asked less and less often, instead of at
-/// a steady beat for as many attempts as it is given.
-fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
-    let factor = 1u32.checked_shl(failures.value()).unwrap_or(u32::MAX);
-    base.saturating_mul(factor).min(max)
 }
 
 /// Removes the rows that were finished long enough ago, and reports what is left.
@@ -295,25 +288,6 @@ fn is_final(error: &RequestError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const MAX: Duration = Duration::from_secs(60 * 60);
-
-    #[test]
-    fn the_back_off_doubles_with_every_failure() {
-        let base = Duration::from_secs(60);
-        assert_eq!(backoff(base, AttemptsCount::new(0), MAX), Duration::from_secs(60));
-        assert_eq!(backoff(base, AttemptsCount::new(1), MAX), Duration::from_secs(120));
-        assert_eq!(backoff(base, AttemptsCount::new(2), MAX), Duration::from_secs(240));
-        assert_eq!(backoff(base, AttemptsCount::new(3), MAX), Duration::from_secs(480));
-    }
-
-    #[test]
-    fn the_back_off_never_grows_past_its_cap() {
-        let base = Duration::from_secs(60);
-        assert_eq!(backoff(base, AttemptsCount::new(30), MAX), MAX);
-        // The shift that would overflow must give the cap, not a wrapped-around delay of nothing.
-        assert_eq!(backoff(base, AttemptsCount::new(u32::MAX), MAX), MAX);
-    }
 
     /// A message someone else removed used to be warned first and only found missing a grace
     /// period later, at the cost of two requests and a warn-level line for a normal event.

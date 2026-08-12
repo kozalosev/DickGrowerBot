@@ -416,11 +416,17 @@ growing. Everything below follows from that.
   committed and its summary is not owed. `Scheduled_Shrink_Broadcasts` (migration 38) is a
   transactional outbox, and that is the property a message broker could not provide: publishing
   after committing is a dual write, and a crash in between loses exactly what this exists to keep.
-* **The run walks the chats in batches** of `DAILY_SHRINK_BATCH_SIZE`, chosen by a read-only
-  `select_shrink_candidates` served by `dicks_idx_updated_at`. Per chat is the right granularity
-  because that is the granularity a summary has: each batch stays atomic over its chats, the locks
-  and the memory are bounded, and a failed batch costs its own chats instead of the day. A `/grow`
-  at midnight then waits behind one batch rather than behind every stale dick in the database.
+* **The run walks the chats in pages** of `DAILY_SHRINK_BATCH_SIZE`, read from `Chats` by keyset
+  on the primary key (`select_chats_page`), so it holds one page at a time however many chats there
+  are. Per chat is the right granularity because that is the granularity a summary has: each page
+  is shrunk by one atomic statement, the locks and the memory are bounded, and a failed page costs
+  its own chats instead of the day. A `/grow` at midnight then waits behind one page rather than
+  behind every stale dick in the database.
+
+  It reads *every* chat rather than only the ones with something to shrink, on purpose: that
+  question needs a `DISTINCT` over about a million stale dicks, and it would exclude roughly one
+  chat in eight, because nearly every chat has a neglected dick in it. A page whose chats have
+  nothing stale shrinks nothing and costs an index lookup.
 * **Nothing comes back from the statement but counts.** The shrinks are in `Stale_Dick_Shrinks` and
   `get_shrinks_for_date` already reads exactly the page a summary needs, so the worker re-reads
   rather than carrying a payload. Page 0 therefore comes from the same `ORDER BY lost_length DESC`
@@ -459,13 +465,25 @@ DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS=48  # older than this and the summary is `e
 DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_MINUTES=4320  # 0 => finished rows are kept for ever
 ```
 
-**Whether the scheduler is alive is `shrink_last_run_timestamp_seconds`**, a gauge read from
+**Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
 `MAX(created_at)` in `Stale_Dick_Shrinks`, not any of the `daily_shrink_*` counters. A counter that
 moves once a day reads zero both when nothing happened and when nobody scraped it before the process
 restarted, and nothing afterwards tells the two apart — which is how a fortnight of silence went
-unnoticed. Alert on `time() - shrink_last_run_timestamp_seconds > 26h`, and on
-`shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs repo's
-`vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
+unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > 26h`, and on
+`daily_shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs
+repo's `vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
+
+**Those two are the only gauges, and only the worker's tick publishes them.** They exist because
+vmalert reads Prometheus and cannot query SQL; everything a human looks at — which chats failed and
+why, the states over time — is a panel over `Scheduled_Shrink_Broadcasts` through Grafana's Postgres
+datasource, which costs nothing when nobody is looking. A gauge over the finished rows was the
+opposite trade: grouping a few hundred thousand rows by state every five seconds so that a graph
+could show what one SQL query already answers.
+
+**A log line's level follows what was lost, not whether the code recovered.** A failed shrink page
+is an `error!`: those chats lost the day and nothing retries it. A failed metric publication is a
+`warn!`: one sample of a gauge is gone, the next tick replaces it, and the database problem behind
+it has already been reported by the run that hit it.
 
 `Chats.is_unreachable` keeps a chat out of the queue, and is cleared by `handlers::rights` on the
 `my_chat_member` update that says the bot may post again — re-added, or un-muted by an
@@ -921,10 +939,16 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   let debt: i64 = value.saturating_into();
   ```
 
-  **Where the sink is ours, the conversion belongs to it, not to the caller.** `Gauge::set` and
-  `Histogram::observe` (`src/metrics.rs`) take `impl SaturatingInto<i64>` / `impl ApproxInto<f64>`,
-  so a caller hands over the domain value itself. The repo layer has done this all along: a query
-  binds `uid as UserId` and sqlx's `Encode` does the converting.
+  **Where the sink is ours *and* the conversion is always the same, it belongs to the sink.** The
+  repo layer does this: a query binds `uid as UserId` and sqlx's `Encode` does the converting.
+
+  The metrics are the counter-example, and worth knowing before trying to tidy them. `Gauge::set`
+  and `Histogram::observe` (`src/metrics.rs`) take a bare `i64` / `f64`, and the callers name the
+  conversion. They cannot do otherwise: `domain_types` implements these traits **only for the pairs
+  that lose something**, on the principle that an exact conversion must say `From`. So there is no
+  `SaturatingInto<i64> for i64`, and a caller holding a Unix timestamp could not satisfy such a
+  bound at all — while a caller holding a `Count` or a `usize` genuinely is narrowing and should
+  say so.
 
   A cast that is genuinely right keeps an `#[allow]` carrying the reason, on the narrowest scope
   that works — never a whole function, or it will also cover the next cast written on that line.

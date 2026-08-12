@@ -58,19 +58,28 @@ pub struct AdjacentDates {
 }
 
 repository!(Shrinks,
-    /// The chats holding a dick the next run would shrink. Read-only and served by
-    /// `dicks_idx_updated_at`, so the one scan of the whole table happens here, holding no locks and
-    /// keeping no transaction open, and every statement that writes is then addressed by chat.
+    /// One page of chats, in id order, for the run to walk. `after` is the last id of the previous
+    /// page, so the caller keeps nothing but that number.
+    ///
+    /// Deliberately not "the chats that have something to shrink": that question needs a `DISTINCT`
+    /// over every stale dick in the database — around a million rows aggregated down to a couple of
+    /// hundred thousand ids — and it excludes about one chat in eight, because nearly every chat has
+    /// a neglected dick in it. Reading the primary key instead is an index scan, and a page whose
+    /// chats turn out to have nothing stale simply shrinks nothing.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(grace_days = %grace_days))]
-    pub async fn select_shrink_candidates(&self, grace_days: DaysCount) -> anyhow::Result<Vec<InternalChatId>> {
+    #[tracing::instrument(skip_all, fields(after = ?after, limit = %limit))]
+    pub async fn select_chats_page(
+        &self,
+        after: Option<InternalChatId>,
+        limit: Limit,
+    ) -> anyhow::Result<Vec<InternalChatId>> {
         sqlx::query_scalar!(
-            r#"SELECT DISTINCT chat_id AS "chat_id: InternalChatId" FROM Dicks
-                WHERE length > 0 AND updated_at <= current_timestamp - make_interval(days => $1::bigint::int)"#,
-                grace_days as DaysCount)
+            r#"SELECT id AS "id: InternalChatId" FROM Chats
+                WHERE id > $1 ORDER BY id LIMIT $2"#,
+                after.unwrap_or(InternalChatId::new(0)) as InternalChatId, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context("couldn't select the chats due for a shrink")
+            .context("couldn't read a page of chats to shrink")
     },
 
     /// Shrinks the stale dicks of `chat_ids`, logs each shrink into `Stale_Dick_Shrinks` and queues
