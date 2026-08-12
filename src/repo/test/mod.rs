@@ -15,6 +15,7 @@ mod deletions;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+use chrono::{DateTime, Utc};
 use tokio::sync::OnceCell;
 use reqwest::Url;
 use domain_types::traits::SaturatingInto;
@@ -80,6 +81,51 @@ pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
     (chat_id, dicks)
+}
+
+/// Every repository over the same database, built the way `main` builds them.
+///
+/// Meant to be destructured, so a test names the repositories it wants and no more:
+/// `let repo::Repositories { users, dicks, .. } = repos(&db);`. A test that needs a repository
+/// configured differently — a feature toggle turned on — still builds that one itself.
+pub fn repos(db: &Pool<Postgres>) -> repo::Repositories {
+    repo::Repositories::new(db, &Default::default())
+}
+
+/// The `Chats.id` of [`CHAT_ID`], which is what every other table's `chat_id` column points at.
+pub async fn internal_chat_id(db: &Pool<Postgres>) -> i64 {
+    sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", CHAT_ID)
+        .fetch_one(db)
+        .await
+        .expect("couldn't resolve the internal chat id")
+}
+
+/// A chat with nothing but a Telegram id, for the tests that need a second one or a chat without
+/// any of the rows `create_or_grow` would bring with it.
+pub async fn create_chat(db: &Pool<Postgres>, telegram_id: i64) -> i64 {
+    sqlx::query_scalar!("INSERT INTO Chats (chat_id) VALUES ($1) RETURNING id", telegram_id)
+        .fetch_one(db)
+        .await
+        .expect("couldn't create the chat")
+}
+
+/// A dick inserted directly, with a length and an age of the test's choosing.
+///
+/// A direct `INSERT` is the only way: the `Dicks` BEFORE UPDATE trigger forbids touching a row that
+/// was grown today, which a freshly created dick always is.
+pub async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, length: i64, days_ago: i32) {
+    sqlx::query!(
+        "INSERT INTO Dicks (uid, chat_id, length, updated_at) \
+            VALUES ($1, $2, $3, current_timestamp - make_interval(days => $4))",
+        uid, internal_chat_id, length, days_ago)
+        .execute(db)
+        .await
+        .expect("couldn't seed an aged dick");
+}
+
+/// A lease, or any other deadline, far enough out that nothing under test can outlive it.
+pub fn far_future() -> DateTime<Utc> {
+    Utc::now() + Duration::from_secs(600)
 }
 
 /// One Postgres for the whole binary, reused across runs, with a database per test.

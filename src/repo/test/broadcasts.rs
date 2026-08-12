@@ -1,21 +1,10 @@
 use std::time::Duration;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::{Pool, Postgres};
 use crate::repo::{BroadcastState, ScheduledBroadcasts};
 use crate::domain::primitives::Limit;
 use crate::domain::primitives::chat::TelegramChatId;
-use crate::repo::test::fresh_db;
-
-/// A lease long enough that nothing under test can outlive it.
-fn lease() -> DateTime<Utc> {
-    Utc::now() + Duration::from_secs(600)
-}
-
-/// A chat with a Telegram id, which is what the queue's foreign key points at.
-async fn chat(db: &Pool<Postgres>, telegram_id: i64) -> i64 {
-    sqlx::query_scalar!("INSERT INTO Chats (chat_id) VALUES ($1) RETURNING id", telegram_id)
-        .fetch_one(db).await.expect("couldn't create the chat")
-}
+use crate::repo::test::{create_chat, far_future, fresh_db};
 
 /// The enqueue is a CTE of the shrinking statement in production; here it is spelled out, so
 /// that these tests are about the queue rather than about the shrink.
@@ -41,10 +30,10 @@ async fn finished_states(db: &Pool<Postgres>) -> Vec<(String, i64)> {
 async fn a_queued_summary_is_claimed_with_the_chat_it_is_owed_to() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    let internal_id = chat(&db, -1001234567890).await;
+    let internal_id = create_chat(&db, -1001234567890).await;
     queue(&db, internal_id, 0).await;
 
-    let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the summaries");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the summaries");
 
     assert_eq!(claimed.len(), 1);
     assert_eq!(claimed[0].chat_id, TelegramChatId::new(-1001234567890));
@@ -58,12 +47,12 @@ async fn a_queued_summary_is_claimed_with_the_chat_it_is_owed_to() {
 async fn a_claimed_summary_is_not_claimed_again() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    queue(&db, chat(&db, -1001234567890).await, 0).await;
+    queue(&db, create_chat(&db, -1001234567890).await, 0).await;
 
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     assert_eq!(claimed.len(), 1);
-    let claimed_again = repo.claim_due(Limit::new(10), lease())
+    let claimed_again = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     assert!(claimed_again.is_empty());
 }
@@ -74,13 +63,13 @@ async fn a_claimed_summary_is_not_claimed_again() {
 async fn a_summary_of_an_expired_lease_comes_back() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    queue(&db, chat(&db, -1001234567890).await, 0).await;
+    queue(&db, create_chat(&db, -1001234567890).await, 0).await;
 
     let expired = Utc::now() - Duration::from_secs(1);
     let claimed = repo.claim_due(Limit::new(10), expired)
         .await.expect("couldn't claim the summaries");
     assert_eq!(claimed.len(), 1);
-    let claimed_again = repo.claim_due(Limit::new(10), lease())
+    let claimed_again = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     assert_eq!(claimed_again.len(), 1);
     assert_eq!(claimed_again[0].id, claimed[0].id);
@@ -91,7 +80,7 @@ async fn a_summary_of_an_expired_lease_comes_back() {
 async fn the_same_chat_and_day_is_queued_once() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    let internal_id = chat(&db, -1001234567890).await;
+    let internal_id = create_chat(&db, -1001234567890).await;
 
     queue(&db, internal_id, 0).await;
     queue(&db, internal_id, 0).await;
@@ -106,7 +95,7 @@ async fn the_same_chat_and_day_is_queued_once() {
 async fn each_day_is_queued_on_its_own() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    let internal_id = chat(&db, -1001234567890).await;
+    let internal_id = create_chat(&db, -1001234567890).await;
 
     queue(&db, internal_id, 0).await;
     queue(&db, internal_id, 1).await;
@@ -119,8 +108,8 @@ async fn each_day_is_queued_on_its_own() {
 async fn a_postponed_summary_counts_its_attempts() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    queue(&db, chat(&db, -1001234567890).await, 0).await;
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    queue(&db, create_chat(&db, -1001234567890).await, 0).await;
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
 
     let attempts = repo.postpone(claimed[0].id, Utc::now() - Duration::from_secs(1))
@@ -129,7 +118,7 @@ async fn a_postponed_summary_counts_its_attempts() {
 
     // The count the back-off is computed from has to survive the round trip, or every attempt
     // would rest as long as the first.
-    let claimed_again = repo.claim_due(Limit::new(10), lease())
+    let claimed_again = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     assert_eq!(claimed_again.len(), 1);
     assert_eq!(claimed_again[0].attempts, 1);
@@ -141,9 +130,9 @@ async fn a_postponed_summary_counts_its_attempts() {
 async fn a_finished_summary_is_kept_but_never_claimed() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    queue(&db, chat(&db, -1001234567890).await, 0).await;
-    queue(&db, chat(&db, -1009876543210).await, 0).await;
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    queue(&db, create_chat(&db, -1001234567890).await, 0).await;
+    queue(&db, create_chat(&db, -1009876543210).await, 0).await;
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     assert_eq!(claimed.len(), 2);
 
@@ -152,7 +141,7 @@ async fn a_finished_summary_is_kept_but_never_claimed() {
     repo.finish(claimed[1].id, BroadcastState::Unreachable)
         .await.expect("couldn't finish the summary");
 
-    let claimed_again = repo.claim_due(Limit::new(10), lease())
+    let claimed_again = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     assert!(claimed_again.is_empty());
     let pending = repo.count_pending()
@@ -171,9 +160,9 @@ async fn every_terminal_state_survives_the_round_trip() {
     let repo = ScheduledBroadcasts::new(db.clone());
     for (i, _) in BroadcastState::TERMINAL.iter().enumerate() {
         let telegram_id = -1001234567890 - i64::try_from(i).expect("the index fits");
-        queue(&db, chat(&db, telegram_id).await, 0).await;
+        queue(&db, create_chat(&db, telegram_id).await, 0).await;
     }
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
 
     for (broadcast, state) in claimed.iter().zip(BroadcastState::TERMINAL) {
@@ -191,9 +180,9 @@ async fn every_terminal_state_survives_the_round_trip() {
 async fn only_the_finished_rows_are_cleaned_up() {
     let db = fresh_db().await;
     let repo = ScheduledBroadcasts::new(db.clone());
-    queue(&db, chat(&db, -1001234567890).await, 0).await;
-    queue(&db, chat(&db, -1009876543210).await, 0).await;
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    queue(&db, create_chat(&db, -1001234567890).await, 0).await;
+    queue(&db, create_chat(&db, -1009876543210).await, 0).await;
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     repo.finish(claimed[0].id, BroadcastState::Sent)
         .await.expect("couldn't finish the summary");
@@ -221,7 +210,7 @@ async fn a_summary_for_a_chat_without_a_telegram_id_is_given_up_on() {
         .fetch_one(&db).await.expect("couldn't create the inline-only chat");
     queue(&db, internal_id, 0).await;
 
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
     assert!(claimed.is_empty());
 

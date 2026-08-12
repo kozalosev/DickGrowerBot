@@ -1,11 +1,11 @@
 use std::time::Duration;
 use domain_types::traits::SaturatingInto;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use crate::config::MessageGroup;
 use crate::domain::primitives::{Count, LanguageCode, Limit};
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
 use crate::repo::{DeletionState, DeletionTarget, MessageKind, NewDeletion, ScheduledDeletion, ScheduledDeletions};
-use crate::repo::test::fresh_db;
+use crate::repo::test::{far_future, fresh_db};
 
 const CHAT_ID: i64 = -1001234567890;
 
@@ -14,11 +14,6 @@ fn chat_message(message_id: u32) -> DeletionTarget {
         chat_id: TelegramChatId::new(CHAT_ID),
         message_id: TelegramMessageId::new(message_id),
     }
-}
-
-/// A lease long enough that nothing under test can outlive it.
-fn lease() -> DateTime<Utc> {
-    Utc::now() + Duration::from_secs(600)
 }
 
 fn due(target: DeletionTarget, kind: MessageKind) -> NewDeletion {
@@ -40,7 +35,7 @@ async fn only_the_due_messages_are_claimed() {
     repo.schedule(&[due(chat_message(1), MessageKind::Reply), later])
         .await.expect("couldn't schedule the deletions");
 
-    let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert_eq!(claimed.len(), 1);
     assert_eq!(claimed[0].target, chat_message(1));
     assert_eq!(claimed[0].kind, MessageKind::Reply);
@@ -59,9 +54,9 @@ async fn a_claimed_message_is_not_claimed_again() {
     repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
         .await.expect("couldn't schedule the deletion");
 
-    let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert_eq!(claimed.len(), 1);
-    let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert!(claimed_again.is_empty());
 }
 
@@ -76,7 +71,7 @@ async fn a_message_of_an_expired_lease_comes_back() {
     let expired = Utc::now() - Duration::from_secs(1);
     let claimed = repo.claim_due(Limit::new(10), expired).await.expect("couldn't claim the deletions");
     assert_eq!(claimed.len(), 1);
-    let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert_eq!(claimed_again.len(), 1);
     assert_eq!(claimed_again[0].id, claimed[0].id);
 }
@@ -90,7 +85,7 @@ async fn an_inline_message_survives_the_round_trip() {
     repo.schedule(&[due(target.clone(), MessageKind::Inline)])
         .await.expect("couldn't schedule the deletion");
 
-    let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert_eq!(claimed.len(), 1);
     assert_eq!(claimed[0].target, target);
     assert_eq!(claimed[0].kind, MessageKind::Inline);
@@ -116,16 +111,16 @@ async fn a_warned_message_comes_back_at_the_end_of_the_grace_period() {
     let repo = ScheduledDeletions::new(db);
     repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
         .await.expect("couldn't schedule the deletion");
-    let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
 
     repo.mark_warned(claimed[0].id, Utc::now() + Duration::from_secs(600))
         .await.expect("couldn't mark the deletion as warned");
-    let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert!(claimed_again.is_empty());
 
     repo.mark_warned(claimed[0].id, Utc::now() - Duration::from_secs(1))
         .await.expect("couldn't mark the deletion as warned");
-    let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert_eq!(claimed_again.len(), 1);
     assert_eq!(claimed_again[0].state, DeletionState::Warned);
 }
@@ -136,7 +131,7 @@ async fn a_postponed_message_counts_its_attempts() {
     let repo = ScheduledDeletions::new(db);
     repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
         .await.expect("couldn't schedule the deletion");
-    let claimed = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
 
     let attempts = repo.postpone(claimed[0].id, Utc::now() - Duration::from_secs(1))
         .await.expect("couldn't postpone the deletion");
@@ -147,7 +142,7 @@ async fn a_postponed_message_counts_its_attempts() {
 
     // The count the back-off is computed from has to survive the round trip, or every attempt
     // would rest as long as the first.
-    let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert_eq!(claimed_again.len(), 1);
     assert_eq!(claimed_again[0].attempts, 2);
 }
@@ -167,7 +162,7 @@ async fn a_finished_message_is_kept_but_never_claimed() {
     repo.finish(claimed[0].id, DeletionState::Removed).await.expect("couldn't finish the deletion");
     repo.finish(claimed[1].id, DeletionState::Failed).await.expect("couldn't fail the deletion");
 
-    let claimed_again = repo.claim_due(Limit::new(10), lease()).await.expect("couldn't claim the deletions");
+    let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert!(claimed_again.is_empty());
     let pending = repo.count_pending().await.expect("couldn't count the pending deletions");
     assert_eq!(pending, 0);
@@ -188,7 +183,7 @@ async fn every_terminal_state_survives_the_round_trip() {
         .map(|i| due(chat_message(i.saturating_into()), MessageKind::Reply))
         .collect();
     repo.schedule(&messages).await.expect("couldn't schedule the deletions");
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the deletions");
 
     for (deletion, state) in claimed.iter().zip(DeletionState::TERMINAL) {
@@ -207,7 +202,7 @@ async fn only_the_finished_rows_are_cleaned_up() {
     let repo = ScheduledDeletions::new(db);
     repo.schedule(&[due(chat_message(1), MessageKind::Reply), due(chat_message(2), MessageKind::Reply)])
         .await.expect("couldn't schedule the deletions");
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the deletions");
     repo.finish(claimed[0].id, DeletionState::Failed)
         .await.expect("couldn't fail the deletion");
@@ -238,7 +233,7 @@ async fn a_row_that_addresses_no_message_is_given_up_on() {
             VALUES ('reply', 'notice', 'en', current_timestamp - interval '1 minute')")
         .execute(&db).await.expect("couldn't insert the malformed row");
 
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the deletions");
     assert!(claimed.is_empty());
 
@@ -258,7 +253,7 @@ async fn a_removed_message_stays_until_it_is_cleaned_up() {
     let repo = ScheduledDeletions::new(db);
     repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
         .await.expect("couldn't schedule the deletion");
-    let claimed = repo.claim_due(Limit::new(10), lease())
+    let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the deletions");
 
     repo.finish(claimed[0].id, DeletionState::Removed)

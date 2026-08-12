@@ -4,32 +4,12 @@ use crate::config::FeatureToggles;
 use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
-use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, get_chat_id_and_dicks, NAME, fresh_db, UID, USER_ID};
+use crate::repo::test::{fresh_db, get_chat_id_and_dicks, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID_KIND, NAME, UID, USER_ID};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
 fn increment_of(value: i64) -> LengthChange {
     LengthChange::signed(value)
-}
-
-async fn internal_chat_id(db: &Pool<Postgres>) -> i64 {
-    sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", CHAT_ID)
-        .fetch_one(db)
-        .await
-        .expect("couldn't resolve the internal chat id")
-}
-
-/// Inserts a `Dicks` row directly (bypassing `create_or_grow`, whose trigger always stamps
-/// `updated_at = now`), so we can seed a dick that looks like it decayed to `0` a while ago —
-/// mirrors `seed_aged_dick` in `repo/test/shrinks.rs`.
-async fn seed_stale_zero_length_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, days_ago: i32) {
-    sqlx::query!(
-        "INSERT INTO Dicks (uid, chat_id, length, updated_at) \
-            VALUES ($1, $2, 0, current_timestamp - make_interval(days => $3))",
-        uid, internal_chat_id, days_ago)
-        .execute(db)
-        .await
-        .expect("couldn't seed a stale zero-length dick");
 }
 
 #[tokio::test]
@@ -143,7 +123,7 @@ async fn test_hide_inactive_zero_length_from_top() {
     let stale_uid = UID + 1;
     users.create_or_update(user_id(stale_uid), "stale-zero")
         .await.expect("couldn't create the stale user");
-    seed_stale_zero_length_dick(&db, internal_chat_id, stale_uid, 10).await;
+    seed_aged_dick(&db, internal_chat_id, stale_uid, 0, 10).await;
 
     // A fresh, zero-length dick (just created today) — must stay visible despite length = 0.
     let fresh_uid = UID + 2;
@@ -184,7 +164,7 @@ async fn test_hide_inactive_zero_length_from_top_disabled() {
     let stale_uid = UID + 1;
     users.create_or_update(user_id(stale_uid), "stale-zero")
         .await.expect("couldn't create the stale user");
-    seed_stale_zero_length_dick(&db, internal_chat_id, stale_uid, 10).await;
+    seed_aged_dick(&db, internal_chat_id, stale_uid, 0, 10).await;
 
     let top = dicks.get_top(&chat_id, Offset::new(0), Limit::new(10), INACTIVITY_DAYS)
         .await.expect("couldn't fetch the top");
@@ -252,8 +232,7 @@ pub async fn create_another_user_and_dick(
     assert!(n > 1);
     let n = n.to_i64().expect("couldn't convert n to i64");
 
-    let users = repo::Users::new(db.clone());
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let repo::Repositories { users, dicks, .. } = repos(&db);
     let uid2 = user_id(UID + n - 1);
     users.create_or_update(uid2, name)
         .await.unwrap_or_else(|_| panic!("couldn't create a user #{n}"));

@@ -187,8 +187,6 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 /// How long a row rests before the next attempt: the base delay doubled once per failure it already
 /// has, up to `max`. A chat that answers slowly is asked less and less often, instead of at a steady
 /// beat for as many attempts as it is given.
-///
-/// Shared by both queues, which want the same curve out of the same three settings.
 fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
     let factor = 1u32.checked_shl(failures.value()).unwrap_or(u32::MAX);
     base.saturating_mul(factor).min(max)

@@ -2,31 +2,17 @@ use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio};
 use crate::domain::primitives::chat::{InternalChatId, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, NAME, fresh_db, UID, USER_ID};
+use crate::repo::test::{fresh_db, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
 use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
 
-/// Two chats per page, so every test here walks more than one and an off-by-one in the keyset
-/// cannot pass unnoticed.
-const PAGE: Limit = Limit::new(2);
+/// Small, so every test here crosses a page boundary instead of fitting into one page.
+const PAGE_SIZE: Limit = Limit::new(2);
 
 /// `<= 1` disables the ramp, applying the full ratio from the first overdue day — the old,
 /// pre-ramp behavior that most tests want so their expected losses stay simple round numbers.
 const NO_RAMP: DaysCount = DaysCount::new(0);
-
-/// Inserts a dick directly (bypassing `create_or_grow`) with an explicit age, so we can seed
-/// dicks that look stale. A direct INSERT is required because the `Dicks` BEFORE UPDATE trigger
-/// forbids touching a row that was grown today — which a freshly created dick always is.
-async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, length: i64, days_ago: i32) {
-    sqlx::query!(
-        "INSERT INTO Dicks (uid, chat_id, length, updated_at) \
-            VALUES ($1, $2, $3, current_timestamp - make_interval(days => $4))",
-        uid, internal_chat_id, length, days_ago)
-        .execute(db)
-        .await
-        .expect("couldn't seed an aged dick");
-}
 
 async fn seed_aged_dick_with_bonus_attempts(
     db: &Pool<Postgres>,
@@ -67,13 +53,6 @@ async fn seed_old_shrink(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, l
         .execute(db)
         .await
         .expect("couldn't seed an old shrink");
-}
-
-async fn internal_chat_id(db: &Pool<Postgres>) -> i64 {
-    sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", CHAT_ID)
-        .fetch_one(db)
-        .await
-        .expect("couldn't resolve the internal chat id")
 }
 
 async fn updated_at_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> chrono::DateTime<chrono::Utc> {
@@ -121,7 +100,7 @@ async fn shrink_all(shrinks: &repo::Shrinks, ratio: Ratio, grace_days: DaysCount
     let mut total = repo::ShrinkBatchOutcome::default();
     let mut after = None;
     loop {
-        let page = shrinks.select_chats_page(after, PAGE)
+        let page = shrinks.select_chats_page(after, PAGE_SIZE)
             .await.expect("couldn't read a page of chats");
         let Some(last) = page.last().copied() else { break };
         after = Some(last);
@@ -134,9 +113,7 @@ async fn shrink_all(shrinks: &repo::Shrinks, ratio: Ratio, grace_days: DaysCount
 #[tokio::test]
 async fn test_perform_daily_shrink() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     // A fresh dick for USER_ID — also creates the Chats row. It must NOT be shrunk (grown today).
     users.create_or_update(USER_ID, NAME)
@@ -196,10 +173,7 @@ async fn test_perform_daily_shrink() {
 #[tokio::test]
 async fn test_perform_daily_shrink_reports_unreachable_chats() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
-    let chats = repo::Chats::new(db.clone(), Default::default());
+    let repo::Repositories { dicks, shrinks, users, chats, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
@@ -234,8 +208,7 @@ async fn test_perform_daily_shrink_reports_unreachable_chats() {
 #[tokio::test]
 async fn test_perform_daily_shrink_queues_nothing_for_an_inline_only_chat() {
     let db = fresh_db().await;
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { shrinks, users, .. } = repos(&db);
 
     let chat_id = sqlx::query_scalar!("INSERT INTO Chats (chat_instance) VALUES ('inline-only') RETURNING id")
         .fetch_one(&db).await.expect("couldn't create the inline-only chat");
@@ -259,9 +232,7 @@ async fn test_perform_daily_shrink_queues_nothing_for_an_inline_only_chat() {
 #[tokio::test]
 async fn test_perform_daily_shrink_queues_one_summary_per_chat_and_day() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -279,7 +250,7 @@ async fn test_perform_daily_shrink_queues_one_summary_per_chat_and_day() {
 
     // The second run aborts on Stale_Dick_Shrinks' primary key, so nothing of it lands — neither a
     // second length change nor a second summary.
-    let page = shrinks.select_chats_page(None, PAGE)
+    let page = shrinks.select_chats_page(None, PAGE_SIZE)
         .await.expect("couldn't read a page of chats");
     let repeated = shrinks.perform_daily_shrink(&page, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
     assert!(repeated.is_err(), "shrinking the same chat twice in one day must not go through");
@@ -291,9 +262,7 @@ async fn test_perform_daily_shrink_queues_one_summary_per_chat_and_day() {
 #[tokio::test]
 async fn test_perform_daily_shrink_ramps_up_the_ratio() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -337,9 +306,7 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
 #[tokio::test]
 async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -371,9 +338,7 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
 #[tokio::test]
 async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wrapping() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -398,9 +363,7 @@ async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wra
 #[tokio::test]
 async fn test_get_shrinks_for_date_only_returns_that_day() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -432,9 +395,7 @@ async fn test_get_shrinks_for_date_only_returns_that_day() {
 #[tokio::test]
 async fn test_get_shrinks_for_date_pages() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
@@ -472,9 +433,7 @@ async fn test_get_shrinks_for_date_pages() {
 #[tokio::test]
 async fn test_get_latest_shrink_date_returns_none_without_history() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
@@ -492,9 +451,7 @@ async fn test_get_latest_shrink_date_returns_none_without_history() {
 #[tokio::test]
 async fn test_get_latest_and_adjacent_shrink_dates() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
@@ -539,8 +496,7 @@ async fn test_get_latest_and_adjacent_shrink_dates() {
 #[tokio::test]
 async fn test_get_player_uids() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -572,8 +528,7 @@ async fn test_get_player_uids() {
 #[tokio::test]
 async fn every_chat_is_reached_across_the_pages() {
     let db = fresh_db().await;
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { shrinks, users, .. } = repos(&db);
 
     // Five chats against a page of two: the last page is a partial one, which is where an
     // off-by-one usually hides.

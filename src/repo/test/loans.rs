@@ -4,7 +4,7 @@ use crate::{config, repo};
 use crate::domain::primitives::{Debt, LoanPayout, PayoutRatio};
 use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
-use crate::repo::test::{user_id, CHAT_ID, NAME, fresh_db, UID, USER_ID, CHAT_ID_KIND};
+use crate::repo::test::{fresh_db, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
 use domain_types::literal;
 
 #[tokio::test]

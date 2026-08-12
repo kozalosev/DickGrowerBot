@@ -4,7 +4,7 @@ use crate::domain::objects::ExternalUser;
 use crate::domain::primitives::{Length, LengthChange, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, fresh_db, UID, USER_ID};
+use crate::repo::test::{fresh_db, repos, user_id, CHAT_ID, CHAT_ID_KIND, UID, USER_ID};
 use crate::repo::test::dicks::{check_dick, create_dick, create_user, create_user_and_dick_2};
 
 /// A chat the import is not asked about, used to check it stays untouched.
@@ -46,8 +46,7 @@ mod import_semantics {
     #[tokio::test]
     async fn every_dick_grows_by_its_own_length() {
         let db = fresh_db().await;
-        let import = repo::Import::new(db.clone());
-        let dicks = repo::Dicks::new(db.clone(), Default::default());
+        let repo::Repositories { import, dicks, .. } = repos(&db);
         let uid2 = user_id(UID + 1);
 
         create_user(&db).await;
