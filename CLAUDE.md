@@ -573,6 +573,26 @@ to match them against. Records of the exporter's own stack (`opentelemetry`, `hy
 `reqwest`) are never exported: the exporter logs while it sends, and those records would be sent
 again. `observability::tests` covers the whole path against a VictoriaLogs container.
 
+**A record also carries the fields of every span it was written inside**, from the root down, the
+nearer span winning where two of them name the same field. That is what makes "a log message is a
+constant; the values are fields" pay off in the log database rather than only on the console: a
+message that leaves `chat_id` out of its text is still searchable by it. It takes the
+`experimental_span_attributes` feature of `opentelemetry-appender-tracing` and
+`build_logs_bridge`; without them the SDK exports the two ids and nothing else, and every
+`#[tracing::instrument(fields(…))]` in the bot is worth something to the traces and nothing to
+VictoriaLogs. Every field is taken rather than a named few — a span's fields are already chosen by
+hand at each `#[tracing::instrument]`, and an allowlist would be a second list to keep in step.
+
+**A span decorates only what is logged while it is entered**, which is the catch for an error that
+travels. A repository returns its errors instead of logging them, so by the time
+`ContextLoggingErrorHandler` writes the record — in the dispatcher's task — both the repo's span
+and the handler's have closed, and nothing is left to carry the ids. So the two cases part ways:
+
+* an error **handled where it is created** — the read-through caches, the schedulers,
+  `handlers::rights` — is logged inside the caller's span, and its context may be a constant;
+* an error that **escapes to the dispatcher's error handler** keeps its ids in the text of its
+  `.context(…)`, because nothing else will carry them there.
+
 `docker-compose.yml` bundles an **optional** observability stack — Jaeger for the spans,
 VictoriaLogs for the records — gated behind the `tracing` Compose profile. The `infra`/`infra:full`
 tasks start both (they name them, activating the profile) and `docker-compose.override.yml`
