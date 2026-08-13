@@ -8,7 +8,7 @@ use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
 use crate::config::MessageGroup;
 use crate::domain::primitives::{Count, SupportedLanguage};
-use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
+use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
 static REGISTRY: Lazy<prometheus::Registry> = Lazy::new(prometheus::Registry::new);
@@ -91,6 +91,16 @@ pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
 pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
+pub static DAILY_SHRINK_LAST_RUN_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("daily_shrink_last_run_timestamp_seconds", "the UTC midnight the last logged shrink belongs to, as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes 26 hours"));
+pub static DAILY_SHRINK_BROADCAST_PENDING: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("daily_shrink_broadcast_pending", "number of shrink summaries the chats are still owed; a number that only grows means the worker stopped draining the queue"));
+pub static DAILY_SHRINK_BROADCAST_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("daily_shrink_broadcast_batch_size",
+        "how many summaries one run of the worker took. Read it together with the duration of that run: short batches and long runs mean Telegram is slow, while batches that reach daily_shrink_broadcast_batch_limit mean the queue is full",
+        &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]));
+pub static DAILY_SHRINK_BROADCAST_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("daily_shrink_broadcast_batch_limit", "the value of DAILY_SHRINK_BROADCAST_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
 pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
     TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/rate_limited/other). A spike of connect/timeout is the DPI-stalling signal; rate_limited means Telegram asked the bot to slow down, so the THROTTLE_* limits are set too high"));
 pub static TELEGRAM_REQUEST_DURATION: Lazy<TelegramRequestDuration> = Lazy::new(||
@@ -114,6 +124,8 @@ pub static TASK_WEBHOOK_SERVER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("w
 pub static TASK_POLLING_DISPATCHER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("polling_dispatcher"));
 pub static TASK_METRICS_SERVER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("metrics_http_server"));
 pub static TASK_DAILY_SHRINK: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("daily_shrink"));
+pub static TASK_DAILY_SHRINK_BROADCAST: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("daily_shrink_broadcast"));
+pub static TASK_DAILY_SHRINK_BROADCAST_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("daily_shrink_broadcast_cleaning"));
 pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
 pub static TASK_SELF_DESTRUCTION_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction_cleaning"));
 pub static TASK_USER_SERVICE_CACHE_CLEANUP: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("user_service_cache_cleanup"));
@@ -329,6 +341,11 @@ impl Gauge {
 
     /// A gauge is a `float64` on the wire whatever is put in it; `IntGauge` holds an `i64` only
     /// to keep the arithmetic exact in the process.
+    ///
+    /// Takes a bare `i64` rather than a conversion: `domain_types` implements `SaturatingInto`
+    /// only for the pairs that can lose something, so a caller already holding an `i64` — a Unix
+    /// timestamp, say — could not satisfy such a bound at all. The narrowing is named where it
+    /// happens instead.
     pub fn set(&self, value: i64) {
         self.0.set(value)
     }
@@ -766,37 +783,42 @@ impl ChatMigrationCounter {
     }
 }
 
-/// Counters of the daily shrink job: the runs, the shrunk dicks, and the sent summaries.
-/// Without them the job is visible in the logs only.
+/// Counters of the daily shrink job: the runs, the shrunk dicks, and the summaries the chats are
+/// owed. Without them the job is visible in the logs only.
 ///
-/// Alert on `daily_shrink_run_total` when it stops growing for more than 26 hours. That means the
-/// scheduler died: it is a detached task and it stops for good if it can't compute the next
-/// wake-up time (see `spawn_daily_shrink`). A day with nothing to shrink still counts as a run,
-/// under the `empty` label, so a quiet day doesn't look like a dead scheduler.
+/// Whether the scheduler is alive is answered by `daily_shrink_last_run_timestamp_seconds` rather than by
+/// any of these: a counter that moves once a day reads zero both when nothing happened and when
+/// nobody scraped it before the process restarted, and nothing afterwards tells the two apart.
 pub struct DailyShrinkCounters {
     runs: CounterVec,
     victims: CounterVec,
     broadcasts: CounterVec,
+    retries: Counter,
 }
 
 impl DailyShrinkCounters {
     fn new() -> Self {
         let runs = CounterVec::new("daily_shrink_run_total",
-            "count of daily shrink runs by outcome: succeeded when dicks were shrunk, empty when there was nothing to shrink today, failed when the shrinking statement itself errored", &["outcome"]);
+            "count of daily shrink runs by outcome: succeeded when dicks were shrunk, empty when there was nothing to shrink today, failed when at least one batch of the run errored", &["outcome"]);
         let victims = CounterVec::new("daily_shrink_victims_total",
             "count of dicks shrunk, by how their owners get to hear about it: broadcast when their chat can be messaged, inline_only when it can't and the shrinks command is the only way to see it, unreachable when the bot can't post to their chat anymore", &["delivery"]);
         let broadcasts = CounterVec::new("daily_shrink_broadcast_total",
-            "count of per-chat shrink summaries by outcome: sent, failed when Telegram rejected the message, unreachable when it rejected it because the bot can't post to that chat at all (which marks the chat), and skipped for chats already marked and not tried again (one sample per chat, not per victim)", &["outcome"]);
+            "count of per-chat shrink summaries by outcome, one sample per chat and not per victim: sent, unreachable when Telegram rejected it because the bot can't post to that chat at all (which marks the chat), expired when it waited until it stopped being worth sending, failed when every attempt failed, and skipped for chats already marked and never queued", &["outcome"]);
+        let retries = Counter::new("daily_shrink_broadcast_retries_total",
+            "count of failed attempts to send a summary that were worth another one; not an outcome, so the outcomes above still add up to the number of summaries");
         for outcome in ["succeeded", "empty", "failed"] {
             runs.counter(&[outcome]);
         }
         for delivery in ["broadcast", "inline_only", "unreachable"] {
             victims.counter(&[delivery]);
         }
-        for outcome in ["sent", "failed", "unreachable", "skipped"] {
-            broadcasts.counter(&[outcome]);
+        // The four terminal states, spelled the way the table spells them, plus the one ending that
+        // never reaches the queue at all.
+        for state in BroadcastState::TERMINAL {
+            broadcasts.counter(&[&state.to_string()]);
         }
-        Self { runs, victims, broadcasts }
+        broadcasts.counter(&["skipped"]);
+        Self { runs, victims, broadcasts, retries }
     }
 
     /// A run that shrank at least one dick.
@@ -830,26 +852,19 @@ impl DailyShrinkCounters {
         self.victims.counter(&["unreachable"]).inc_by(count)
     }
 
-    /// One chat's summary delivered.
-    pub fn broadcast_sent(&self) {
-        self.broadcasts.counter(&["sent"]).inc()
+    /// One summary reached a state it never leaves. Counted where the row is written, so the table
+    /// and this counter can't say different things.
+    pub fn broadcast_finished(&self, state: BroadcastState) {
+        self.broadcasts.counter(&[&state.to_string()]).inc()
     }
 
-    /// One chat's summary was not delivered. Its members can still use the shrinks command.
-    ///
-    /// A transient failure: the same chat is tried again tomorrow. Watch this one — it used to
-    /// carry the permanent failures too, which kept it growing forever.
-    pub fn broadcast_failed(&self) {
-        self.broadcasts.counter(&["failed"]).inc()
+    /// One attempt failed for a reason worth another attempt. Not an ending: the summary is counted
+    /// again later, under whatever it does end as.
+    pub fn broadcast_retried(&self) {
+        self.retries.inc()
     }
 
-    /// One chat's summary was rejected because the bot can't post there at all, so the chat has
-    /// just been marked and won't be tried again until it comes back.
-    pub fn broadcast_unreachable(&self) {
-        self.broadcasts.counter(&["unreachable"]).inc()
-    }
-
-    /// `count` chats weren't even tried: they had already been marked unreachable.
+    /// `count` chats were never queued: they had already been marked unreachable.
     pub fn broadcast_skipped(&self, count: u64) {
         self.broadcasts.counter(&["skipped"]).inc_by(count)
     }
@@ -1056,7 +1071,7 @@ mod tests {
         let expected = [
             ("daily_shrink_run_total", "outcome", ["succeeded", "empty", "failed"].as_slice()),
             ("daily_shrink_victims_total", "delivery", ["broadcast", "inline_only", "unreachable"].as_slice()),
-            ("daily_shrink_broadcast_total", "outcome", ["sent", "failed", "unreachable", "skipped"].as_slice()),
+            ("daily_shrink_broadcast_total", "outcome", ["sent", "unreachable", "expired", "failed", "skipped"].as_slice()),
         ];
         for (metric, label, values) in expected {
             for value in values {

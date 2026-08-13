@@ -8,12 +8,13 @@
 //! The one right tracked here is deleting other members' messages.
 
 use autometrics::autometrics;
-use teloxide::types::{ChatId, ChatMemberUpdated};
+use teloxide::types::{ChatId, ChatMember, ChatMemberKind, ChatMemberUpdated};
 use std::time::Duration;
 use crate::cache::{Cache, CacheKey};
 use crate::config::AppConfig;
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::metrics;
+use crate::repo::Repositories;
 
 /// What the cache last knew about the bot's right to delete messages here, or `None` when nothing
 /// is known.
@@ -48,7 +49,7 @@ pub async fn remember_deletion_right(cache: &Cache, chat_id: ChatId, may_delete:
 /// demoted or removed, so the write is rare whatever the bot's traffic.
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = upd.chat.id.0))]
-pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache, config: AppConfig) {
+pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache, config: AppConfig, repos: Repositories) {
     let Some(may_delete) = right_to_remember(&upd) else {
         return
     };
@@ -56,6 +57,33 @@ pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache, config: A
         tracing::info!(may_delete, "the bot's rights in the chat have changed");
     }
     remember_deletion_right(&cache, upd.chat.id, may_delete, config.caches.bot_admin).await;
+
+    if may_post_again(&upd) {
+        let chat_id = TelegramChatId::from(upd.chat.id);
+        // Best-effort: a chat that stays marked merely waits for the next command in it, which is
+        // what used to be the only way back.
+        match repos.chats.clear_unreachable(&chat_id).await {
+            Ok(true) => tracing::info!("the bot may post to the chat again"),
+            Ok(false) => {},
+            Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't clear the unreachable mark of the chat"),
+        }
+    }
+}
+
+/// Whether this update is the moment the bot regained the right to post here — added back, or
+/// un-muted by an administrator. Both arrive as a `my_chat_member` update, which is why nothing has
+/// to poll and why waiting for a command in the chat was never the right signal.
+fn may_post_again(upd: &ChatMemberUpdated) -> bool {
+    !may_post(&upd.old_chat_member) && may_post(&upd.new_chat_member)
+}
+
+/// Whether the bot could send a message with that status. Being present is enough for every status
+/// but `restricted`, which is the muted one and carries the answer as a field of its own.
+fn may_post(member: &ChatMember) -> bool {
+    match &member.kind {
+        ChatMemberKind::Restricted(restricted) => restricted.is_member && restricted.can_send_messages,
+        kind => kind.is_present(),
+    }
 }
 
 /// What to remember for this update, or `None` for a chat nothing is ever cleaned up in.
@@ -165,6 +193,59 @@ mod test {
     fn joining_a_group_as_an_ordinary_member_is_remembered_too() {
         let upd = updated(supergroup(), left(), member());
         assert_eq!(right_to_remember(&upd), Some(false));
+    }
+
+    /// A muted bot, which is one of the two ways a chat gets marked unreachable in the first place.
+    fn muted(can_send: bool) -> serde_json::Value {
+        serde_json::json!({
+            "status": "restricted",
+            "user": bot(),
+            "until_date": 0,
+            "is_member": true,
+            "can_send_messages": can_send,
+            "can_send_audios": false,
+            "can_send_documents": false,
+            "can_send_photos": false,
+            "can_send_videos": false,
+            "can_send_video_notes": false,
+            "can_send_voice_notes": false,
+            "can_send_polls": false,
+            "can_send_other_messages": false,
+            "can_add_web_page_previews": false,
+            "can_change_info": false,
+            "can_invite_users": false,
+            "can_pin_messages": false,
+            "can_manage_topics": false,
+        })
+    }
+
+    #[test]
+    fn being_added_back_lets_the_chat_be_reached_again() {
+        let upd = updated(supergroup(), left(), member());
+        assert!(may_post_again(&upd));
+    }
+
+    #[test]
+    fn being_unmuted_lets_the_chat_be_reached_again() {
+        let upd = updated(supergroup(), muted(false), muted(true));
+        assert!(may_post_again(&upd));
+    }
+
+    /// The mark is only ever taken off, never put on here: losing the right is what the failed send
+    /// finds out, and guessing at it from a status change would take a chat away on a demotion that
+    /// says nothing about posting.
+    #[test]
+    fn losing_the_right_is_not_a_reason_to_clear_anything() {
+        assert!(!may_post_again(&updated(supergroup(), member(), left())));
+        assert!(!may_post_again(&updated(supergroup(), muted(true), muted(false))));
+    }
+
+    /// A promotion changes what the bot may do, but it could already post, so nothing about
+    /// reachability has changed and the mark (if any) was about something else.
+    #[test]
+    fn a_promotion_alone_clears_nothing() {
+        let upd = updated(supergroup(), member(), admin(true));
+        assert!(!may_post_again(&upd));
     }
 
     #[test]

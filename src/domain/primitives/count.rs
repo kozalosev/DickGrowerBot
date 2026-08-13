@@ -69,6 +69,26 @@ where i64: sqlx::Decode<'r, DB>
     }
 }
 
+/// Counts of the same thing add up — a total over several batches is still a count of `T`. It
+/// saturates like every other domain number, so a total can't wrap into a smaller one.
+///
+/// Addition is the only operation here. Subtraction would saturate at zero, which turns a
+/// difference that was never supposed to go negative into a plausible-looking `0` instead of a
+/// failure, and nothing asks for it; a count times a count isn't a count at all.
+impl <T> std::ops::Add for Count<T> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self::new(self.value.saturating_add(other.value))
+    }
+}
+
+impl <T> std::ops::AddAssign for Count<T> {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
 impl <T> Deref for Count<T> {
     type Target = u64;
 

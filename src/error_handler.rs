@@ -3,39 +3,33 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use teloxide::RequestError;
 use teloxide::error_handlers::ErrorHandler;
-use crate::metrics::TELEGRAM_REQUEST_ERRORS;
-
-/// An [`ErrorHandler`] that logs like teloxide's `LoggingErrorHandler` but also feeds the
-/// `telegram_request_errors_total` metric, classifying each [`RequestError`] by kind so that a
-/// spike of `connect`/`timeout` errors (the DPI/ТСПУ signal) becomes visible in Prometheus.
+/// An [`ErrorHandler`] that logs like teloxide's `LoggingErrorHandler`, but joins the whole cause
+/// chain onto one line and says which part of the dispatcher the error came from.
 ///
 /// It handles both error types that flow through the dispatcher: the boxed errors returned by
-/// handlers (a [`RequestError`] — e.g. a failed `sendMessage` — is counted; anything else, like a
-/// DB error, is only logged) and a bare [`RequestError`] from an update listener (e.g. failing
-/// `getUpdates` when polling).
-pub struct MetricsErrorHandler {
+/// handlers and a bare [`RequestError`] from an update listener (e.g. failing `getUpdates` when
+/// polling). Neither is counted here — `telegram_request_errors_total` is written by
+/// [`crate::telegram_observer`], which sees every request rather than only the ones that reach a
+/// dispatcher.
+pub struct ContextLoggingErrorHandler {
     text: String,
 }
 
-impl MetricsErrorHandler {
+impl ContextLoggingErrorHandler {
     pub fn new(text: impl Into<String>) -> Arc<Self> {
         Arc::new(Self { text: text.into() })
     }
 }
 
-impl ErrorHandler<Box<dyn Error + Send + Sync>> for MetricsErrorHandler {
+impl ErrorHandler<Box<dyn Error + Send + Sync>> for ContextLoggingErrorHandler {
     fn handle_error(self: Arc<Self>, error: Box<dyn Error + Send + Sync>) -> BoxFuture<'static, ()> {
-        if let Some(request_error) = error.downcast_ref::<RequestError>() {
-            TELEGRAM_REQUEST_ERRORS.record(classify(request_error));
-        }
         tracing::error!(context = %self.text, error = %chain(error.as_ref()), "an error reached the error handler");
         Box::pin(async {})
     }
 }
 
-impl ErrorHandler<RequestError> for MetricsErrorHandler {
+impl ErrorHandler<RequestError> for ContextLoggingErrorHandler {
     fn handle_error(self: Arc<Self>, error: RequestError) -> BoxFuture<'static, ()> {
-        TELEGRAM_REQUEST_ERRORS.record(classify(&error));
         tracing::error!(context = %self.text, error = %chain(&error), "an error reached the error handler");
         Box::pin(async {})
     }

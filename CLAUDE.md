@@ -188,7 +188,7 @@ MSG_SELFDESTRUCT_INLINE_GROUPS=         # comma-separated groups; empty => inlin
 MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS=60 # the first wait after a failure; it doubles with each one
 MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS=3600  # the cap that doubling stops at
 MSG_SELFDESTRUCT_MAX_ATTEMPTS=3         # attempts before the row is marked `failed` and left alone
-MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES=1440  # minutes a finished row is kept; 0 => for ever
+MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS=1        # days a finished row is kept; 0 => for ever
 ```
 
 **Every chat may overrule all of that** with `/cleanup` (issue #128), an admins-only picker that
@@ -321,7 +321,7 @@ warned into the void and found missing again a grace period later — the notice
 edit costs, but a message that is gone is not coming back.
 `SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
 stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
-`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_MINUTES` minutes
+`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS` days
 later — a task of its own, because clearing the history must never be part of the run that wrote it.
 **A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
 on a busy bot.
@@ -399,13 +399,105 @@ Two limits are Telegram's:
 An application answered before it expires is *cancelled* (`loan.rs`, `pvp.rs`): the message has
 stopped being an offer, and its outcome is kept like any other event.
 
+### The daily shrink and its broadcast queue
+
+The shrink and the summaries it owes are **two jobs, not one** (issue #154). `run_daily_shrink`
+applies the decay and writes a row per chat; `scheduler/broadcasts.rs` sends them. Nothing is held
+in memory between the two.
+
+That split is not tidiness. At ~204k chats and ~1.3M victims a day, the old single function held
+the whole day's events in a `HashMap` and sent to each chat in turn — one `await` per chat, with a
+user-service language call inside the loop — so a run took days rather than minutes. And the loop
+around it sleeps only *after* the run returns, so a run that outlasts the day takes the next
+midnight with it: five runs were logged in the fortnight before this was fixed, with the gaps
+growing. Everything below follows from that.
+
+* **The enqueue is a CTE of the shrinking statement**, so there is no moment at which a shrink is
+  committed and its summary is not owed. `Scheduled_Shrink_Broadcasts` (migration 38) is a
+  transactional outbox, and that is the property a message broker could not provide: publishing
+  after committing is a dual write, and a crash in between loses exactly what this exists to keep.
+* **The run walks the chats in batches** of `DAILY_SHRINK_BATCH_SIZE`, read from `Chats` by keyset
+  on the primary key (`select_chats_batch`), so it holds one batch at a time however many chats
+  there are. Per chat is the right granularity because that is the granularity a summary has: each
+  batch is shrunk by one atomic statement, the locks and the memory are bounded, and a failed batch
+  costs its own chats instead of the day. A `/grow` at midnight then waits behind one batch rather
+  than behind every stale dick in the database.
+
+  It reads *every* chat rather than only the ones with something to shrink, on purpose: that
+  question needs a `DISTINCT` over about a million stale dicks, and it would exclude roughly one
+  chat in eight, because nearly every chat has a neglected dick in it. A batch whose chats have
+  nothing stale shrinks nothing and costs an index lookup.
+* **Nothing comes back from the statement but counts.** The shrinks are in `Stale_Dick_Shrinks` and
+  `get_shrinks_for_date` already reads exactly the page a summary needs, so the worker re-reads
+  rather than carrying a payload. Page 0 therefore comes from the same `ORDER BY lost_length DESC`
+  as pages 1+, which the in-memory version did not — its "next page" button could repeat or skip
+  people.
+* **The worker is a copy of `scheduler/deletions.rs`**: claim-with-lease, `for_each_concurrent`,
+  exponential back-off, `finish()` writing the row and the counter together. `UNIQUE (chat_id,
+  shrink_date)` makes the enqueue idempotent, so re-running a day can't double-send. The two
+  indexes are complements — `(fire_after) WHERE finished_at IS NULL` for the claim,
+  `(finished_at) WHERE finished_at IS NOT NULL` for the cleaner — each leaving out what the other
+  is about.
+* **`DAILY_SHRINK_BROADCAST_CONCURRENCY` is the throughput knob**, not the batch size: a run gets through
+  that many messages per round trip. Keep it under `DATABASE_MAX_CONNECTIONS` — every finished
+  summary writes a row — and watch `telegram_request_errors_total{kind="rate_limited"}`.
+* **A rejection teloxide has a variant for is final** (`scheduler::broadcasts::is_final`): Telegram
+  thought about it and refused, so the same payload gets the same answer, and three attempts across
+  199k chats is an outage rather than a hiccup. `ApiError::Unknown` stays retryable — Telegram's own
+  5xx answers arrive that way — unless its text says the chat is unreachable.
+* **A summary older than `DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS` is `expired`** without spending a request.
+  Yesterday's list is still news in a chat that reads once a day; last week's is noise.
+
+```
+DAILY_SHRINK_RATIO=0.01                # unset or 0 => the whole feature is off, queue included
+DAILY_SHRINK_INACTIVITY_DAYS=7
+DAILY_SHRINK_RAMP_UP_DAYS=7
+DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
+DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
+DAILY_SHRINK_BROADCAST_POLL_SECONDS=5
+DAILY_SHRINK_BROADCAST_BATCH_SIZE=200  # summaries one run claims
+DAILY_SHRINK_BROADCAST_CONCURRENCY=16  # how many it sends at once — the throughput knob
+DAILY_SHRINK_BROADCAST_LEASE_SECONDS=300
+DAILY_SHRINK_BROADCAST_RETRY_DELAY_SECONDS=60
+DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY_SECONDS=3600
+DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
+DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS=48  # older than this and the summary is `expired` unsent
+DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_DAYS=3        # 0 => finished rows are kept for ever
+```
+
+**Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
+`MAX(created_at)` in `Stale_Dick_Shrinks`, not any of the `daily_shrink_*` counters. A counter that
+moves once a day reads zero both when nothing happened and when nobody scraped it before the process
+restarted, and nothing afterwards tells the two apart — which is how a fortnight of silence went
+unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > 26h`, and on
+`daily_shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs
+repo's `vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
+
+**Those two are the only gauges, and only the worker's tick publishes them.** They exist because
+vmalert reads Prometheus and cannot query SQL; everything a human looks at — which chats failed and
+why, the states over time — is a panel over `Scheduled_Shrink_Broadcasts` through Grafana's Postgres
+datasource, which costs nothing when nobody is looking. A gauge over the finished rows was the
+opposite trade: grouping a few hundred thousand rows by state every five seconds so that a graph
+could show what one SQL query already answers.
+
+**A log line's level follows what was lost, not whether the code recovered.** A failed shrink page
+is an `error!`: those chats lost the day and nothing retries it. A failed metric publication is a
+`warn!`: one sample of a gauge is gone, the next tick replaces it, and the database problem behind
+it has already been reported by the run that hit it.
+
+`Chats.is_unreachable` keeps a chat out of the queue, and is cleared by `handlers::rights` on the
+`my_chat_member` update that says the bot may post again — re-added, or un-muted by an
+administrator. Telegram sends that update either way, so nothing polls and nobody has to type a
+command in the chat first. It is only ever *taken off* there: whether the bot lost the right is what
+a failed send finds out.
+
 ### One throttle for the schedulers
 
-The daily shrink and the deletion worker both reach many chats at once, and both hold
-`teloxide`'s `Throttle`. They share **one**, built by `scheduler::throttled` and cloned into both
-(`main.rs`).
+The daily shrink's broadcast worker and the deletion worker both reach many chats at once, and both
+hold `teloxide`'s `Throttle`. They share **one**, built by `scheduler::throttled` and cloned into
+both (`main.rs`).
 
-**It only governs the shrink.** The adaptor throttles the message-*sending* methods and passes
+**It only governs the broadcast.** The adaptor throttles the message-*sending* methods and passes
 everything else through, so the deletion worker — which only deletes and edits — is not bounded by
 it at all. That is teloxide's judgement, not an oversight: the documented limits (30 a second, one
 a second per chat) are about sending, and a deletion produces no message and no notification. What
@@ -481,6 +573,26 @@ to match them against. Records of the exporter's own stack (`opentelemetry`, `hy
 `reqwest`) are never exported: the exporter logs while it sends, and those records would be sent
 again. `observability::tests` covers the whole path against a VictoriaLogs container.
 
+**A record also carries the fields of every span it was written inside**, from the root down, the
+nearer span winning where two of them name the same field. That is what makes "a log message is a
+constant; the values are fields" pay off in the log database rather than only on the console: a
+message that leaves `chat_id` out of its text is still searchable by it. It takes the
+`experimental_span_attributes` feature of `opentelemetry-appender-tracing` and
+`build_logs_bridge`; without them the SDK exports the two ids and nothing else, and every
+`#[tracing::instrument(fields(…))]` in the bot is worth something to the traces and nothing to
+VictoriaLogs. Every field is taken rather than a named few — a span's fields are already chosen by
+hand at each `#[tracing::instrument]`, and an allowlist would be a second list to keep in step.
+
+**A span decorates only what is logged while it is entered**, which is the catch for an error that
+travels. A repository returns its errors instead of logging them, so by the time
+`ContextLoggingErrorHandler` writes the record — in the dispatcher's task — both the repo's span
+and the handler's have closed, and nothing is left to carry the ids. So the two cases part ways:
+
+* an error **handled where it is created** — the read-through caches, the schedulers,
+  `handlers::rights` — is logged inside the caller's span, and its context may be a constant;
+* an error that **escapes to the dispatcher's error handler** keeps its ids in the text of its
+  `.context(…)`, because nothing else will carry them there.
+
 `docker-compose.yml` bundles an **optional** observability stack — Jaeger for the spans,
 VictoriaLogs for the records — gated behind the `tracing` Compose profile. The `infra`/`infra:full`
 tasks start both (they name them, activating the profile) and `docker-compose.override.yml`
@@ -508,8 +620,15 @@ Each request produces three things:
 
 * `telegram_request_duration_seconds{method,outcome}` — how long the call took. The failed calls
   are measured too, so a timeout (the slowest case there is) is in the histogram rather than
-  missing from it. `outcome` is `ok` or one of the kinds `telegram_request_errors_total` uses; both
-  come from the same `error_handler::classify`, so the two metrics always agree.
+  missing from it. `outcome` is `ok` or one of the kinds `telegram_request_errors_total` uses.
+* `telegram_request_errors_total{kind}` — the failures of that same call, from that same
+  `error_handler::classify`. One classification feeds both, so the two can't disagree. It is
+  counted **here** rather than at the dispatcher's error handler, which is the only place that sees
+  requests at all: the schedulers never reach a dispatcher, so a broadcast-wide outage left the
+  counter flat. The observer sits under every adaptor, so it sees them and polling's `getUpdates`
+  alike. One consequence worth knowing: `Throttle` retries after a flood wait and the observer is
+  below it, so `rate_limited` counts every rejection where the handler only ever saw the last one.
+  `ContextLoggingErrorHandler` now only logs.
 * a `telegram_request` client span, so a slow API call is a child span of the handler's trace
   instead of an unattributed gap inside it.
 * when the API answers with `ApiError::Unknown` — its way of saying it disliked the payload without
@@ -840,10 +959,16 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   let debt: i64 = value.saturating_into();
   ```
 
-  **Where the sink is ours, the conversion belongs to it, not to the caller.** `Gauge::set` and
-  `Histogram::observe` (`src/metrics.rs`) take `impl SaturatingInto<i64>` / `impl ApproxInto<f64>`,
-  so a caller hands over the domain value itself. The repo layer has done this all along: a query
-  binds `uid as UserId` and sqlx's `Encode` does the converting.
+  **Where the sink is ours *and* the conversion is always the same, it belongs to the sink.** The
+  repo layer does this: a query binds `uid as UserId` and sqlx's `Encode` does the converting.
+
+  The metrics are the counter-example, and worth knowing before trying to tidy them. `Gauge::set`
+  and `Histogram::observe` (`src/metrics.rs`) take a bare `i64` / `f64`, and the callers name the
+  conversion. They cannot do otherwise: `domain_types` implements these traits **only for the pairs
+  that lose something**, on the principle that an exact conversion must say `From`. So there is no
+  `SaturatingInto<i64> for i64`, and a caller holding a Unix timestamp could not satisfy such a
+  bound at all — while a caller holding a `Count` or a `usize` genuinely is narrowing and should
+  say so.
 
   A cast that is genuinely right keeps an `#[allow]` carrying the reason, on the narrowest scope
   that works — never a whole function, or it will also cover the next cast written on that line.

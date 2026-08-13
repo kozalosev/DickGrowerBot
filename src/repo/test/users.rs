@@ -3,7 +3,7 @@ use crate::domain::objects::User;
 use crate::domain::primitives::{DaysCount, LengthChange, Ratio, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{user_id, CHAT_ID, NAME, fresh_db, UID, USER_ID};
+use crate::repo::test::{fresh_db, repos, user_id, CHAT_ID, NAME, UID, USER_ID};
 use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
@@ -185,8 +185,7 @@ fn check_member_with_name(members: &[User], name: &str) {
 }
 
 async fn create_member(db: &Pool<Postgres>) {
-    let users = repo::Users::new(db.clone());
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let repo::Repositories { users, dicks, .. } = repos(db);
 
     let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));
     let uid = USER_ID;

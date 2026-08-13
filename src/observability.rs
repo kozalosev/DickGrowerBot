@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::error::Error;
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_appender_tracing::layer::{OpenTelemetryTracingBridge, TracingSpanAttributes};
 use opentelemetry_sdk::Resource;
 use opentelemetry_otlp::{LogExporter, SpanExporter, WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::filter::{filter_fn, FilterExt};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -55,6 +55,10 @@ impl Telemetry {
 /// different protocols. Trace and span ids are attached to the exported records by the SDK itself,
 /// which is why the console lines carry no ids: without the infrastructure there is nothing to
 /// match them against anyway.
+///
+/// An exported record also carries the fields of every span it was written inside, from the root
+/// down, so a value a log message keeps out of its text is searchable all the same. The nearer
+/// span wins where two of them name the same field.
 pub fn init_tracing() -> Result<Telemetry, Box<dyn Error>> {
     let spans_exported = endpoint(TRACES_ENDPOINT_VAR).is_some();
     let tracer_provider = build_tracer_provider()?;
@@ -74,7 +78,7 @@ pub fn init_tracing() -> Result<Telemetry, Box<dyn Error>> {
         let filter = EnvFilter::from_default_env()
             .and(filter_fn(|metadata| !NEVER_EXPORTED_TARGETS.iter()
                 .any(|target| metadata.target().starts_with(target))));
-        OpenTelemetryTracingBridge::new(provider).with_filter(filter)
+        build_logs_bridge(provider).with_filter(filter)
     });
     let logs_exported = logs_layer.is_some();
 
@@ -148,6 +152,19 @@ fn build_logger_provider(endpoint: String) -> Result<SdkLoggerProvider, Box<dyn 
         .build())
 }
 
+/// Turns the tracing events into OTLP log records, each carrying the fields of the spans it was
+/// written inside.
+///
+/// Every field is taken rather than a named few: what a span carries is already chosen by hand at
+/// each `#[tracing::instrument]`, and a list here would be a second one to keep in step with it.
+fn build_logs_bridge(
+    provider: &SdkLoggerProvider,
+) -> OpenTelemetryTracingBridge<SdkLoggerProvider, SdkLogger> {
+    OpenTelemetryTracingBridge::builder(provider)
+        .with_tracing_span_attributes(TracingSpanAttributes::all())
+        .build()
+}
+
 fn endpoint(variable: &str) -> Option<String> {
     std::env::var(variable).ok().filter(|value| !value.is_empty())
 }
@@ -176,9 +193,13 @@ mod tests {
         "victoria-logs", "victoriametrics/victoria-logs", "latest", VICTORIA_LOGS_PORT, &[])
         .with_settle_millis(500);
 
-    /// The record must carry the ids of the span it was written in, put there by the SDK. Everything
-    /// here is the real pipeline: the tracing bridge, the OTLP/HTTP exporter, and the same log database
-    /// the server runs. The fields must survive as fields, not as text inside the message.
+    /// The record must carry the ids of the span it was written in, put there by the SDK, and the
+    /// fields of that span. Everything here is the real pipeline: the tracing bridge, the OTLP/HTTP
+    /// exporter, and the same log database the server runs. The fields must survive as fields, not
+    /// as text inside the message.
+    ///
+    /// `chat_id` is set on the span and never on an event, so nothing but the span can be carrying
+    /// it when the assertion finds it.
     #[tokio::test]
     async fn an_exported_record_carries_the_trace_id_and_the_fields() {
         let base_url = victoria_logs().await;
@@ -189,12 +210,16 @@ mod tests {
         let tracer_provider = SdkTracerProvider::builder().build();
         let subscriber = tracing_subscriber::registry()
             .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")))
-            .with(OpenTelemetryTracingBridge::new(&logger_provider));
+            .with(build_logs_bridge(&logger_provider));
+
+        // The container outlives the run, so a fixed id could be matched in an earlier run's
+        // records and the assertion would hold whether or not this run's fields arrived.
+        let chat_id = -i64::from(std::process::id());
 
         let trace_id = tracing::subscriber::with_default(subscriber, || {
-            let span = tracing::info_span!("a_handler");
+            let span = tracing::info_span!("a_handler", chat_id);
             let _entered = span.enter();
-            tracing::info!(chat_id = -100500, "a message from the test");
+            tracing::info!("a message from the test");
             // The shape sqlx logs a finished query in: fields only, no message.
             tracing::info!(summary = "SELECT Dicks …", rows_returned = 1);
             span.context().span().span_context().trace_id().to_string()
@@ -205,7 +230,7 @@ mod tests {
         let logs = query_logs(&base_url, &trace_id).await;
         assert!(logs.contains("a message from the test"), "the record is missing from:\n{logs}");
         assert!(logs.contains(&trace_id), "the trace id {trace_id} is missing from:\n{logs}");
-        assert!(logs.contains("-100500"), "the chat_id field is missing from:\n{logs}");
+        assert!(logs.contains(&chat_id.to_string()), "the chat_id of the span is missing from:\n{logs}");
         assert!(logs.contains(r#""severity_text":"INFO""#), "the level is missing from:\n{logs}");
         // A record without a message takes it from `summary`; see `build_logger_provider`.
         assert!(logs.contains(r#""_msg":"SELECT Dicks …""#), "the fallback message is missing from:\n{logs}");

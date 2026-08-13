@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Scheduled_Shrink_Broadcasts (chat_id, shrink_date, created_at) VALUES ($1, current_date - $2::int, current_timestamp - make_interval(days => $2)) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53bf38942275781fc865a5837633169440736876386c54b221ce43c7765ecabc"
+}

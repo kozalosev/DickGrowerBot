@@ -7,12 +7,12 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup};
 use crate::config::AppConfig;
-use crate::domain::primitives::{LanguageCode, Length, Offset, Page, UserId, Username};
+use crate::domain::primitives::{LanguageCode, Offset, Page};
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerDeps, HandlerResult};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
-use crate::repo::{AdjacentDates, RecentShrink, Repositories, ShrinkEvent};
+use crate::repo::{AdjacentDates, RecentShrink, Repositories};
 
 pub(crate) struct ShrinksPage {
     pub lines: String,
@@ -39,29 +39,6 @@ impl ShrinkView {
             ShrinkView::Recent => "commands.shrink.recent",
         }
     }
-}
-
-/// Lets a page render from either a fresh [`RecentShrink`] query or the [`ShrinkEvent`]s the daily
-/// job already holds, so the broadcast's page 0 needs no query at all.
-pub(crate) trait ShrinkLine {
-    fn uid(&self) -> UserId;
-    fn owner_name(&self) -> &Username;
-    fn lost_length(&self) -> Length;
-    fn length(&self) -> Length;
-}
-
-impl ShrinkLine for RecentShrink {
-    fn uid(&self) -> UserId { self.uid }
-    fn owner_name(&self) -> &Username { &self.owner_name }
-    fn lost_length(&self) -> Length { self.lost_length }
-    fn length(&self) -> Length { self.length }
-}
-
-impl ShrinkLine for ShrinkEvent {
-    fn uid(&self) -> UserId { self.uid }
-    fn owner_name(&self) -> &Username { &self.owner_name }
-    fn lost_length(&self) -> Length { self.lost_length }
-    fn length(&self) -> Length { self.new_length }
 }
 
 /// Callback payload of a shrink list's "prev/next page" and "prev/next day" buttons. Wire format:
@@ -99,8 +76,8 @@ impl TryFrom<String> for ShrinkCallbackData {
     }
 }
 
-pub(crate) fn render_shrinks_page<T: ShrinkLine>(
-    rows: &[T],
+pub(crate) fn render_shrinks_page(
+    rows: &[RecentShrink],
     config: &AppConfig,
     lang_code: &LanguageCode,
     view: ShrinkView,
@@ -116,8 +93,8 @@ pub(crate) fn render_shrinks_page<T: ShrinkLine>(
     let lines = rows.iter()
         .take(usize::from(config.top_limit))
         .map(|s| {
-            let name = s.owner_name().escaped();
-            t!(&line_key, locale = lang_code, uid = s.uid(), name = name, lost = s.lost_length(), length = s.length())
+            let name = s.owner_name.escaped();
+            t!(&line_key, locale = lang_code, uid = s.uid, name = name, lost = s.lost_length, length = s.length)
         })
         .collect::<Vec<_>>()
         .join("\n");

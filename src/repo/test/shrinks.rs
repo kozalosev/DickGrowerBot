@@ -1,28 +1,18 @@
 use sqlx::{Pool, Postgres};
-use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio, Username};
-use crate::domain::primitives::chat::TelegramChatId;
+use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio};
+use crate::domain::primitives::chat::{InternalChatId, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{user_id, CHAT_ID, CHAT_ID_KIND, NAME, fresh_db, UID, USER_ID};
+use crate::repo::test::{fresh_db, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
 use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
 
+/// Small, so every test here crosses a batch boundary instead of fitting into one batch.
+const BATCH_SIZE: Limit = Limit::new(2);
+
 /// `<= 1` disables the ramp, applying the full ratio from the first overdue day — the old,
 /// pre-ramp behavior that most tests want so their expected losses stay simple round numbers.
 const NO_RAMP: DaysCount = DaysCount::new(0);
-
-/// Inserts a dick directly (bypassing `create_or_grow`) with an explicit age, so we can seed
-/// dicks that look stale. A direct INSERT is required because the `Dicks` BEFORE UPDATE trigger
-/// forbids touching a row that was grown today — which a freshly created dick always is.
-async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, length: i64, days_ago: i32) {
-    sqlx::query!(
-        "INSERT INTO Dicks (uid, chat_id, length, updated_at) \
-            VALUES ($1, $2, $3, current_timestamp - make_interval(days => $4))",
-        uid, internal_chat_id, length, days_ago)
-        .execute(db)
-        .await
-        .expect("couldn't seed an aged dick");
-}
 
 async fn seed_aged_dick_with_bonus_attempts(
     db: &Pool<Postgres>,
@@ -65,13 +55,6 @@ async fn seed_old_shrink(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, l
         .expect("couldn't seed an old shrink");
 }
 
-async fn internal_chat_id(db: &Pool<Postgres>) -> i64 {
-    sqlx::query_scalar!("SELECT id FROM Chats WHERE chat_id = $1", CHAT_ID)
-        .fetch_one(db)
-        .await
-        .expect("couldn't resolve the internal chat id")
-}
-
 async fn updated_at_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> chrono::DateTime<chrono::Utc> {
     sqlx::query_scalar!("SELECT updated_at FROM Dicks WHERE uid = $1 AND chat_id = $2", uid, internal_chat_id)
         .fetch_one(db)
@@ -86,12 +69,51 @@ async fn length_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i64 
         .expect("couldn't read length")
 }
 
+/// What today's run took off that dick. The shrink no longer hands the events back, so this is
+/// where a loss is read from — the same table the summary is rendered out of.
+async fn lost_length_of(db: &Pool<Postgres>, uid: i64) -> i64 {
+    sqlx::query_scalar!(
+        "SELECT lost_length FROM Stale_Dick_Shrinks WHERE uid = $1 AND created_at = current_date", uid)
+        .fetch_one(db)
+        .await
+        .expect("couldn't read the logged loss")
+}
+
+/// The summaries queued for today, as `(internal chat id, state)`.
+async fn queued_broadcasts(db: &Pool<Postgres>) -> Vec<(i64, String)> {
+    sqlx::query!(
+        r#"SELECT chat_id, state::text AS "state!" FROM Scheduled_Shrink_Broadcasts
+            WHERE shrink_date = current_date ORDER BY chat_id"#)
+        .fetch_all(db)
+        .await
+        .expect("couldn't read the queued summaries")
+        .into_iter()
+        .map(|row| (row.chat_id, row.state))
+        .collect()
+}
+
+/// Every chat, walked one batch at a time — what the run does, with a batch size small enough that
+/// these tests cross a batch boundary rather than fitting into one.
+async fn shrink_all(shrinks: &repo::Shrinks, ratio: Ratio, grace_days: DaysCount, ramp_up_days: DaysCount)
+    -> repo::ShrinkBatchOutcome
+{
+    let mut total = repo::ShrinkBatchOutcome::default();
+    let mut after = None;
+    loop {
+        let batch = shrinks.select_chats_batch(after, BATCH_SIZE)
+            .await.expect("couldn't read a batch of chats");
+        let Some(last) = batch.last().copied() else { break };
+        after = Some(last);
+        total += shrinks.perform_daily_shrink(&batch, ratio, grace_days, ramp_up_days)
+            .await.expect("couldn't perform the daily shrink");
+    }
+    total
+}
+
 #[tokio::test]
 async fn test_perform_daily_shrink() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     // A fresh dick for USER_ID — also creates the Chats row. It must NOT be shrunk (grown today).
     users.create_or_update(USER_ID, NAME)
@@ -120,17 +142,18 @@ async fn test_perform_daily_shrink() {
         .await.expect("couldn't create the bonus user");
     seed_aged_dick_with_bonus_attempts(&db, chat_id, bonus_uid, 100, 10, 1).await;
 
-    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP)
-        .await.expect("couldn't perform the daily shrink");
+    let outcome = shrink_all(&shrinks, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
 
-    assert_eq!(events.len(), 2, "the two stale, positive dicks should have shrunk");
-    let event = events.iter().find(|e| e.uid == user_id(victim_uid))
-        .expect("the victim's shrink event is missing");
-    assert_eq!(event.owner_name, Username::from("stale-victim"));
-    assert_eq!(event.lost_length, 10, "loss = ceil(100 * 0.1)");
-    assert_eq!(event.new_length, 90);
-    assert_eq!(event.messageable_chat_id, Some(TelegramChatId::new(CHAT_ID)));
-    assert!(!event.is_unreachable, "the bot has no reason to think it can't post here");
+    assert_eq!(outcome.victims, 2, "the two stale, positive dicks should have shrunk");
+    assert_eq!(outcome.to_broadcast, 2);
+    assert_eq!(outcome.inline_only, 0);
+    assert_eq!(outcome.unreachable, 0);
+    assert_eq!(lost_length_of(&db, victim_uid).await, 10, "loss = ceil(100 * 0.1)");
+    assert_eq!(length_of(&db, victim_uid, chat_id).await, 90);
+
+    // One summary for the chat, however many of its dicks shrank.
+    assert_eq!(outcome.chats_queued, 1);
+    assert_eq!(queued_broadcasts(&db).await, vec![(chat_id, "created".to_owned())]);
 
     // The fresh and the zero-length dicks are untouched.
     assert_eq!(length_of(&db, UID, chat_id).await, 100, "the fresh dick must not shrink");
@@ -150,10 +173,7 @@ async fn test_perform_daily_shrink() {
 #[tokio::test]
 async fn test_perform_daily_shrink_reports_unreachable_chats() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
-    let chats = repo::Chats::new(db.clone(), Default::default());
+    let repo::Repositories { dicks, shrinks, users, chats, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
@@ -169,24 +189,80 @@ async fn test_perform_daily_shrink_reports_unreachable_chats() {
     chats.mark_unreachable(&TelegramChatId::new(CHAT_ID))
         .await.expect("couldn't mark the chat as unreachable");
 
-    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP)
-        .await.expect("couldn't perform the daily shrink");
+    let outcome = shrink_all(&shrinks, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
 
-    assert_eq!(events.len(), 1);
-    let event = &events[0];
-    assert!(event.is_unreachable);
-    assert_eq!(event.messageable_chat_id, Some(TelegramChatId::new(CHAT_ID)),
-        "the chat is still messageable in principle — it just can't be reached right now");
-    assert_eq!(event.new_length, 90, "an unreachable chat shrinks like any other");
+    assert_eq!(outcome.victims, 1);
+    assert_eq!(outcome.unreachable, 1, "the chat is messageable in principle, just not right now");
+    assert_eq!(outcome.to_broadcast, 0);
+    assert_eq!(outcome.chats_skipped, 1);
+    assert_eq!(length_of(&db, victim_uid, chat_id).await, 90, "an unreachable chat shrinks like any other");
+
+    // Nothing is queued for it, which is the point: the worker never spends a request on a chat
+    // the bot is already known to have lost.
+    assert_eq!(outcome.chats_queued, 0);
+    assert!(queued_broadcasts(&db).await.is_empty());
+}
+
+/// A chat known only by its `chat_instance` can't be messaged proactively at all, so it shrinks
+/// without ever being queued. Its members still see the events through the `shrinks` command.
+#[tokio::test]
+async fn test_perform_daily_shrink_queues_nothing_for_an_inline_only_chat() {
+    let db = fresh_db().await;
+    let repo::Repositories { shrinks, users, .. } = repos(&db);
+
+    let chat_id = sqlx::query_scalar!("INSERT INTO Chats (chat_instance) VALUES ('inline-only') RETURNING id")
+        .fetch_one(&db).await.expect("couldn't create the inline-only chat");
+
+    let victim_uid = UID + 1;
+    users.create_or_update(user_id(victim_uid), "stale-victim")
+        .await.expect("couldn't create the victim user");
+    seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
+
+    let outcome = shrink_all(&shrinks, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
+
+    assert_eq!(outcome.victims, 1);
+    assert_eq!(outcome.inline_only, 1);
+    assert_eq!(outcome.chats_queued, 0);
     assert_eq!(length_of(&db, victim_uid, chat_id).await, 90);
+    assert!(queued_broadcasts(&db).await.is_empty());
+}
+
+/// The unique index is what keeps a chat from being told twice about the same day, however often
+/// the run is repeated — the property that makes re-running a partly failed day safe.
+#[tokio::test]
+async fn test_perform_daily_shrink_queues_one_summary_per_chat_and_day() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
+
+    users.create_or_update(USER_ID, NAME)
+        .await.expect("couldn't create the primary user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100))
+        .await.expect("couldn't create the fresh dick");
+    let chat_id = internal_chat_id(&db).await;
+
+    let victim_uid = UID + 1;
+    users.create_or_update(user_id(victim_uid), "stale-victim")
+        .await.expect("couldn't create the victim user");
+    seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
+
+    let first = shrink_all(&shrinks, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
+    assert_eq!(first.chats_queued, 1);
+
+    // The second run aborts on Stale_Dick_Shrinks' primary key, so nothing of it lands — neither a
+    // second length change nor a second summary.
+    let batch = shrinks.select_chats_batch(None, BATCH_SIZE)
+        .await.expect("couldn't read a batch of chats");
+    let repeated = shrinks.perform_daily_shrink(&batch, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
+    assert!(repeated.is_err(), "shrinking the same chat twice in one day must not go through");
+
+    assert_eq!(length_of(&db, victim_uid, chat_id).await, 90);
+    assert_eq!(queued_broadcasts(&db).await, vec![(chat_id, "created".to_owned())]);
 }
 
 #[tokio::test]
 async fn test_perform_daily_shrink_ramps_up_the_ratio() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -215,16 +291,11 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
         .await.expect("couldn't create the way-overdue user");
     seed_aged_dick(&db, chat_id, way_overdue_uid, 1000, 20).await;
 
-    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.5), GRACE_DAYS, DaysCount::new(4))
-        .await.expect("couldn't perform the daily shrink");
+    shrink_all(&shrinks, literal!(Ratio = 0.5), GRACE_DAYS, DaysCount::new(4)).await;
 
-    let loss_of = |uid: i64| events.iter()
-        .find(|e| e.uid == user_id(uid))
-        .unwrap_or_else(|| panic!("no shrink event for uid {uid}"))
-        .lost_length;
-    assert_eq!(loss_of(just_overdue_uid), 125, "1/4 of the ramp: ceil(1000 * 0.5 * 1/4)");
-    assert_eq!(loss_of(fully_ramped_uid), 500, "ramp fully kicked in: ceil(1000 * 0.5)");
-    assert_eq!(loss_of(way_overdue_uid), 500, "ramp is capped at the full ratio, not exceeded");
+    assert_eq!(lost_length_of(&db, just_overdue_uid).await, 125, "1/4 of the ramp: ceil(1000 * 0.5 * 1/4)");
+    assert_eq!(lost_length_of(&db, fully_ramped_uid).await, 500, "ramp fully kicked in: ceil(1000 * 0.5)");
+    assert_eq!(lost_length_of(&db, way_overdue_uid).await, 500, "ramp is capped at the full ratio, not exceeded");
 }
 
 /// The loss formula floors at `GREATEST(1, ...)`, so any neglected, positive-length dick loses at
@@ -235,9 +306,7 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
 #[tokio::test]
 async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -251,13 +320,10 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
     seed_aged_dick(&db, chat_id, victim_uid, 1, 100).await;
 
     // ratio * length rounds down to 0 cm on its own — GREATEST(1, ...) must still floor it at 1.
-    let events = shrinks.perform_daily_shrink(literal!(Ratio = 0.01), GRACE_DAYS, NO_RAMP)
-        .await.expect("couldn't perform the daily shrink");
+    shrink_all(&shrinks, literal!(Ratio = 0.01), GRACE_DAYS, NO_RAMP).await;
 
-    let event = events.iter().find(|e| e.uid == user_id(victim_uid))
-        .expect("the 1cm dick must still shrink despite the tiny ratio");
-    assert_eq!(event.lost_length, 1, "the floor must apply even though ratio * length rounds to 0");
-    assert_eq!(event.new_length, 0);
+    assert_eq!(lost_length_of(&db, victim_uid).await, 1,
+        "the floor must apply even though ratio * length rounds to 0");
     assert_eq!(length_of(&db, victim_uid, chat_id).await, 0);
 }
 
@@ -272,9 +338,7 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
 #[tokio::test]
 async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wrapping() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -288,7 +352,8 @@ async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wra
     seed_aged_dick(&db, chat_id, victim_uid, 100, 100).await;
 
     let absurd_grace_days = DaysCount::new(3_000_000_000); // > i32::MAX (~2.15 billion), valid u32
-    let result = shrinks.perform_daily_shrink(literal!(Ratio = 0.5), absurd_grace_days, NO_RAMP).await;
+    let chat_ids = &[InternalChatId::new(chat_id.try_into().expect("the internal chat id must be positive"))];
+    let result = shrinks.perform_daily_shrink(chat_ids, literal!(Ratio = 0.5), absurd_grace_days, NO_RAMP).await;
 
     assert!(result.is_err(), "an out-of-range grace_days must error, not silently wrap to negative");
     assert_eq!(length_of(&db, victim_uid, chat_id).await, 100,
@@ -298,9 +363,7 @@ async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wra
 #[tokio::test]
 async fn test_get_shrinks_for_date_only_returns_that_day() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -314,8 +377,7 @@ async fn test_get_shrinks_for_date_only_returns_that_day() {
     seed_aged_dick(&db, chat_id, victim_uid, 100, 10).await;
 
     // Today's shrink (logged with created_at = current_date).
-    shrinks.perform_daily_shrink(literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP)
-        .await.expect("couldn't perform the daily shrink");
+    shrink_all(&shrinks, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
     // An older shrink, on a different day — must not leak into today's exact-date query.
     seed_old_shrink(&db, chat_id, UID, 5, 8).await;
 
@@ -333,9 +395,7 @@ async fn test_get_shrinks_for_date_only_returns_that_day() {
 #[tokio::test]
 async fn test_get_shrinks_for_date_pages() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
@@ -373,9 +433,7 @@ async fn test_get_shrinks_for_date_pages() {
 #[tokio::test]
 async fn test_get_latest_shrink_date_returns_none_without_history() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
@@ -393,9 +451,7 @@ async fn test_get_latest_shrink_date_returns_none_without_history() {
 #[tokio::test]
 async fn test_get_latest_and_adjacent_shrink_dates() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let shrinks = repo::Shrinks::new(db.clone());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, shrinks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
@@ -440,8 +496,7 @@ async fn test_get_latest_and_adjacent_shrink_dates() {
 #[tokio::test]
 async fn test_get_player_uids() {
     let db = fresh_db().await;
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
-    let users = repo::Users::new(db.clone());
+    let repo::Repositories { dicks, users, .. } = repos(&db);
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
@@ -464,4 +519,41 @@ async fn test_get_player_uids() {
         user_id(UID + 1),
         user_id(UID + 2),
     ]);
+}
+
+/// The run walks the chats by their primary key, a batch at a time. An off-by-one in the keyset
+/// would silently skip a chat every batch — nobody's dick would shrink there and no summary would
+/// be owed — so this seeds more chats than fit in one batch and insists that every one of them was
+/// reached.
+#[tokio::test]
+async fn every_chat_is_reached_across_the_batches() {
+    let db = fresh_db().await;
+    let repo::Repositories { shrinks, users, .. } = repos(&db);
+
+    // Five chats against a batch of two: the last batch is a partial one, which is where an
+    // off-by-one usually hides.
+    let mut seeded = Vec::new();
+    for i in 0..5i64 {
+        let chat_id = sqlx::query_scalar!("INSERT INTO Chats (chat_id) VALUES ($1) RETURNING id", -1000 - i)
+            .fetch_one(&db).await.expect("couldn't create the chat");
+        let uid = UID + 100 + i;
+        users.create_or_update(user_id(uid), "stale-victim")
+            .await.expect("couldn't create the victim user");
+        seed_aged_dick(&db, chat_id, uid, 100, 10).await;
+        seeded.push((chat_id, uid));
+    }
+
+    let outcome = shrink_all(&shrinks, literal!(Ratio = 0.1), GRACE_DAYS, NO_RAMP).await;
+
+    assert_eq!(outcome.victims, 5, "every chat's dick must have shrunk");
+    assert_eq!(outcome.chats_queued, 5, "every chat must be owed a summary");
+    for (chat_id, uid) in &seeded {
+        assert_eq!(length_of(&db, *uid, *chat_id).await, 90, "the dick in chat {chat_id} was skipped");
+    }
+
+    let mut queued: Vec<i64> = queued_broadcasts(&db).await.into_iter().map(|(id, _)| id).collect();
+    queued.sort_unstable();
+    let mut expected: Vec<i64> = seeded.into_iter().map(|(chat_id, _)| chat_id).collect();
+    expected.sort_unstable();
+    assert_eq!(queued, expected);
 }

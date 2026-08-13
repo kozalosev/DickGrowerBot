@@ -136,6 +136,16 @@ impl<'a> EnvDuration<'a> {
         Self::of(key, 60)
     }
 
+    /// The variable holds whole hours.
+    pub fn hours(key: &'a str) -> Self {
+        Self::of(key, 60 * 60)
+    }
+
+    /// The variable holds whole days.
+    pub fn days(key: &'a str) -> Self {
+        Self::of(key, 60 * 60 * 24)
+    }
+
     fn of(key: &'a str, seconds_per_unit: u64) -> Self {
         Self { units: EnvValue::of(key), seconds_per_unit }
     }

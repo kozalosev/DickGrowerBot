@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Scheduled_Message_Deletions (message_kind, message_group, lang_code, fire_after)\n            VALUES ('reply', 'notice', 'en', current_timestamp - interval '1 minute')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1fd616bda035d8b4d752b6e105076e582d93c336942840f3d41a64c50938e60a"
+}

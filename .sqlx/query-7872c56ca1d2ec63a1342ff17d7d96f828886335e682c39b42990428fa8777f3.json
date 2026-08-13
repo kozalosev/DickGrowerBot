@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Shrink_Broadcasts b SET fire_after = $2\n                WHERE b.id IN (\n                    SELECT id FROM Scheduled_Shrink_Broadcasts\n                    WHERE fire_after <= current_timestamp AND finished_at IS NULL\n                    ORDER BY fire_after\n                    LIMIT $1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING b.id AS \"id: ScheduledBroadcastId\",\n                          (SELECT c.chat_id FROM Chats c WHERE c.id = b.chat_id) AS \"chat_id: TelegramChatId\",\n                          b.shrink_date, b.created_at, b.attempts AS \"attempts!: AttemptsCount\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: ScheduledBroadcastId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "scheduled_shrink_broadcasts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chat_id: TelegramChatId",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "shrink_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "scheduled_shrink_broadcasts",
+            "name": "shrink_date"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "scheduled_shrink_broadcasts",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "attempts!: AttemptsCount",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "scheduled_shrink_broadcasts",
+            "name": "attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7872c56ca1d2ec63a1342ff17d7d96f828886335e682c39b42990428fa8777f3"
+}

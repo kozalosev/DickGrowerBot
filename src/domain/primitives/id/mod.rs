@@ -8,7 +8,8 @@ use crate::*;
 id!(
     LoanId,
     UserId,
-    ScheduledDeletionId
+    ScheduledDeletionId,
+    ScheduledBroadcastId
 );
 
 #[domain_type]

@@ -9,7 +9,7 @@ use crate::repo::test::{dicks, fresh_db, CHAT_ID_KIND};
 #[tokio::test]
 async fn test_configured() {
     let db = fresh_db().await;
-    create_chat(&db).await;
+    seed_chat_with_player(&db).await;
 
     // test creation and update
     for i in 1..=2 {
@@ -52,7 +52,7 @@ async fn test_configured_impl(db: &Pool<Postgres>, attempt: u8) {
 async fn test_no_announcements() {
     let db = fresh_db().await;
     let [en, _] = get_languages();
-    create_chat(&db).await;
+    seed_chat_with_player(&db).await;
 
     // Ensure we get nothing if properties are not set:
 
@@ -82,7 +82,7 @@ async fn test_no_announcements() {
 #[tokio::test]
 async fn test_reload() {
     let db = fresh_db().await;
-    create_chat(&db).await;
+    seed_chat_with_player(&db).await;
     let [en, _] = get_languages();
 
     let path = write_temp_file("max_shows: 1\ntexts:\n  en: before\n");
@@ -116,7 +116,8 @@ fn write_file(path: &str, content: &str) {
     std::fs::write(path, content).expect("couldn't write the temp file");
 }
 
-async fn create_chat(db: &Pool<Postgres>) {
+/// A chat with a player in it, which is what an announcement needs to be shown to.
+async fn seed_chat_with_player(db: &Pool<Postgres>) {
     let chat_id_part = CHAT_ID_KIND.clone().into();
     dicks::create_user_and_dick_2(db, &chat_id_part, "Ann").await;
 }

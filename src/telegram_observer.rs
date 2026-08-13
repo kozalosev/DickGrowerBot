@@ -4,7 +4,7 @@ use teloxide::observer::{RequestBody, RequestObservation, RequestObserver};
 use teloxide::{ApiError, RequestError};
 use tracing::Span;
 use crate::error_handler::classify;
-use crate::metrics::TELEGRAM_REQUEST_DURATION;
+use crate::metrics::{TELEGRAM_REQUEST_DURATION, TELEGRAM_REQUEST_ERRORS};
 
 /// Watches every request the bot sends to the Telegram Bot API and turns it into three signals:
 /// the `telegram_request_duration_seconds` histogram, a client span the request's latency can be
@@ -39,6 +39,12 @@ impl RequestObservation for PendingRequest {
     fn on_response(self: Box<Self>, elapsed: Duration, outcome: Result<(), &RequestError>) {
         let label = outcome.map_or_else(classify, |()| "ok");
         TELEGRAM_REQUEST_DURATION.record(self.method, label, elapsed.as_secs_f64());
+        // One classification feeds both, so the histogram's `outcome` and the counter's `kind` can
+        // never disagree. Counted here rather than at the dispatcher because this sits below every
+        // adaptor, and so sees the schedulers' requests too — which the dispatcher never does.
+        if outcome.is_err() {
+            TELEGRAM_REQUEST_ERRORS.record(label);
+        }
 
         // `ApiError::Unknown` is the answer Telegram gives when it dislikes something about the
         // payload itself — a broken entity, an over-long text — and the message alone never says
@@ -78,14 +84,42 @@ mod tests {
         assert_samples("GetMe", "ok", 1);
     }
 
+    /// `telegram_request_errors_total` carries only a `kind`, so unlike the histogram there is no
+    /// per-test label to hide behind while the tests run in parallel. The delta is what can be
+    /// asserted; the absolute value belongs to whatever else ran at the same time.
+    fn errors_of(kind: &str) -> u64 {
+        let series = format!("telegram_request_errors_total{{kind=\"{kind}\"}} ");
+        render_metrics().lines()
+            .find_map(|line| line.strip_prefix(&series))
+            .and_then(|count| count.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
     #[test]
     fn records_a_failed_request_under_its_own_outcome() {
         let err = RequestError::Api(ApiError::BotBlocked);
+        let before = errors_of("api");
 
         let guard = TelegramObserver.on_request("SendDice", RequestBody::Json(b"{}"));
         guard.on_response(Duration::from_millis(50), Err(&err));
 
         assert_samples("SendDice", "api", 1);
+        // The same classification feeds both, which is the point of counting the errors here: the
+        // schedulers never reach a dispatcher, so nothing else would count theirs.
+        assert!(errors_of("api") > before, "the failed request wasn't counted as an error");
+    }
+
+    /// A request that went through must leave the error counter alone, or every graph of the error
+    /// rate would follow the traffic instead of the failures.
+    #[test]
+    fn a_successful_request_is_not_counted_as_an_error() {
+        let before = errors_of("network");
+
+        let guard = TelegramObserver.on_request("GetChat", RequestBody::Json(b"{}"));
+        guard.on_response(Duration::from_millis(10), Ok(()));
+
+        assert_samples("GetChat", "ok", 1);
+        assert_eq!(errors_of("network"), before);
     }
 
     /// A multipart request has no body to log, but it must still be measured.

@@ -5,7 +5,7 @@ use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramCh
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
-use crate::repo::test::{CHAT_ID, fresh_db, UID, USER_ID};
+use crate::repo::test::{fresh_db, repos, CHAT_ID, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
 
 #[tokio::test]
@@ -385,8 +385,7 @@ async fn migrate_chat_id() {
     let db = fresh_db().await;
     create_user(&db).await;
 
-    let chats = repo::Chats::new(db.clone(), Default::default());
-    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let repo::Repositories { chats, dicks, .. } = repos(&db);
     let (old, new) = (TelegramChatId::new(CHAT_ID), TelegramChatId::new(-1001234567890));
 
     // nothing is known about the group yet — the migration is a no-op rather than an error, and

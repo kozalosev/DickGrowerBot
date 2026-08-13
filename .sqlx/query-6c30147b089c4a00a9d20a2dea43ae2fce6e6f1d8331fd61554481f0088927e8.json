@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT state::text AS \"state!\", count(*) AS \"count!\" FROM Scheduled_Shrink_Broadcasts\n            WHERE finished_at IS NOT NULL GROUP BY state ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "6c30147b089c4a00a9d20a2dea43ae2fce6e6f1d8331fd61554481f0088927e8"
+}

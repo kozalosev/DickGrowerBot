@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Shrink_Broadcasts SET state = $2, finished_at = current_timestamp WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        {
+          "Custom": {
+            "name": "broadcast_state",
+            "kind": {
+              "Enum": [
+                "created",
+                "sent",
+                "unreachable",
+                "expired",
+                "failed"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eab1e2bcee8fc455f395a2d558bbd80f3537bc6fae40fcc001b5d35e184d8ef1"
+}
