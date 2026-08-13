@@ -1066,7 +1066,7 @@ mod tests {
     #[test]
     fn every_daily_shrink_series_is_exported() {
         Lazy::force(&DAILY_SHRINK);
-            let rendered = render_metrics();
+        let rendered = render_metrics();
 
         let expected = [
             ("daily_shrink_run_total", "outcome", ["succeeded", "empty", "failed"].as_slice()),
