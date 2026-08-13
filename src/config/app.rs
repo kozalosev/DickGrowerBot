@@ -1,3 +1,4 @@
+use std::time::Duration;
 use reqwest::Url;
 use crate::config::caches::CachesConfig;
 use crate::config::env::*;
@@ -32,6 +33,10 @@ pub struct DatabaseConfig {
     pub url: Url,
     pub max_connections: u32,
     pub min_connections: u32,
+    /// How long a query waits for a free connection before giving up. sqlx's own default, so that
+    /// reading it from the environment changes nothing by itself — but queueing means the pool is
+    /// empty, and waiting longer creates no connections, so `.env.example` suggests less.
+    pub acquire_timeout: Duration,
 }
 
 impl AppConfig {
@@ -126,6 +131,7 @@ impl DatabaseConfig {
             url: get_env_mandatory_value("DATABASE_URL")?,
             max_connections: get_env_value_or_default("DATABASE_MAX_CONNECTIONS", 10),
             min_connections: get_env_value_or_default("DATABASE_MIN_CONNECTIONS", 5),
+            acquire_timeout: env_duration!("DATABASE_ACQUIRE_TIMEOUT", or = secs(30), at_least = secs(1)),
         })
     }
 }

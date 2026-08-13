@@ -84,6 +84,7 @@ pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Po
         }))
         .max_connections(config.max_connections)
         .min_connections(config.min_connections)
+        .acquire_timeout(config.acquire_timeout)
         .connect(config.url.as_str()).await?;
     sqlx::migrate!().run(&pool).await?;
     Ok(pool)

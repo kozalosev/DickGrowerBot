@@ -202,7 +202,14 @@ fn db_url(port: u16, database: &str) -> Url {
 async fn connect_and_migrate(url: Url) -> Pool<Postgres> {
     // A test drives its database from one task, so a couple of connections is plenty. The cap
     // matters because every test in the binary holds a pool of its own at the same time.
-    let conf = DatabaseConfig { url, max_connections: 2, min_connections: 1 };
+    // A generous wait for a connection, unlike production's: a test that queues here is queueing
+    // behind the whole suite's containers starting up, not behind a user watching a spinner.
+    let conf = DatabaseConfig {
+        url,
+        max_connections: 2,
+        min_connections: 1,
+        acquire_timeout: Duration::from_secs(60),
+    };
     repo::establish_database_connection(&conf)
         .await.expect("couldn't establish a database connection")
 }
