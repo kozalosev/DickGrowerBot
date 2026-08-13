@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
     let repos = Repositories::new(&db_conn, &app_config);
-    let cache = Cache::connect(config::RedisConfig::from_env()).await;
+    let cache = Cache::connect(config::CacheConfig::from_env()).await;
     let language_service = users::init_language_service(&integrations_config, app_config.caches.chat_language,
                                                         repos.chats.clone(), app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;

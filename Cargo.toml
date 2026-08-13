@@ -50,7 +50,7 @@ tower = "0.5.3"
 dotenvy = "0.15.7"
 # Database and SQL
 sqlx = { version = "0.9.0", features = [ "runtime-tokio", "postgres", "chrono", "tls-rustls", "macros" ] }
-redis = { version = "1.5.0", default-features = false, features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.5.0", default-features = false, features = ["tokio-comp", "connection-manager", "script"] }
 # gRPC client
 tonic = "0.14"
 tonic-prost = "0.14"
@@ -60,6 +60,7 @@ prost-types = "0.14"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json"] }
 # Serialization / deserialization
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
 serde-saphyr = "1.0.0-rc.1"
 # HTML and templates
 tinytemplate = "1.2.1"
@@ -91,9 +92,6 @@ domain_types_macro = { version = "0.1.0", path = "domain_types_macro" }
 
 [dev-dependencies]
 testcontainers = { version = "0.27.3", features = ["reusable-containers"] }
-# Builds a teloxide `Message` for the tests of the update filters: it has far more fields than a
-# test wants to name, but it deserializes from the JSON Telegram itself would have sent.
-serde_json = "1"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

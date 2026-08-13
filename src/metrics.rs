@@ -58,6 +58,10 @@ pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_cleanup_usage_total", "count of /cleanup invocations and changes of the setting", ["invoked", "finished"]));
 pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
+pub static CACHE_LOCAL_ENTRIES: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("cache_local_entries", "number of values the cache is holding in this process, as of the last sweep. Always zero when the values are shared through Redis, since nothing is kept here then. A number to watch rather than to alert on: keeping the values here is a setting, and the only one a single instance of the bot needs"));
+pub static CACHE_FALLBACK_ACTIVE: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("cache_fallback_active", "1 when the bot was told to share its cached values through Redis and is keeping them in its own process instead, having failed to reach the server as it started. 0 when it is doing what it was asked, whichever that was — cache_local_entries says which mode is running, this says only whether it was chosen"));
 pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
     CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
@@ -129,6 +133,7 @@ pub static TASK_DAILY_SHRINK_BROADCAST_CLEANING: Lazy<TaskMonitor> = Lazy::new(|
 pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
 pub static TASK_SELF_DESTRUCTION_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction_cleaning"));
 pub static TASK_USER_SERVICE_CACHE_CLEANUP: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("user_service_cache_cleanup"));
+pub static TASK_CACHE_SWEEPER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("cache_sweeper"));
 
 pub fn init() -> (axum::Router, PrometheusMetricLayer<'static>) {
     force_registration();
@@ -187,6 +192,8 @@ fn force_registration() {
     Lazy::force(&CHAT_TOPICS);
     Lazy::force(&CMD_CLEANUP);
     Lazy::force(&CHAT_CLEANUP);
+    Lazy::force(&CACHE_LOCAL_ENTRIES);
+    Lazy::force(&CACHE_FALLBACK_ACTIVE);
     Lazy::force(&BOT_ADMIN_LOOKUP);
     Lazy::force(&BROADCAST_LANGUAGE);
     Lazy::force(&USER_SERVICE_LANGUAGES_BATCH_SIZE);

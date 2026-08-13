@@ -10,7 +10,7 @@ mod env;
 mod help;
 mod integrations;
 mod caches;
-mod redis;
+mod cache;
 
 pub use app::*;
 pub use bot::*;
@@ -21,6 +21,6 @@ pub use throttle::*;
 pub use incrementor::*;
 pub use help::*;
 pub use integrations::*;
-pub use redis::*;
+pub use cache::*;
 
 pub use env::get_env_value_or_default;
