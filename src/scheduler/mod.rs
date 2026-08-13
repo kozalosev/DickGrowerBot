@@ -128,7 +128,7 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
         return;
     }
     if retention.is_zero() {
-        tracing::info!(variable = "DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_DAYS",
+        tracing::info!(variable = "DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY",
             "the finished shrink summaries are kept for ever");
         return;
     }
@@ -187,7 +187,7 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
         return;
     }
     if retention.is_zero() {
-        tracing::info!(variable = "MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS",
+        tracing::info!(variable = "MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY",
             "the finished self-destructions are kept for ever");
         return;
     }

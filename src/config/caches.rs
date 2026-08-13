@@ -31,11 +31,11 @@ pub struct CachesConfig {
 impl CachesConfig {
     pub fn from_env() -> Self {
         Self {
-            chat_language: EnvDuration::seconds("CHAT_LANGUAGE_CACHE_TIME_SECONDS").or(3600).read(),
-            chat_topics: EnvDuration::seconds("CHAT_TOPICS_CACHE_TIME_SECONDS").or(3600).read(),
-            chat_cleanup: EnvDuration::seconds("CHAT_CLEANUP_CACHE_TIME_SECONDS").or(3600).read(),
-            ban_list_refresh: EnvDuration::seconds("BAN_LIST_REFRESH_SECONDS").or(900).at_least(1).read(),
-            bot_admin: EnvDuration::seconds("BOT_ADMIN_CACHE_TIME_SECONDS").or(3600).at_least(1).read(),
+            chat_language: env_duration!("CHAT_LANGUAGE_CACHE_TIME", or = hours(1)),
+            chat_topics: env_duration!("CHAT_TOPICS_CACHE_TIME", or = hours(1)),
+            chat_cleanup: env_duration!("CHAT_CLEANUP_CACHE_TIME", or = hours(1)),
+            ban_list_refresh: env_duration!("BAN_LIST_REFRESH", or = mins(15), at_least = secs(1)),
+            bot_admin: env_duration!("BOT_ADMIN_CACHE_TIME", or = hours(1), at_least = secs(1)),
         }
     }
 }

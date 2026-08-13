@@ -40,8 +40,8 @@ impl UserServiceConfig {
         let address = get_optional_env_string("GRPC_ADDR_USER_SERVICE")?;
         Some(Self {
             address,
-            cache_ttl: EnvDuration::seconds("USER_CACHE_TIME_SECONDS").or(360).at_least(1).read(),
-            timeout: EnvDuration::seconds("USER_SERVICE_TIMEOUT_SECONDS").or(5).read(),
+            cache_ttl: env_duration!("USER_CACHE_TIME", or = mins(6), at_least = secs(1)),
+            timeout: env_duration!("USER_SERVICE_TIMEOUT", or = secs(5)),
         })
     }
 }

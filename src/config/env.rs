@@ -112,72 +112,128 @@ macro_rules! env_value {
 
 pub(crate) use env_value;
 
-/// A [`Duration`] read from an environment variable holding a whole number of time units.
+/// A [`Duration`] read from an environment variable that carries its unit in the value.
 ///
-/// The unit, the fallback and the lower bound are three independent choices, and spelling every
-/// combination of them out gave a function per combination. Here each is a call of its own, so a
-/// new combination costs nothing.
+/// **The value says the unit**, as a letter after the number: `15m`, `1h`, `3d`, `30s`. So a knob
+/// has one name whatever anyone writes it in, and changing `900` to `15m` is an edit to the value
+/// alone — no rename, no code change, and no way for a name and a number to end up disagreeing.
 ///
-/// Everything but the unit is [`EnvValue`]'s: the number is read, defaulted and bounded there, in
-/// whichever unit the variable is written in, and only the last step turns it into a [`Duration`].
+/// A bare number is seconds, which is what every value written before this meant.
 pub(super) struct EnvDuration<'a> {
-    units: EnvValue<'a, u64>,
-    seconds_per_unit: u64,
+    key: &'a str,
+    default: Duration,
+    min: Option<Duration>,
 }
 
 impl<'a> EnvDuration<'a> {
-    /// The variable holds whole seconds.
-    pub fn seconds(key: &'a str) -> Self {
-        Self::of(key, 1)
+    pub fn new(key: &'a str) -> Self {
+        Self { key, default: Duration::ZERO, min: None }
     }
 
-    /// The variable holds whole minutes.
-    pub fn minutes(key: &'a str) -> Self {
-        Self::of(key, 60)
-    }
-
-    /// The variable holds whole hours.
-    pub fn hours(key: &'a str) -> Self {
-        Self::of(key, 60 * 60)
-    }
-
-    /// The variable holds whole days.
-    pub fn days(key: &'a str) -> Self {
-        Self::of(key, 60 * 60 * 24)
-    }
-
-    fn of(key: &'a str, seconds_per_unit: u64) -> Self {
-        Self { units: EnvValue::of(key), seconds_per_unit }
-    }
-
-    /// What to read when the variable is missing or unparsable. Zero without this call, which every
+    /// What to read when the variable is missing or unreadable. Zero without this call, which every
     /// optional feature takes to mean "off".
-    pub fn or(mut self, default: u64) -> Self {
-        self.units = self.units.or(default);
+    pub fn or(mut self, default: Duration) -> Self {
+        self.default = default;
         self
     }
 
-    /// Raises anything smaller, in the same unit — for the intervals a zero would turn into a busy
-    /// loop. Without this call nothing is raised, which is not the same as a bound of zero.
-    pub fn at_least(mut self, min: u64) -> Self {
-        self.units = self.units.at_least(min);
+    /// Raises anything smaller — for the intervals a zero would turn into a busy loop. Without this
+    /// call nothing is raised, which is not the same as a bound of zero.
+    pub fn at_least(mut self, min: Duration) -> Self {
+        self.min = Some(min);
         self
     }
 
     pub fn read(self) -> Duration {
-        Duration::from_secs(self.units.read().saturating_mul(self.seconds_per_unit))
+        let value = get_optional_env_duration(self.key).unwrap_or(self.default);
+        self.min.map_or(value, |min| value.max(min))
     }
 }
 
-/// A whole number of seconds, or nothing at all when the variable is unset or empty — for a knob
-/// whose default belongs to something else than this configuration. An unparsable value is warned
-/// about and counts as unset, which is the only thing left to do with it.
-pub(super) fn get_optional_env_seconds(key: &str) -> Option<Duration> {
-    get_optional_env_string(key)?
-        .parse::<u64>()
-        .inspect_err(|e| tracing::warn!(key = %key, error = %e, "invalid value of an environment variable"))
+/// A span written as a number and a unit — `30s`, `15m`, `1h`, `3d` — or a bare number, which is
+/// seconds. The letter may be upper case.
+pub(super) fn parse_duration(raw: &str) -> Result<Duration, InvalidDuration> {
+    let raw = raw.trim();
+    let last = raw.chars().next_back().ok_or(InvalidDuration::Empty)?;
+    // Only the four ASCII letters are ever sliced off, so the cut can't land inside a character.
+    let (number, seconds_per_unit) = match last.to_ascii_lowercase() {
+        's' => (&raw[..raw.len() - 1], 1),
+        'm' => (&raw[..raw.len() - 1], 60),
+        'h' => (&raw[..raw.len() - 1], 60 * 60),
+        'd' => (&raw[..raw.len() - 1], 60 * 60 * 24),
+        other if other.is_alphabetic() => return Err(InvalidDuration::Unit(last)),
+        _ => (raw, 1),
+    };
+    let count: u64 = number.trim().parse().map_err(InvalidDuration::Number)?;
+    Ok(Duration::from_secs(count.saturating_mul(seconds_per_unit)))
+}
+
+/// Why a value isn't a span. Worth telling apart in the log: a number too large to hold is a
+/// different mistake from a letter nobody knows, and both read as "not a duration" otherwise.
+#[derive(Debug, derive_more::Display)]
+pub(super) enum InvalidDuration {
+    #[display("it is empty")]
+    Empty,
+    #[display("'{_0}' is not a unit — use s, m, h or d")]
+    Unit(char),
+    #[display("{_0}")]
+    Number(std::num::ParseIntError),
+}
+
+/// The spans a fallback is written in. `Duration::from_days` is still unstable, so one of the four
+/// has to be written out — and once one is, the other three earn their place by keeping every
+/// fallback in the config the same shape.
+pub(super) const fn secs(count: u64) -> Duration {
+    Duration::from_secs(count)
+}
+
+pub(super) const fn mins(count: u64) -> Duration {
+    Duration::from_secs(count * 60)
+}
+
+pub(super) const fn hours(count: u64) -> Duration {
+    Duration::from_secs(count * 60 * 60)
+}
+
+pub(super) const fn days(count: u64) -> Duration {
+    Duration::from_secs(count * 60 * 60 * 24)
+}
+
+/// Reads a [`Duration`] from a variable that carries its unit in the value, with a fallback and a
+/// lower bound. Shaped like [`env_value!`] above.
+///
+/// A bound of `secs(1)` is the usual one, and what it guards is an interval of zero, which spins.
+macro_rules! env_duration {
+    ($key:literal $(, or = $default:expr)? $(, at_least = $min:expr)?) => {{
+        #[allow(unused_mut)]
+        let mut value = $crate::config::env::EnvDuration::new($key);
+        $( value = value.or($default); )?
+        $( value = value.at_least($min); )?
+        value.read()
+    }};
+}
+
+pub(crate) use env_duration;
+
+/// The span a variable holds, or nothing when it is unset, empty or unreadable.
+///
+/// The one place a duration is read. [`EnvDuration`] is this plus a fallback and a floor, and a
+/// caller whose default belongs to somebody else — teloxide's own timeouts — takes the `None`
+/// instead.
+///
+/// Both ways of having no value are logged, as [`get_env_value_or_default`] logs its own: what the
+/// bot fell back to is worth having in the log of a start, and a variable that was meant to be set
+/// and isn't looks the same as one nobody ever set until something says so.
+pub(super) fn get_optional_env_duration(key: &str) -> Option<Duration> {
+    let raw = get_optional_env_string(key)
+        .or_else(|| {
+            tracing::warn!(key = %key, "no duration was configured for an optional environment variable");
+            None
+        })?;
+    parse_duration(&raw)
+        .inspect_err(|e| tracing::warn!(key = %key, value = raw, error = %e,
+            "couldn't read a duration, so it counts as unset"))
         .ok()
-        .map(Duration::from_secs)
 }
 
 pub(super) fn get_optional_env_ratio(key: &str) -> Option<Ratio> {
@@ -202,8 +258,6 @@ mod tests {
     use super::*;
     use crate::domain::primitives::{AttemptsCount, Limit};
 
-    const UNSET: &str = "DICK_GROWER_BOT_TEST_VARIABLE_THAT_IS_NEVER_SET";
-
     #[test]
     fn a_missing_value_falls_back_to_its_type() {
         let value = env_value!("DICK_GROWER_BOT_TEST_VARIABLE_THAT_IS_NEVER_SET": AttemptsCount);
@@ -226,25 +280,70 @@ mod tests {
         assert_eq!(value, AttemptsCount::new(2));
     }
 
+    /// What every duration in the configuration is read by, so a wrong answer here is a value out
+    /// by sixty or by eighty-six thousand.
     #[test]
-    fn a_missing_variable_is_zero_by_default() {
-        assert_eq!(EnvDuration::seconds(UNSET).read(), Duration::ZERO);
-        assert_eq!(EnvDuration::minutes(UNSET).read(), Duration::ZERO);
+    fn a_value_says_its_own_unit() {
+        assert_eq!(parse_duration("30s").ok(), Some(secs(30)));
+        assert_eq!(parse_duration("15m").ok(), Some(mins(15)));
+        assert_eq!(parse_duration("1h").ok(), Some(hours(1)));
+        assert_eq!(parse_duration("3d").ok(), Some(days(3)));
+        // The letter may be shouted, and the value may have been typed with a space around it.
+        assert_eq!(parse_duration("15M").ok(), Some(mins(15)));
+        assert_eq!(parse_duration(" 1H ").ok(), Some(hours(1)));
+    }
+
+    /// Every value written before units were understood still means what it did, which is what lets
+    /// a variable be renamed without its value being touched in the same breath.
+    #[test]
+    fn a_bare_number_is_seconds() {
+        assert_eq!(parse_duration("900").ok(), Some(secs(900)));
+        assert_eq!(parse_duration("0").ok(), Some(Duration::ZERO));
     }
 
     #[test]
-    fn the_fallback_is_read_in_the_unit_it_was_given() {
-        assert_eq!(EnvDuration::seconds(UNSET).or(90).read(), Duration::from_secs(90));
-        assert_eq!(EnvDuration::minutes(UNSET).or(90).read(), Duration::from_secs(90 * 60));
+    fn anything_else_is_not_a_duration() {
+        for raw in ["", "   ", "5x", "m", "5m30s", "-5", "1.5h", "five", "5м"] {
+            assert!(parse_duration(raw).is_err(), "{raw:?} must not read as a duration");
+        }
+    }
+
+    /// The log says which mistake it was, because a number too large to hold and a letter nobody
+    /// knows are different things to go and fix.
+    #[test]
+    fn the_reason_is_worth_reading() {
+        let too_large = parse_duration("99999999999999999999999s")
+            .expect_err("a number that cannot be held must be refused");
+        assert!(too_large.to_string().contains("too large"), "got {too_large}");
+
+        let bad_unit = parse_duration("5x").expect_err("x is not a unit");
+        assert_eq!(bad_unit.to_string(), "'x' is not a unit — use s, m, h or d");
+
+        let empty = parse_duration("  ").expect_err("nothing is not a duration");
+        assert_eq!(empty.to_string(), "it is empty");
+    }
+
+    #[test]
+    fn a_missing_variable_is_zero_by_default() {
+        assert_eq!(env_duration!("DICK_GROWER_BOT_TEST_DURATION"), Duration::ZERO);
+    }
+
+    #[test]
+    fn the_fallback_is_used_when_nothing_is_set() {
+        assert_eq!(env_duration!("DICK_GROWER_BOT_TEST_DURATION", or = mins(15)), secs(900));
     }
 
     #[test]
     fn the_lower_bound_lifts_the_fallback_too() {
-        assert_eq!(EnvDuration::seconds(UNSET).at_least(1).read(), Duration::from_secs(1));
-        assert_eq!(EnvDuration::minutes(UNSET).at_least(2).read(), Duration::from_secs(120));
+        // Nothing set and no fallback, so the bound is all that is left — which is the interval of
+        // zero it exists to prevent.
+        let value = env_duration!("DICK_GROWER_BOT_TEST_DURATION", at_least = secs(1));
+        assert_eq!(value, secs(1));
         // A fallback above the bound is left where it is.
-        assert_eq!(EnvDuration::seconds(UNSET).or(30).at_least(1).read(), Duration::from_secs(30));
-        // A fallback below the bound is lifted to it.
-        assert_eq!(EnvDuration::seconds(UNSET).or(30).at_least(60).read(), Duration::from_secs(60));
+        let value = env_duration!("DICK_GROWER_BOT_TEST_DURATION", or = secs(30), at_least = secs(1));
+        assert_eq!(value, secs(30));
+        // And one below it is lifted.
+        let value = env_duration!("DICK_GROWER_BOT_TEST_DURATION", or = secs(30), at_least = mins(1));
+        assert_eq!(value, mins(1));
     }
 }
