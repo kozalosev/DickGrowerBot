@@ -172,6 +172,33 @@ impl ChatIdKind {
             ChatIdKind::Instance(instance) => instance.to_string(),
         }
     }
+
+    /// The value with its kind spelled out, for wherever the two share a namespace. Both are
+    /// signed 64-bit numbers, so [`Self::value`] alone lets a chat id stand for a chat instance
+    /// that happens to read the same.
+    pub fn qualified(&self) -> String {
+        match self {
+            ChatIdKind::ID(id) => format!("id:{}", id.0),
+            ChatIdKind::Instance(instance) => format!("instance:{instance}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// A chat instance is a signed 64-bit number written as a string, so it can read exactly like
+    /// somebody else's chat id. Two different chats must never come out the same.
+    #[test]
+    fn the_two_kinds_never_read_alike() {
+        let number = "-1001100294568";
+        let id = ChatIdKind::ID(TelegramChatId::new(number.parse().expect("the id must parse")));
+        let instance = ChatIdKind::Instance(TelegramChatInstanceId::new(number.to_owned()));
+
+        assert_eq!(id.value(), instance.value());
+        assert_ne!(id.qualified(), instance.qualified());
+    }
 }
 
 

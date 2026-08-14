@@ -10,7 +10,7 @@ use crate::domain::primitives::chat::TopicId;
 ///
 /// An empty set means the chat is unrestricted, which is the default: a chat that never touched
 /// the setting has no `topics` key at all.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Constructor)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Constructor, serde::Serialize, serde::Deserialize)]
 pub struct AllowedTopics(BTreeSet<TopicId>);
 
 impl AllowedTopics {

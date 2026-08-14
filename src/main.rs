@@ -65,8 +65,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let language_service = users::init_language_service(&integrations_config, app_config.caches.chat_language,
                                                         repos.chats.clone(), app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;
-    let topic_policy = topics::TopicPolicy::new(app_config.caches.chat_topics, repos.chats.clone());
-    let cleanup_policy = cleanup::CleanupPolicy::new(app_config.caches.chat_cleanup, repos.chats.clone());
+    let topic_policy = topics::TopicPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_topics);
+    let cleanup_policy = cleanup::CleanupPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_cleanup);
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),

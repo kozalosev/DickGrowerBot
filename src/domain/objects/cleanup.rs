@@ -12,7 +12,7 @@ use crate::domain::primitives::DelayMinutes;
 /// The inline flag is a tri-state for the same reason.
 ///
 /// All-empty is the default: a chat that never touched the setting has no `cleanup` key at all.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Constructor)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Constructor, serde::Serialize, serde::Deserialize)]
 pub struct ChatCleanupSettings {
     delays: BTreeMap<MessageGroup, DelayMinutes>,
     /// Whether an inline message is replaced with the placeholder when its time is up. `None`
