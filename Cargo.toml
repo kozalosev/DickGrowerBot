@@ -75,7 +75,6 @@ rand = "0.10.2"
 chrono = { version = "0.4.45", features = [ "serde" ] }
 base64 = "0.23.0"
 byteorder = "1.5.0"
-flurry = "0.5.2"
 sha2 = "0.11.0"
 unicode-general-category = "1.1.0"
 # Rust specific stuff

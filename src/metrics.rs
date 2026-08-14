@@ -36,6 +36,8 @@ pub static CMD_DOD_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_dick_of_day_usage_total", "count of /dick_of_day invocations"));
 pub static CMD_PVP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_pvp_usage_total", "count of /pvp invocations"));
+pub static PVP_DOUBLE_ATTACKS_BLOCKED: Lazy<Counter> = Lazy::new(||
+    Counter::new("pvp_double_attacks_blocked_total", "count of answers to a battle offer that were refused because another answer to the same offer was still being resolved. A user tapping twice is the ordinary cause; read it against command_pvp_usage_total{mode=\"inline\"}, which counts the answers that went through"));
 pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
@@ -181,6 +183,7 @@ fn force_registration() {
     Lazy::force(&CMD_LOAN_COUNTER);
     Lazy::force(&CMD_DOD_COUNTER);
     Lazy::force(&CMD_PVP_COUNTER);
+    Lazy::force(&PVP_DOUBLE_ATTACKS_BLOCKED);
     Lazy::force(&CMD_STATS);
     Lazy::force(&CMD_SHRINKS);
     Lazy::force(&CMD_IMPORT);

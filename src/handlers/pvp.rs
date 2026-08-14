@@ -19,7 +19,7 @@ use crate::domain::primitives::{Bet, CharCount, LanguageCode, LengthChange, Loan
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, InlineMessageId, TelegramChatId};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
-use crate::handlers::utils::locks::LockCallbackServiceFacade;
+use crate::handlers::utils::locks::BattleLocks;
 use crate::repo::Repositories;
 
 // let's calculate time offsets from 22.06.2024
@@ -211,7 +211,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 pub async fn pvp_callback_handler(
     bot: Bot,
     query: CallbackQuery,
-    mut battle_locker: LockCallbackServiceFacade,
+    battle_locker: BattleLocks,
     deps: HandlerDeps,
 ) -> HandlerResult {
     let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
@@ -235,7 +235,7 @@ pub async fn pvp_callback_handler(
     if callback_data.initiator == query.from.id {
         return send_error_callback_answer(bot, query, "commands.pvp.errors.same_person").await;
     }
-    let _battle_guard = match battle_locker.try_lock(&callback_data) {
+    let _battle_guard = match battle_locker.try_lock(&callback_data).await {
         Some(lock) => lock,
         None => return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await
     };

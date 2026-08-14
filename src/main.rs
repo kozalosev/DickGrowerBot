@@ -41,7 +41,7 @@ use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanC
 use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
-use crate::handlers::utils::locks::LockCallbackServiceFacade;
+use crate::handlers::utils::locks::BattleLocks;
 use crate::error_handler::ContextLoggingErrorHandler;
 use crate::repo::Repositories;
 use crate::users::LanguageService;
@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(), &repos.dicks, perks);
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
-    let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
+    let battle_locker = BattleLocks::new(&cache, app_config.caches.pvp_lock);
     let self_destruction = SelfDestructionService::new(app_config.self_destruction.clone(),
                                                        repos.deletions.clone(), cleanup_policy.clone(),
                                                        cache.clone(), me.user.id, app_config.caches.bot_admin);
