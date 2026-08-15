@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ban_user($1, 7)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ban_user",
+        "type_info": "Void",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9f27fac2d09da183c330008695e78ec06b206dd4faf0584a27c83e157374c2b6"
+}

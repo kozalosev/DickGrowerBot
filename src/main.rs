@@ -184,6 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
+    ban_list.spawn_listen_task(db_conn.clone());
     ban_list.spawn_refresh_task(app_config.caches.ban_list_refresh);
 
     let ignore_unknown_updates = |_| Box::pin(async {});

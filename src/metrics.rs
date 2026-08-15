@@ -135,6 +135,7 @@ pub static TASK_DAILY_SHRINK_BROADCAST_CLEANING: Lazy<TaskMonitor> = Lazy::new(|
 pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
 pub static TASK_SELF_DESTRUCTION_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction_cleaning"));
 pub static TASK_CACHE_SWEEPER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("cache_sweeper"));
+pub static TASK_BAN_LIST_LISTENER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("ban_list_listener"));
 
 pub fn init() -> (axum::Router, PrometheusMetricLayer<'static>) {
     force_registration();
