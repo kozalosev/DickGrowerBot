@@ -144,6 +144,18 @@ included, so a timeout doesn't go missing), it gets a client span of its own in 
 request the API rejects without a proper error code is logged together with the payload that caused
 it.
 
+### The cache
+
+Everything the bot keeps briefly — cached settings, locks, unfinished dialogues — lives in one
+store instead of a map per feature. Almost nothing there is a source of truth, so a store that is
+down, slow or absent costs only the work it would have saved: the bot starts and runs either way.
+
+Without `REDIS_HOST` the values stay in the process, which is all a single instance needs and not a
+degraded mode. A server adds a dialogue that survives a restart, and correctness once there is more
+than one instance, for a round trip on each miss. The container runs [Valkey](https://valkey.io),
+the BSD-licensed fork; the protocol is Redis, which the variables are named after, and
+`.env.example` describes them.
+
 ### [user-service](https://github.com/Kozalo-Blog/user-service) integration
 
 user-service is a small gRPC microservice that stores a user's preferred interface language
