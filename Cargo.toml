@@ -91,6 +91,10 @@ domain_types_macro = { version = "0.1.0", path = "domain_types_macro" }
 
 [dev-dependencies]
 testcontainers = { version = "0.27.3", features = ["reusable-containers"] }
+# `test-util` for `#[tokio::test(start_paused = true)]`, which advances the clock instead of waiting
+# on it. Only a test that owns every clock involved may use it — anything asserting against a
+# container waits for real, since pausing ours doesn't move theirs.
+tokio = { version = "1.53.1", features = ["test-util"] }
 
 [build-dependencies]
 tonic-prost-build = "0.14"

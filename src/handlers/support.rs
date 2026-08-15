@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use autometrics::autometrics;
 use rust_i18n::t;
 use teloxide::Bot;
-use teloxide::dispatching::dialogue::InMemStorage;
+use crate::dialogue::CachedDialogueStorage;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{Dialogue, Requester};
@@ -34,14 +34,14 @@ pub enum SupportCommands {
     Support(String),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SupportCommandState {
     #[default]
     Start,
     Requested,
 }
 
-pub type SupportDialogue = Dialogue<SupportCommandState, InMemStorage<SupportCommandState>>;
+pub type SupportDialogue = Dialogue<SupportCommandState, CachedDialogueStorage<SupportCommandState>>;
 
 enum Relayed {
     Sent,

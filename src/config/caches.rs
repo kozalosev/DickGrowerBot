@@ -26,6 +26,9 @@ pub struct CachesConfig {
     /// writes it the moment it changes, so this only bounds how long a change missed while the bot
     /// was down goes unnoticed — which is why it is the shortest of the lot.
     pub bot_admin: Duration,
+    /// How long a half-finished `/promo` or `/support` waits for its next message. Not a staleness
+    /// at all: it is how long a conversation stays open, and it starts again with every answer.
+    pub dialogue: Duration,
     /// How long a battle stays locked when the handler holding it never gets to let go.
     ///
     /// The guard frees it as the handler ends, so this only bounds a killed process — but it must
@@ -43,6 +46,7 @@ impl CachesConfig {
             chat_cleanup: env_duration!("CHAT_CLEANUP_CACHE_TIME", or = hours(1)),
             ban_list_refresh: env_duration!("BAN_LIST_REFRESH", or = mins(15), at_least = secs(1)),
             bot_admin: env_duration!("BOT_ADMIN_CACHE_TIME", or = hours(1), at_least = secs(1)),
+            dialogue: env_duration!("DIALOGUE_STATE_TIME", or = hours(1), at_least = secs(1)),
             pvp_lock: env_duration!("PVP_LOCK_TIME", or = mins(3), at_least = secs(1)),
         }
     }
