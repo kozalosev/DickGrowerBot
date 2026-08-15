@@ -63,7 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repos = Repositories::new(&db_conn, &app_config);
     let cache = Cache::connect(config::CacheConfig::from_env()).await;
     let language_service = users::init_language_service(&integrations_config, app_config.caches.chat_language,
-                                                        repos.chats.clone(), app_config.features.chats_merging).await;
+                                                        repos.chats.clone(), cache.clone(),
+                                                        app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;
     let topic_policy = topics::TopicPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_topics);
     let cleanup_policy = cleanup::CleanupPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_cleanup);

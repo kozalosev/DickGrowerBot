@@ -134,7 +134,6 @@ pub static TASK_DAILY_SHRINK_BROADCAST: Lazy<TaskMonitor> = Lazy::new(|| task_mo
 pub static TASK_DAILY_SHRINK_BROADCAST_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("daily_shrink_broadcast_cleaning"));
 pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
 pub static TASK_SELF_DESTRUCTION_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction_cleaning"));
-pub static TASK_USER_SERVICE_CACHE_CLEANUP: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("user_service_cache_cleanup"));
 pub static TASK_CACHE_SWEEPER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("cache_sweeper"));
 
 pub fn init() -> (axum::Router, PrometheusMetricLayer<'static>) {
@@ -169,8 +168,8 @@ pub fn register_db_pool_collector(pool: sqlx::Pool<sqlx::Postgres>) {
 ///
 /// The `TASK_*` monitors are the exception: each of them registers itself when its task is first
 /// spawned, so `/metrics` lists only the tasks this process actually runs. The webhook server and
-/// the polling dispatcher are never both in use, and the user-service cache cleanup runs only when
-/// the integration is enabled.
+/// the polling dispatcher are never both in use, and the cache sweeper runs only when the values
+/// are kept in this process.
 fn force_registration() {
     Lazy::force(&INLINE_COUNTER);
     Lazy::force(&CMD_START_COUNTER);
