@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT current_date AS \"today!\", agg.states AS \"states?\"\n                    FROM (\n                        SELECT jsonb_object_agg(ps.perk_id::text, ps.state) AS states\n                          FROM Perk_States ps\n                          JOIN Chats c ON ps.chat_id = c.id\n                         WHERE ps.uid = $1 AND (c.chat_id = $2::bigint OR c.chat_instance = $2::text)\n                    ) agg",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "today!",
+        "type_info": "Date",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "states?",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "3e5213148db04394a6f243489fa2660f059e55905707cb26984d08810af58918"
+}

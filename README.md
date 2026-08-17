@@ -193,6 +193,11 @@ cargo sqlx prepare -- --tests
 
 It's most probably you want to change the value of the `GROW_SHRINK_RATIO` environment variable to make the players upset and disappointed more or less often.
 
+The reward for playing every day is `STREAK_BONUS_RATIO_PER_DAY` (0.05 by default): each consecutive
+day multiplies the rolled value by that much more, counting up to `STREAK_BONUS_MAX_DAYS` (20) days,
+so three weeks of playing doubles it. A negative roll is multiplied just the same. Setting either
+variable to 0 turns the perk off, as does `DISABLE_STREAK`.
+
 ### How to disable a command?
 
 Most of the command can be hidden from both lists: command hints and inline results. To do so, specify an environment variable like `DISABLE_CMD_STATS` (where `STATS` is a command key) with any value.

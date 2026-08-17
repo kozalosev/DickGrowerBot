@@ -917,6 +917,48 @@ Each bot feature is a vertical slice: a file in `handlers/` (e.g. `dick.rs`, `pv
 by a matching file in `repo/` (`dicks.rs`, `pvpstats.rs`, `loans.rs`, …) that owns the
 SQL. When adding a feature, follow this pairing rather than mixing DB access into handlers.
 
+### Perks and the storage they are given
+
+A perk changes a length change: `handlers/perks.rs` holds them, `perks::all` registers them, and
+each is switched off by a `DISABLE_<NAME>` variable named after it. **A perk is a plugin**, so it
+never gets a column of its own on `Dicks`. It gets `Perk_States` instead (migration 41) — a row per
+`(chat, user, perk)` whose `state` is jsonb the perk alone understands. Nothing validates that blob:
+its shape belongs to the perk, and a `CHECK` would have to name each perk's private shape to say
+anything useful. `serde` is the schema, and a blob it can't read is treated as a fresh start rather
+than a failure, which is what lets a perk change its stored shape without a data migration. Adding a perk therefore
+needs no migration, only a row in `Perks`, and that name-to-id dictionary is read **once**, by
+`Incrementor::new` at startup, in a single statement for all of them. Nothing looks a perk up by
+name afterwards.
+
+**A perk does not write.** `apply` returns its new state next to its change, and
+`Dicks::create_or_grow` writes the length and every blob in one transaction. That ordering is the
+whole point: the once-a-day rule is a trigger that raises `GD0E1` *after* the perks have run, and a
+rolled-back growth must leave no perk believing it happened. `LoanPayoutPerk` predates this and
+still pays inside `apply`, which is why a refused growth can still spend a payment; moving it here
+is its own issue.
+
+Two things a perk is handed rather than fetching itself: `ChangeSource`, because a Dick of the Day
+award is not a growth and `dod_increment` shares the perk pipeline with `growth_increment`; and
+`today`, which is the **database's** `current_date`, because that is the calendar the daily trigger
+compares against. A perk counting days that asked this process's clock would count different ones.
+
+The streak perk (issue #156) is the first user of all this. It stores
+`{"streak": …, "max": …, "last_grow": …}` and multiplies the base increment by
+`STREAK_BONUS_RATIO_PER_DAY` for each consecutive day, up to `STREAK_BONUS_MAX_DAYS`. **A shrink is
+multiplied too.** Only playing on a *later* day advances the count — a second growth on the same
+day, bought with `bonus_attempts`, is paid the same bonus and leaves it alone.
+
+```
+STREAK_BONUS_RATIO_PER_DAY=0.05  # of the roll, per consecutive day; 0 => the perk is off
+STREAK_BONUS_MAX_DAYS=20         # days that still count, so the cap is x2; 0 => the perk is off
+```
+
+Unlike `help-pussies`, it is **on by default** (`PerksConfig::default`), so it works without a
+change to server-configs.
+
+`/stats` gets its line through `Perk::stats_line`, a hook with a default of `None`: the states are
+read once and handed round, so a perk with nothing to say costs nothing.
+
 ### Dependency injection
 
 Repositories are grouped in a `Repositories` struct and injected into handlers via the `deps!` macro. Handlers do not construct repos directly.
@@ -927,8 +969,9 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Code Style
 
-- **`new` builds a domain value; `literal!` is for the validated types only.** Four types validate
-  anything: `Ratio`, `Percentage`, `FloatPercentage` (`ratio.rs`) and `PromoCode` (`promo.rs`).
+- **`new` builds a domain value; `literal!` is for the validated types only.** Five types validate
+  anything: `Ratio`, `Percentage`, `FloatPercentage` (`ratio.rs`), `PromoCode` (`promo.rs`) and
+  `PerkName` (`perk.rs`).
   They alone have the `check_literal`/`from_literal` pair, and
   `literal!(Ratio = 0.5)` is what makes the `assert!` run while the code is compiled; a bare
   `Ratio::from_literal(0.5)` skips the `const` block, and with it the check.
@@ -971,6 +1014,12 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   that every call site would have to accept anyway — a display name, say — gains nothing from a
   fallible constructor and loses by it: the safe path becomes the lossy one, and the plain `new`
   turns into a panic waiting for someone to reach for it.
+
+  The other thing a rule may guard is a **column that would refuse the value anyway**. `PerkName`
+  takes 1 to 32 ASCII characters, and `Perks.name` is a `varchar(32)` with a `CHECK` saying the
+  same — which is what makes reading a name back into the type unable to fail. Every name is a
+  literal in our own source, so the check runs while the code is built and the `Result` is never
+  seen at runtime.
 
   Where the failure shows up depends on the kind of constant: a named `const` item is evaluated by
   `cargo check`, while an inline `const` block — which is what `literal!` expands to — is evaluated

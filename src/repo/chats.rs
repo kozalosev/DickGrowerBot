@@ -632,11 +632,38 @@ repository!(Chats, with_feature_toggles,
         let imports = Self::move_imports(tx, main_id, deleted_id).await?;
         let dod = Self::move_dicks_of_the_day(tx, main_id, deleted_id).await?;
         let shrinks = Self::move_shrinks(tx, main_id, deleted_id).await?;
+        let perk_states = Self::move_perk_states(tx, main_id, deleted_id).await?;
         let migrations = Self::move_chat_migrations(tx, main_id, deleted_id).await?;
 
-        tracing::info!(loans, battle_stats, announcements, imports, dod, shrinks, migrations,
+        tracing::info!(loans, battle_stats, announcements, imports, dod, shrinks, perk_states, migrations,
             "moved the rows of the deleted chat to the main one");
         Ok(())
+    }
+,
+    /// A state means whatever its perk decided it means, so two of them can't be folded together
+    /// here. The main chat's state wins and the other is dropped, the same choice the dicks make
+    /// with their `updated_at`.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
+    async fn move_perk_states(
+        tx: &mut Transaction<'_, Postgres>,
+        main_id: InternalChatId,
+        deleted_id: InternalChatId,
+    ) -> anyhow::Result<u64> {
+        let moved = sqlx::query!(
+            "INSERT INTO Perk_States (chat_id, uid, perk_id, state)
+                    SELECT $1, uid, perk_id, state FROM Perk_States WHERE chat_id = $2
+                    ON CONFLICT (chat_id, uid, perk_id) DO NOTHING",
+                main_id as InternalChatId, deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move the perk states from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Perk_States WHERE chat_id = $1", deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete the perk states of the chat with id = {deleted_id}"))?;
+        Ok(moved)
     }
 ,
     /// Nothing constrains `(uid, chat_id)` here, so the loans can just be repointed.

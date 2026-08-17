@@ -26,13 +26,13 @@ async fn test_all() {
     assert_eq!(d.len(), 0);
 
     let increment = 5;
-    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment))
+    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &[])
         .await.expect("couldn't grow a dick");
     assert_eq!(growth.pos_in_top, Some(Position::new(1)));
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment))
+    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment), &[])
         .await
         .expect("couldn't elect a winner")
         .expect("the winner hasn't a dick");
@@ -62,13 +62,13 @@ async fn test_all_with_top_pagination_disabled() {
     assert_eq!(d.len(), 0);
 
     let increment = 5;
-    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment))
+    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &[])
         .await.expect("couldn't grow a dick");
     assert_eq!(growth.pos_in_top, None);
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment))
+    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment), &[])
         .await
         .expect("couldn't elect a winner")
         .expect("the winner hasn't a dick");
@@ -115,7 +115,7 @@ async fn test_hide_inactive_zero_length_from_top() {
 
     // An active player with a positive length — always visible.
     create_user(&db).await;
-    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5))
+    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5), &[])
         .await.expect("couldn't grow the active dick");
     let internal_chat_id = internal_chat_id(&db).await;
 
@@ -129,7 +129,7 @@ async fn test_hide_inactive_zero_length_from_top() {
     let fresh_uid = UID + 2;
     users.create_or_update(user_id(fresh_uid), "fresh-zero")
         .await.expect("couldn't create the fresh user");
-    dicks.create_or_grow(user_id(fresh_uid), &chat_id_partiality, increment_of(0))
+    dicks.create_or_grow(user_id(fresh_uid), &chat_id_partiality, increment_of(0), &[])
         .await.expect("couldn't create the fresh zero-length dick");
 
     let top = dicks.get_top(&chat_id, Offset::new(0), Limit::new(10), INACTIVITY_DAYS)
@@ -157,7 +157,7 @@ async fn test_hide_inactive_zero_length_from_top_disabled() {
     let chat_id_partiality = chat_id.clone().into();
 
     create_user(&db).await;
-    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5))
+    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5), &[])
         .await.expect("couldn't grow the active dick");
     let internal_chat_id = internal_chat_id(&db).await;
 
@@ -186,7 +186,7 @@ async fn test_pvp() {
     }
     {
         create_user(&db).await;
-        dicks.create_or_grow(uid, chat_id_part, increment_of(1))
+        dicks.create_or_grow(uid, chat_id_part, increment_of(1), &[])
             .await
             .expect("couldn't create a dick");
 
@@ -236,13 +236,13 @@ pub async fn create_another_user_and_dick(
     let uid2 = user_id(UID + n - 1);
     users.create_or_update(uid2, name)
         .await.unwrap_or_else(|_| panic!("couldn't create a user #{n}"));
-    dicks.create_or_grow(uid2, chat_id, increment_of(increment))
+    dicks.create_or_grow(uid2, chat_id, increment_of(increment), &[])
         .await.unwrap_or_else(|_| panic!("couldn't create a dick #{n}"));
 }
 
 pub async fn create_dick(db: &Pool<Postgres>) {
     let (chat_id, dicks) = get_chat_id_and_dicks(db);
-    dicks.create_or_grow(USER_ID, &chat_id.into(), increment_of(0))
+    dicks.create_or_grow(USER_ID, &chat_id.into(), increment_of(0), &[])
         .await
         .expect("couldn't create a dick");
 }

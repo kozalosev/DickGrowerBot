@@ -6,12 +6,13 @@ use crate::repo::test::{fresh_db, CHAT_ID, NAME, USER_ID};
 
 /// Every table `erase_user` must clear, as `(table, uid column)`. The guard test below fails when a
 /// new one appears in the schema, because then the function needs a new DELETE too.
-const TABLES_WITH_USER_ROWS: [(&str, &str); 7] = [
+const TABLES_WITH_USER_ROWS: [(&str, &str); 8] = [
     ("battle_stats", "uid"),
     ("dick_of_day", "winner_uid"),
     ("dicks", "uid"),
     ("imports", "uid"),
     ("loans", "uid"),
+    ("perk_states", "uid"),
     ("promo_code_activations", "uid"),
     ("stale_dick_shrinks", "uid"),
 ];
@@ -197,6 +198,11 @@ async fn fill_all_tables(db: &Pool<Postgres>) {
         .execute(db).await.expect("couldn't create the shrink");
     sqlx::query!("INSERT INTO Imports (chat_id, uid, original_length) VALUES ($1, $2, 7)", internal_chat_id, USER_ID as UserId)
         .execute(db).await.expect("couldn't create the import");
+    let perk_id = sqlx::query_scalar!("INSERT INTO Perks (name) VALUES ('test-perk') RETURNING id")
+        .fetch_one(db).await.expect("couldn't create the perk");
+    sqlx::query!("INSERT INTO Perk_States (chat_id, uid, perk_id) VALUES ($1, $2, $3)",
+            internal_chat_id, USER_ID as UserId, perk_id)
+        .execute(db).await.expect("couldn't create the perk state");
 }
 
 /// The one query in this file that can't be a `query_scalar!`: the macro needs a string literal,
