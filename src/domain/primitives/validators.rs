@@ -8,7 +8,7 @@
 //! Working on `&str` in a `const fn` means working on bytes — `chars()` is not const — so the ones
 //! below walk `as_bytes()` themselves.
 
-const PROMO_CODE_MIN_LENGTH: usize = 4;
+const PROMO_CODE_MIN_LENGTH: usize = 3;
 const PROMO_CODE_MAX_LENGTH: usize = 16;
 const PERK_NAME_MAX_LENGTH: usize = 32;
 
@@ -20,7 +20,7 @@ pub const fn ratio_range_validator_f32(x: &f32) -> bool {
     *x >= 0.0 && *x <= 1.0
 }
 
-/// Latin and Cyrillic letters, digits, `_` and `-`, between 4 and 16 characters.
+/// Latin and Cyrillic letters, digits, `_` and `-`, between 3 and 16 characters.
 pub const fn promo_code_validator(code: &str) -> bool {
     let bytes = code.as_bytes();
     let mut i = 0;
@@ -126,8 +126,8 @@ mod test {
     fn a_promo_code_is_measured_in_characters() {
         assert!(promo_code_validator("абвгдеёжзийклмно"), "16 letters is the limit");
         assert!(!promo_code_validator("абвгдеёжзийклмноп"), "17 is past it");
-        assert!(promo_code_validator("абвг"), "4 letters is the minimum");
-        assert!(!promo_code_validator("абв"), "3 is below it");
+        assert!(promo_code_validator("абв"), "3 letters is the minimum");
+        assert!(!promo_code_validator("аб"), "2 is below it");
         assert!(!promo_code_validator(""));
     }
 
