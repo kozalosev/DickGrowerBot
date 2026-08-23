@@ -51,6 +51,15 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// bot notices Redis is back, not whether anything works while it waits.
 const REDIS_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
+/// How long Redis must have been answering before [`RedisState::fallback_sweeper`] is stopped —
+/// not for good, just until the next outage restarts it, see [`Backend::route`].
+///
+/// A constant for the same reason as [`SWEEP_INTERVAL`]: correctness doesn't wait on this. The
+/// fallback is already unused the moment Redis recovers — `Backend::route` never sends a call
+/// there again until the next failure — so all this decides is how long an idle sweeper keeps
+/// ticking after that before it is worth reclaiming.
+const REDIS_FALLBACK_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// What every key of this bot's begins with.
 ///
 /// A server may be shared, and a key like `chat:id:-1001234:language` says nothing about whose chat
@@ -96,8 +105,8 @@ impl Cache {
             CacheMode::Redis => connect_to_redis(config.url).await,
         };
         match &backend {
-            Backend::Disabled(store) | Backend::Local(store) => store.spawn_sweeper(),
-            Backend::Redis(state) => spawn_redis_health_check(state.clone()),
+            Backend::Disabled(store) | Backend::Local(store) => { store.spawn_sweeper(); }
+            Backend::Redis(state) => spawn_redis_health_check(state.clone(), REDIS_FALLBACK_IDLE_TIMEOUT),
         }
         // Keeping the values here is a setting, and the only one a single instance of the bot
         // needs; being told to share them and failing to is a fault. Only the second is worth
@@ -313,8 +322,9 @@ impl Backend {
             Backend::Disabled(_) => Route::Disabled,
             Backend::Local(store) => Route::Local(store),
             Backend::Redis(state) if state.health.is_degraded() => {
-                if !state.fallback_swept.swap(true, Ordering::Relaxed) {
-                    state.fallback.spawn_sweeper();
+                let mut sweeper = lock(&state.fallback_sweeper);
+                if sweeper.is_none() {
+                    *sweeper = Some(state.fallback.spawn_sweeper());
                 }
                 Route::Local(&state.fallback)
             }
@@ -334,10 +344,13 @@ struct RedisState {
     conn: ConnectionManager,
     /// Where the values go while [`RedisHealth::is_degraded`] — this instance's own store, exactly
     /// what [`Backend::Local`] would use. Built once, up front, so falling into it costs nothing to
-    /// make — only its sweeper waits for the first use, see [`Backend::route`].
+    /// make.
     fallback: LocalStore,
-    /// Whether [`LocalStore::spawn_sweeper`] has been started for [`fallback`](Self::fallback) yet.
-    fallback_swept: AtomicBool,
+    /// Started lazily by [`Backend::route`] on the first call that actually needs
+    /// [`fallback`](Self::fallback), and stopped by [`spawn_redis_health_check`] once Redis has
+    /// been answering for [`REDIS_FALLBACK_IDLE_TIMEOUT`] — `None` the rest of the time, so a
+    /// Redis that never fails, or one that recovered a while ago, never pays for it.
+    fallback_sweeper: Mutex<Option<tokio::task::JoinHandle<()>>>,
     health: RedisHealth,
 }
 
@@ -353,15 +366,23 @@ struct RedisState {
 struct RedisHealth {
     /// Cleared only by [`spawn_redis_health_check`] once a probe succeeds again.
     degraded: AtomicBool,
+    /// When [`degraded`](Self::degraded) last changed, either way — what
+    /// [`spawn_redis_health_check`] measures a healthy stretch against.
+    changed_at: Mutex<Instant>,
 }
 
 impl RedisHealth {
     fn new() -> Self {
-        Self { degraded: AtomicBool::new(false) }
+        Self { degraded: AtomicBool::new(false), changed_at: Mutex::new(Instant::now()) }
     }
 
     fn is_degraded(&self) -> bool {
         self.degraded.load(Ordering::Relaxed)
+    }
+
+    /// How long Redis has been answering since it last stopped, or `None` while it still isn't.
+    fn healthy_for(&self) -> Option<Duration> {
+        (!self.is_degraded()).then(|| lock(&self.changed_at).elapsed())
     }
 
     /// Folds one call's outcome into [`degraded`](Self::degraded), logged only on the calls that
@@ -372,9 +393,11 @@ impl RedisHealth {
         metrics::CACHE_FALLBACK_ACTIVE.set(result.is_err().into());
         match &result {
             Ok(_) => if self.degraded.swap(false, Ordering::Relaxed) {
+                *lock(&self.changed_at) = Instant::now();
                 tracing::info!("Redis answered again, sharing the cached values through it once more");
             },
             Err(_) => if !self.degraded.swap(true, Ordering::Relaxed) {
+                *lock(&self.changed_at) = Instant::now();
                 tracing::warn!("couldn't reach Redis, keeping the cached values in this process until it answers again");
             },
         }
@@ -441,7 +464,10 @@ impl LocalStore {
 
     /// Drops what has run out. A key read once and never again would otherwise be kept for ever:
     /// the expiry on the read path answers correctly but frees nothing.
-    fn spawn_sweeper(&self) {
+    ///
+    /// Returns the handle so [`RedisState::fallback_sweeper`] can abort it once it stops earning
+    /// its keep; the other two callers just let theirs run for the life of the process.
+    fn spawn_sweeper(&self) -> tokio::task::JoinHandle<()> {
         let store = self.clone();
         tokio::spawn(metrics::TASK_CACHE_SWEEPER.instrument(async move {
             let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
@@ -452,14 +478,11 @@ impl LocalStore {
                 entries.retain(|_, entry| entry.until > now);
                 metrics::CACHE_LOCAL_ENTRIES.set(entries.len().saturating_into());
             }
-        }));
+        }))
     }
 
-    /// Locks the map. It holds nothing that stays valid across a panic anyway, so a poisoned mutex
-    /// is recovered rather than propagated — otherwise one stray panic would turn every later
-    /// lookup into a panic of its own.
     fn entries(&self) -> MutexGuard<'_, HashMap<String, Entry>> {
-        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        lock(&self.0)
     }
 }
 
@@ -480,7 +503,7 @@ async fn connect_to_redis(url: Option<String>) -> Backend {
             Backend::Redis(Arc::new(RedisState {
                 conn,
                 fallback: LocalStore::default(),
-                fallback_swept: AtomicBool::new(false),
+                fallback_sweeper: Mutex::new(None),
                 health: RedisHealth::new(),
             }))
         }
@@ -494,17 +517,35 @@ async fn connect_to_redis(url: Option<String>) -> Backend {
 /// Retries Redis on a timer while [`RedisHealth::is_degraded`], rather than on the data path: a
 /// degraded call is routed away from Redis entirely so it isn't paying its timeout (see
 /// [`Backend::route`]), and something still has to notice when it is safe to use again.
-fn spawn_redis_health_check(state: Arc<RedisState>) {
+///
+/// `idle_timeout` is [`REDIS_FALLBACK_IDLE_TIMEOUT`] in production — a parameter rather than the
+/// constant read directly, so a test can ask for the teardown without waiting minutes for it.
+fn spawn_redis_health_check(state: Arc<RedisState>, idle_timeout: Duration) {
     tokio::spawn(metrics::TASK_CACHE_REDIS_HEALTH_CHECK.instrument(async move {
         let mut ticker = tokio::time::interval(REDIS_HEALTH_CHECK_INTERVAL);
         loop {
             ticker.tick().await;
-            if !state.health.is_degraded() {
-                continue;
+
+            match state.health.healthy_for() {
+                None => {
+                    let result = state.conn.clone().ping::<String>().await;
+                    let _ = state.health.record(result)
+                        .inspect_err(|e| tracing::debug!(error = %e, "Redis is still not answering"));
+                }
+                Some(healthy_for) if healthy_for >= idle_timeout => {
+                    // Locked before the re-check, not after: a call that fails between
+                    // `healthy_for` above and here must find its sweeper still running, or
+                    // `Backend::route` — which only starts one when it finds `None` — would leave
+                    // a degraded backend with none at all until the *next* failure restarts one.
+                    let mut sweeper = lock(&state.fallback_sweeper);
+                    if !state.health.is_degraded()
+                        && let Some(handle) = sweeper.take() {
+                        handle.abort();
+                        tracing::debug!("Redis has been reachable for a while, stopping the fallback's sweeper");
+                    }
+                }
+                Some(_) => {}
             }
-            let result = state.conn.clone().ping::<String>().await;
-            let _ = state.health.record(result)
-                .inspect_err(|e| tracing::debug!(error = %e, "Redis is still not answering"));
         }
     }));
 }
@@ -515,6 +556,13 @@ async fn open(url: String) -> redis::RedisResult<ConnectionManager> {
 
 fn full_key(key: impl CacheKey) -> String {
     format!("{KEY_PREFIX}:{key}")
+}
+
+/// Locks a mutex, recovering it if poisoned rather than propagating the panic: nothing behind one
+/// of these stays invalid across a panic, so poisoning would only turn a later, unrelated call into
+/// a panic of its own.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -783,6 +831,25 @@ mod test {
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }).await.expect("the health check must notice Redis answers again");
+    }
+
+    /// Whether a real outage can trip the sweeper is the test above; this one is only about the
+    /// teardown, so it seeds a running sweeper directly instead of paying for another outage to
+    /// start one — and asks [`spawn_redis_health_check`] for a short `idle_timeout`.
+    #[tokio::test]
+    async fn an_idle_fallback_sweeper_is_stopped_once_redis_has_been_healthy_long_enough() {
+        let (_container, cache) = a_cache_with_its_own_container().await;
+        let Backend::Redis(state) = &cache.backend else { panic!("must have connected to Redis") };
+
+        *lock(&state.fallback_sweeper) = Some(state.fallback.spawn_sweeper());
+        assert!(!state.health.is_degraded(), "healthy since connect, with nothing having failed");
+
+        spawn_redis_health_check(state.clone(), Duration::from_millis(50));
+        tokio::time::timeout(REDIS_HEALTH_CHECK_INTERVAL * 2, async {
+            while lock(&state.fallback_sweeper).is_some() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }).await.expect("an idle sweeper must be stopped once Redis has been healthy long enough");
     }
 
     /// A Valkey container of its own, not [`CONTAINER`]: stopping the one every other test in this
