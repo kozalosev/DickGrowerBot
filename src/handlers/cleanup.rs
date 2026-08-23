@@ -187,7 +187,7 @@ fn delays(config: &SelfDestructionConfig, group: MessageGroup, button: &ButtonBu
     let lang_code = button.lang();
     let suggested = config.delay_options.iter()
         .map(|minutes| button.with_label(
-            format_delay(Duration::from_secs(u64::from(minutes.value()) * 60), lang_code),
+            format_delay(Duration::from_mins(minutes.value().into()), lang_code),
             CleanupAction::Set(group, minutes)))
         .chunks(DELAYS_PER_ROW);
     let always = [
@@ -392,7 +392,7 @@ mod test {
 
     fn config() -> SelfDestructionConfig {
         SelfDestructionConfig {
-            notice: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
             mode: DeletionMode::Enabled,
             ..Default::default()
         }
@@ -568,7 +568,7 @@ mod test {
     /// stays in minutes.
     #[test]
     fn test_a_delay_is_shown_in_the_larger_unit_that_fits() {
-        let minutes = |count: u64| format_delay(Duration::from_secs(count * 60), &english());
+        let minutes = |count: u64| format_delay(Duration::from_mins(count), &english());
         assert_eq!(minutes(5), "5 min");
         assert_eq!(minutes(60), "1 h");
         assert_eq!(minutes(180), "3 h");

@@ -25,7 +25,7 @@ use crate::{metrics, reply_html};
 
 /// One request per user per minute. A `const` rather than an environment variable: the knob is too
 /// small to be worth a line in every deployment file.
-const RATE_LIMIT: Duration = Duration::from_secs(60);
+const RATE_LIMIT: Duration = Duration::from_mins(1);
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]

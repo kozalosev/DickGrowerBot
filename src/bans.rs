@@ -23,7 +23,7 @@ const CHANNEL: &str = "bans";
 
 /// How long to wait before listening again after the connection was lost. The timer keeps the list
 /// fresh meanwhile, so there is nothing to be gained by hurrying.
-const RECONNECT_DELAY: Duration = Duration::from_secs(60);
+const RECONNECT_DELAY: Duration = Duration::from_mins(1);
 
 type Bans = HashMap<UserId, DateTime<Utc>>;
 

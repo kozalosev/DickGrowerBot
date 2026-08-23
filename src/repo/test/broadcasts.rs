@@ -188,11 +188,11 @@ async fn only_the_finished_rows_are_cleaned_up() {
         .await.expect("couldn't finish the summary");
 
     // Nothing has been finished for long enough yet.
-    let removed = repo.delete_finished(Utc::now() - Duration::from_secs(600))
+    let removed = repo.delete_finished(Utc::now() - Duration::from_mins(10))
         .await.expect("couldn't clean the summaries up");
     assert_eq!(removed, 0);
 
-    let removed = repo.delete_finished(Utc::now() + Duration::from_secs(600))
+    let removed = repo.delete_finished(Utc::now() + Duration::from_mins(10))
         .await.expect("couldn't clean the summaries up");
     assert_eq!(removed, 1);
     let pending = repo.count_pending()

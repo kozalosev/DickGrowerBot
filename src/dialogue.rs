@@ -109,7 +109,7 @@ mod test {
     use super::*;
     use crate::config::{CacheConfig, CacheMode};
 
-    const A_MINUTE: Duration = Duration::from_secs(60);
+    const A_MINUTE: Duration = Duration::from_mins(1);
 
     #[derive(Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
     enum TestState {

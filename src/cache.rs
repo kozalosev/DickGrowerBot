@@ -618,7 +618,7 @@ mod test {
     use super::*;
     use crate::test_containers::SharedContainer;
 
-    const A_MINUTE: Duration = Duration::from_secs(60);
+    const A_MINUTE: Duration = Duration::from_mins(1);
 
     /// Stands in for the real keys, which live with the values they name rather than here.
     ///
@@ -826,25 +826,6 @@ mod test {
         assert!(!health.is_degraded(), "one success must undo it");
     }
 
-    /// A server that dies **after** a successful connect stays on `Backend::Redis` — nothing here
-    /// switches it back to `Backend::Local` — so the first call against it must fail on its own
-    /// rather than hang until something else gives up on it. A container of its own, not
-    /// [`CONTAINER`]: killing the one every other test in this file shares would break them.
-    #[tokio::test]
-    async fn a_dead_server_fails_a_call_instead_of_hanging_it() {
-        let (container, cache) = a_cache_with_its_own_container().await;
-        let key = TestKey(15);
-
-        cache.set_flag(key, true, A_MINUTE).await;
-        assert_eq!(cache.get_flag(key).await, Some(true), "the server is up, so this must hit");
-
-        container.stop_with_timeout(Some(0)).await.expect("couldn't stop the container");
-
-        let result = tokio::time::timeout(Duration::from_secs(5), cache.get_flag(key)).await
-            .expect("a call against a dead server must fail on its own, not hang until this timeout");
-        assert_eq!(result, None, "a call against a dead server is a miss, like every other failure here");
-    }
-
     /// After that first failure, a call stops trying Redis altogether and starts working again
     /// against [`RedisState::fallback`] — this is what makes the real fallback more than a fast
     /// miss: a lock or a dialogue kept during the outage actually means what it says.
@@ -856,7 +837,8 @@ mod test {
     /// its next start, which would leave `cache` pointed at a port nothing listens on any more and
     /// make recovery untestable for a reason that has nothing to do with this file. A paused
     /// container keeps its port and freezes instead, which the client sees as a server that stopped
-    /// answering — the same thing a live outage looks like.
+    /// answering — the same thing a live outage looks like. A container of its own, not
+    /// [`CONTAINER`]: pausing the one every other test in this file shares would break them.
     #[tokio::test]
     async fn a_sustained_outage_falls_back_to_a_working_store_and_recovers_on_its_own() {
         let (container, cache) = a_cache_with_its_own_container().await;
@@ -864,8 +846,9 @@ mod test {
         let key = TestKey(16);
 
         container.pause().await.expect("couldn't pause the container");
-        let _ = tokio::time::timeout(Duration::from_secs(5), cache.get_flag(key)).await
-            .expect("must fail on its own, not hang");
+        let result = tokio::time::timeout(Duration::from_secs(5), cache.get_flag(key)).await
+            .expect("a call against a dead server must fail on its own, not hang until this timeout");
+        assert_eq!(result, None, "a call against a dead server is a miss, like every other failure here");
         assert!(state.health.is_degraded(), "the failure must have tripped the fallback");
 
         let started = Instant::now();
@@ -887,36 +870,28 @@ mod test {
         assert!(state.fallback.entries().is_empty(), "and the fallback must have been drained of it");
     }
 
-    /// Whether a real outage fills the fallback and a real recovery drains it is the test above;
-    /// this one is only about the sync itself, seeded directly rather than through a whole outage.
+    /// Two more properties of a healthy `Redis`, each seeded directly rather than paid for with a
+    /// real outage — that end-to-end path is the test above. They share one container, since
+    /// neither ever pauses or stops it the way that one does.
     #[tokio::test]
-    async fn sync_fallback_to_redis_writes_what_it_held_and_drains_it() {
+    async fn a_healthy_redis_syncs_a_seeded_fallback_and_stops_its_idle_sweeper() {
         let (_container, cache) = a_cache_with_its_own_container().await;
         let Backend::Redis(state) = &cache.backend else { panic!("must have connected to Redis") };
-        let (first, second) = (TestKey(18), TestKey(19));
 
-        // Two, not one: sync_fallback_to_redis sends every entry as a single pipeline, and this is
-        // what proves more than one command in it actually lands.
+        // sync_fallback_to_redis: two entries, not one — sync sends every entry as a single
+        // pipeline, and this is what proves more than one command in it actually lands.
+        let (first, second) = (TestKey(18), TestKey(19));
         state.fallback.insert(&full_key(first), TRUE.to_vec(), A_MINUTE);
         state.fallback.insert(&full_key(second), FALSE.to_vec(), A_MINUTE);
         sync_fallback_to_redis(state).await;
-
         assert_eq!(cache.get_flag(first).await, Some(true), "the first synced value must be readable");
         assert_eq!(cache.get_flag(second).await, Some(false), "and the second, from the same pipeline");
         assert!(state.fallback.entries().is_empty(), "and both gone from the fallback");
-    }
 
-    /// Whether a real outage can trip the sweeper is the test above; this one is only about the
-    /// teardown, so it seeds a running sweeper directly instead of paying for another outage to
-    /// start one — and asks [`spawn_redis_health_check`] for a short `idle_timeout`.
-    #[tokio::test]
-    async fn an_idle_fallback_sweeper_is_stopped_once_redis_has_been_healthy_long_enough() {
-        let (_container, cache) = a_cache_with_its_own_container().await;
-        let Backend::Redis(state) = &cache.backend else { panic!("must have connected to Redis") };
-
+        // The idle-sweeper teardown: seed a running sweeper directly rather than paying for
+        // another outage to start one, and ask spawn_redis_health_check for a short idle_timeout.
         *lock(&state.fallback_sweeper) = Some(state.fallback.spawn_sweeper());
         assert!(!state.health.is_degraded(), "healthy since connect, with nothing having failed");
-
         spawn_redis_health_check(state.clone(), Duration::from_millis(50));
         tokio::time::timeout(REDIS_HEALTH_CHECK_INTERVAL * 2, async {
             while lock(&state.fallback_sweeper).is_some() {
