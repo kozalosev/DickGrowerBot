@@ -17,7 +17,8 @@
 //! disabled: [`RedisState::fallback`] is a local store it always carries, and once
 //! [`RedisHealth::is_degraded`] trips, every call routes there instead of to Redis — see
 //! [`Backend::route`]. Only the map itself is built up front; its sweeper waits for that first
-//! trip, so a Redis that never fails never pays for one.
+//! trip, so a Redis that never fails never pays for one. [`sync_fallback_to_redis`] hands whatever
+//! is still there back to Redis the moment it answers again, before the routing switches back.
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -42,7 +43,7 @@ use crate::metrics::CacheSourceCounters;
 /// answer the store gives is the same whatever this is set to, because the read path checks the
 /// deadline itself and an expired entry is already unreadable. All it decides is how promptly the
 /// memory behind one is handed back.
-const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+const SWEEP_INTERVAL: Duration = Duration::from_mins(1);
 
 /// How often a degraded [`Backend::Redis`] is probed to see whether it can be used again.
 ///
@@ -58,7 +59,7 @@ const REDIS_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// fallback is already unused the moment Redis recovers — `Backend::route` never sends a call
 /// there again until the next failure — so all this decides is how long an idle sweeper keeps
 /// ticking after that before it is worth reclaiming.
-const REDIS_FALLBACK_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+const REDIS_FALLBACK_IDLE_TIMEOUT: Duration = Duration::from_mins(5);
 
 /// What every key of this bot's begins with.
 ///
@@ -484,6 +485,27 @@ impl LocalStore {
     fn entries(&self) -> MutexGuard<'_, HashMap<String, Entry>> {
         lock(&self.0)
     }
+
+    /// Takes every entry still worth keeping, each with however much of its lifetime is left —
+    /// what [`sync_fallback_to_redis`] needs to hand them on rather than let them expire unread.
+    /// Already-expired entries are dropped rather than returned, the same as every other read here.
+    fn drain_live(&self) -> Vec<DrainedEntry> {
+        let now = Instant::now();
+        self.entries()
+            .drain()
+            .filter_map(|(key, entry)| (entry.until > now)
+                .then(|| DrainedEntry { key, bytes: entry.bytes, ttl: entry.until - now }))
+            .collect()
+    }
+}
+
+/// One value taken out of a [`LocalStore`] by [`LocalStore::drain_live`], with what's left of its
+/// lifetime — a named field for each rather than a tuple, since `.1` said nothing about which was
+/// the key and which the value at the one call site this has, let alone at a second one.
+struct DrainedEntry {
+    key: String,
+    bytes: Vec<u8>,
+    ttl: Duration,
 }
 
 impl Entry {
@@ -529,8 +551,12 @@ fn spawn_redis_health_check(state: Arc<RedisState>, idle_timeout: Duration) {
             match state.health.healthy_for() {
                 None => {
                     let result = state.conn.clone().ping::<String>().await;
-                    let _ = state.health.record(result)
-                        .inspect_err(|e| tracing::debug!(error = %e, "Redis is still not answering"));
+                    let recovered = state.health.record(result)
+                        .inspect_err(|e| tracing::debug!(error = %e, "Redis is still not answering"))
+                        .is_ok();
+                    if recovered {
+                        sync_fallback_to_redis(&state).await;
+                    }
                 }
                 Some(healthy_for) if healthy_for >= idle_timeout => {
                     // Locked before the re-check, not after: a call that fails between
@@ -548,6 +574,28 @@ fn spawn_redis_health_check(state: Arc<RedisState>, idle_timeout: Duration) {
             }
         }
     }));
+}
+
+/// Copies whatever [`RedisState::fallback`] still holds into Redis the moment it answers again, so
+/// a lock or a dialogue that outlived the outage doesn't vanish the instant [`Backend::route`]
+/// stops reading from the fallback. Each entry keeps whatever is left of its original lifetime
+/// rather than starting a fresh one, and is drained from the fallback either way — a failure here
+/// is logged and the whole batch given up on, the same as every other failure in this file, not
+/// retried.
+async fn sync_fallback_to_redis(state: &RedisState) {
+    let entries = state.fallback.drain_live();
+    if entries.is_empty() {
+        return;
+    }
+    let count = entries.len();
+
+    let mut pipeline = redis::pipe();
+    for entry in entries {
+        pipeline.set_ex(entry.key, entry.bytes, entry.ttl.as_secs().max(1)).ignore();
+    }
+    if let Err(e) = pipeline.query_async::<()>(&mut state.conn.clone()).await {
+        tracing::warn!(error = %e, count, "couldn't sync the fallback into Redis");
+    }
 }
 
 async fn open(url: String) -> redis::RedisResult<ConnectionManager> {
@@ -800,7 +848,9 @@ mod test {
     /// After that first failure, a call stops trying Redis altogether and starts working again
     /// against [`RedisState::fallback`] — this is what makes the real fallback more than a fast
     /// miss: a lock or a dialogue kept during the outage actually means what it says.
-    /// [`spawn_redis_health_check`] is what notices Redis is back and lets calls use it again.
+    /// [`spawn_redis_health_check`] is what notices Redis is back, lets calls use it again, and
+    /// syncs what the outage wrote into the fallback into Redis before `Backend::route` stops
+    /// reading from it — see [`sync_fallback_to_redis`].
     ///
     /// Paused rather than stopped: Docker Desktop hands a *stopped* container a new host port on
     /// its next start, which would leave `cache` pointed at a port nothing listens on any more and
@@ -831,6 +881,29 @@ mod test {
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }).await.expect("the health check must notice Redis answers again");
+
+        assert_eq!(cache.get_flag(key).await, Some(true),
+            "what the outage wrote must have been synced into Redis, not left behind in the fallback");
+        assert!(state.fallback.entries().is_empty(), "and the fallback must have been drained of it");
+    }
+
+    /// Whether a real outage fills the fallback and a real recovery drains it is the test above;
+    /// this one is only about the sync itself, seeded directly rather than through a whole outage.
+    #[tokio::test]
+    async fn sync_fallback_to_redis_writes_what_it_held_and_drains_it() {
+        let (_container, cache) = a_cache_with_its_own_container().await;
+        let Backend::Redis(state) = &cache.backend else { panic!("must have connected to Redis") };
+        let (first, second) = (TestKey(18), TestKey(19));
+
+        // Two, not one: sync_fallback_to_redis sends every entry as a single pipeline, and this is
+        // what proves more than one command in it actually lands.
+        state.fallback.insert(&full_key(first), TRUE.to_vec(), A_MINUTE);
+        state.fallback.insert(&full_key(second), FALSE.to_vec(), A_MINUTE);
+        sync_fallback_to_redis(state).await;
+
+        assert_eq!(cache.get_flag(first).await, Some(true), "the first synced value must be readable");
+        assert_eq!(cache.get_flag(second).await, Some(false), "and the second, from the same pipeline");
+        assert!(state.fallback.entries().is_empty(), "and both gone from the fallback");
     }
 
     /// Whether a real outage can trip the sweeper is the test above; this one is only about the

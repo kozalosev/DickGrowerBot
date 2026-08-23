@@ -782,10 +782,15 @@ already uses correctly under `CACHE_MODE=LOCAL`, not a degraded stand-in for `CA
 Recovery is a background probe, not the data path: `spawn_redis_health_check` pings Redis every
 `REDIS_HEALTH_CHECK_INTERVAL` (a constant, on the same grounds as `SWEEP_INTERVAL` — it only decides
 how promptly the bot notices Redis is back, not whether anything works while it waits) *only* while
-degraded, and `RedisHealth::record` clears the flag on the first probe that succeeds. Values written
-to the fallback during the outage are not migrated back — the swap is one-directional and the
-process cache starts cold again once Redis takes over — so a dialogue answered mid-outage still
-needs to finish before the swap back, the same as it needs to finish before a restart.
+degraded, and `RedisHealth::record` clears the flag on the first probe that succeeds. That same
+successful probe drains `RedisState::fallback` and writes each live entry into Redis with whatever
+is left of its original lifetime (`sync_fallback_to_redis`) — so a lock or a dialogue answered
+mid-outage doesn't vanish the instant `Backend::route` stops reading from the fallback. It is
+best-effort like everything else here: a write that fails is logged and given up on, not retried,
+which for a lock is free (the same as never having been taken) and for a dialogue reads as if a
+restart had just happened. Nothing keeps the fallback's copy once its write is attempted either way,
+which is also what makes it empty — and its sweeper idle — the moment recovery is noticed, rather
+than only once each entry's own TTL would have expired it anyway.
 
 **`cache_fallback_active` follows the most recent call to Redis, not only the one at startup.**
 `RedisHealth::record` sets it on every call that actually reaches Redis: `1` on failure, `0` on the
