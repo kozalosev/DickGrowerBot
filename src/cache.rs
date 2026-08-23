@@ -12,10 +12,17 @@
 //! The exceptions are the two tenants a miss is *not* free for — a lock nobody holds is no lock,
 //! and a dialogue with nowhere to keep its state can never advance. They ask for
 //! [`Cache::or_local`], which turns a disabled store into a local one and leaves the rest alone.
+//!
+//! [`Backend::Redis`] rides out a live outage the same way [`Cache::or_local`] rides out being
+//! disabled: [`RedisState::fallback`] is a local store it always carries, and once
+//! [`RedisHealth::is_degraded`] trips, every call routes there instead of to Redis — see
+//! [`Backend::route`]. Only the map itself is built up front; its sweeper waits for that first
+//! trip, so a Redis that never fails never pays for one.
 
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use once_cell::sync::Lazy;
@@ -36,6 +43,13 @@ use crate::metrics::CacheSourceCounters;
 /// deadline itself and an expired entry is already unreadable. All it decides is how promptly the
 /// memory behind one is handed back.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How often a degraded [`Backend::Redis`] is probed to see whether it can be used again.
+///
+/// This is what actually finds out — nothing else does, since a degraded call never touches Redis
+/// at all. A constant for the same reason as [`SWEEP_INTERVAL`]: it only decides how promptly the
+/// bot notices Redis is back, not whether anything works while it waits.
+const REDIS_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// What every key of this bot's begins with.
 ///
@@ -81,8 +95,9 @@ impl Cache {
             }
             CacheMode::Redis => connect_to_redis(config.url).await,
         };
-        if let Backend::Disabled(store) | Backend::Local(store) = &backend {
-            store.spawn_sweeper();
+        match &backend {
+            Backend::Disabled(store) | Backend::Local(store) => store.spawn_sweeper(),
+            Backend::Redis(state) => spawn_redis_health_check(state.clone()),
         }
         // Keeping the values here is a setting, and the only one a single instance of the bot
         // needs; being told to share them and failing to is a fault. Only the second is worth
@@ -143,10 +158,10 @@ impl Cache {
     /// Forgets the value, and says whether there was one.
     pub async fn remove(&self, key: impl CacheKey) -> bool {
         let key = full_key(key);
-        match &self.backend {
-            Backend::Disabled(_) => false,
-            Backend::Local(store) => store.remove(&key),
-            Backend::Redis(conn) => conn.clone().del::<_, usize>(&key).await
+        match self.backend.route() {
+            Route::Disabled => false,
+            Route::Local(store) => store.remove(&key),
+            Route::Redis(state) => state.health.record(state.conn.clone().del::<_, usize>(&key).await)
                 .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't remove a value from the cache"))
                 .is_ok_and(|removed| removed > 0),
         }
@@ -160,17 +175,19 @@ impl Cache {
     pub async fn lock(&self, key: impl CacheKey, ttl: Duration) -> Option<LockToken> {
         let key = full_key(key);
         let token = LockToken::new();
-        let taken = match &self.backend {
-            Backend::Disabled(_) => true,
-            Backend::Local(store) => store.insert_if_absent(&key, token.0.clone().into_bytes(), ttl),
-            Backend::Redis(conn) => {
+        let taken = match self.backend.route() {
+            Route::Disabled => true,
+            Route::Local(store) => store.insert_if_absent(&key, token.0.clone().into_bytes(), ttl),
+            Route::Redis(state) => {
                 let options = redis::SetOptions::default()
                     .conditional_set(redis::ExistenceCheck::NX)
                     .with_expiration(redis::SetExpiry::EX(ttl.as_secs()));
-                conn.clone().set_options::<_, _, Option<String>>(&key, &token.0, options).await
+                state.health.record(state.conn.clone().set_options::<_, _, Option<String>>(&key, &token.0, options).await)
                     .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't take a lock, letting the caller through"))
-                    // An unreachable server must not stop the bot working, so a failure counts as
-                    // free — the same fallback a miss gets everywhere else here.
+                    // This one call must not stop the bot working, so it counts as free — the same
+                    // fallback a miss gets everywhere else here. The next one isn't reached at all —
+                    // see `Backend::route` — and the lock is a real one again, taken against
+                    // `RedisState::fallback` instead.
                     .map_or(true, |answer| answer.is_some())
             }
         };
@@ -183,11 +200,11 @@ impl Cache {
     /// left alone — see [`UNLOCK`] for why that has to be decided by the store rather than here.
     pub async fn unlock(&self, key: impl CacheKey, token: &LockToken) -> bool {
         let key = full_key(key);
-        match &self.backend {
-            Backend::Disabled(_) => false,
-            Backend::Local(store) => store.remove_if_holds(&key, token.0.as_bytes()),
-            Backend::Redis(conn) => UNLOCK.key(&key).arg(&token.0)
-                .invoke_async::<usize>(&mut conn.clone()).await
+        match self.backend.route() {
+            Route::Disabled => false,
+            Route::Local(store) => store.remove_if_holds(&key, token.0.as_bytes()),
+            Route::Redis(state) => state.health.record(UNLOCK.key(&key).arg(&token.0)
+                .invoke_async::<usize>(&mut state.conn.clone()).await)
                 .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't free a lock, leaving it to run out"))
                 .is_ok_and(|freed| freed > 0),
         }
@@ -238,10 +255,10 @@ impl Cache {
     }
 
     async fn get_raw(&self, key: &str) -> Option<Vec<u8>> {
-        match &self.backend {
-            Backend::Disabled(_) => None,
-            Backend::Local(store) => store.get(key),
-            Backend::Redis(conn) => conn.clone().get::<_, Option<Vec<u8>>>(key).await
+        match self.backend.route() {
+            Route::Disabled => None,
+            Route::Local(store) => store.get(key),
+            Route::Redis(state) => state.health.record(state.conn.clone().get::<_, Option<Vec<u8>>>(key).await)
                 .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't read a value from the cache"))
                 .ok()
                 .flatten(),
@@ -249,10 +266,10 @@ impl Cache {
     }
 
     async fn set_raw(&self, key: &str, value: Vec<u8>, ttl: Duration) {
-        match &self.backend {
-            Backend::Disabled(_) => {}
-            Backend::Local(store) => store.insert(key, value, ttl),
-            Backend::Redis(conn) => conn.clone().set_ex::<_, _, ()>(key, value, ttl.as_secs()).await
+        match self.backend.route() {
+            Route::Disabled => {}
+            Route::Local(store) => store.insert(key, value, ttl),
+            Route::Redis(state) => state.health.record(state.conn.clone().set_ex::<_, _, ()>(key, value, ttl.as_secs()).await)
                 .unwrap_or_else(|e| tracing::warn!(error = %e, key, "couldn't write a value into the cache")),
         }
     }
@@ -282,7 +299,87 @@ enum Backend {
     /// [`Cache::or_local`] hands to the two tenants an operator's choice may not reach.
     Disabled(LocalStore),
     Local(LocalStore),
-    Redis(ConnectionManager),
+    Redis(Arc<RedisState>),
+}
+
+impl Backend {
+    /// Resolves to the store a call should actually use. A healthy `Redis` routes to itself;
+    /// everything else — a degraded `Redis` included — routes to a local store, and only
+    /// `Disabled` refuses to hold anything at all. Kept as one place rather than a fourth arm
+    /// repeated in every method, since a degraded call is handled by the exact code a real
+    /// `Backend::Local` already has.
+    fn route(&self) -> Route<'_> {
+        match self {
+            Backend::Disabled(_) => Route::Disabled,
+            Backend::Local(store) => Route::Local(store),
+            Backend::Redis(state) if state.health.is_degraded() => {
+                if !state.fallback_swept.swap(true, Ordering::Relaxed) {
+                    state.fallback.spawn_sweeper();
+                }
+                Route::Local(&state.fallback)
+            }
+            Backend::Redis(state) => Route::Redis(state),
+        }
+    }
+}
+
+enum Route<'a> {
+    Disabled,
+    Local(&'a LocalStore),
+    Redis(&'a RedisState),
+}
+
+/// A live Redis connection, and everything needed to ride out a stretch where it stops answering.
+struct RedisState {
+    conn: ConnectionManager,
+    /// Where the values go while [`RedisHealth::is_degraded`] — this instance's own store, exactly
+    /// what [`Backend::Local`] would use. Built once, up front, so falling into it costs nothing to
+    /// make — only its sweeper waits for the first use, see [`Backend::route`].
+    fallback: LocalStore,
+    /// Whether [`LocalStore::spawn_sweeper`] has been started for [`fallback`](Self::fallback) yet.
+    fallback_swept: AtomicBool,
+    health: RedisHealth,
+}
+
+/// Whether Redis answered the last time it was asked, kept apart from the connection itself so the
+/// state machine can be exercised without one.
+///
+/// Trips on the **first** failure rather than waiting for a few in a row: `ConnectionManager`
+/// already retries internally with its own growing backoff before a call returns at all, so
+/// tolerating several failures here would mean paying that backoff several times over — the exact
+/// wait this exists to avoid. Nothing is lost by tripping early: `RedisState::fallback` is a
+/// correct store for the one instance of the bot that ever runs, not a degraded one, so there is no
+/// downside to using it a little sooner.
+struct RedisHealth {
+    /// Cleared only by [`spawn_redis_health_check`] once a probe succeeds again.
+    degraded: AtomicBool,
+}
+
+impl RedisHealth {
+    fn new() -> Self {
+        Self { degraded: AtomicBool::new(false) }
+    }
+
+    fn is_degraded(&self) -> bool {
+        self.degraded.load(Ordering::Relaxed)
+    }
+
+    /// Folds one call's outcome into [`degraded`](Self::degraded), logged only on the calls that
+    /// change the mode, not on every one that confirms it. Also keeps
+    /// [`metrics::CACHE_FALLBACK_ACTIVE`] following the most recent call, so a live outage shows up
+    /// there too and not only one that was never reached at startup.
+    fn record<T, E>(&self, result: Result<T, E>) -> Result<T, E> {
+        metrics::CACHE_FALLBACK_ACTIVE.set(result.is_err().into());
+        match &result {
+            Ok(_) => if self.degraded.swap(false, Ordering::Relaxed) {
+                tracing::info!("Redis answered again, sharing the cached values through it once more");
+            },
+            Err(_) => if !self.degraded.swap(true, Ordering::Relaxed) {
+                tracing::warn!("couldn't reach Redis, keeping the cached values in this process until it answers again");
+            },
+        }
+        result
+    }
 }
 
 /// The values kept in this process, in one map for every kind of them, so that there is one sweeper
@@ -380,13 +477,36 @@ async fn connect_to_redis(url: Option<String>) -> Backend {
     match open(url).await {
         Ok(conn) => {
             tracing::info!(mode = %CacheMode::Redis, "the cached values are shared through Redis");
-            Backend::Redis(conn)
+            Backend::Redis(Arc::new(RedisState {
+                conn,
+                fallback: LocalStore::default(),
+                fallback_swept: AtomicBool::new(false),
+                health: RedisHealth::new(),
+            }))
         }
         Err(e) => {
             tracing::error!(error = %e, "couldn't connect to Redis, the cached values are kept in this process");
             Backend::Local(LocalStore::default())
         }
     }
+}
+
+/// Retries Redis on a timer while [`RedisHealth::is_degraded`], rather than on the data path: a
+/// degraded call is routed away from Redis entirely so it isn't paying its timeout (see
+/// [`Backend::route`]), and something still has to notice when it is safe to use again.
+fn spawn_redis_health_check(state: Arc<RedisState>) {
+    tokio::spawn(metrics::TASK_CACHE_REDIS_HEALTH_CHECK.instrument(async move {
+        let mut ticker = tokio::time::interval(REDIS_HEALTH_CHECK_INTERVAL);
+        loop {
+            ticker.tick().await;
+            if !state.health.is_degraded() {
+                continue;
+            }
+            let result = state.conn.clone().ping::<String>().await;
+            let _ = state.health.record(result)
+                .inspect_err(|e| tracing::debug!(error = %e, "Redis is still not answering"));
+        }
+    }));
 }
 
 async fn open(url: String) -> redis::RedisResult<ConnectionManager> {
@@ -589,6 +709,98 @@ mod test {
         assert_eq!(cache.get_flag(TestKey(13)).await, Some(true));
     }
 
+    /// `RedisHealth::record` must hand back exactly what it was given — every Redis arm relies on
+    /// chaining `.inspect_err`/`.ok`/`.is_ok_and` onto its result unchanged.
+    #[test]
+    fn redis_health_record_passes_the_result_through() {
+        let health = RedisHealth::new();
+        assert_eq!(health.record::<u8, &str>(Ok(5)), Ok(5));
+        assert_eq!(health.record::<u8, &str>(Err("boom")), Err("boom"));
+    }
+
+    #[test]
+    fn redis_health_falls_back_on_the_first_failure_and_recovers_on_one_success() {
+        let health = RedisHealth::new();
+        assert!(!health.is_degraded());
+
+        let _ = health.record::<(), ()>(Err(()));
+        assert!(health.is_degraded(), "one failure must be enough to trip it");
+
+        let _ = health.record::<(), ()>(Ok(()));
+        assert!(!health.is_degraded(), "one success must undo it");
+    }
+
+    /// A server that dies **after** a successful connect stays on `Backend::Redis` — nothing here
+    /// switches it back to `Backend::Local` — so the first call against it must fail on its own
+    /// rather than hang until something else gives up on it. A container of its own, not
+    /// [`CONTAINER`]: killing the one every other test in this file shares would break them.
+    #[tokio::test]
+    async fn a_dead_server_fails_a_call_instead_of_hanging_it() {
+        let (container, cache) = a_cache_with_its_own_container().await;
+        let key = TestKey(15);
+
+        cache.set_flag(key, true, A_MINUTE).await;
+        assert_eq!(cache.get_flag(key).await, Some(true), "the server is up, so this must hit");
+
+        container.stop_with_timeout(Some(0)).await.expect("couldn't stop the container");
+
+        let result = tokio::time::timeout(Duration::from_secs(5), cache.get_flag(key)).await
+            .expect("a call against a dead server must fail on its own, not hang until this timeout");
+        assert_eq!(result, None, "a call against a dead server is a miss, like every other failure here");
+    }
+
+    /// After that first failure, a call stops trying Redis altogether and starts working again
+    /// against [`RedisState::fallback`] — this is what makes the real fallback more than a fast
+    /// miss: a lock or a dialogue kept during the outage actually means what it says.
+    /// [`spawn_redis_health_check`] is what notices Redis is back and lets calls use it again.
+    ///
+    /// Paused rather than stopped: Docker Desktop hands a *stopped* container a new host port on
+    /// its next start, which would leave `cache` pointed at a port nothing listens on any more and
+    /// make recovery untestable for a reason that has nothing to do with this file. A paused
+    /// container keeps its port and freezes instead, which the client sees as a server that stopped
+    /// answering — the same thing a live outage looks like.
+    #[tokio::test]
+    async fn a_sustained_outage_falls_back_to_a_working_store_and_recovers_on_its_own() {
+        let (container, cache) = a_cache_with_its_own_container().await;
+        let Backend::Redis(state) = &cache.backend else { panic!("must have connected to Redis") };
+        let key = TestKey(16);
+
+        container.pause().await.expect("couldn't pause the container");
+        let _ = tokio::time::timeout(Duration::from_secs(5), cache.get_flag(key)).await
+            .expect("must fail on its own, not hang");
+        assert!(state.health.is_degraded(), "the failure must have tripped the fallback");
+
+        let started = Instant::now();
+        cache.set_flag(key, true, A_MINUTE).await;
+        assert_eq!(cache.get_flag(key).await, Some(true),
+            "a degraded backend must actually work against its fallback store, not just miss");
+        assert!(started.elapsed() < Duration::from_millis(200),
+            "and must not even try the dead server while degraded");
+
+        container.unpause().await.expect("couldn't unpause the container");
+        tokio::time::timeout(REDIS_HEALTH_CHECK_INTERVAL * 6, async {
+            while state.health.is_degraded() {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }).await.expect("the health check must notice Redis answers again");
+    }
+
+    /// A Valkey container of its own, not [`CONTAINER`]: stopping the one every other test in this
+    /// file shares would break them.
+    async fn a_cache_with_its_own_container() -> (testcontainers::ContainerAsync<testcontainers::GenericImage>, Cache) {
+        use testcontainers::GenericImage;
+        use testcontainers::core::{IntoContainerPort, WaitFor};
+        use testcontainers::runners::AsyncRunner;
+
+        let container = GenericImage::new("valkey/valkey", "9-alpine")
+            .with_exposed_port(6379.tcp())
+            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
+            .start().await.expect("couldn't start a Valkey container of its own");
+        let port = container.get_host_port_ipv4(6379).await.expect("couldn't fetch its port");
+        let cache = Cache::connect(CacheConfig::redis(format!("redis://localhost:{port}/"))).await;
+        (container, cache)
+    }
+
     /// Runs the scenario against both live backends, so that every assertion above holds for
     /// either.
     ///
@@ -604,7 +816,7 @@ mod test {
     {
         let port = CONTAINER.port().await;
         let redis = Cache::connect(CacheConfig::redis(format!("redis://localhost:{port}/"))).await;
-        let local = Cache::connect(CacheConfig { mode: CacheMode::Local, url: None }).await;
+        let local = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
         tokio::join!(scenario(redis), scenario(local));
     }
 

@@ -61,9 +61,9 @@ pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
 pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
 pub static CACHE_LOCAL_ENTRIES: Lazy<Gauge> = Lazy::new(||
-    Gauge::new("cache_local_entries", "number of values the cache is holding in this process, as of the last sweep. Always zero when the values are shared through Redis, since nothing is kept here then. A number to watch rather than to alert on: keeping the values here is a setting, and the only one a single instance of the bot needs"));
+    Gauge::new("cache_local_entries", "number of values the cache is holding in this process, as of the last sweep. Zero when the values are shared through Redis and it is answering; non-zero there too, for as long as cache_fallback_active reports an outage, since that is when a Redis backend starts holding its own values here instead. A number to watch rather than to alert on: keeping the values here is a setting, and the only one a single instance of the bot needs"));
 pub static CACHE_FALLBACK_ACTIVE: Lazy<Gauge> = Lazy::new(||
-    Gauge::new("cache_fallback_active", "1 when the bot was told to share its cached values through Redis and is keeping them in its own process instead, having failed to reach the server as it started. 0 when it is doing what it was asked, whichever that was — cache_local_entries says which mode is running, this says only whether it was chosen"));
+    Gauge::new("cache_fallback_active", "1 when the bot was told to share its cached values through Redis and isn't: either it fell back to its own process as it started, or the most recent call to Redis failed. 0 once a call succeeds again. cache_local_entries says whether the values are kept here, this says only whether Redis is presently answering"));
 pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
     CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
@@ -135,6 +135,7 @@ pub static TASK_DAILY_SHRINK_BROADCAST_CLEANING: Lazy<TaskMonitor> = Lazy::new(|
 pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
 pub static TASK_SELF_DESTRUCTION_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction_cleaning"));
 pub static TASK_CACHE_SWEEPER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("cache_sweeper"));
+pub static TASK_CACHE_REDIS_HEALTH_CHECK: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("cache_redis_health_check"));
 pub static TASK_BAN_LIST_LISTENER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("ban_list_listener"));
 
 pub fn init() -> (axum::Router, PrometheusMetricLayer<'static>) {

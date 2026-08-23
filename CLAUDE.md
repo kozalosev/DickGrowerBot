@@ -766,6 +766,34 @@ worth keeping for seconds. So every write takes one, and the numbers live togeth
 the work again, so a server that is down, slow or simply absent costs only the work it would have
 saved. Every failure is logged and swallowed: `Cache` returns no errors and never panics.
 
+**A `Backend::Redis` that starts failing falls back for real, not just to a faster miss.** The first
+failed call trips `RedisHealth::degraded` (`src/cache.rs`), and every call after that is routed by
+`Backend::route` straight to `RedisState::fallback` — a local store `Backend::Redis` always carries
+— without even attempting Redis. Only the map itself is built up front and free; its sweeper starts
+lazily, on that same first trip, so a Redis that never fails never pays for a background task that
+would spend its whole life finding an empty map. A lock taken in the fallback is a real lock, not a
+`true` handed out because the store couldn't be asked; a dialogue written there is read back, not
+lost until the outage ends. Trips on the *first* failure rather than after a few in a row:
+`ConnectionManager` already retries internally with its own growing backoff before a call returns at
+all, so waiting for several failures here would mean paying that backoff several times over, and
+there is no correctness reason to wait — `RedisState::fallback` is what a single instance of the bot
+already uses correctly under `CACHE_MODE=LOCAL`, not a degraded stand-in for `CACHE_MODE=REDIS`.
+
+Recovery is a background probe, not the data path: `spawn_redis_health_check` pings Redis every
+`REDIS_HEALTH_CHECK_INTERVAL` (a constant, on the same grounds as `SWEEP_INTERVAL` — it only decides
+how promptly the bot notices Redis is back, not whether anything works while it waits) *only* while
+degraded, and `RedisHealth::record` clears the flag on the first probe that succeeds. Values written
+to the fallback during the outage are not migrated back — the swap is one-directional and the
+process cache starts cold again once Redis takes over — so a dialogue answered mid-outage still
+needs to finish before the swap back, the same as it needs to finish before a restart.
+
+**`cache_fallback_active` follows the most recent call to Redis, not only the one at startup.**
+`RedisHealth::record` sets it on every call that actually reaches Redis: `1` on failure, `0` on the
+next success — which, once degraded, means only the health check's own probes touch it, since the
+data path stops trying Redis entirely. `Cache::connect`'s own write is only the value it starts at.
+So the gauge, and the alert built on it (`DickGrowerBotCacheFellBack`, `for: 5m` in server-configs),
+cover a server that dies mid-session too, not only one that was never reached.
+
 **A chat-keyed value spells the kind out** — `chat:id:-100…:topics`, not `chat:-100…:topics`. A
 chat id and a chat instance are both signed 64-bit numbers, and `ChatIdKind`'s `Display` forwards to
 the value, so two different chats would share an entry. `ChatIdKind::qualified` is what the keys

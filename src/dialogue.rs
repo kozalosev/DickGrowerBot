@@ -182,7 +182,7 @@ mod test {
     /// Two chats are two conversations, and so are two commands in one chat.
     #[tokio::test]
     async fn dialogues_of_other_chats_and_commands_are_left_alone() {
-        let cache = Cache::connect(CacheConfig { mode: CacheMode::Local, url: None }).await;
+        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
         let promo: Arc<CachedDialogueStorage<TestState>> = CachedDialogueStorage::new(&cache, "promo", A_MINUTE);
         let support: Arc<CachedDialogueStorage<TestState>> = CachedDialogueStorage::new(&cache, "support", A_MINUTE);
 
@@ -202,7 +202,7 @@ mod test {
     /// realistic length instead of one shortened to keep the suite quick.
     #[tokio::test(start_paused = true)]
     async fn an_abandoned_dialogue_is_forgotten() {
-        let cache = Cache::connect(CacheConfig { mode: CacheMode::Local, url: None }).await;
+        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
         let storage: Arc<CachedDialogueStorage<TestState>> =
             CachedDialogueStorage::new(&cache, "promo", A_MINUTE);
 
@@ -219,7 +219,7 @@ mod test {
     /// second step could never reach it.
     #[tokio::test]
     async fn a_disabled_store_still_holds_a_dialogue() {
-        let cache = Cache::connect(CacheConfig { mode: CacheMode::Disabled, url: None }).await;
+        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Disabled)).await;
         let storage: Arc<CachedDialogueStorage<TestState>> =
             CachedDialogueStorage::new(&cache, "promo", A_MINUTE);
 
@@ -232,7 +232,7 @@ mod test {
     }
 
     async fn storage() -> Arc<CachedDialogueStorage<TestState>> {
-        let cache = Cache::connect(CacheConfig { mode: CacheMode::Local, url: None }).await;
+        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
         CachedDialogueStorage::new(&cache, "test", A_MINUTE)
     }
 }

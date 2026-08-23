@@ -149,7 +149,7 @@ mod test {
 
     /// Two services over one store, which is what two instances of the bot amount to.
     async fn two_instances(mode: CacheMode) -> (BattleLocks, BattleLocks) {
-        let cache = Cache::connect(CacheConfig { mode, url: None }).await;
+        let cache = Cache::connect(CacheConfig::without_redis(mode)).await;
         let ttl = Duration::from_secs(30);
         (BattleLocks::new(&cache, ttl), BattleLocks::new(&cache, ttl))
     }

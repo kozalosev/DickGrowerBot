@@ -41,6 +41,13 @@ impl CacheConfig {
     pub fn redis(url: String) -> Self {
         Self { mode: CacheMode::Redis, url: Some(url) }
     }
+
+    /// A configuration for [`CacheMode::Local`] or [`CacheMode::Disabled`], for tests that don't
+    /// talk to a server.
+    #[cfg(test)]
+    pub fn without_redis(mode: CacheMode) -> Self {
+        Self { mode, url: None }
+    }
 }
 
 fn redis_url() -> Option<String> {
