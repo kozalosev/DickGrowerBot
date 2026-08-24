@@ -10,6 +10,7 @@ use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::BattlesFeatureToggles;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::objects::WinRateAware;
+use crate::handlers::utils::{DickId, Incrementor};
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -23,6 +24,7 @@ pub enum StatsCommands {
 pub async fn stats_cmd_handler(
     bot: Bot,
     msg: Message,
+    incr: Incrementor,
     deps: HandlerDeps,
 ) -> HandlerResult {
     let HandlerDeps { repos, config: app_config, self_destruction, lang_resolver } = deps;
@@ -38,7 +40,7 @@ pub async fn stats_cmd_handler(
         let answer = if msg.chat.is_private() {
             personal_stats_impl(&repos, from_refs, &lang_code).await?
         } else {
-            chat_stats_impl(&repos, from_refs, features, &lang_code).await?
+            chat_stats_impl(&repos, &incr, from_refs, features, &lang_code).await?
         };
 
         reply_html_ephemeral!(bot, msg, answer, self_destruction, Report, lang_code);
@@ -60,16 +62,24 @@ async fn personal_stats_impl(
 
 pub(crate) async fn chat_stats_impl(
     repos: &repo::Repositories,
+    incr: &Incrementor,
     from_refs: FromRefs<'_>,
     features: BattlesFeatureToggles,
     lang_code: &LanguageCode,
 ) -> anyhow::Result<String> {
-    let (length, position) = repos.dicks.fetch_dick(UserId::from(from_refs.0), &from_refs.1.kind()).await?
+    let uid = UserId::from(from_refs.0);
+    let (length, position) = repos.dicks.fetch_dick(uid, &from_refs.1.kind()).await?
         .map(|dick| (dick.length, dick.position.unwrap_or_default()))
         .unwrap_or_default();
     let length_stats = t!("commands.stats.length", locale = lang_code,
         length = length, pos = position);
-    let pvp_stats = repos.pvp_stats.get_stats(&from_refs.1.kind(), UserId::from(from_refs.0)).await
+    let perks_lines = incr.perks_stats_lines(&DickId(uid, from_refs.1.kind()), lang_code).await;
+    let length_stats = if perks_lines.is_empty() {
+        length_stats.to_string()
+    } else {
+        format!("{length_stats}\n{}", perks_lines.join("\n"))
+    };
+    let pvp_stats = repos.pvp_stats.get_stats(&from_refs.1.kind(), uid).await
         .map(|stats| t!("commands.stats.pvp", locale = lang_code,
             win_rate = stats.win_rate_percentage(), win_streak = stats.win_streak_max,
             battles = stats.battles_total, wins = stats.battles_won,

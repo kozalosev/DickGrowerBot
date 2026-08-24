@@ -15,6 +15,21 @@ const PROMO_BONUS: i32 = 10;
 const PENALTY_PROMO_CODE: &str = "penalty30";
 const PENALTY_PROMO_BONUS: i32 = -30;
 
+/// The column's `promo_code_format` and `promo_code_validator` have to agree on the shortest code
+/// there is. The bot writes through the type, so a code the type takes and the column turns down
+/// would fail as a constraint violation rather than as a refusal anyone can act on.
+#[tokio::test]
+async fn the_column_takes_the_shortest_code_the_type_takes() {
+    let db = fresh_db().await;
+    let promo = repo::Promo::new(db);
+
+    promo.create_promo_code(PromoCodeParams {
+        code: literal!(PromoCode = "abc"),
+        bonus_length: PromoBonus::new(PROMO_BONUS),
+        capacity: PromoCapacity::new(1),
+    }).await.expect("three characters is the minimum of both");
+}
+
 #[tokio::test]
 async fn activate() {
     let db = fresh_db().await;

@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 use crate::config::env::{env_value, get_env_value_or_default};
-use crate::domain::primitives::{DaysCount, Ratio};
+use crate::domain::primitives::{DaysCount, PerkName, Ratio};
 use domain_types::literal;
 
 /// Tuning of the length changes produced by the incrementor and its perks.
@@ -15,7 +15,16 @@ pub struct IncrementorConfig {
 
 #[derive(Clone, Default)]
 pub struct PerksConfig {
+    /// Zero by default, which leaves `help-pussies` off until someone asks for it.
     pub help_pussies_ratio: Ratio,
+    pub streak_bonus: StreakBonusConfig,
+}
+
+/// How much a day in a row is worth, and how many of them still count.
+#[derive(Clone, Copy)]
+pub struct StreakBonusConfig {
+    pub ratio_per_day: Ratio,
+    pub max_days: DaysCount,
 }
 
 impl Default for IncrementorConfig {
@@ -26,6 +35,15 @@ impl Default for IncrementorConfig {
             newcomers_grace_days: DaysCount::new(7),
             dod_bonus_range: 1..=5,
             perks: Default::default(),
+        }
+    }
+}
+
+impl Default for StreakBonusConfig {
+    fn default() -> Self {
+        Self {
+            ratio_per_day: literal!(Ratio = 0.05),
+            max_days: DaysCount::new(20),
         }
     }
 }
@@ -44,6 +62,12 @@ impl IncrementorConfig {
             dod_bonus_range: *defaults.dod_bonus_range.start()..=dod_max_bonus,
             perks: PerksConfig {
                 help_pussies_ratio: env_value!("HELP_PUSSIES_COEF": Ratio),
+                streak_bonus: StreakBonusConfig {
+                    ratio_per_day: get_env_value_or_default("STREAK_BONUS_RATIO_PER_DAY",
+                        defaults.perks.streak_bonus.ratio_per_day),
+                    max_days: get_env_value_or_default("STREAK_BONUS_MAX_DAYS",
+                        defaults.perks.streak_bonus.max_days),
+                },
             },
         }
     }
@@ -63,8 +87,8 @@ impl IncrementorConfig {
 
 impl PerksConfig {
     /// Every perk can be turned off by a `DISABLE_<NAME>` variable named after the perk.
-    pub fn enabled(&self, perk_name: &str) -> bool {
-        let env_key = format!("DISABLE_{}", perk_name.to_uppercase().replace('-', "_"));
+    pub fn enabled(&self, perk_name: &PerkName) -> bool {
+        let env_key = format!("DISABLE_{}", perk_name.value().to_uppercase().replace('-', "_"));
         !get_env_value_or_default(&env_key, false)
     }
 }

@@ -54,7 +54,7 @@ mod import_semantics {
         create_user_and_dick_2(&db, &CHAT_ID_KIND.into(), "second").await;
         // The same user in another chat, so a wrong join shows up as this dick growing too.
         let other_chat = ChatIdKind::ID(TelegramChatId::new(OTHER_CHAT_ID));
-        dicks.create_or_grow(USER_ID, &other_chat.into(), LengthChange::signed(3))
+        dicks.create_or_grow(USER_ID, &other_chat.into(), LengthChange::signed(3), &[])
             .await.expect("couldn't create a dick in the other chat");
 
         let before1 = read_dick(&db, USER_ID, CHAT_ID).await;

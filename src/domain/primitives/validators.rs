@@ -8,8 +8,9 @@
 //! Working on `&str` in a `const fn` means working on bytes — `chars()` is not const — so the ones
 //! below walk `as_bytes()` themselves.
 
-const PROMO_CODE_MIN_LENGTH: usize = 4;
+const PROMO_CODE_MIN_LENGTH: usize = 3;
 const PROMO_CODE_MAX_LENGTH: usize = 16;
+const PERK_NAME_MAX_LENGTH: usize = 32;
 
 pub const fn ratio_range_validator(x: &f64) -> bool {
     *x >= 0.0 && *x <= 1.0
@@ -19,7 +20,7 @@ pub const fn ratio_range_validator_f32(x: &f32) -> bool {
     *x >= 0.0 && *x <= 1.0
 }
 
-/// Latin and Cyrillic letters, digits, `_` and `-`, between 4 and 16 characters.
+/// Latin and Cyrillic letters, digits, `_` and `-`, between 3 and 16 characters.
 pub const fn promo_code_validator(code: &str) -> bool {
     let bytes = code.as_bytes();
     let mut i = 0;
@@ -36,6 +37,16 @@ pub const fn promo_code_validator(code: &str) -> bool {
         length += 1;
     }
     length >= PROMO_CODE_MIN_LENGTH && length <= PROMO_CODE_MAX_LENGTH
+}
+
+/// Between 1 and 32 ASCII characters. One byte per character is also the count `varchar(32)`
+/// makes, so the bound means the same thing here as it does in the column.
+///
+/// `Perks.name` carries the same rule as a `CHECK`, which is what lets a name read back from it
+/// become a `PerkName` without the read being able to fail.
+pub const fn perk_name_validator(name: &str) -> bool {
+    let length = name.len();
+    length > 0 && length <= PERK_NAME_MAX_LENGTH && name.is_ascii()
 }
 
 const fn is_promo_code_char(c: char) -> bool {
@@ -99,13 +110,24 @@ mod test {
         }
     }
 
+    #[test]
+    fn a_perk_name_is_short_and_ascii() {
+        assert!(perk_name_validator("help-pussies"));
+        assert!(perk_name_validator("streak_2"));
+        assert!(perk_name_validator(&"a".repeat(32)), "32 characters is the limit");
+        assert!(!perk_name_validator(&"a".repeat(33)), "33 is past it");
+        assert!(!perk_name_validator(""), "a perk has to be called something");
+        assert!(!perk_name_validator("серия"), "a name outside ASCII is refused");
+        assert!(!perk_name_validator("🍆"), "and so is anything wider");
+    }
+
     /// A Cyrillic letter is two bytes, so counting bytes would refuse a code of legal length.
     #[test]
     fn a_promo_code_is_measured_in_characters() {
         assert!(promo_code_validator("абвгдеёжзийклмно"), "16 letters is the limit");
         assert!(!promo_code_validator("абвгдеёжзийклмноп"), "17 is past it");
-        assert!(promo_code_validator("абвг"), "4 letters is the minimum");
-        assert!(!promo_code_validator("абв"), "3 is below it");
+        assert!(promo_code_validator("абв"), "3 letters is the minimum");
+        assert!(!promo_code_validator("аб"), "2 is below it");
         assert!(!promo_code_validator(""));
     }
 

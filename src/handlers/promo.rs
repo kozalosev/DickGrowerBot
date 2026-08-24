@@ -202,10 +202,10 @@ mod test {
     /// The inline button is offered for what the type would accept, and for nothing else.
     #[test]
     fn only_a_well_formed_code_is_offered() {
-        for accepted in ["TESTPROMO", "test-11_1", "промо-код", "тест1234"] {
+        for accepted in ["TESTPROMO", "test-11_1", "промо-код", "тест1234", "T34"] {
             assert!(promo_inline_filter(query(accepted)), "{accepted} should be offered");
         }
-        for refused in ["T34", "PROMO!", "VERYVERYLONGLONGPROMOCODE"] {
+        for refused in ["T3", "PROMO!", "VERYVERYLONGLONGPROMOCODE"] {
             assert!(!promo_inline_filter(query(refused)), "{refused} should not be offered");
         }
     }

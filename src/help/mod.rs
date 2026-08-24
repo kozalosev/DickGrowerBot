@@ -1,7 +1,7 @@
 use rust_i18n::t;
 use serde::Serialize;
 use tinytemplate::TinyTemplate;
-use crate::domain::primitives::{LanguageCode, Percentage, Username};
+use crate::domain::primitives::{DaysCount, LanguageCode, Percentage, Username};
 use crate::domain::primitives::SupportedLanguage::{EN, RU, IT, FA, ZH};
 
 static EN_HELP: &str = include_str!("en.html");
@@ -48,6 +48,8 @@ pub struct Context {
     pub admin_chat_en: Username,
     pub git_repo: String,
     pub help_pussies_percentage: Percentage,
+    pub streak_bonus_percentage_per_day: Percentage,
+    pub streak_bonus_max_days: DaysCount,
 }
 
 pub fn render_help_messages(context: Context) -> Result<HelpContainer, tinytemplate::error::Error> {

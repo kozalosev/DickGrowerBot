@@ -398,7 +398,7 @@ async fn migrate_chat_id() {
     let old_partiality = ChatIdPartiality::Specific(old.into());
     let internal_id = chats.upsert_chat(&old_partiality)
         .await.expect("couldn't create a chat");
-    dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5))
+    dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5), &[])
         .await.expect("couldn't create a dick");
 
     // this chat was never anchored, so its inline half — if it ever had one — is left behind
@@ -715,7 +715,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
         .await.expect("couldn't create dicks");
 
     let chat_id = full.to_partiality(Default::default());
-    dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(0))
+    dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(0), &[])
         .await
         .expect("couldn't create a dick");
 

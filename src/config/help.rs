@@ -1,7 +1,7 @@
 use teloxide::types::Me;
 use crate::config::env::get_env_mandatory_value;
 use crate::domain::primitives::{Percentage, Username};
-use crate::handlers::perks::HelpPussiesPerk;
+use crate::handlers::perks::{HelpPussiesPerk, StreakPerk};
 use crate::handlers::utils::Incrementor;
 use crate::help;
 use domain_types::literal;
@@ -17,6 +17,7 @@ pub fn build_context_for_help_messages(
         .collect::<Vec<String>>()
         .join(", ");
     let incr_cfg = incr.get_config();
+    let streak = incr.find_perk_config::<StreakPerk>();
 
     Ok(help::Context {
         bot_name: Username::from(me.username()),
@@ -30,6 +31,12 @@ pub fn build_context_for_help_messages(
         git_repo: get_env_mandatory_value("HELP_GIT_REPO")?,
         help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
             .map(Percentage::from)
-            .unwrap_or(literal!(Percentage = 0))
+            .unwrap_or(literal!(Percentage = 0)),
+        streak_bonus_percentage_per_day: streak.as_ref()
+            .map(|cfg| Percentage::from(cfg.ratio_per_day))
+            .unwrap_or(literal!(Percentage = 0)),
+        streak_bonus_max_days: streak
+            .map(|cfg| cfg.max_days)
+            .unwrap_or_default(),
     })
 }

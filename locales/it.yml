@@ -122,6 +122,7 @@ commands:
   stats:
     description: "Statistiche"
     length: "Lunghezza: <b>%{length}</b>\nPosizione in classifica: <b>%{pos}</b>"
+    streak: "Giorni di fila: <b>%{current}</b>\nLa serie più lunga di crescite: <b>%{max}</b>"
     pvp: "Tasso di vittoria: <b>%{win_rate}</b>.\nSfide: <b>%{battles}</b>.\nVittorie: <b>%{wins}</b>.\nSerie di vittorie massima: <b>%{win_streak}</b>.\nLunghezza acquisita: <b>%{acquired} cm</b>.\nLunghezza persa: <b>%{lost} cm</b>."
     notice: "La raccolta delle statistiche è iniziata il 2 Luglio 2024."
     personal: "<i>Le tue statistiche personali:</i>\n— Numero di gruppi in cui giochi: <b>%{chats}</b>.\n— Lunghezza massima raggiunta: <b>%{max_length}</b>.\n— Somma dei tuoi peni in tutti i gruppi: <b>%{total_length}</b>."
@@ -172,7 +173,7 @@ commands:
         plural: "Il tuo pene si è ridotto di <b>%{growth}</b> cm in <b>%{affected_chats}</b> gruppi!"
     errors:
       no_activations_left: "Mi dispiace ma questo codice promozionale non esiste o è scaduto 😞"
-      invalid_format: "Questo non sembra un codice promozionale 🤔 Sono lunghi da 4 a 16 caratteri: lettere, numeri, trattini e trattini bassi."
+      invalid_format: "Questo non sembra un codice promozionale 🤔 Sono lunghi da 3 a 16 caratteri: lettere, numeri, trattini e trattini bassi."
       already_activated: "Sembra che tu abbia già utilizzato questo codice promozionale 🤨"
       no_dicks: "Non hai ancora alcun pene. 🤔 Devi aggiungermi ad un gruppo ed eseguire il comando <code>/grow</code>!"
     inline:
@@ -205,6 +206,8 @@ titles:
     top_line: "I seguenti vantaggi hanno influenzato il risultato:"
     help-pussies: "buco profondo"
     loan-payout: "microdebitore"
+    streak: "giorno dopo giorno"
+    streak_note: "%{days} giorni di fila"
 setup:
   text: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo quando vengo chiamato in modalità inline.\n\nPremi il pulsante qui sotto <b>una volta</b> per attivarmi qui — dopodiché tutto funzionerà come al solito.\n\nFinché non viene premuto, tutto ciò che è stato giocato in modalità inline andrà perso se il gruppo diventa un supergruppo."
   button: "Attiva"

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Perk_States (chat_id, uid, perk_id, state)\n                    SELECT $1, uid, perk_id, state FROM Perk_States WHERE chat_id = $2\n                    ON CONFLICT (chat_id, uid, perk_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ae60f01163e790b8caa21284dfe64c19eec7f737e9fcd0831fe65ce74c591a4d"
+}

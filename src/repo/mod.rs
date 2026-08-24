@@ -10,6 +10,7 @@ mod shrinks;
 mod announcements;
 mod deletions;
 mod broadcasts;
+mod perks;
 
 #[cfg(test)]
 pub(crate) mod test;
@@ -29,6 +30,7 @@ pub use shrinks::*;
 pub use announcements::*;
 pub use deletions::*;
 pub use broadcasts::*;
+pub use perks::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 use crate::domain::primitives::chat::ChatIdKind;
@@ -52,6 +54,7 @@ pub struct Repositories {
     pub shrinks: Shrinks,
     pub deletions: ScheduledDeletions,
     pub broadcasts: ScheduledBroadcasts,
+    pub perk_states: PerkStates,
 }
 
 impl Repositories {
@@ -69,6 +72,7 @@ impl Repositories {
             shrinks: Shrinks::new(db_conn.clone()),
             deletions: ScheduledDeletions::new(db_conn.clone()),
             broadcasts: ScheduledBroadcasts::new(db_conn.clone()),
+            perk_states: PerkStates::new(db_conn.clone()),
         }
     }
 }

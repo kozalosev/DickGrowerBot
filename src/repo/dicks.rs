@@ -4,10 +4,10 @@ use futures::TryFutureExt;
 use domain_types::traits::SaturatingInto;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
-use crate::domain::objects::{Dick, GrowthResult};
+use crate::domain::objects::{Dick, GrowthResult, PerkStateUpdate};
 use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
-use super::Chats;
+use super::{Chats, PerkStates};
 
 /// The database projection of a [`Dick`]. `position` is a `ROW_NUMBER()` (a plain `int8`),
 /// so it's decoded as `i64` here and converted to the `Position` domain type at this boundary
@@ -56,16 +56,22 @@ impl Dicks {
         uid: UserId,
         chat_id: &ChatIdPartiality,
         increment: LengthChange,
+        perk_states: &[PerkStateUpdate],
     ) -> anyhow::Result<GrowthResult> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
+
+        let mut tx = self.pool.begin().await?;
         let new_length = sqlx::query_scalar!(
             "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
                 ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
                 RETURNING length",
                 uid as UserId, internal_chat_id as InternalChatId, increment.value())
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await
             .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
+        PerkStates::write_all(&mut tx, internal_chat_id, uid, perk_states).await?;
+        tx.commit().await?;
+
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
         Ok(GrowthResult { new_length: Length::new(new_length), pos_in_top })
     }
@@ -151,6 +157,7 @@ impl Dicks {
         chat_id: &ChatIdPartiality,
         user_id: UserId,
         bonus: LengthChange,
+        perk_states: &[PerkStateUpdate],
     ) -> anyhow::Result<Option<GrowthResult>> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
@@ -160,6 +167,7 @@ impl Dicks {
             None => return Ok(None)
         };
         Self::insert_to_dod_table(&mut tx, internal_chat_id, user_id).await?;
+        PerkStates::write_all(&mut tx, internal_chat_id, user_id, perk_states).await?;
         tx.commit().await?;
 
         let pos_in_top = self.get_position_in_top(internal_chat_id, user_id).await?;

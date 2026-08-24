@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Perks (name)\n                    SELECT unnest($1::text[]) EXCEPT SELECT name FROM Perks\n                    ON CONFLICT (name) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ddcd5721e6beda81b84977164e20f35ddd260d82362f7c39642ee3823ace22c5"
+}

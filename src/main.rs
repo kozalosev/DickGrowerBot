@@ -157,7 +157,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let me = bot.get_me().await?;
     let perks = handlers::perks::all(&db_conn, &app_config);
-    let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(), &repos.dicks, perks);
+    let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
+                                                        &repos.dicks, &repos.perk_states, perks).await?;
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = BattleLocks::new(&cache, app_config.caches.pvp_lock);

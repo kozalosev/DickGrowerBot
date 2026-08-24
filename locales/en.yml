@@ -122,6 +122,7 @@ commands:
   stats:
     description: "Statistics"
     length: "Length: <b>%{length}</b>\nPosition in the top: <b>%{pos}</b>"
+    streak: "Days in a row: <b>%{current}</b>\nThe longest series of growths: <b>%{max}</b>"
     pvp: "Win rate: <b>%{win_rate}</b>.\nFights: <b>%{battles}</b>.\nWins: <b>%{wins}</b>.\nMax win streak: <b>%{win_streak}</b>.\nAcquired length: <b>%{acquired} cm</b>.\nLost length: <b>%{lost} cm</b>."
     notice: "The collection of statistics started on July 2, 2024."
     personal: "<i>Your personal statistics:</i>\n— Number of the chats in which you play: <b>%{chats}</b>.\n— Maximum length: <b>%{max_length}</b>.\n— Sum of dicks across all the chats: <b>%{total_length}</b>."
@@ -172,7 +173,7 @@ commands:
         plural: "Your dick has shrunk by <b>%{growth}</b> cm in <b>%{affected_chats}</b> chats!"
     errors:
       no_activations_left: "I'm so sorry but this promo code either does not exist at all, or expired, or exhausted 😞"
-      invalid_format: "That doesn't look like a promo code 🤔 They are 4 to 16 characters long: letters, digits, hyphens and underscores."
+      invalid_format: "That doesn't look like a promo code 🤔 They are 3 to 16 characters long: letters, digits, hyphens and underscores."
       already_activated: "It seems you already used this promocode earlier 🤨"
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
     inline:
@@ -205,6 +206,8 @@ titles:
     top_line: "The following perks affected the result"
     help-pussies: "deep hole"
     loan-payout: "micro-loaner"
+    streak: "day after day"
+    streak_note: "%{days} days in a row"
 setup:
   text: "This group is not a supergroup, so I can't recognize it when I'm called through inline mode.\n\nPress the button below <b>once</b> to activate me here — after that everything will work as usual.\n\nUntil it is pressed, everything played through inline mode will be lost if the group turns into a supergroup."
   button: "Activate"

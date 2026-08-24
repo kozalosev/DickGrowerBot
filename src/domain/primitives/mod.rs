@@ -16,4 +16,5 @@ pub_use_modules!(
     hash,
     pagination,
     promo,
+    perk,
     count);

@@ -5,7 +5,7 @@ use crate::number;
 #[domain_type(
     validated(
         promo_code_validator,
-        error_message("must be 4 to 16 letters, digits, underscores or hyphens"),
+        error_message("must be 3 to 16 letters, digits, underscores or hyphens"),
     ),
 )]
 struct PromoCode(String);
