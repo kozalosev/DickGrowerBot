@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO Perks (name) SELECT DISTINCT unnest($1::text[])\n                    ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name\n                    RETURNING id AS \"id: PerkId\", name AS \"name: PerkName\"",
+  "query": "SELECT id AS \"id: PerkId\", name AS \"name: PerkName\" FROM Perks WHERE name = ANY($1::text[])",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "fe4fa9bc9e0b1b12c15bbf6401304da67594cc11870c84951110133d44023ad8"
+  "hash": "1cd51c8602223d204361d9fcb87c790cb9c3bc553b08dad35ec373a8e4dc0b04"
 }

@@ -29,9 +29,6 @@ impl PerkStatesSnapshot {
 
 repository!(PerkStates,
     /// Gives every perk the id its states are keyed by, creating the rows a first run needs.
-    ///
-    /// The `DO UPDATE` looks like a no-op and is not: without it `RETURNING` skips the names that
-    /// were already there, and the map would come back missing every perk that has ever run.
     #[autometrics]
     #[tracing::instrument(skip_all)]
     pub async fn register_all(&self, names: &[PerkName]) -> anyhow::Result<HashMap<PerkName, PerkId>> {
@@ -39,16 +36,22 @@ repository!(PerkStates,
             .map(|name| name.value().to_owned())
             .collect();
         sqlx::query!(
-                r#"INSERT INTO Perks (name) SELECT DISTINCT unnest($1::text[])
-                    ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-                    RETURNING id AS "id: PerkId", name AS "name: PerkName""#,
+                "INSERT INTO Perks (name)
+                    SELECT unnest($1::text[]) EXCEPT SELECT name FROM Perks
+                    ON CONFLICT (name) DO NOTHING",
+                &names)
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't insert the perks new to this run out of {names:?}"))?;
+        sqlx::query!(
+                r#"SELECT id AS "id: PerkId", name AS "name: PerkName" FROM Perks WHERE name = ANY($1::text[])"#,
                 &names)
             .fetch_all(&self.pool)
             .await
             .map(|rows| rows.into_iter()
                 .map(|row| (row.name, row.id))
                 .collect())
-            .context(format!("couldn't register the perks {names:?}"))
+            .context(format!("couldn't read the ids of the perks {names:?}"))
     },
 
     #[autometrics]
