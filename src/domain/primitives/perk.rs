@@ -15,3 +15,8 @@ struct PerkId(u16);
     ),
 )]
 struct PerkName(String);
+
+/// A perk's own detail for the "affected the result" line, already rendered in the player's
+/// language — e.g. how long a streak has grown to.
+#[domain_type]
+struct PerkNote(String);

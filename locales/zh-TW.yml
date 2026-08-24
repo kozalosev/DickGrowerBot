@@ -66,7 +66,7 @@ commands:
       battle_already_in_progress: "已經在對戰了！結果稍後就會更新……"
   stats:
     length: "長度: <b>%{length}</b>\n在排行榜上的位置: <b>%{pos}</b>"
-    streak: "連續天數: <b>%{current}</b>（最長連續: <b>%{max}</b>）"
+    streak: "連續天數: <b>%{current}</b>\n最長連續增長次數: <b>%{max}</b>"
     pvp: "勝率: <b>%{win_rate}</b>。\n戰鬥次數: <b>%{battles}</b>。\n勝利次數: <b>%{wins}</b>。\n最大連勝: <b>%{win_streak}</b>。\n獲得長度: <b>%{acquired} 公分</b>。\n失去長度: <b>%{lost} 公分</b>。"
     notice: "統計收集從2024年7月2日開始。"
     personal: "<i>你的個人統計:</i>\n— 你參與的遊戲聊天數量: <b>%{chats}</b>。\n— 最大長度: <b>%{max_length}</b>。\n— 所有聊天中的老二總長度: <b>%{total_length}</b>。"
@@ -195,6 +195,7 @@ titles:
     help-pussies: "深洞"
     loan-payout: "貸款人"
     streak: "日復一日"
+    streak_note: "連續 %{days} 天"
 setup:
   text: "本群不是超級群組，因此透過內聯模式呼叫我時，我無法識別它。\n\n請<b>點擊一次</b>下方按鈕以在此啟用我——之後一切將正常運作。\n\n在按鈕被點擊之前，如果本群升級為超級群組，透過內聯模式遊玩的一切都會遺失。"
   button: "啟用"

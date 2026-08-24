@@ -87,7 +87,7 @@ pub(crate) async fn grow_impl(
     let days_since_registration = days_since_registration.num_days().to_u32()
         .map(DaysCount::new)
         .ok_or_else(|| anyhow!("days since registration are too much: {days_since_registration}"))?;
-    let increment = incr.growth_increment(uid, chat_id.kind(), days_since_registration).await;
+    let increment = incr.growth_increment(uid, chat_id.kind(), days_since_registration, lang_code).await;
     let grow_result = repos.dicks.create_or_grow(uid, chat_id, increment.total, &increment.perk_states).await;
 
     let (main_part, group) = match grow_result {

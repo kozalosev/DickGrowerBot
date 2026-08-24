@@ -9,7 +9,7 @@ use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{AdditionalChange, ChangeSource, ConfigurablePerk, Perk, PerkContext, PerkOutcome};
 use crate::config::StreakBonusConfig;
 use crate::{config, repo};
-use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, LoanPayout, PerkName, Ratio};
+use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, LoanPayout, PerkName, PerkNote, Ratio};
 use domain_types::literal;
 
 const HELP_PUSSIES: &str = "help-pussies";
@@ -153,6 +153,7 @@ impl Perk for StreakPerk {
             state: serde_json::to_value(state)
                 .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = %e, "couldn't serialize a streak"))
                 .ok(),
+            note: Some(PerkNote::new(t!("titles.perks.streak_note", locale = ctx.lang_code, days = streak).to_string())),
         }
     }
 
@@ -192,16 +193,21 @@ mod test {
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk, StreakPerk, StreakState};
     use crate::handlers::utils::{ChangeIntent, ChangeSource, DickId, Perk, PerkContext};
     use crate::{config, repo};
-    use crate::domain::primitives::{DaysCount, Debt, Length, LengthChange, LengthIncrement, PayoutRatio, Ratio, SignedLengthChange};
+    use std::sync::LazyLock;
+    use crate::domain::primitives::{DaysCount, Debt, LanguageCode, Length, LengthChange, LengthIncrement, PayoutRatio, Ratio, SignedLengthChange};
     use crate::repo::test::{CHAT_ID_KIND, fresh_db, USER_ID};
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 8, 17).expect("a valid date")
     }
 
+    static LANG_CODE: LazyLock<LanguageCode> = LazyLock::new(|| LanguageCode::new("en".to_owned()));
+
     /// A growth with nothing remembered about it, which is what both of the stateless perks get.
     fn ctx(dick_id: &DickId, intent: ChangeIntent) -> PerkContext<'_> {
-        PerkContext { dick_id, intent, source: ChangeSource::Growth, state: None, today: today() }
+        PerkContext {
+            dick_id, intent, source: ChangeSource::Growth, state: None, today: today(), lang_code: &LANG_CODE,
+        }
     }
 
     #[tokio::test]

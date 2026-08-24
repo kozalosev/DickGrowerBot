@@ -122,7 +122,7 @@ commands:
   stats:
     description: "统计"
     length: "长度: <b>%{length}</b>\n在排行榜上的位置: <b>%{pos}</b>"
-    streak: "连续天数: <b>%{current}</b>（最长连续: <b>%{max}</b>）"
+    streak: "连续天数: <b>%{current}</b>\n最长连续增长次数: <b>%{max}</b>"
     pvp: "胜率: <b>%{win_rate}</b>。\n战斗次数: <b>%{battles}</b>。\n胜利次数: <b>%{wins}</b>。\n最大连胜: <b>%{win_streak}</b>。\n获得长度: <b>%{acquired} 厘米</b>。\n失去长度: <b>%{lost} 厘米</b>。"
     notice: "统计收集从2024年7月2日开始。"
     personal: "<i>你的个人统计:</i>\n— 你参与的游戏聊天数量: <b>%{chats}</b>。\n— 最大长度: <b>%{max_length}</b>。\n— 所有聊天中的丁丁总长度: <b>%{total_length}</b>。"
@@ -207,6 +207,7 @@ titles:
     help-pussies: "深洞"
     loan-payout: "小贷人员"
     streak: "日复一日"
+    streak_note: "连续 %{days} 天"
 setup:
   text: "本群不是超级群组，因此通过内联模式调用我时，我无法识别它。\n\n请<b>点击一次</b>下方按钮以在此激活我——之后一切将正常运作。\n\n在按钮被点击之前，如果本群升级为超级群组，通过内联模式游玩的一切都会丢失。"
   button: "激活"

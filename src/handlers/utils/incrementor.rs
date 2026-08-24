@@ -16,7 +16,7 @@ use crate::repo;
 use crate::config::IncrementorConfig;
 use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::ChatIdKind;
-use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, PerkId, PerkName, Ratio, SignedLengthChange, UserId};
+use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
 use domain_types::literal;
 
 #[derive(Clone)]
@@ -76,6 +76,7 @@ pub struct PerkContext<'a> {
     pub source: ChangeSource,
     pub state: Option<&'a JsonValue>,
     pub today: NaiveDate,
+    pub lang_code: &'a LanguageCode,
 }
 
 /// What a perk made of it. The state travels with the change instead of being stored on the spot,
@@ -83,11 +84,14 @@ pub struct PerkContext<'a> {
 pub struct PerkOutcome {
     pub change: AdditionalChange,
     pub state: Option<JsonValue>,
+    /// Extra detail for the "perks affected the result" line, e.g. how long a streak has grown to.
+    /// Shown only next to a non-zero change.
+    pub note: Option<PerkNote>,
 }
 
 impl From<AdditionalChange> for PerkOutcome {
     fn from(change: AdditionalChange) -> Self {
-        Self { change, state: None }
+        Self { change, state: None, note: None }
     }
 }
 
@@ -100,9 +104,16 @@ impl AdditionalChange {
     }
 }
 
+/// What one perk did to the roll, for the "perks affected the result" line.
+#[derive(Debug)]
+pub struct PerkEffect {
+    pub change: SignedLengthChange,
+    pub note: Option<PerkNote>,
+}
+
 pub struct Increment {
     pub base: LengthChange,
-    pub by_perks: HashMap<PerkName, SignedLengthChange>,
+    pub by_perks: HashMap<PerkName, PerkEffect>,
     pub total: LengthChange,
     pub perk_states: Vec<PerkStateUpdate>,
 }
@@ -198,6 +209,7 @@ impl Incrementor {
         user_id: UserId,
         chat_id: ChatIdKind,
         days_since_registration: DaysCount,
+        lang_code: &LanguageCode,
     ) -> Increment {
         let dick_id = DickId(user_id, chat_id);
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
@@ -206,13 +218,13 @@ impl Incrementor {
             literal!(Ratio = 1.0)
         };
         let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
-        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into()), ChangeSource::Growth).await
+        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into()), ChangeSource::Growth, lang_code).await
     }
 
-    pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind) -> Increment {
+    pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind, lang_code: &LanguageCode) -> Increment {
         let dick_id = DickId(user_id, chat_id);
         let base_incr = rand::rng().random_range(self.config.dod_bonus_range.clone());
-        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into()), ChangeSource::DickOfDay).await
+        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into()), ChangeSource::DickOfDay, lang_code).await
     }
 
     async fn add_additional_incr(
@@ -220,6 +232,7 @@ impl Incrementor {
         dick: DickId,
         base_increment: BaseIncrement,
         source: ChangeSource,
+        lang_code: &LanguageCode,
     ) -> Increment {
         let Ok(current_length) = self.dicks.fetch_length(dick.0, &dick.1).await
             .inspect_err(|e| tracing::error!(error = %e, "couldn't fetch the length of a dick"))
@@ -247,13 +260,15 @@ impl Incrementor {
                 source,
                 state: states.of(*id),
                 today: states.today,
+                lang_code,
             };
-            let PerkOutcome { change: AdditionalChange(ac), state } = perk.apply(ctx).await;
+            let PerkOutcome { change: AdditionalChange(ac), state, note } = perk.apply(ctx).await;
             if let Some(state) = state {
                 perk_states.push(PerkStateUpdate { perk_id: *id, state });
             }
             if !ac.is_zero() {
-                by_perks.insert(perk.name(), SignedLengthChange::new(ac.value()));
+                let change = SignedLengthChange::new(ac.value());
+                by_perks.insert(perk.name(), PerkEffect { change, note });
             }
             // saturating addition: a perk pushing the sum out of i64 bounds clamps it
             // instead of wrapping; the checked addition below still decides the outcome
@@ -287,10 +302,14 @@ impl Increment {
         if self.base.value() != self.total.value() {
             let top_line = t!("titles.perks.top_line", locale = lang_code);
             let perks = self.by_perks.iter()
-                .map(|(perk, value)| {
+                .map(|(perk, effect)| {
                     let t_key = format!("titles.perks.{perk}");
                     let name = t!(&t_key, locale = lang_code);
-                    format!("— {name} ({value:+})")
+                    let value = effect.change;
+                    match &effect.note {
+                        Some(note) => format!("— {name} ({value:+}, {note})"),
+                        None => format!("— {name} ({value:+})"),
+                    }
                 })
                 .collect::<Vec<String>>()
                 .join("\n");
@@ -364,7 +383,7 @@ mod test_incrementor {
     use async_trait::async_trait;
     use futures::future::join_all;
     use crate::config::IncrementorConfig;
-    use crate::domain::primitives::{DaysCount, LengthChange, PerkName, Ratio};
+    use crate::domain::primitives::{DaysCount, LanguageCode, LengthChange, PerkName, Ratio};
     use crate::handlers::utils::{AdditionalChange, Incrementor, Perk, PerkContext, PerkOutcome};
     use crate::repo;
     use crate::repo::test::{CHAT_ID_KIND, fresh_db, USER_ID};
@@ -392,9 +411,14 @@ mod test_incrementor {
         test_perk_with_overflow(&incr).await;
     }
 
+    fn lang() -> LanguageCode {
+        LanguageCode::new("en".to_owned())
+    }
+
     async fn test_growth_increment_base(incr: &Incrementor) {
+        let lang_code = lang();
         let lazy_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1)));
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1), &lang_code));
         for fut in lazy_vals {
             let val = fut.await;
             assert_eq!(val.base, val.total);
@@ -404,7 +428,7 @@ mod test_incrementor {
         }
 
         let lazy_positive_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0)));
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0), &lang_code));
         for fut in lazy_positive_vals {
             let val = fut.await;
             assert_eq!(val.base, val.total);
@@ -413,8 +437,9 @@ mod test_incrementor {
     }
 
     async fn test_dod_increment_base(incr: &Incrementor) {
+        let lang_code = lang();
         let val = (0..100)
-            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND));
+            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang_code));
         let val = join_all(val).await;
         assert!(val.iter().all(|n| { n.base == n.total }));
         assert!(val.iter().all(|n| { n.base.value() == 1 || n.base.value() == 2 }))
@@ -455,17 +480,18 @@ mod test_incrementor {
         let perk_plus2 = AddPerk::boxed(2);
         let perk_minus1 = AddPerk::boxed(-1);
         incr.set_perks(vec![perk_plus2.clone(), perk_minus1.clone()]);
+        let lang_code = lang();
 
         let growth_lazy_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1)));
+            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1), &lang_code));
         let dod_lazy_vals = (0..100)
-            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND));
+            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang_code));
 
         macro_rules! assertions {
             ($val:ident) => {
                 assert_eq!($val.total.value() - $val.base.value(), 1);
-                assert_eq!($val.by_perks[&perk_plus2.name()], 2);
-                assert_eq!($val.by_perks[&perk_minus1.name()], -1);
+                assert_eq!($val.by_perks[&perk_plus2.name()].change, 2);
+                assert_eq!($val.by_perks[&perk_minus1.name()].change, -1);
             };
         }
 
@@ -482,7 +508,7 @@ mod test_incrementor {
         let perk_add_max_int = AddPerk::boxed(i64::MAX);
         incr.set_perks(vec![perk_add_max_int.clone()]);
 
-        let increment = incr.dod_increment(USER_ID, CHAT_ID_KIND).await;
+        let increment = incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang()).await;
         assert_eq!(increment.base, increment.total);
         assert!(increment.by_perks.is_empty());
     }
