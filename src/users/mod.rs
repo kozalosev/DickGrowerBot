@@ -662,8 +662,8 @@ mod test {
         LanguageService {
             users: UserServiceClientMock::new(),
             chats,
-            cache: Cache::connect(CacheConfig { mode: CacheMode::Local, url: None }).await,
-            chat_ttl: Duration::from_secs(60),
+            cache: Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await,
+            chat_ttl: Duration::from_mins(1),
             chats_merging,
         }
     }

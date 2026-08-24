@@ -188,15 +188,15 @@ pub(super) const fn secs(count: u64) -> Duration {
 }
 
 pub(super) const fn mins(count: u64) -> Duration {
-    Duration::from_secs(count * 60)
+    Duration::from_mins(count)
 }
 
 pub(super) const fn hours(count: u64) -> Duration {
-    Duration::from_secs(count * 60 * 60)
+    Duration::from_hours(count)
 }
 
 pub(super) const fn days(count: u64) -> Duration {
-    Duration::from_secs(count * 60 * 60 * 24)
+    Duration::from_hours(count * 24)
 }
 
 /// Reads a [`Duration`] from a variable that carries its unit in the value, with a fallback and a

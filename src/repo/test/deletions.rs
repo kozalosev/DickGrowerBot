@@ -31,7 +31,7 @@ async fn only_the_due_messages_are_claimed() {
     let db = fresh_db().await;
     let repo = ScheduledDeletions::new(db);
 
-    let later = NewDeletion { fire_after: Utc::now() + Duration::from_secs(600), ..due(chat_message(2), MessageKind::Reply) };
+    let later = NewDeletion { fire_after: Utc::now() + Duration::from_mins(10), ..due(chat_message(2), MessageKind::Reply) };
     repo.schedule(&[due(chat_message(1), MessageKind::Reply), later])
         .await.expect("couldn't schedule the deletions");
 
@@ -113,7 +113,7 @@ async fn a_warned_message_comes_back_at_the_end_of_the_grace_period() {
         .await.expect("couldn't schedule the deletion");
     let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
 
-    repo.mark_warned(claimed[0].id, Utc::now() + Duration::from_secs(600))
+    repo.mark_warned(claimed[0].id, Utc::now() + Duration::from_mins(10))
         .await.expect("couldn't mark the deletion as warned");
     let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert!(claimed_again.is_empty());
@@ -208,11 +208,11 @@ async fn only_the_finished_rows_are_cleaned_up() {
         .await.expect("couldn't fail the deletion");
 
     // Nothing has been finished for long enough yet.
-    let removed = repo.delete_finished(Utc::now() - Duration::from_secs(600))
+    let removed = repo.delete_finished(Utc::now() - Duration::from_mins(10))
         .await.expect("couldn't clean the deletions up");
     assert_eq!(removed, 0);
 
-    let removed = repo.delete_finished(Utc::now() + Duration::from_secs(600))
+    let removed = repo.delete_finished(Utc::now() + Duration::from_mins(10))
         .await.expect("couldn't clean the deletions up");
     assert_eq!(removed, 1);
     let pending = repo.count_pending()
@@ -264,7 +264,7 @@ async fn a_removed_message_stays_until_it_is_cleaned_up() {
     let finished = repo.count_finished().await.expect("couldn't count the finished deletions");
     assert_eq!(finished, vec![(DeletionState::Removed, Count::<ScheduledDeletion>::new(1))]);
 
-    let removed = repo.delete_finished(Utc::now() + Duration::from_secs(600))
+    let removed = repo.delete_finished(Utc::now() + Duration::from_mins(10))
         .await.expect("couldn't clean the deletions up");
     assert_eq!(removed, 1);
 }

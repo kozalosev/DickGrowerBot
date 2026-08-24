@@ -261,16 +261,16 @@ mod tests {
 
     #[test]
     fn the_back_off_doubles_with_every_failure() {
-        let base = Duration::from_secs(60);
-        assert_eq!(backoff(base, AttemptsCount::new(0), MAX), Duration::from_secs(60));
-        assert_eq!(backoff(base, AttemptsCount::new(1), MAX), Duration::from_secs(120));
-        assert_eq!(backoff(base, AttemptsCount::new(2), MAX), Duration::from_secs(240));
-        assert_eq!(backoff(base, AttemptsCount::new(3), MAX), Duration::from_secs(480));
+        let base = Duration::from_mins(1);
+        assert_eq!(backoff(base, AttemptsCount::new(0), MAX), Duration::from_mins(1));
+        assert_eq!(backoff(base, AttemptsCount::new(1), MAX), Duration::from_mins(2));
+        assert_eq!(backoff(base, AttemptsCount::new(2), MAX), Duration::from_mins(4));
+        assert_eq!(backoff(base, AttemptsCount::new(3), MAX), Duration::from_mins(8));
     }
 
     #[test]
     fn the_back_off_never_grows_past_its_cap() {
-        let base = Duration::from_secs(60);
+        let base = Duration::from_mins(1);
         assert_eq!(backoff(base, AttemptsCount::new(30), MAX), MAX);
         // The shift that would overflow must give the cap, not a wrapped-around delay of nothing.
         assert_eq!(backoff(base, AttemptsCount::new(u32::MAX), MAX), MAX);
