@@ -33,6 +33,11 @@ use crate::config;
 use crate::config::DatabaseConfig;
 use crate::domain::primitives::chat::ChatIdKind;
 
+/// Connections the pool holds on top of what queries may use. A listening connection can't serve
+/// queries, so it is held for as long as it listens; the pool is built that much larger, and
+/// `DATABASE_MAX_CONNECTIONS` keeps meaning what an operator set it to.
+const LISTENER_CONNECTIONS: u32 = 1;
+
 #[derive(Clone)]
 pub struct Repositories {
     pub users: Users,
@@ -82,8 +87,9 @@ pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Po
             crate::metrics::DB_POOL_CONNECTION_AGE_SECONDS.observe(meta.age.as_secs_f64());
             Ok(true)
         }))
-        .max_connections(config.max_connections)
+        .max_connections(config.max_connections + LISTENER_CONNECTIONS)
         .min_connections(config.min_connections)
+        .acquire_timeout(config.acquire_timeout)
         .connect(config.url.as_str()).await?;
     sqlx::migrate!().run(&pool).await?;
     Ok(pool)

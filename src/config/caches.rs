@@ -26,16 +26,28 @@ pub struct CachesConfig {
     /// writes it the moment it changes, so this only bounds how long a change missed while the bot
     /// was down goes unnoticed — which is why it is the shortest of the lot.
     pub bot_admin: Duration,
+    /// How long a half-finished `/promo` or `/support` waits for its next message. Not a staleness
+    /// at all: it is how long a conversation stays open, and it starts again with every answer.
+    pub dialogue: Duration,
+    /// How long a battle stays locked when the handler holding it never gets to let go.
+    ///
+    /// The guard frees it as the handler ends, so this only bounds a killed process — but it must
+    /// stay above the longest a handler can take. A lock that runs out under a working handler lets
+    /// the next answer through, and the same attack is resolved twice. Generous is cheap: the
+    /// restart after the death that leaves a lock behind takes longer anyway.
+    pub pvp_lock: Duration,
 }
 
 impl CachesConfig {
     pub fn from_env() -> Self {
         Self {
-            chat_language: EnvDuration::seconds("CHAT_LANGUAGE_CACHE_TIME_SECONDS").or(3600).read(),
-            chat_topics: EnvDuration::seconds("CHAT_TOPICS_CACHE_TIME_SECONDS").or(3600).read(),
-            chat_cleanup: EnvDuration::seconds("CHAT_CLEANUP_CACHE_TIME_SECONDS").or(3600).read(),
-            ban_list_refresh: EnvDuration::seconds("BAN_LIST_REFRESH_SECONDS").or(900).at_least(1).read(),
-            bot_admin: EnvDuration::seconds("BOT_ADMIN_CACHE_TIME_SECONDS").or(3600).at_least(1).read(),
+            chat_language: env_duration!("CHAT_LANGUAGE_CACHE_TIME", or = hours(1)),
+            chat_topics: env_duration!("CHAT_TOPICS_CACHE_TIME", or = hours(1)),
+            chat_cleanup: env_duration!("CHAT_CLEANUP_CACHE_TIME", or = hours(1)),
+            ban_list_refresh: env_duration!("BAN_LIST_REFRESH", or = mins(15), at_least = secs(1)),
+            bot_admin: env_duration!("BOT_ADMIN_CACHE_TIME", or = hours(1), at_least = secs(1)),
+            dialogue: env_duration!("DIALOGUE_STATE_TIME", or = hours(1), at_least = secs(1)),
+            pvp_lock: env_duration!("PVP_LOCK_TIME", or = mins(3), at_least = secs(1)),
         }
     }
 }

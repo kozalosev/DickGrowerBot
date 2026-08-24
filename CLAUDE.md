@@ -29,12 +29,27 @@ cargo test -p domain_types
 # if the DB is behind — see note below)
 cargo sqlx migrate run
 
+# Before committing — all three, and `build` is not optional
+cargo build && cargo clippy --tests && cargo test
+
 # Regenerate sqlx offline query cache
 cargo sqlx prepare -- --tests
 
 # Start via Docker Compose
 docker-compose up
 ```
+
+### Why `cargo build` is in that list
+
+`cargo check --tests`, `cargo clippy --tests` and `cargo test` all enable `[dev-dependencies]`. A
+crate declared only there but used in shipped code therefore compiles under every one of them and
+fails on the plain build — which is what the `Dockerfile` runs. `serde_json` did exactly this: it
+was a dev-dependency, `cache.rs` and `dialogue.rs` used it in production code, and the release
+binary had not compiled for several commits while every check passed.
+
+The same gap hides dead code, since an unused function only warns on the non-test build. A helper
+that exists for the tests is marked `#[cfg(test)]` rather than left `pub` — `Cache::get_json` and
+`CacheConfig::redis` are the two of those.
 
 ### Adding a new environment variable
 
@@ -68,8 +83,8 @@ after a bounded time instead of blocking update processing. Both vars are option
 overrides only its own knob; leaving **both** unset keeps teloxide's stock client:
 
 ```
-BOT_HTTP_CONNECT_TIMEOUT_SECONDS=5  # teloxide default when unset
-BOT_HTTP_TIMEOUT_SECONDS=17         # total per-request timeout; teloxide default when unset
+BOT_HTTP_CONNECT_TIMEOUT=5s  # teloxide default when unset
+BOT_HTTP_TIMEOUT=17s        # total per-request timeout; teloxide default when unset
 ```
 
 Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are auto-detected by
@@ -80,7 +95,7 @@ reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read
 
 ```
 SUPPORT_CHAT_ID=-1001234567890  # where /support relays messages; unset => command hidden and disabled
-BAN_LIST_REFRESH_SECONDS=900       # how often the in-memory ban list is re-read from the DB
+BAN_LIST_REFRESH=15m       # the backstop behind the notification, see below
 ```
 
 `Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
@@ -90,8 +105,51 @@ request is answered by hand. `erase_user` deletes every row the user owns but **
 row (empty name, reset `created_at`, future `banned_until`), which is why none of the missing
 `ON DELETE CASCADE` foreign keys matter.
 
-Because the ban is written straight into the database, the bot polls for it: `bans::BanList` keeps
-the whole (tiny) list in memory, refreshes it on a timer and on SIGHUP.
+`bans::BanList` keeps the whole (tiny) list in memory, because `banned_until` is a **sync** function
+in a dptree filter: every instance needs the list of its own whatever else exists, which is why this
+one did not move into the shared store with the rest of #155. What it needed was not another place
+to keep the list but a way to hear that it changed, and only the database can say so — nothing in
+the bot ever writes a ban.
+
+So migration 40 puts an `AFTER UPDATE OF banned_until` trigger on `Users` that notifies the `bans`
+channel, and `spawn_listen_task` reloads on it through a `PgListener`. A trigger rather than a line
+in each of the three admin functions: their bodies would have to be repeated in that migration and
+kept in step for ever, and a ban applied by a plain `UPDATE` would still go unheard. `pg_notify`
+is delivered on commit, so a rolled-back ban is never announced.
+
+The timer stays behind it as the backstop — a notification sent while the listener is reconnecting
+is heard by nobody — and so does SIGHUP. A listening connection can't serve queries and is held for
+as long as it listens, so `establish_database_connection` builds the pool
+`LISTENER_CONNECTIONS` larger and `DATABASE_MAX_CONNECTIONS` keeps meaning what an operator set it
+to.
+
+### How a span of time is written
+
+Every setting that names one takes a number and a unit — `30s`, `15m`, `1h`, `3d`. A bare number is
+seconds, so a value written before this still means what it did.
+
+The unit is in the **value**, never in the name. A name that carried it (`BAN_LIST_REFRESH_SECONDS`)
+had to be renamed to change the unit, and gave two places for the unit to be stated and so one for
+them to disagree — `EnvDuration::minutes` on a `_SECONDS` variable compiled and was off by sixty.
+`env_duration!` and `parse_duration` in `config/env.rs` are the whole of it, and `secs`/`mins`/
+`hours`/`days` write the fallbacks beside them.
+
+The one exception is `MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES`, which keeps its suffix because it is
+not a span: it is the list of minute counts `/cleanup` offers a chat, stored as minutes in the
+`Chats.settings` jsonb and shown as minutes on the buttons. The same goes for the `*_DAYS` knobs
+that are `DaysCount` — a count of days is what they mean, not a duration.
+
+### How long a query waits for a connection
+
+```
+DATABASE_ACQUIRE_TIMEOUT=30s  # sqlx's own default; `.env.example` suggests 5s
+```
+
+A wait here is backpressure, not patience: queueing means the pool is empty, and waiting longer
+creates no connections. The default matches sqlx so that reading the variable changes nothing by
+itself; the shorter value is opted into, and is what keeps a handler's worst case comfortably inside
+`PVP_LOCK_TIME`. Refusals under load mean `DATABASE_MAX_CONNECTIONS` is too small, not that
+this is too short.
 
 That list is only how fast a banned user sees the polite message — **the enforcement is migration
 36**, a `BEFORE UPDATE` trigger on `Users` that refuses any statement touching a banned user's row
@@ -120,8 +178,8 @@ Only the keys carry meaning; an object is used rather than an array because it m
 in one statement and dedupes for free.
 
 ```
-CHAT_TOPICS_CACHE_TIME_SECONDS=3600   # optional TTL for the per-chat allowed-topics cache
-BOT_ADMIN_CACHE_TIME_SECONDS=3600     # optional TTL for what is known about the bot's rights in a chat
+CHAT_TOPICS_CACHE_TIME=1h     # optional TTL for the per-chat allowed-topics cache
+BOT_ADMIN_CACHE_TIME=1h       # optional TTL for what is known about the bot's rights in a chat
 ```
 
 `checks::reject_forbidden_topic()` sits at the very top of the dispatcher tree, above even the ban
@@ -172,23 +230,23 @@ waiting for an answer) — and each group has a delay of its own, zero meaning p
 chats are never cleaned up; they aren't noisy.
 
 ```
-MSG_SELFDESTRUCT_DELAY_NOTICE_MINUTES=2         # minutes; 0 or unset => the group is permanent
-MSG_SELFDESTRUCT_DELAY_REPORT_MINUTES=5
-MSG_SELFDESTRUCT_DELAY_EVENT_MINUTES=0          # the chat's history — permanent by default
-MSG_SELFDESTRUCT_DELAY_APPLICATION_MINUTES=60
+MSG_SELFDESTRUCT_DELAY_NOTICE=2m        # 0 or unset => the group is permanent
+MSG_SELFDESTRUCT_DELAY_REPORT=5m
+MSG_SELFDESTRUCT_DELAY_EVENT=0s         # the chat's history — permanent by default
+MSG_SELFDESTRUCT_DELAY_APPLICATION=1h
 MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES=1,5,15,60,180  # the delays /cleanup offers a chat
 MSG_SELFDESTRUCT_READING_SPEED_CPM=500  # a long message lives at least as long as it takes to read
-MSG_SELFDESTRUCT_WARNING_SECONDS=15     # grace period showing "will be deleted in N seconds"
+MSG_SELFDESTRUCT_WARNING=15s    # grace period showing "will be deleted in N seconds"
 MSG_SELFDESTRUCT_MODE=ENABLED           # DISABLED | ENABLED | ONLY_WITH_COMMAND | WITHOUT_COMMAND
-MSG_SELFDESTRUCT_POLL_SECONDS=5            # how often the worker looks for the due messages
+MSG_SELFDESTRUCT_POLL=5s           # how often the worker looks for the due messages
 MSG_SELFDESTRUCT_BATCH_SIZE=50          # messages one run takes on
 MSG_SELFDESTRUCT_CONCURRENCY=8          # how many of them it acts on at once
-MSG_SELFDESTRUCT_LEASE_SECONDS=300         # how long a claimed batch is held out of reach
+MSG_SELFDESTRUCT_LEASE=5m          # how long a claimed batch is held out of reach
 MSG_SELFDESTRUCT_INLINE_GROUPS=         # comma-separated groups; empty => inline messages are kept
-MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS=60 # the first wait after a failure; it doubles with each one
-MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS=3600  # the cap that doubling stops at
+MSG_SELFDESTRUCT_RETRY_DELAY=1m # the first wait after a failure; it doubles with each one
+MSG_SELFDESTRUCT_MAX_RETRY_DELAY=1h    # the cap that doubling stops at
 MSG_SELFDESTRUCT_MAX_ATTEMPTS=3         # attempts before the row is marked `failed` and left alone
-MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS=1        # days a finished row is kept; 0 => for ever
+MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY=1d       # how long a finished row is kept; 0 => for ever
 ```
 
 **Every chat may overrule all of that** with `/cleanup` (issue #128), an admins-only picker that
@@ -196,7 +254,7 @@ switches each of the four groups on or off for that chat alone. Only on and off:
 operator's, because it is about the bot's rights rather than about taste.
 
 ```
-CHAT_CLEANUP_CACHE_TIME_SECONDS=3600   # optional TTL for the per-chat cleanup-settings cache
+CHAT_CLEANUP_CACHE_TIME=1h     # optional TTL for the per-chat cleanup-settings cache
 ```
 
 The choices live in the same `Chats.settings` jsonb as the chat language and the allowed topics,
@@ -227,8 +285,8 @@ afterwards. `SelfDestructionService::may_delete_here` is that unconditional chec
 mode-dependent `may_delete_commands` the answering path uses. Keeping a group, or handing it back
 to the bot, takes nothing away and asks nothing.
 
-The setting is cached in this process, like the chat language and the allowed topics, not in the
-Redis `Cache`: that one is flag-shaped and is never a source of truth.
+The setting is cached like the chat language and the allowed topics — the same shape, the same
+lifetime, and the same read-through (see "The store of short-lived values").
 
 **Inline messages obey the chat too, where the chat can be named.** An inline message can only be
 rewritten into the placeholder, never deleted, so it gets a switch of its own in the picker rather
@@ -256,7 +314,7 @@ bot never sees it, and it is one line long anyway.
 (`handlers/utils/self_destruction.rs`) only writes rows into `Scheduled_Message_Deletions`
 (migration 37), and the worker in `scheduler/deletions.rs` claims what is due and acts on it. The
 claim *leases* its batch — one `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING`
-that pushes `fire_after` `MSG_SELFDESTRUCT_LEASE_SECONDS` out. The lease, not the lock, is what makes the claim
+that pushes `fire_after` `MSG_SELFDESTRUCT_LEASE` out. The lease, not the lock, is what makes the claim
 exclusive: the row's lock lives only as long as that statement, while the requests it leads to take
 much longer. A worker killed mid-batch leaves its messages to be claimed again once the lease runs
 out. That is what a restart between an answer and its
@@ -272,7 +330,8 @@ Two things are load-bearing in the schema:
   warning and rescheduled, rather than held in memory. An inline row stays `created` to its end.
 
 **Whether the bot may delete the command** is not in the schema at all — it lives in the cache
-(see "The cache" below), because the bot is *told* the answer rather than having to ask for it.
+(see "The store of short-lived values" below), because the bot is *told* the answer rather than
+having to ask for it.
 `handlers::rights` writes it from every `my_chat_member` update, which Telegram sends when the bot
 is added, promoted or demoted, and `scheduler::deletions` writes `false` when a deletion is refused.
 
@@ -321,13 +380,13 @@ warned into the void and found missing again a grace period later — the notice
 edit costs, but a message that is gone is not coming back.
 `SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
 stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
-`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS` days
+`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY` days
 later — a task of its own, because clearing the history must never be part of the run that wrote it.
 **A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
 on a busy bot.
 
-The wait between attempts is **exponential** — `MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS` doubled once
-per failure already recorded, capped at `MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS`
+The wait between attempts is **exponential** — `MSG_SELFDESTRUCT_RETRY_DELAY` doubled once
+per failure already recorded, capped at `MSG_SELFDESTRUCT_MAX_RETRY_DELAY`
 (`scheduler::deletions::backoff`). The count comes from the claimed row's `attempts`, not from the
 `postpone` that follows: the delay has to be known before it is written. Keep the cap well under
 Telegram's 48 hours. Without a cap the doubling would push an old row past that limit, and every
@@ -338,7 +397,7 @@ setting for it would be a knob that changes nothing. Everything else the worker 
 size and the lease too — is an environment variable, because the right value depends on how busy
 the bot is, and finding it should not need a rebuild.
 
-**Deciding on `MSG_SELFDESTRUCT_POLL_SECONDS`** takes two metrics, not one, because a long tick has two
+**Deciding on `MSG_SELFDESTRUCT_POLL`** takes two metrics, not one, because a long tick has two
 opposite causes. `run_pending_deletions` carries `#[autometrics]`, so how long a run took is
 `function_calls_duration_seconds{function="run_pending_deletions"}` — and the default buckets
 include `5.0`, the stock interval, so "the share of runs that fit into one tick" needs no
@@ -445,7 +504,7 @@ growing. Everything below follows from that.
   thought about it and refused, so the same payload gets the same answer, and three attempts across
   199k chats is an outage rather than a hiccup. `ApiError::Unknown` stays retryable — Telegram's own
   5xx answers arrive that way — unless its text says the chat is unreachable.
-* **A summary older than `DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS` is `expired`** without spending a request.
+* **A summary older than `DAILY_SHRINK_BROADCAST_MAX_AGE` is `expired`** without spending a request.
   Yesterday's list is still news in a chat that reads once a day; last week's is noise.
 
 ```
@@ -454,15 +513,15 @@ DAILY_SHRINK_INACTIVITY_DAYS=7
 DAILY_SHRINK_RAMP_UP_DAYS=7
 DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
 DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
-DAILY_SHRINK_BROADCAST_POLL_SECONDS=5
+DAILY_SHRINK_BROADCAST_POLL=5s
 DAILY_SHRINK_BROADCAST_BATCH_SIZE=200  # summaries one run claims
 DAILY_SHRINK_BROADCAST_CONCURRENCY=16  # how many it sends at once — the throughput knob
-DAILY_SHRINK_BROADCAST_LEASE_SECONDS=300
-DAILY_SHRINK_BROADCAST_RETRY_DELAY_SECONDS=60
-DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY_SECONDS=3600
+DAILY_SHRINK_BROADCAST_LEASE=5m
+DAILY_SHRINK_BROADCAST_RETRY_DELAY=1m
+DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY=1h
 DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
-DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS=48  # older than this and the summary is `expired` unsent
-DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_DAYS=3        # 0 => finished rows are kept for ever
+DAILY_SHRINK_BROADCAST_MAX_AGE=48h # older than this and the summary is `expired` unsent
+DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY=3d       # 0 => finished rows are kept for ever
 ```
 
 **Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
@@ -642,46 +701,165 @@ body to log; it is still measured.
 Changing any of this means updating the Grafana dashboard in the server-configs repo, next to the
 "Telegram API request errors by kind" panel.
 
-### Optional: the cache
+### The store of short-lived values
 
-Short-lived values live in Redis (`src/cache.rs`), which is the one place that keeps them.
+Everything the bot keeps briefly lives in `src/cache.rs`, which is the one place that keeps
+anything: the three per-chat settings (`topics.rs`, `cleanup.rs`, the chat language in
+`users/mod.rs`), the users fetched from user-service, what is known about the bot's rights in a
+chat, the PVP locks (`handlers/utils/locks.rs`) and the dialogue states (`dialogue.rs`).
 
 ```
-REDIS_HOST=localhost    # unset => the cache is off
+REDIS_HOST=localhost    # unset => the values are kept in this process
 REDIS_PORT=6379
 REDIS_PASSWORD=…
+CACHE_MODE=REDIS        # REDIS | LOCAL | DISABLED; unset => REDIS with a host, LOCAL without one
 ```
 
-**How long a value lives is not configured here.** A lifetime belongs to the value, not to the
-store: what makes a chat's language worth keeping for an hour says nothing about a lock that is
-worth keeping for seconds. So `set_flag` takes it with each write, and the numbers live together
-in `CachesConfig` (`config/caches.rs`) with one variable each — where the caches of #155 will find
-theirs already waiting when they move here from process memory.
+**One store, three backends, and only one of them is a choice.** `Backend::Redis` and
+`Backend::Local` hold the same keyspace — the rendered `CacheKey` — so a tenant never learns which
+it got, and the fallback exists once instead of once per feature. `Local` is what an unset or
+unreachable `REDIS_HOST` falls back to, so **the bot must start and run without a server**, which is
+the path most likely to rot and so has a test of its own. `Disabled` is only ever asked for.
 
-**Nothing here is a source of truth.** A miss is answered by the caller doing the work again, so a
-server that is down, slow or simply absent costs only the work it would have saved. Every failure is
-logged and swallowed: `Cache` returns no errors and never panics, and an unreachable server at
-startup leaves `Cache::Disabled` rather than stopping the bot. That is also why `REDIS_HOST` is
-merely a switch — **the bot must start and run without it**, which is the path most likely to rot
-and so has a test of its own.
+**The bot runs as a single instance, and `LOCAL` serves that perfectly well.** The issue's talk of
+two instances describes what `LOCAL` could not do, not something that ever went wrong: with one
+process, a map in that process is a correct cache and a correct lock. What `REDIS` buys a lone
+instance is narrower and worth naming plainly — a `/promo` or `/support` dialogue that survives a
+restart, and nothing else. Everything else it buys is insurance against a second instance that does
+not exist yet.
+
+The cost is on the other side of the same line: the topics gate runs on every command of every
+group, and under `REDIS` each miss is a round trip where `LOCAL` had a `HashMap` lookup. Choose
+accordingly, and don't read `LOCAL` as a degraded mode.
+
+**Two tenants are not caches, and the switch doesn't reach them.** A cache may be turned off because
+a miss costs a query and nothing else. A dialogue with nowhere to keep its state can never advance
+past its first step, and a lock nobody holds is no lock — answering one offer twice is what the
+guard is for, and not a thing to have a setting for. Both call `Cache::or_local()`, which turns a
+disabled store into a local one and leaves the rest alone. So the `Local` store is always built,
+whatever the mode.
+
+That is why the locking has no switch of its own any more. `PVP_CALLBACK_LOCKS_ENABLED` was one, and
+it earned its place while the lock was a `HashSet` with no expiry, where a leaked guard left a
+battle unanswerable for as long as the process lived. `SET NX EX` frees itself after
+`PVP_LOCK_TIME`, so the escape hatch guards nothing and only offers a way to put the bug
+back. `BattleLocks` is a plain struct for the same reason: with nothing to switch and a store that
+is always there, there was never a second variant to be.
+
+**`PVP_LOCK_TIME` must outlive a handler, and that is the whole of it.** The guard frees the
+lock as the handler ends, so the lifetime only bounds a process killed mid-battle. But if it runs
+out while the handler is still working, the next answer goes straight through and the same attack is
+resolved twice — which no release scheme can undo, since by then both are already running.
+
+The bound is a handler's worst case: a few Telegram requests at `BOT_HTTP_TIMEOUT` plus
+`pvp_impl_attack`'s four queries at `DATABASE_ACQUIRE_TIMEOUT` each. It is an estimate read
+off the code, not a guarantee — nothing caps a handler's total time — so the default is 180 rather
+than something snug. Generosity is cheap here: the restart after a death that leaves a lock behind
+takes longer anyway.
+
+**How long a value lives is not configured in `cache.rs`.** A lifetime belongs to the value, not to
+the store: what makes a chat's language worth keeping for an hour says nothing about a lock that is
+worth keeping for seconds. So every write takes one, and the numbers live together in `CachesConfig`
+(`config/caches.rs`) with one variable each.
+
+**Nothing there is a source of truth** (bar the two above). A miss is answered by the caller doing
+the work again, so a server that is down, slow or simply absent costs only the work it would have
+saved. Every failure is logged and swallowed: `Cache` returns no errors and never panics.
+
+**A `Backend::Redis` that starts failing falls back for real, not just to a faster miss.** The first
+failed call trips `RedisHealth::degraded` (`src/cache.rs`), and every call after that is routed by
+`Backend::route` straight to `RedisState::fallback` — a local store `Backend::Redis` always carries
+— without even attempting Redis. Only the map itself is built up front and free; its sweeper starts
+lazily, on that same first trip, so a Redis that never fails never pays for a background task that
+would spend its whole life finding an empty map. A lock taken in the fallback is a real lock, not a
+`true` handed out because the store couldn't be asked; a dialogue written there is read back, not
+lost until the outage ends. Trips on the *first* failure rather than after a few in a row:
+`ConnectionManager` already retries internally with its own growing backoff before a call returns at
+all, so waiting for several failures here would mean paying that backoff several times over, and
+there is no correctness reason to wait — `RedisState::fallback` is what a single instance of the bot
+already uses correctly under `CACHE_MODE=LOCAL`, not a degraded stand-in for `CACHE_MODE=REDIS`.
+
+Recovery is a background probe, not the data path: `spawn_redis_health_check` pings Redis every
+`REDIS_HEALTH_CHECK_INTERVAL` (a constant, on the same grounds as `SWEEP_INTERVAL` — it only decides
+how promptly the bot notices Redis is back, not whether anything works while it waits) *only* while
+degraded, and `RedisHealth::record` clears the flag on the first probe that succeeds. That same
+successful probe drains `RedisState::fallback` and writes each live entry into Redis with whatever
+is left of its original lifetime (`sync_fallback_to_redis`) — so a lock or a dialogue answered
+mid-outage doesn't vanish the instant `Backend::route` stops reading from the fallback. It is
+best-effort like everything else here: a write that fails is logged and given up on, not retried,
+which for a lock is free (the same as never having been taken) and for a dialogue reads as if a
+restart had just happened. Nothing keeps the fallback's copy once its write is attempted either way,
+which is also what makes it empty — and its sweeper idle — the moment recovery is noticed, rather
+than only once each entry's own TTL would have expired it anyway.
+
+**`cache_fallback_active` follows the most recent call to Redis, not only the one at startup.**
+`RedisHealth::record` sets it on every call that actually reaches Redis: `1` on failure, `0` on the
+next success — which, once degraded, means only the health check's own probes touch it, since the
+data path stops trying Redis entirely. `Cache::connect`'s own write is only the value it starts at.
+So the gauge, and the alert built on it (`DickGrowerBotCacheFellBack`, `for: 5m` in server-configs),
+cover a server that dies mid-session too, not only one that was never reached.
+
+**A chat-keyed value spells the kind out** — `chat:id:-100…:topics`, not `chat:-100…:topics`. A
+chat id and a chat instance are both signed 64-bit numbers, and `ChatIdKind`'s `Display` forwards to
+the value, so two different chats would share an entry. `ChatIdKind::qualified` is what the keys
+use, and `chat::test` pins it.
+
+The local store expires lazily on read **and** is swept on a timer (`TASK_CACHE_SWEEPER`): a key
+read once and never again would otherwise be kept for ever. One sweeper for every tenant, which is
+what replaced the user-service cache's own. Its size is `cache_local_entries`, and it is the number
+to watch, since it is the one that can grow without bound.
 
 The client is `redis` with `ConnectionManager`, and there is deliberately **no pool**. Redis runs
 commands one at a time, so extra connections buy no parallelism; the protocol multiplexes instead,
 letting many requests share one socket, and `ConnectionManager` adds reconnection on top. A pool
 would only add an acquire step that can fail, a size to choose, and a dead connection to retry.
-Keep it this way unless something needs a connection to itself — `BLPOP`, `SUBSCRIBE`, `WATCH` —
-and note that `MULTI`/`EXEC` is unsafe on a multiplexed connection, so an atomic operation wants a
-single command (`SET NX EX`) or a Lua script.
+Keep it this way unless something needs a connection to itself — `BLPOP`, `SUBSCRIBE`, `WATCH`.
+
+**`MULTI`/`EXEC` is unsafe on a multiplexed connection; a Lua script is not.** An `EVAL` is one
+command to the server and runs there without interleaving, so it is exactly as safe as any other
+single command and is the way to do anything that takes more than one step. Both are in use:
+`Cache::lock` is a plain `SET NX EX`, and `Cache::unlock` is a script, because "delete this key if
+it still holds my token" cannot be one command and must not be two. A bare `DEL` would free
+whatever holds the key — after an expiry, somebody else's lock — and that lets a third caller in
+while the second is still working, which is the failure the lock exists to prevent.
 
 The container in `docker-compose.yml` runs **Valkey**, the BSD-licensed fork. The protocol is Redis,
 which is what the service, the network and the variables are named after; only the binaries differ
 (`valkey-server`, `valkey-cli`). It sits behind the `redis` Compose profile, like `user-service` and
 `tracing`.
 
-Everything else the bot caches is still in process memory, each with its own TTL and mutex —
-`topics.rs`, the two in `users/mod.rs`, `bans.rs`, and the PVP locks in `handlers/utils/locks.rs`.
-Moving them here is tracked separately. The locks are the interesting one: an in-memory `HashSet`
-locks nothing across two instances, so that one is a bug rather than a tidy-up.
+**Every key begins with `KEY_PREFIX`** (`dgb:chat:id:-1001234:language`), and `Cache` applies it
+rather than each key type, so a kind of value added later cannot be the one that forgets. A server
+may be shared, and `chat:id:-1001234:language` says nothing about whose chat that is. The database
+index in the URL isolates too; having both means neither is what everything rests on.
+
+The user-service entry is prefixed like the rest, though the data behind it is the service's rather
+than ours. Sharing it with another bot would mean agreeing on the encoding, which is a shape
+invented here and read by nothing else — the store is where a saved round trip is kept, not where
+two bots meet, and the service itself is that place. A user is stored as a tag byte and its encoded
+message; the tag is what keeps "the service has no such user" apart from a user whose every field is
+the default, which prost encodes to nothing at all.
+
+### Dialogue state
+
+`/promo` and `/support` have a second step, and their state used to sit in teloxide's
+`InMemStorage`, so every restart dropped whatever conversation was in progress. `dialogue.rs`
+implements teloxide's `Storage` over the store instead.
+
+**Not teloxide's `RedisStorage`**, though the fork does carry the feature. That one is built on
+`deadpool-redis`, which brings a second copy of the `redis` crate (0.32 beside our 1.5) and a
+connection pool next to the multiplexed connection we deliberately don't pool; it keys by the bare
+`chat_id`, which collides with anything else in a shared database; and it sets **no lifetime at
+all**, so an abandoned dialogue would be kept for ever. The trait is three methods, so ours is
+shorter than adopting that would have been, and it inherits the local fallback for free.
+
+```
+DIALOGUE_STATE_TIME=1h     # how long a half-finished command waits for its next message
+```
+
+That is not a staleness: it is how long the conversation stays open, and every answer starts it
+again. `remove_dialogue` refuses when there was nothing to remove, which is what `InMemStorage` does
+and what `Dialogue::exit` expects.
 
 ### Optional: user-service integration
 
@@ -690,7 +868,7 @@ microservice (gRPC) to read/update a user's preferred language across all of Koz
 
 ```
 GRPC_ADDR_USER_SERVICE=host:port   # unset => integration disabled, personal /language hidden in PMs
-USER_CACHE_TIME_SECONDS=360           # optional cache TTL for fetched users
+USER_CACHE_TIME=6m            # optional cache TTL for fetched users
 ```
 
 `/language` is overloaded: in a private chat it changes the caller's personal language (via
@@ -699,7 +877,7 @@ everyone and overrides each user's own preference. The chat-wide setting is stor
 `Chats.settings` (jsonb) column, so it works even when user-service is disabled:
 
 ```
-CHAT_LANGUAGE_CACHE_TIME_SECONDS=3600 # optional TTL for the per-chat language cache (we own the data)
+CHAT_LANGUAGE_CACHE_TIME=1h   # optional TTL for the per-chat language cache (we own the data)
 ```
 
 The proto contract is vendored as the `user-service-proto` git submodule and compiled by

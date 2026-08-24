@@ -3,7 +3,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rust_i18n::t;
 use teloxide::Bot;
-use teloxide::dispatching::dialogue::InMemStorage;
+use crate::dialogue::CachedDialogueStorage;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{Dialogue, InlineQuery, Requester};
@@ -22,14 +22,14 @@ pub enum PromoCommands {
     Promo(String),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PromoCommandState {
     #[default]
     Start,
     Requested,
 }
 
-pub type PromoCodeDialogue = Dialogue<PromoCommandState, InMemStorage<PromoCommandState>>;
+pub type PromoCodeDialogue = Dialogue<PromoCommandState, CachedDialogueStorage<PromoCommandState>>;
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]

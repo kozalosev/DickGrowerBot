@@ -23,7 +23,7 @@ use super::backoff;
 /// [`crate::config::MAX_DELAY`] caps the delays an hour below it. Nothing is scheduled this late,
 /// so a message gets here only if the queue fell behind. It is a constant and not a setting,
 /// because the number is Telegram's and our own value would change nothing.
-const MAX_AGE: Duration = Duration::from_secs(48 * 60 * 60);
+const MAX_AGE: Duration = Duration::from_hours(48);
 
 /// What the worker decided to do with a row once it had acted on its message.
 #[derive(Debug, PartialEq, Eq)]

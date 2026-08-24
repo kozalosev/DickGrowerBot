@@ -243,8 +243,8 @@ mod tests {
     fn reading_time_scales_with_length() {
         // 1000 chars/min => 1000 chars take a minute, 2000 take two.
         assert_eq!(reading_time(CharCount::new(0), 1000), Duration::ZERO);
-        assert_eq!(reading_time(CharCount::new(1000), 1000), Duration::from_secs(60));
-        assert_eq!(reading_time(CharCount::new(2000), 1000), Duration::from_secs(120));
+        assert_eq!(reading_time(CharCount::new(1000), 1000), Duration::from_mins(1));
+        assert_eq!(reading_time(CharCount::new(2000), 1000), Duration::from_mins(2));
     }
 
     #[test]

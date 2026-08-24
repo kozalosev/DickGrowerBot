@@ -20,6 +20,7 @@ mod bans;
 mod topics;
 mod cleanup;
 mod cache;
+mod dialogue;
 
 #[cfg(test)]
 mod test_containers;
@@ -27,7 +28,6 @@ mod test_containers;
 use std::net::SocketAddr;
 use futures::future::join_all;
 use rust_i18n::i18n;
-use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dispatching::DpHandlerDescription;
 use teloxide::prelude::*;
 use teloxide::dptree::{deps, HandlerDescription};
@@ -35,13 +35,14 @@ use teloxide::update_listeners::webhooks::{axum_to_router, Options};
 use teloxide::update_listeners::{polling_default, UpdateListener};
 use cache::Cache;
 use config::AppConfig;
+use dialogue::CachedDialogueStorage;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
 use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
-use crate::handlers::utils::locks::LockCallbackServiceFacade;
+use crate::handlers::utils::locks::BattleLocks;
 use crate::error_handler::ContextLoggingErrorHandler;
 use crate::repo::Repositories;
 use crate::users::LanguageService;
@@ -61,12 +62,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let integrations_config = config::IntegrationsConfig::from_env()?;
     let db_conn = repo::establish_database_connection(&database_config).await?;
     let repos = Repositories::new(&db_conn, &app_config);
-    let cache = Cache::connect(config::RedisConfig::from_env()).await;
+    let cache = Cache::connect(config::CacheConfig::from_env()).await;
     let language_service = users::init_language_service(&integrations_config, app_config.caches.chat_language,
-                                                        repos.chats.clone(), app_config.features.chats_merging).await;
+                                                        repos.chats.clone(), cache.clone(),
+                                                        app_config.features.chats_merging).await;
     let ban_list = bans::BanList::load(repos.users.clone()).await;
-    let topic_policy = topics::TopicPolicy::new(app_config.caches.chat_topics, repos.chats.clone());
-    let cleanup_policy = cleanup::CleanupPolicy::new(app_config.caches.chat_cleanup, repos.chats.clone());
+    let topic_policy = topics::TopicPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_topics);
+    let cleanup_policy = cleanup::CleanupPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_cleanup);
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
@@ -84,9 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter(checks::is_group_chat).filter_async(checks::is_forbidden_topic).endpoint(checks::handle_forbidden_topic))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
-        .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, InMemStorage<SupportCommandState>, SupportCommandState>()
+        .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
-        .branch(Update::filter_message().enter_dialogue::<Message, InMemStorage<SupportCommandState>, SupportCommandState>()
+        .branch(Update::filter_message().enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler)))
         // Everything above the ban gate must not write a single row for the sender: a banned user
         // may still read the policy and reach the owner, but must not come back into the database.
@@ -102,9 +104,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(checks::group_command::<ImportCommands>().endpoint(handlers::import_cmd_handler))
         .branch(checks::group_command::<CleanupCommands>().endpoint(handlers::cleanup::cleanup_cmd_handler))
         .branch(Update::filter_message().filter_command::<StatsCommands>().branch(checks::require_anchored_group()).endpoint(handlers::stats::stats_cmd_handler))
-        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, InMemStorage<PromoCommandState>, PromoCommandState>()
+        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<PromoCommandState>, PromoCommandState>()
             .branch(dptree::case![PromoCommandState::Start].endpoint(handlers::promo_cmd_handler)))
-        .branch(Update::filter_message().enter_dialogue::<Message, InMemStorage<PromoCommandState>, PromoCommandState>()
+        .branch(Update::filter_message().enter_dialogue::<Message, CachedDialogueStorage<PromoCommandState>, PromoCommandState>()
             .branch(dptree::case![PromoCommandState::Requested].endpoint(handlers::promo_requested_handler)))
         .branch(Update::filter_message().filter(checks::is_not_group_chat).endpoint(checks::handle_not_group_chat))
         .branch(Update::filter_inline_query().filter(checks::inline::is_group_chat).filter(handlers::pvp::inline_filter).endpoint(handlers::pvp::pvp_inline_handler))
@@ -158,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(), &repos.dicks, perks);
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
     let help_container = help::render_help_messages(help_context)?;
-    let battle_locker = LockCallbackServiceFacade::from_config(app_config.features);
+    let battle_locker = BattleLocks::new(&cache, app_config.caches.pvp_lock);
     let self_destruction = SelfDestructionService::new(app_config.self_destruction.clone(),
                                                        repos.deletions.clone(), cleanup_policy.clone(),
                                                        cache.clone(), me.user.id, app_config.caches.bot_admin);
@@ -182,9 +184,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
+    ban_list.spawn_listen_task(db_conn.clone());
     ban_list.spawn_refresh_task(app_config.caches.ban_list_refresh);
 
     let ignore_unknown_updates = |_| Box::pin(async {});
+    let promo_dialogues = CachedDialogueStorage::<PromoCommandState>::new(&cache, "promo", app_config.caches.dialogue);
+    let support_dialogues = CachedDialogueStorage::<SupportCommandState>::new(&cache, "support", app_config.caches.dialogue);
     let deps = deps![
         me,
         repos,
@@ -199,8 +204,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         topic_policy,
         cleanup_policy,
         cache,
-        InMemStorage::<PromoCommandState>::new(),
-        InMemStorage::<SupportCommandState>::new()
+        promo_dialogues,
+        support_dialogues
     ];
 
     let join_result = match webhook_url {

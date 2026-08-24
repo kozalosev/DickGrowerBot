@@ -2,8 +2,8 @@
 pub mod mock;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+use prost::Message as _;
 use teloxide::types::{UpdateKind, UserId, Update};
 use tonic::{Code, Response};
 use tonic::transport::Channel;
@@ -12,6 +12,7 @@ use tower::Layer;
 use generated::user_service_client::UserServiceClient as GrpcClient;
 use generated::update_user_request::Target;
 use generated::{GetUserRequest, GetUsersRequest, UpdateUserRequest, User};
+use crate::cache::{Cache, CacheKey};
 use crate::config::IntegrationsConfig;
 use domain_types::traits::{ApproxInto, SaturatingInto};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
@@ -23,6 +24,24 @@ use crate::repo::Chats;
 pub mod generated {
     tonic::include_proto!("user_service");
 }
+
+/// The first byte of a cached user, saying whether the service had one at all.
+const REGISTERED: u8 = 1;
+const UNREGISTERED: u8 = 0;
+
+/// Keyed by chat, because the language a group is answered in is the group's own.
+#[derive(derive_more::Display)]
+#[display("chat:{}:language", _0.qualified())]
+struct ChatLanguageKey(ChatIdKind);
+
+impl CacheKey for ChatLanguageKey {}
+
+/// Keyed by the Telegram id, which is what the caller has and what the service is asked by.
+#[derive(derive_more::Display)]
+#[display("user_service:user:{}", _0.0)]
+struct UserKey(UserId);
+
+impl CacheKey for UserKey {}
 
 /// Abstraction over the user-service client so handlers and the language-resolving
 /// middleware can be unit-tested against a mock (see [`mock`]).
@@ -56,32 +75,30 @@ impl<T: UserServiceClient> UserService<T> {
     }
 }
 
-#[derive(Clone)]
-struct CachedUser {
-    user: Option<User>,
-    updated_at: tokio::time::Instant,
-}
-
-impl From<Option<User>> for CachedUser {
-    fn from(user: Option<User>) -> Self {
-        Self { user, updated_at: tokio::time::Instant::now() }
-    }
-}
-
-/// gRPC implementation with a small TTL cache keyed by the Telegram [`UserId`].
+/// gRPC implementation with a small cache keyed by the Telegram [`UserId`].
 ///
 /// The cache stores the whole [`User`] (including the internal `user.id`), so once the
 /// language-resolving middleware has fetched a user, [`Self::set_language`] can resolve the
 /// internal id from the cache without an extra round-trip.
+///
+/// The entry is this bot's own, like every other, even though the data behind it is the service's.
+/// Sharing it with another bot would mean agreeing on the encoding below, which is a shape invented
+/// here and read by nothing else — so the store is where a saved round trip is kept, not where two
+/// bots meet. The service itself is that place.
 #[derive(Clone)]
 pub struct UserServiceClientGrpc {
     inner: GrpcClient<OtelGrpcService<Channel>>,
-    cache: Arc<Mutex<HashMap<UserId, CachedUser>>>,
+    cache: Cache,
     cache_ttl: Duration,
 }
 
 impl UserServiceClientGrpc {
-    pub async fn connect(address: String, cache_ttl: Duration, timeout: Duration) -> anyhow::Result<Self> {
+    pub async fn connect(
+        address: String,
+        cache: Cache,
+        cache_ttl: Duration,
+        timeout: Duration,
+    ) -> anyhow::Result<Self> {
         let endpoint = if address.contains("://") {
             address
         } else {
@@ -94,38 +111,26 @@ impl UserServiceClientGrpc {
             .await?;
         Ok(Self {
             inner: GrpcClient::new(OtelGrpcLayer.layer(channel)),
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache,
             cache_ttl,
         })
     }
 
-    /// Locks the cache. It only guards an in-memory cache whose data stays valid regardless, so if
-    /// the mutex was ever poisoned (a holder panicked) we recover the guard rather than propagate
-    /// the poison — otherwise a single stray panic would turn every later cache access into a panic.
-    fn cache(&self) -> MutexGuard<'_, HashMap<UserId, CachedUser>> {
-        self.cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    /// What is known about the user: `Some(Some(user))` for one the service has, `Some(None)` for
+    /// one it hasn't, and `None` when nothing was kept.
+    async fn cached(&self, uid: UserId) -> Option<Option<User>> {
+        let bytes = self.cache.get_bytes(UserKey(uid)).await?;
+        decode_user(&bytes)
+            .inspect_err(|e| tracing::warn!(uid = uid.0, error = %e, "couldn't read a user out of the cache"))
+            .ok()
     }
 
-    /// Evicts stale entries; meant to be called periodically from a background task.
-    pub fn clean_up_cache(&self) {
-        let now = tokio::time::Instant::now();
-        let ttl = self.cache_ttl;
-        self.cache().retain(|_, cached| now.duration_since(cached.updated_at) <= ttl);
+    async fn cache_put(&self, uid: UserId, user: Option<User>) {
+        self.cache.set_bytes(UserKey(uid), encode_user(user), self.cache_ttl).await
     }
 
-    fn cached_fresh(&self, uid: UserId) -> Option<Option<User>> {
-        let now = tokio::time::Instant::now();
-        self.cache().get(&uid)
-            .filter(|cached| now.duration_since(cached.updated_at) <= self.cache_ttl)
-            .map(|cached| cached.user.clone())
-    }
-
-    fn cache_put(&self, uid: UserId, user: Option<User>) {
-        self.cache().insert(uid, user.into());
-    }
-
-    fn cache_evict(&self, uid: UserId) {
-        self.cache().remove(&uid);
+    async fn cache_evict(&self, uid: UserId) {
+        self.cache.remove(UserKey(uid)).await;
     }
 
     /// Resolves the internal service id, reusing the shared cache the middleware populated.
@@ -140,7 +145,7 @@ impl UserServiceClientGrpc {
 impl UserServiceClient for UserServiceClientGrpc {
     #[tracing::instrument(skip_all, fields(uid = uid.0))]
     async fn get(&self, uid: UserId) -> Result<Option<User>, tonic::Status> {
-        if let Some(cached) = self.cached_fresh(uid) {
+        if let Some(cached) = self.cached(uid).await {
             metrics::USER_SERVICE.cache_hit();
             return Ok(cached);
         }
@@ -153,11 +158,11 @@ impl UserServiceClient for UserServiceClientGrpc {
         match resp {
             Ok(resp) => {
                 let user = resp.into_inner();
-                self.cache_put(uid, Some(user.clone()));
+                self.cache_put(uid, Some(user.clone())).await;
                 Ok(Some(user))
             }
             Err(status) if status.code() == Code::NotFound => {
-                self.cache_put(uid, None);
+                self.cache_put(uid, None).await;
                 Ok(None)
             }
             Err(status) => Err(status),
@@ -199,7 +204,7 @@ impl UserServiceClient for UserServiceClientGrpc {
             id,
             target: Some(Target::Language(code.to_owned())),
         }).await.map(Response::into_inner)?;
-        self.cache_evict(uid);
+        self.cache_evict(uid).await;
         Ok(())
     }
 }
@@ -244,12 +249,6 @@ fn inline_chat_candidates(update: &Update, chats_merging: bool) -> Vec<ChatIdKin
     }
 }
 
-#[derive(Clone)]
-struct CachedLang {
-    lang: Option<SupportedLanguage>,
-    at: tokio::time::Instant,
-}
-
 /// The single language-resolution service injected into the dispatcher. It owns both sources of
 /// truth: the per-user preference in the user-service (gRPC, cross-bot) and the per-chat override
 /// stored in our own `Chats` table (with a small TTL cache).
@@ -257,7 +256,7 @@ struct CachedLang {
 pub struct LanguageService<C: UserServiceClient = UserServiceClientGrpc> {
     users: UserService<C>,
     chats: Chats,
-    chat_cache: Arc<Mutex<HashMap<ChatIdKind, CachedLang>>>,
+    cache: Cache,
     chat_ttl: Duration,
     /// Whether the `chat_id` hidden in an `inline_message_id` may be used to name a chat —
     /// see [`inline_chat_candidates`].
@@ -316,12 +315,12 @@ impl<C: UserServiceClient> LanguageService<C> {
         None
     }
 
-    /// Sets (or clears, with `None`) the chat-wide language and refreshes the local cache so this
-    /// instance is immediately consistent.
+    /// Sets (or clears, with `None`) the chat-wide language and writes it through the cache, so
+    /// every instance is immediately consistent.
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id, lang = ?lang))]
     pub async fn set_chat_language(&self, chat_id: &ChatIdPartiality, lang: Option<SupportedLanguage>) -> anyhow::Result<()> {
         self.chats.set_chat_language(chat_id, lang).await?;
-        self.chat_cache().insert(chat_id.kind(), CachedLang { lang, at: tokio::time::Instant::now() });
+        self.cache.set_json(ChatLanguageKey(chat_id.kind()), &lang, self.chat_ttl).await;
         Ok(())
     }
 
@@ -356,60 +355,46 @@ impl<C: UserServiceClient> LanguageService<C> {
         }
     }
 
-    fn chat_cache(&self) -> MutexGuard<'_, HashMap<ChatIdKind, CachedLang>> {
-        self.chat_cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// Read-through TTL cache over [`Chats::get_chat_language`].
+    /// Read-through cache over [`Chats::get_chat_language`]. A chat with no language of its own is
+    /// cached as such: that is an answer, and the commonest one.
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     async fn chat_language(&self, chat_id: &ChatIdKind) -> Option<SupportedLanguage> {
-        let now = tokio::time::Instant::now();
-        if let Some(cached) = self.chat_cache().get(chat_id)
-            .filter(|cached| now.duration_since(cached.at) <= self.chat_ttl)
-        {
-            metrics::CHAT_LANGUAGE.cache_hit();
-            return cached.lang;
-        }
-
-        metrics::CHAT_LANGUAGE.db_query();
-        let lang = self.chats.get_chat_language(chat_id).await
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = format!("{e:#}"), "couldn't fetch the language of the chat");
-                None
-            });
-        self.chat_cache().insert(chat_id.clone(), CachedLang { lang, at: now });
-        lang
+        let key = ChatLanguageKey(chat_id.clone());
+        self.cache.read_through(key, self.chat_ttl, &metrics::CHAT_LANGUAGE, || async {
+            self.chats.get_chat_language(chat_id).await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(error = format!("{e:#}"), "couldn't fetch the language of the chat");
+                    None
+                })
+        }).await
     }
 }
 
-/// Builds the [`LanguageService`], connecting to the user-service when it's configured and spawning
-/// a background task to keep the user cache tidy. Falls back to a disabled user-service (Telegram
-/// languages only) when it's not configured or unreachable — the chat-language part keeps working.
+/// Builds the [`LanguageService`], connecting to the user-service when it's configured. Falls back
+/// to a disabled user-service (Telegram languages only) when it's not configured or unreachable —
+/// the chat-language part keeps working.
 pub async fn init_language_service(
     config: &IntegrationsConfig,
     chat_ttl: Duration,
     chats: Chats,
+    cache: Cache,
     chats_merging: bool,
 ) -> LanguageService<UserServiceClientGrpc> {
-    let users = connect_user_service(config).await;
-    LanguageService {
-        users,
-        chats,
-        chat_cache: Arc::new(Mutex::new(HashMap::new())),
-        chat_ttl,
-        chats_merging,
-    }
+    let users = connect_user_service(config, cache.clone()).await;
+    LanguageService { users, chats, cache, chat_ttl, chats_merging }
 }
 
-async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserServiceClientGrpc> {
+async fn connect_user_service(
+    config: &IntegrationsConfig,
+    cache: Cache,
+) -> UserService<UserServiceClientGrpc> {
     let Some(cfg) = config.user_service.as_ref() else {
         tracing::warn!("the user-service integration is disabled (GRPC_ADDR_USER_SERVICE is not set)");
         return UserService::Disabled;
     };
-    match UserServiceClientGrpc::connect(cfg.address.clone(), cfg.cache_ttl, cfg.timeout).await {
+    match UserServiceClientGrpc::connect(cfg.address.clone(), cache, cfg.cache_ttl, cfg.timeout).await {
         Ok(client) => {
             tracing::info!(address = %cfg.address, "connected to the user-service");
-            spawn_cache_cleanup(client.clone(), cfg.cache_ttl);
             UserService::Connected(client)
         }
         Err(e) => {
@@ -419,15 +404,27 @@ async fn connect_user_service(config: &IntegrationsConfig) -> UserService<UserSe
     }
 }
 
-fn spawn_cache_cleanup(client: UserServiceClientGrpc, cache_ttl: Duration) {
-    tokio::spawn(metrics::TASK_USER_SERVICE_CACHE_CLEANUP.instrument(async move {
-        let mut interval = tokio::time::interval(cache_ttl);
-        interval.tick().await; // consume the immediate first tick
-        loop {
-            interval.tick().await;
-            client.clean_up_cache();
-        }
-    }));
+/// A user as the store keeps it: a tag saying whether the service had one, and the encoded message
+/// after it when it did.
+///
+/// The tag is what keeps "not registered" apart from a user whose every field happens to be the
+/// default — prost encodes that one to nothing at all.
+fn encode_user(user: Option<User>) -> Vec<u8> {
+    let Some(user) = user else {
+        return vec![UNREGISTERED]
+    };
+    let mut bytes = Vec::with_capacity(user.encoded_len() + 1);
+    bytes.push(REGISTERED);
+    user.encode(&mut bytes).expect("a Vec never runs out of room");
+    bytes
+}
+
+fn decode_user(bytes: &[u8]) -> anyhow::Result<Option<User>> {
+    match bytes {
+        [UNREGISTERED] => Ok(None),
+        [REGISTERED, encoded @ ..] => Ok(Some(User::decode(encoded)?)),
+        _ => anyhow::bail!("the value is not a cached user"),
+    }
 }
 
 /// A `LanguageCode` not yet resolved: constructing this queries nothing, so an update matched
@@ -473,15 +470,14 @@ pub(crate) async fn resolve_language_for<C: UserServiceClient>(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
     use std::time::Duration;
     use sqlx::{Pool, Postgres};
     use teloxide::types::{Chat, ChatId, ChatKind, ChatPublic, ChosenInlineResult, InaccessibleMessage,
         MaybeInaccessibleMessage, MessageId, PublicChatKind, PublicChatSupergroup, Update, UpdateId,
         UpdateKind, User, UserId};
     use crate::domain::primitives::{LanguageCode, SupportedLanguage};
-    use crate::config::FeatureToggles;
+    use crate::config::{CacheConfig, CacheMode, FeatureToggles};
     use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
     use crate::handlers::utils::callbacks::build_callback_query;
     use crate::handlers::utils::inline_message_id_of;
@@ -489,7 +485,8 @@ mod test {
     use crate::repo::test::fresh_db;
     use crate::users::generated::{User as ServiceUser, user::Options};
     use crate::users::mock::UserServiceClientMock;
-    use super::{inline_chat_candidates, most_popular_language, resolve_language_for, LanguageService, UserService, UserServiceClient};
+    use super::{decode_user, encode_user, inline_chat_candidates, most_popular_language,
+        resolve_language_for, Cache, ChatLanguageKey, LanguageService, UserService, UserServiceClient};
 
     fn service_user(id: i64, language_code: Option<&str>) -> ServiceUser {
         ServiceUser {
@@ -517,6 +514,28 @@ mod test {
         let codes = [LanguageCode::new("xx".to_owned())];
         assert_eq!(most_popular_language(codes.iter()), None);
         assert_eq!(most_popular_language([].iter()), None);
+    }
+
+    /// The tag is the whole point of the format: a user with nothing but defaults encodes to no
+    /// bytes at all, and without it that user would read back as one the service doesn't have.
+    #[test]
+    fn a_user_survives_the_cache_whatever_is_in_it() {
+        let cases = [
+            Some(service_user(100, Some("ru"))),
+            Some(ServiceUser { id: 0, name: None, options: None, is_premium: false }),
+            None,
+        ];
+        for user in cases {
+            let encoded = encode_user(user.clone());
+            let decoded = decode_user(&encoded).expect("a value written here must read back");
+            assert_eq!(decoded, user);
+        }
+    }
+
+    #[test]
+    fn anything_else_is_not_a_user() {
+        assert!(decode_user(&[]).is_err());
+        assert!(decode_user(&[42]).is_err());
     }
 
     #[tokio::test]
@@ -643,8 +662,8 @@ mod test {
         LanguageService {
             users: UserServiceClientMock::new(),
             chats,
-            chat_cache: Arc::new(Mutex::new(HashMap::new())),
-            chat_ttl: Duration::from_secs(60),
+            cache: Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await,
+            chat_ttl: Duration::from_mins(1),
             chats_merging,
         }
     }
@@ -750,11 +769,15 @@ mod test {
         let ls = language_service_of(db, true).await;
         let update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
 
+        let key = || ChatLanguageKey(ChatIdKind::ID(TelegramChatId::new(SUPERGROUP_ID)));
+
         let resolver = ls.clone().defer(update);
-        assert!(ls.chat_cache().is_empty());
+        let before: Option<Option<SupportedLanguage>> = ls.cache.get_json(key()).await;
+        assert_eq!(before, None);
 
         assert_eq!(resolver.execute().await.to_string(), "ru");
-        assert!(!ls.chat_cache().is_empty());
+        let after: Option<Option<SupportedLanguage>> = ls.cache.get_json(key()).await;
+        assert_eq!(after, Some(Some(SupportedLanguage::RU)));
     }
 
     #[tokio::test]

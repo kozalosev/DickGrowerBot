@@ -36,6 +36,8 @@ pub static CMD_DOD_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_dick_of_day_usage_total", "count of /dick_of_day invocations"));
 pub static CMD_PVP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_pvp_usage_total", "count of /pvp invocations"));
+pub static PVP_DOUBLE_ATTACKS_BLOCKED: Lazy<Counter> = Lazy::new(||
+    Counter::new("pvp_double_attacks_blocked_total", "count of answers to a battle offer that were refused because another answer to the same offer was still being resolved. A user tapping twice is the ordinary cause; read it against command_pvp_usage_total{mode=\"inline\"}, which counts the answers that went through"));
 pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
@@ -58,6 +60,10 @@ pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_cleanup_usage_total", "count of /cleanup invocations and changes of the setting", ["invoked", "finished"]));
 pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
+pub static CACHE_LOCAL_ENTRIES: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("cache_local_entries", "number of values the cache is holding in this process, as of the last sweep. Zero when the values are shared through Redis and it is answering; non-zero there too, for as long as cache_fallback_active reports an outage, since that is when a Redis backend starts holding its own values here instead. A number to watch rather than to alert on: keeping the values here is a setting, and the only one a single instance of the bot needs"));
+pub static CACHE_FALLBACK_ACTIVE: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("cache_fallback_active", "1 when the bot was told to share its cached values through Redis and isn't: either it fell back to its own process as it started, or the most recent call to Redis failed. 0 once a call succeeds again. cache_local_entries says whether the values are kept here, this says only whether Redis is presently answering"));
 pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
     CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
@@ -80,7 +86,7 @@ pub static SELF_DESTRUCTION_PENDING: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_pending", "number of messages waiting for their self-destruction; a number that only grows means the worker stopped draining the queue"));
 pub static SELF_DESTRUCTION_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
     Histogram::new("self_destruction_batch_size",
-        "how many messages one run of the worker took. Read it together with the duration of that run: short batches and long runs mean Telegram is slow, while batches that reach self_destruction_batch_limit mean the queue is full. The two need opposite changes to MSG_SELFDESTRUCT_POLL_SECONDS",
+        "how many messages one run of the worker took. Read it together with the duration of that run: short batches and long runs mean Telegram is slow, while batches that reach self_destruction_batch_limit mean the queue is full. The two need opposite changes to MSG_SELFDESTRUCT_POLL",
         &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
 pub static SELF_DESTRUCTION_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_batch_limit", "the value of MSG_SELFDESTRUCT_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
@@ -128,7 +134,9 @@ pub static TASK_DAILY_SHRINK_BROADCAST: Lazy<TaskMonitor> = Lazy::new(|| task_mo
 pub static TASK_DAILY_SHRINK_BROADCAST_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("daily_shrink_broadcast_cleaning"));
 pub static TASK_SELF_DESTRUCTION: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction"));
 pub static TASK_SELF_DESTRUCTION_CLEANING: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("self_destruction_cleaning"));
-pub static TASK_USER_SERVICE_CACHE_CLEANUP: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("user_service_cache_cleanup"));
+pub static TASK_CACHE_SWEEPER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("cache_sweeper"));
+pub static TASK_CACHE_REDIS_HEALTH_CHECK: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("cache_redis_health_check"));
+pub static TASK_BAN_LIST_LISTENER: Lazy<TaskMonitor> = Lazy::new(|| task_monitor("ban_list_listener"));
 
 pub fn init() -> (axum::Router, PrometheusMetricLayer<'static>) {
     force_registration();
@@ -162,8 +170,8 @@ pub fn register_db_pool_collector(pool: sqlx::Pool<sqlx::Postgres>) {
 ///
 /// The `TASK_*` monitors are the exception: each of them registers itself when its task is first
 /// spawned, so `/metrics` lists only the tasks this process actually runs. The webhook server and
-/// the polling dispatcher are never both in use, and the user-service cache cleanup runs only when
-/// the integration is enabled.
+/// the polling dispatcher are never both in use, and the cache sweeper runs only when the values
+/// are kept in this process.
 fn force_registration() {
     Lazy::force(&INLINE_COUNTER);
     Lazy::force(&CMD_START_COUNTER);
@@ -176,6 +184,7 @@ fn force_registration() {
     Lazy::force(&CMD_LOAN_COUNTER);
     Lazy::force(&CMD_DOD_COUNTER);
     Lazy::force(&CMD_PVP_COUNTER);
+    Lazy::force(&PVP_DOUBLE_ATTACKS_BLOCKED);
     Lazy::force(&CMD_STATS);
     Lazy::force(&CMD_SHRINKS);
     Lazy::force(&CMD_IMPORT);
@@ -187,6 +196,8 @@ fn force_registration() {
     Lazy::force(&CHAT_TOPICS);
     Lazy::force(&CMD_CLEANUP);
     Lazy::force(&CHAT_CLEANUP);
+    Lazy::force(&CACHE_LOCAL_ENTRIES);
+    Lazy::force(&CACHE_FALLBACK_ACTIVE);
     Lazy::force(&BOT_ADMIN_LOOKUP);
     Lazy::force(&BROADCAST_LANGUAGE);
     Lazy::force(&USER_SERVICE_LANGUAGES_BATCH_SIZE);

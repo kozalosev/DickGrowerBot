@@ -1,5 +1,5 @@
 use std::time::Duration;
-use crate::config::env::get_optional_env_seconds;
+use crate::config::env::get_optional_env_duration;
 use teloxide::Bot;
 use crate::telegram_observer::TelegramObserver;
 
@@ -21,8 +21,8 @@ pub struct BotConfig {
 impl BotConfig {
     fn from_env() -> Self {
         Self {
-            connect_timeout: get_optional_env_seconds("BOT_HTTP_CONNECT_TIMEOUT_SECONDS"),
-            timeout: get_optional_env_seconds("BOT_HTTP_TIMEOUT_SECONDS"),
+            connect_timeout: get_optional_env_duration("BOT_HTTP_CONNECT_TIMEOUT"),
+            timeout: get_optional_env_duration("BOT_HTTP_TIMEOUT"),
         }
     }
 

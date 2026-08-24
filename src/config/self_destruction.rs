@@ -10,7 +10,7 @@ pub use crate::domain::enums::MessageGroup;
 /// message falls due and the moment the request goes out: the poll interval, the lease, the
 /// warning's grace period and the waits between failed attempts. Scheduled at the full 48, a
 /// message would be past the limit before it was ever tried.
-pub const MAX_DELAY: Duration = Duration::from_secs(47 * 60 * 60);
+pub const MAX_DELAY: Duration = Duration::from_hours(47);
 
 /// What the bot does with the command behind a self-destructing answer. The default takes both
 /// away: a chat that asked for the answers to go wants no half-dialogues left behind, and the
@@ -193,7 +193,7 @@ impl SelfDestructionConfig {
             return None
         }
         match settings.get(group) {
-            Some(minutes) => self.capped(Duration::from_secs(u64::from(minutes.value()) * 60)),
+            Some(minutes) => self.capped(Duration::from_mins(u64::from(minutes.value()))),
             None => self.delay_for(group),
         }
     }
@@ -299,23 +299,23 @@ mod tests {
     #[test]
     fn non_zero_delays_are_returned() {
         let config = enabled(SelfDestructionConfig {
-            notice: Duration::from_secs(120),
-            report: Duration::from_secs(300),
-            event: Duration::from_secs(3600),
-            application: Duration::from_secs(1800),
+            notice: Duration::from_mins(2),
+            report: Duration::from_mins(5),
+            event: Duration::from_hours(1),
+            application: Duration::from_mins(30),
             ..Default::default()
         });
-        assert_eq!(config.delay_for(MessageGroup::Notice), Some(Duration::from_secs(120)));
-        assert_eq!(config.delay_for(MessageGroup::Report), Some(Duration::from_secs(300)));
-        assert_eq!(config.delay_for(MessageGroup::Event), Some(Duration::from_secs(3600)));
-        assert_eq!(config.delay_for(MessageGroup::Application), Some(Duration::from_secs(1800)));
+        assert_eq!(config.delay_for(MessageGroup::Notice), Some(Duration::from_mins(2)));
+        assert_eq!(config.delay_for(MessageGroup::Report), Some(Duration::from_mins(5)));
+        assert_eq!(config.delay_for(MessageGroup::Event), Some(Duration::from_hours(1)));
+        assert_eq!(config.delay_for(MessageGroup::Application), Some(Duration::from_mins(30)));
         assert!(config.enabled());
     }
 
     #[test]
     fn too_long_delays_are_cut_down() {
         let config = enabled(SelfDestructionConfig {
-            application: Duration::from_secs(72 * 60 * 60),
+            application: Duration::from_hours(72),
             ..Default::default()
         });
         assert_eq!(config.delay_for(MessageGroup::Application), Some(MAX_DELAY));
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn the_disabled_mode_makes_everything_permanent() {
         let config = SelfDestructionConfig {
-            notice: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
             mode: DeletionMode::Disabled,
             ..Default::default()
         };
@@ -339,28 +339,28 @@ mod tests {
     #[test]
     fn a_chat_that_chose_nothing_follows_the_bot() {
         let config = enabled(SelfDestructionConfig {
-            notice: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
             ..Default::default()
         });
         let settings = ChatCleanupSettings::default();
-        assert_eq!(config.delay_for_chat(MessageGroup::Notice, &settings), Some(Duration::from_secs(120)));
+        assert_eq!(config.delay_for_chat(MessageGroup::Notice, &settings), Some(Duration::from_mins(2)));
         assert_eq!(config.delay_for_chat(MessageGroup::Report, &settings), None);
     }
 
     #[test]
     fn a_chosen_delay_wins_over_the_bots_own() {
         let config = enabled(SelfDestructionConfig {
-            notice: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
             ..Default::default()
         });
         let settings = chose(MessageGroup::Notice, 5);
-        assert_eq!(config.delay_for_chat(MessageGroup::Notice, &settings), Some(Duration::from_secs(300)));
+        assert_eq!(config.delay_for_chat(MessageGroup::Notice, &settings), Some(Duration::from_mins(5)));
     }
 
     #[test]
     fn a_group_kept_for_ever_is_permanent_in_that_chat() {
         let config = enabled(SelfDestructionConfig {
-            notice: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
             ..Default::default()
         });
         let settings = chose(MessageGroup::Notice, 0);
@@ -372,7 +372,7 @@ mod tests {
     fn a_delay_can_be_chosen_for_a_group_the_bot_keeps() {
         let config = enabled(SelfDestructionConfig::default());
         let settings = chose(MessageGroup::Event, 5);
-        assert_eq!(config.delay_for_chat(MessageGroup::Event, &settings), Some(Duration::from_secs(300)));
+        assert_eq!(config.delay_for_chat(MessageGroup::Event, &settings), Some(Duration::from_mins(5)));
     }
 
     #[test]
@@ -401,25 +401,25 @@ mod tests {
     #[test]
     fn inline_follows_the_bots_list_until_the_chat_says_otherwise() {
         let config = enabled(SelfDestructionConfig {
-            notice: Duration::from_secs(120),
-            report: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
+            report: Duration::from_mins(2),
             inline_groups: "notice".parse().expect("couldn't parse the groups"),
             ..Default::default()
         });
         let untouched = ChatCleanupSettings::default();
         assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &untouched),
-                   Some(Duration::from_secs(120)));
+                   Some(Duration::from_mins(2)));
         assert_eq!(config.inline_delay_for_chat(MessageGroup::Report, &untouched), None);
 
         let chose = chose(MessageGroup::Notice, 5);
         assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &chose),
-                   Some(Duration::from_secs(300)));
+                   Some(Duration::from_mins(5)));
     }
 
     #[test]
     fn a_chat_that_asked_for_inline_gets_every_group_it_cleans_up() {
         let config = enabled(SelfDestructionConfig {
-            notice: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
             inline_groups: InlineGroups::default(),   // the bot itself opens nothing
             ..Default::default()
         });
@@ -428,11 +428,11 @@ mod tests {
 
         // Not in the bot's list, and yet cleaned up: the chat asked for it.
         assert_eq!(config.inline_delay_for_chat(MessageGroup::Report, &compressing),
-                   Some(Duration::from_secs(300)));
+                   Some(Duration::from_mins(5)));
         // The flag says whether inline messages are touched at all, not how soon: a group the chat
         // chose nothing for still runs on the bot's delay.
         assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &compressing),
-                   Some(Duration::from_secs(120)));
+                   Some(Duration::from_mins(2)));
         // And a group nobody gave a delay to stays for good, flag or no flag.
         assert_eq!(config.inline_delay_for_chat(MessageGroup::Event, &compressing), None);
     }
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn a_chat_that_refused_inline_keeps_them_whatever_the_bot_says() {
         let config = enabled(SelfDestructionConfig {
-            notice: Duration::from_secs(120),
+            notice: Duration::from_mins(2),
             inline_groups: "notice".parse().expect("couldn't parse the groups"),
             ..Default::default()
         });

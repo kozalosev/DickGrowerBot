@@ -1,3 +1,4 @@
+use std::time::Duration;
 use reqwest::Url;
 use crate::config::caches::CachesConfig;
 use crate::config::env::*;
@@ -32,6 +33,10 @@ pub struct DatabaseConfig {
     pub url: Url,
     pub max_connections: u32,
     pub min_connections: u32,
+    /// How long a query waits for a free connection before giving up. sqlx's own default, so that
+    /// reading it from the environment changes nothing by itself — but queueing means the pool is
+    /// empty, and waiting longer creates no connections, so `.env.example` suggests less.
+    pub acquire_timeout: Duration,
 }
 
 impl AppConfig {
@@ -46,7 +51,6 @@ impl AppConfig {
         let multiple_loans = get_env_value_or_default("MULTIPLE_LOANS_ENABLED", false);
         let pvp_default_bet = env_value!("PVP_DEFAULT_BET": Bet, or = 1);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
-        let callback_locks = get_env_value_or_default("PVP_CALLBACK_LOCKS_ENABLED", true);
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
         let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
         let most_popular_language_enabled = get_env_value_or_default("MOST_POPULAR_LANGUAGE_ENABLED", true);
@@ -57,36 +61,36 @@ impl AppConfig {
             ramp_up_days: env_value!("DAILY_SHRINK_RAMP_UP_DAYS": DaysCount, or = 7),
             batch_size: env_value!("DAILY_SHRINK_BATCH_SIZE": Limit, or = 100, at_least = 1),
             broadcast: BroadcastConfig {
-                poll_interval: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_POLL_SECONDS").or(5).at_least(1).read(),
+                poll_interval: env_duration!("DAILY_SHRINK_BROADCAST_POLL", or = secs(5), at_least = secs(1)),
                 batch_size: env_value!("DAILY_SHRINK_BROADCAST_BATCH_SIZE": Limit, or = 200, at_least = 1),
                 concurrency: env_value!("DAILY_SHRINK_BROADCAST_CONCURRENCY": Limit, or = 16, at_least = 1),
-                lease: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_LEASE_SECONDS").or(300).at_least(1).read(),
-                retry_delay: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_RETRY_DELAY_SECONDS").or(60).at_least(1).read(),
-                max_retry_delay: EnvDuration::seconds("DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY_SECONDS").or(3600).at_least(1).read(),
+                lease: env_duration!("DAILY_SHRINK_BROADCAST_LEASE", or = mins(5), at_least = secs(1)),
+                retry_delay: env_duration!("DAILY_SHRINK_BROADCAST_RETRY_DELAY", or = mins(1), at_least = secs(1)),
+                max_retry_delay: env_duration!("DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY", or = hours(1), at_least = secs(1)),
                 max_attempts: env_value!("DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
-                max_age: EnvDuration::hours("DAILY_SHRINK_BROADCAST_MAX_AGE_HOURS").or(48).at_least(1).read(),
-                retention: EnvDuration::days("DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY_DAYS").or(3).read(),
+                max_age: env_duration!("DAILY_SHRINK_BROADCAST_MAX_AGE", or = hours(48), at_least = secs(1)),
+                retention: env_duration!("DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY", or = days(3)),
             },
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
         let self_destruction = SelfDestructionConfig {
-            notice: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_NOTICE_MINUTES").read(),
-            report: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_REPORT_MINUTES").read(),
-            event: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_EVENT_MINUTES").read(),
-            application: EnvDuration::minutes("MSG_SELFDESTRUCT_DELAY_APPLICATION_MINUTES").read(),
+            notice: env_duration!("MSG_SELFDESTRUCT_DELAY_NOTICE"),
+            report: env_duration!("MSG_SELFDESTRUCT_DELAY_REPORT"),
+            event: env_duration!("MSG_SELFDESTRUCT_DELAY_EVENT"),
+            application: env_duration!("MSG_SELFDESTRUCT_DELAY_APPLICATION"),
             delay_options: get_optional_env_value("MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES"),
             reading_speed_cpm: get_env_value_or_default("MSG_SELFDESTRUCT_READING_SPEED_CPM", 500),
-            warning: EnvDuration::seconds("MSG_SELFDESTRUCT_WARNING_SECONDS").read(),
+            warning: env_duration!("MSG_SELFDESTRUCT_WARNING"),
             mode: get_optional_env_value("MSG_SELFDESTRUCT_MODE"),
-            poll_interval: EnvDuration::seconds("MSG_SELFDESTRUCT_POLL_SECONDS").or(5).at_least(1).read(),
+            poll_interval: env_duration!("MSG_SELFDESTRUCT_POLL", or = secs(5), at_least = secs(1)),
             batch_size: env_value!("MSG_SELFDESTRUCT_BATCH_SIZE": Limit, or = 50, at_least = 1),
             concurrency: env_value!("MSG_SELFDESTRUCT_CONCURRENCY": Limit, or = 8, at_least = 1),
-            lease: EnvDuration::seconds("MSG_SELFDESTRUCT_LEASE_SECONDS").or(300).at_least(1).read(),
+            lease: env_duration!("MSG_SELFDESTRUCT_LEASE", or = mins(5), at_least = secs(1)),
             inline_groups: get_optional_env_value("MSG_SELFDESTRUCT_INLINE_GROUPS"),
-            retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_RETRY_DELAY_SECONDS").or(60).at_least(1).read(),
-            max_retry_delay: EnvDuration::seconds("MSG_SELFDESTRUCT_MAX_RETRY_DELAY_SECONDS").or(3600).at_least(1).read(),
+            retry_delay: env_duration!("MSG_SELFDESTRUCT_RETRY_DELAY", or = mins(1), at_least = secs(1)),
+            max_retry_delay: env_duration!("MSG_SELFDESTRUCT_MAX_RETRY_DELAY", or = hours(1), at_least = secs(1)),
             max_attempts: env_value!("MSG_SELFDESTRUCT_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
-            retention: EnvDuration::days("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY_DAYS").or(1).read(),
+            retention: env_duration!("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY", or = days(1)),
         };
         let support_chat_id = get_optional_chat_id("SUPPORT_CHAT_ID");
         Self {
@@ -97,7 +101,6 @@ impl AppConfig {
                 dod_selection_mode,
                 pvp: BattlesFeatureToggles {
                     check_acceptor_length,
-                    callback_locks,
                     show_stats,
                     show_stats_notice,
                 },
@@ -126,6 +129,7 @@ impl DatabaseConfig {
             url: get_env_mandatory_value("DATABASE_URL")?,
             max_connections: get_env_value_or_default("DATABASE_MAX_CONNECTIONS", 10),
             min_connections: get_env_value_or_default("DATABASE_MIN_CONNECTIONS", 5),
+            acquire_timeout: env_duration!("DATABASE_ACQUIRE_TIMEOUT", or = secs(30), at_least = secs(1)),
         })
     }
 }

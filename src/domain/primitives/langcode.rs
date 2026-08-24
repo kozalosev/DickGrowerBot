@@ -21,8 +21,10 @@ static LOCALE_TO_LANGUAGE: [(&str, SupportedLanguage); 11] = [
 #[domain_type]
 struct LanguageCode(String);
 
-#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, strum_macros::EnumString, sqlx::Type)]
+#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, strum_macros::EnumString, sqlx::Type,
+         serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "language_code", rename_all = "lowercase")]
 pub enum SupportedLanguage {
     EN,

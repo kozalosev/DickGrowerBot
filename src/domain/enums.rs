@@ -11,8 +11,10 @@
 /// The lowercase spelling is shared by the `message_group` enum of the database, the label of
 /// [`crate::metrics::SELF_DESTRUCTION`] and the log field, so the three can't drift apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type,
-         strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter)]
+         strum_macros::Display, strum_macros::EnumString, strum_macros::EnumIter,
+         serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "message_group", rename_all = "lowercase")]
 pub enum MessageGroup {
     Notice,

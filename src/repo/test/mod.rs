@@ -125,7 +125,7 @@ pub async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64
 
 /// A lease, or any other deadline, far enough out that nothing under test can outlive it.
 pub fn far_future() -> DateTime<Utc> {
-    Utc::now() + Duration::from_secs(600)
+    Utc::now() + Duration::from_mins(10)
 }
 
 /// One Postgres for the whole binary, reused across runs, with a database per test.
@@ -144,7 +144,7 @@ impl SharedPostgres {
             // Every test asks for its database through this one pool, and they all start at once,
             // so a single connection would make them queue up until one times out.
             .max_connections(10)
-            .acquire_timeout(Duration::from_secs(60))
+            .acquire_timeout(Duration::from_mins(1))
             .connect(db_url(port, POSTGRES_DB).as_str())
             .await.expect("couldn't connect to the maintenance database");
 
@@ -202,7 +202,14 @@ fn db_url(port: u16, database: &str) -> Url {
 async fn connect_and_migrate(url: Url) -> Pool<Postgres> {
     // A test drives its database from one task, so a couple of connections is plenty. The cap
     // matters because every test in the binary holds a pool of its own at the same time.
-    let conf = DatabaseConfig { url, max_connections: 2, min_connections: 1 };
+    // A generous wait for a connection, unlike production's: a test that queues here is queueing
+    // behind the whole suite's containers starting up, not behind a user watching a spinner.
+    let conf = DatabaseConfig {
+        url,
+        max_connections: 2,
+        min_connections: 1,
+        acquire_timeout: Duration::from_mins(1),
+    };
     repo::establish_database_connection(&conf)
         .await.expect("couldn't establish a database connection")
 }

@@ -12,9 +12,25 @@ use teloxide::types::{ChatId, ChatMember, ChatMemberKind, ChatMemberUpdated};
 use std::time::Duration;
 use crate::cache::{Cache, CacheKey};
 use crate::config::AppConfig;
-use crate::domain::primitives::chat::TelegramChatId;
+use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
 use crate::metrics;
 use crate::repo::Repositories;
+
+/// Keyed by chat, because the right is granted per chat.
+#[derive(derive_more::Display)]
+#[display("chat:{}:bot_admin", _0.qualified())]
+struct BotAdminKey(ChatIdKind);
+
+impl CacheKey for BotAdminKey {}
+
+impl BotAdminKey {
+    /// Only ever an id: a right is granted in a chat Telegram named, never in one known by its
+    /// instance alone. The kind is spelled out regardless, so that every chat-keyed value reads the
+    /// same way and none of them has a rendering of its own to keep in step.
+    fn new(chat_id: ChatId) -> Self {
+        Self(ChatIdKind::from(chat_id))
+    }
+}
 
 /// What the cache last knew about the bot's right to delete messages here, or `None` when nothing
 /// is known.
@@ -89,19 +105,6 @@ fn may_post(member: &ChatMember) -> bool {
 /// What to remember for this update, or `None` for a chat nothing is ever cleaned up in.
 fn right_to_remember(upd: &ChatMemberUpdated) -> Option<bool> {
     (!upd.chat.is_private()).then(|| upd.new_chat_member.can_delete_messages())
-}
-
-/// Keyed by chat, because the right is granted per chat.
-#[derive(derive_more::Display)]
-#[display("chat:{_0}:bot_admin")]
-struct BotAdminKey(TelegramChatId);
-
-impl CacheKey for BotAdminKey {}
-
-impl BotAdminKey {
-    fn new(chat_id: ChatId) -> Self {
-        Self(TelegramChatId::from(chat_id))
-    }
 }
 
 #[cfg(test)]
