@@ -517,6 +517,7 @@ DAILY_SHRINK_BROADCAST_POLL=5s
 DAILY_SHRINK_BROADCAST_BATCH_SIZE=200  # summaries one run claims
 DAILY_SHRINK_BROADCAST_CONCURRENCY=16  # how many it sends at once — the throughput knob
 DAILY_SHRINK_BROADCAST_LEASE=5m
+DAILY_SHRINK_BROADCAST_SEND_TIMEOUT=30s # backstop for a hang BOT_HTTP_TIMEOUT doesn't cover, see below
 DAILY_SHRINK_BROADCAST_RETRY_DELAY=1m
 DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY=1h
 DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
@@ -532,7 +533,24 @@ unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > 26h`, an
 `daily_shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs
 repo's `vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
 
-**Those two are the only gauges, and only the worker's tick publishes them.** They exist because
+**`daily_shrink_broadcast_last_tick_timestamp_seconds` is a faster version of the same idea, scoped
+to one tick instead of one day.** It is set at the very top of the worker's loop, before `claim_due`
+or a single send has run, so a tick stuck inside either one stops moving it forward within a poll
+interval or two — instead of waiting for `daily_shrink_broadcast_pending` to cross the six-hour
+alert threshold. It exists because of an incident where the worker froze silently for hours: a
+single `send_message` never returned — not even into an error — because it hung *inside
+`Throttle`'s own queue*, waiting on a lock its worker never unlocked. That wait happens before the
+HTTP client is even asked to send anything, so `BOT_HTTP_TIMEOUT`/`BOT_HTTP_CONNECT_TIMEOUT` never
+saw it, and the stuck tick never returned — so `ticker.tick()` was never awaited again, and the
+whole worker stopped for good with no crash, no panic, and no log line to point at it.
+
+`DAILY_SHRINK_BROADCAST_SEND_TIMEOUT` is the fix for that specific hole: a `tokio::time::timeout`
+around `request.send()` (`scheduler::broadcasts::send`), bounding the send itself regardless of
+*where* inside it the hang is. A timeout there ends the tick with a `Retry`, logging the fact at
+`warn!` — inside the `send_and_record` span, so the log line carries the `chat_id`/`id` of whichever
+summary was in flight, without having to reach for a debugger next time.
+
+**Those three are the only gauges, and only the worker's tick publishes them.** They exist because
 vmalert reads Prometheus and cannot query SQL; everything a human looks at — which chats failed and
 why, the states over time — is a panel over `Scheduled_Shrink_Broadcasts` through Grafana's Postgres
 datasource, which costs nothing when nobody is looking. A gauge over the finished rows was the

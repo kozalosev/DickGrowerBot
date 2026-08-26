@@ -29,6 +29,12 @@ pub struct BroadcastConfig {
     pub concurrency: Limit,
     /// How long a claimed batch stays out of every other worker's reach.
     pub lease: Duration,
+    /// The longest a single send may take before the worker gives up on it and moves on. A backstop
+    /// against a hang that `BOT_HTTP_TIMEOUT`/`BOT_HTTP_CONNECT_TIMEOUT` don't cover — e.g. a stuck
+    /// `Throttle` queue entry, whose wait happens before the HTTP client is even asked to send
+    /// anything, so no request-level timeout ever sees it. Without this, one such hang freezes the
+    /// whole worker: the tick that owns it never returns, so `ticker.tick()` is never awaited again.
+    pub send_timeout: Duration,
     /// How long a summary rests after a failure that is worth another attempt.
     pub retry_delay: Duration,
     /// The longest a summary may rest between two attempts, however many have failed.
@@ -58,6 +64,7 @@ impl Default for BroadcastConfig {
             batch_size: Limit::new(200),
             concurrency: Limit::new(16),
             lease: Duration::from_mins(5),
+            send_timeout: Duration::from_secs(30),
             retry_delay: Duration::from_mins(1),
             max_retry_delay: Duration::from_hours(1),
             max_attempts: AttemptsCount::new(3),

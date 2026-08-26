@@ -5,7 +5,7 @@ use futures::{stream, StreamExt};
 use teloxide::{ApiError, Bot, RequestError};
 use teloxide::adaptors::Throttle;
 use teloxide::payloads::SendMessageSetters;
-use teloxide::requests::Requester;
+use teloxide::requests::{Request, Requester};
 use teloxide::sugar::request::RequestLinkPreviewExt;
 use teloxide::types::{ChatId, ReplyMarkup, UserId as TeloxideUserId};
 use teloxide::types::ParseMode::Html;
@@ -181,7 +181,18 @@ async fn send(deps: BroadcastDeps<'_>, broadcast: &ScheduledBroadcast) -> Outcom
         request = request.message_thread_id(topic.into());
     }
 
-    outcome_of(request.await.map(|_| ()), repos, broadcast).await
+    // Bounded on top of the request itself: BOT_HTTP_TIMEOUT covers the HTTP call, but a request can
+    // also hang before that even starts — stuck inside Throttle's own queue, waiting on a lock its
+    // worker never unlocks. That wait has no timeout of its own, and it blocks this whole tick (and
+    // so every tick after it) until something ends it. This is that something.
+    match tokio::time::timeout(broadcast_config.send_timeout, request.send()).await {
+        Ok(sent) => outcome_of(sent.map(|_| ()), repos, broadcast).await,
+        Err(_) => {
+            tracing::warn!(timeout = ?broadcast_config.send_timeout,
+                "sending the shrink summary timed out, retrying it later");
+            Outcome::Retry
+        },
+    }
 }
 
 /// Turns the answer of the Bot API into an outcome, remembering what it says about the chat.

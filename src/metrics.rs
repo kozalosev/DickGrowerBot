@@ -101,6 +101,8 @@ pub static DAILY_SHRINK_LAST_RUN_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_last_run_timestamp_seconds", "the UTC midnight the last logged shrink belongs to, as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes 26 hours"));
 pub static DAILY_SHRINK_BROADCAST_PENDING: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_broadcast_pending", "number of shrink summaries the chats are still owed; a number that only grows means the worker stopped draining the queue"));
+pub static DAILY_SHRINK_BROADCAST_LAST_TICK_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("daily_shrink_broadcast_last_tick_timestamp_seconds", "when the worker's loop last came back around to ticker.tick(), as a Unix timestamp. Set at the very top of every iteration, before a summary is claimed or sent, so a tick stuck inside one send (or inside claim_due) is visible within a poll interval or two — far sooner than daily_shrink_broadcast_pending crossing the six-hour alert threshold. Alert when time() minus this passes a few times DAILY_SHRINK_BROADCAST_POLL"));
 pub static DAILY_SHRINK_BROADCAST_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
     Histogram::new("daily_shrink_broadcast_batch_size",
         "how many summaries one run of the worker took. Read it together with the duration of that run: short batches and long runs mean Telegram is slow, while batches that reach daily_shrink_broadcast_batch_limit mean the queue is full",

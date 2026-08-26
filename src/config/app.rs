@@ -65,6 +65,7 @@ impl AppConfig {
                 batch_size: env_value!("DAILY_SHRINK_BROADCAST_BATCH_SIZE": Limit, or = 200, at_least = 1),
                 concurrency: env_value!("DAILY_SHRINK_BROADCAST_CONCURRENCY": Limit, or = 16, at_least = 1),
                 lease: env_duration!("DAILY_SHRINK_BROADCAST_LEASE", or = mins(5), at_least = secs(1)),
+                send_timeout: env_duration!("DAILY_SHRINK_BROADCAST_SEND_TIMEOUT", or = secs(30), at_least = secs(1)),
                 retry_delay: env_duration!("DAILY_SHRINK_BROADCAST_RETRY_DELAY", or = mins(1), at_least = secs(1)),
                 max_retry_delay: env_duration!("DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY", or = hours(1), at_least = secs(1)),
                 max_attempts: env_value!("DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),

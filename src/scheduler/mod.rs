@@ -103,6 +103,9 @@ pub fn spawn_broadcast_worker(
         let mut ticker = tokio::time::interval(config.daily_shrink.broadcast.poll_interval);
         loop {
             ticker.tick().await;
+            // Set before any work of the tick, not after: a tick stuck inside claim_due or a send
+            // must stop moving this forward, which is the whole point of a heartbeat.
+            metrics::DAILY_SHRINK_BROADCAST_LAST_TICK_TIMESTAMP.set(chrono::Utc::now().timestamp());
 
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.
