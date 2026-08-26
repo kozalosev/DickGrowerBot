@@ -686,6 +686,26 @@ in `main.rs` (`autometrics::prometheus_exporter::init()`) and its output is appe
 existing `/metrics` endpoint in `src/metrics.rs`, alongside the `axum-prometheus` and custom
 counters — all scraped by Prometheus from the same port `8080` `/metrics` route.
 
+**A panic is caught by a process-wide hook** (`observability::install_panic_hook`, called from
+`main.rs` right after `init_tracing`), not left to Rust's default. The default hook writes straight
+to stderr — outside `tracing` entirely, so a panic reached neither the console formatting nor the
+OTLP log export nor any metric. That gap is what let the shrink broadcast worker's freeze (a
+different failure, a hang rather than a panic) go unnoticed for hours in the first place, and it
+would have hidden a panic just as well: nothing but the process staying up with one dead task to
+show for it. The hook logs an `error!` (location, message, thread, backtrace) through the same
+subscriber as everything else, and counts it in `panics_total{location}` — low-cardinality, since a
+panic's location is a fixed point in the source, not user input. `DickGrowerBotPanicked` in
+server-configs alerts on any nonzero rate.
+
+**A scheduler tick recovers from its own panic instead of dying for good.** Every worker in
+`scheduler.rs` is a fire-and-forget `tokio::spawn` with no `JoinHandle` kept anywhere — a panic that
+unwinds past the loop ends that task silently, with nothing awaiting it to notice. `resilient()`
+wraps one tick's work in `catch_unwind` (via `AssertUnwindSafe`, since the futures here borrow
+`Repositories`/`Throttle<Bot>` across an `.await` that the compiler can't prove safe to resume) so
+the loop gets another tick instead. The panic is still logged and counted by the hook above — this
+only stops it from unwinding any further. Nothing here holds a lock that a caught panic could leave
+half-updated: the state that matters lives in the database and Redis, outside this process.
+
 ### Observing the Telegram Bot API calls
 
 The outgoing requests are watched by `TelegramObserver` (`src/telegram_observer.rs`), attached to

@@ -2,7 +2,10 @@ mod shrink;
 mod deletions;
 mod broadcasts;
 
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
+use futures::FutureExt;
 use teloxide::Bot;
 use teloxide::adaptors::throttle::{Settings, Throttle};
 use domain_types::traits::SaturatingInto;
@@ -61,7 +64,7 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
         // aborts on Stale_Dick_Shrinks' primary key, rolling the length change back with it.
         if get_env_value_or_default("DAILY_SHRINK_RUN_ON_STARTUP", false) {
             tracing::warn!(variable = "DAILY_SHRINK_RUN_ON_STARTUP", "the variable is set, running the daily shrink right now");
-            run().await;
+            resilient(run()).await;
         }
         loop {
             let Some(till_next_day) = duration_till_next_day().and_then(|d| d.to_std().ok()) else {
@@ -71,7 +74,7 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
             tracing::debug!(sleeping_for = ?till_next_day, "waiting for the next UTC midnight");
             tokio::time::sleep(till_next_day).await;
 
-            run().await;
+            resilient(run()).await;
         }
     }));
 }
@@ -109,15 +112,17 @@ pub fn spawn_broadcast_worker(
 
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.
-            let deps = BroadcastDeps {
-                bot: &bot, repos: &repos, language_service: &language_service,
-                topics: &topics, config: &config,
-            };
-            if let Err(e) = run_pending_broadcasts(deps).await {
-                tracing::error!(error = format!("{e:#}"), "a shrink broadcast run failed");
-                continue;
-            }
-            report_shrink_queue(&repos).await;
+            resilient(async {
+                let deps = BroadcastDeps {
+                    bot: &bot, repos: &repos, language_service: &language_service,
+                    topics: &topics, config: &config,
+                };
+                if let Err(e) = run_pending_broadcasts(deps).await {
+                    tracing::error!(error = format!("{e:#}"), "a shrink broadcast run failed");
+                    return;
+                }
+                report_shrink_queue(&repos).await;
+            }).await;
         }
     }));
 }
@@ -143,8 +148,10 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
         loop {
             ticker.tick().await;
 
-            clean_finished_broadcasts(&repos, retention).await
-                .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished shrink summaries failed"));
+            resilient(async {
+                clean_finished_broadcasts(&repos, retention).await
+                    .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished shrink summaries failed"));
+            }).await;
         }
     }));
 }
@@ -172,11 +179,13 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
 
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.
-            if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction, bot_admin_ttl).await {
-                tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
-                continue;
-            }
-            report_queue(&repos).await;
+            resilient(async {
+                if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction, bot_admin_ttl).await {
+                    tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
+                    return;
+                }
+                report_queue(&repos).await;
+            }).await;
         }
     }));
 }
@@ -202,11 +211,32 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
         loop {
             ticker.tick().await;
 
-            clean_finished_deletions(&repos, retention).await
-                .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished self-destructions failed"));
-            report_queue(&repos).await;
+            resilient(async {
+                clean_finished_deletions(&repos, retention).await
+                    .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished self-destructions failed"));
+                report_queue(&repos).await;
+            }).await;
         }
     }));
+}
+
+/// Runs one tick of a scheduler loop without letting a panic inside it kill the whole task.
+///
+/// Every scheduler here is a fire-and-forget `tokio::spawn` with no `JoinHandle` kept anywhere, so
+/// a panic that unwinds past the loop ends the task for good — silently, since nothing awaits it
+/// to notice. The panic itself is already logged and counted by the process-wide hook installed in
+/// `observability::install_panic_hook`; this only stops it from unwinding any further, so the loop
+/// gets another tick instead of dying with nothing but a stale heartbeat to show for it.
+///
+/// `AssertUnwindSafe` is what makes this compile: the futures here borrow `Repositories`,
+/// `Throttle<Bot>` and the like across an `.await`, none of which the compiler can prove safe to
+/// resume after a panic. Nothing here holds a lock that could be left half-updated by one — the
+/// state that matters (the database, Redis) lives outside this process — so asserting it is safe
+/// in practice.
+async fn resilient<F: Future<Output = ()>>(tick: F) {
+    if AssertUnwindSafe(tick).catch_unwind().await.is_err() {
+        tracing::warn!("a scheduler tick panicked; the loop continues regardless");
+    }
 }
 
 /// How long a row rests before the next attempt: the base delay doubled once per failure it already

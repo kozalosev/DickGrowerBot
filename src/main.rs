@@ -55,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv()?;
 
     let telemetry = observability::init_tracing()?;
+    observability::install_panic_hook();
     autometrics::prometheus_exporter::init();
 
     let app_config = AppConfig::from_env();

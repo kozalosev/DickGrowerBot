@@ -108,6 +108,32 @@ pub fn init_tracing() -> Result<Telemetry, Box<dyn Error>> {
     Ok(Telemetry { tracer_provider, logger_provider })
 }
 
+/// Installs a process-wide panic hook that routes every panic through the tracing pipeline
+/// instead of Rust's default, which writes straight to stderr — bypassing the console formatting,
+/// the OTLP log export, and `panics_total`. Must be called after [`init_tracing`], since it logs
+/// through the subscriber that installs.
+///
+/// A hook covers every panic in the process, including one inside a fire-and-forget background
+/// task ([`crate::scheduler`] spawns each worker without keeping its `JoinHandle`), which is the
+/// case a per-call-site `catch_unwind` would miss unless it were added everywhere by hand. Such a
+/// panic otherwise kills that task for good with nothing to say why — only the task's own
+/// heartbeat going stale, minutes to hours later, in the way that was diagnosed the hard way
+/// before this existed.
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let location = info.location().map_or_else(|| "unknown".to_owned(), ToString::to_string);
+        let payload = info.payload();
+        let message = payload.downcast_ref::<&str>().copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("<non-string panic payload>");
+        let thread = std::thread::current().name().unwrap_or("<unnamed>").to_owned();
+        let backtrace = std::backtrace::Backtrace::capture();
+
+        crate::metrics::PANICS_TOTAL.inc(&[&location]);
+        tracing::error!(%location, message, %thread, %backtrace, "a panic was caught");
+    }));
+}
+
 fn build_tracer_provider() -> Result<SdkTracerProvider, Box<dyn Error>> {
     let Some(endpoint) = endpoint(TRACES_ENDPOINT_VAR) else {
         return Ok(SdkTracerProvider::builder().build());

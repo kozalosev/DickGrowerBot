@@ -60,6 +60,8 @@ pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_cleanup_usage_total", "count of /cleanup invocations and changes of the setting", ["invoked", "finished"]));
 pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
+pub static PANICS_TOTAL: Lazy<CounterVec> = Lazy::new(||
+    CounterVec::new("panics_total", "count of panics caught by the process-wide hook installed in observability.rs, by the source location (file:line) that panicked. A hook, rather than catch_unwind at every call site, is what makes this cover every panic in the process, including ones in code that isn't wrapped for it. Any nonzero rate is worth paging on: a panic inside a fire-and-forget background task (the schedulers) kills that task for good with no other signal until its own heartbeat goes stale", &["location"]));
 pub static CACHE_LOCAL_ENTRIES: Lazy<Gauge> = Lazy::new(||
     Gauge::new("cache_local_entries", "number of values the cache is holding in this process, as of the last sweep. Zero when the values are shared through Redis and it is answering; non-zero there too, for as long as cache_fallback_active reports an outage, since that is when a Redis backend starts holding its own values here instead. A number to watch rather than to alert on: keeping the values here is a setting, and the only one a single instance of the bot needs"));
 pub static CACHE_FALLBACK_ACTIVE: Lazy<Gauge> = Lazy::new(||
@@ -419,6 +421,14 @@ impl CounterVec {
         REGISTRY.register(Box::new(inner.clone()))
             .unwrap_or_else(|e| panic!("unable to register the {name} counter vec: {e}"));
         Self(inner)
+    }
+
+    /// Increments the child counter identified by these label values, given in the same order as
+    /// the labels passed to [`CounterVec::new`]. Public, unlike [`CounterVec::counter`]: a vec
+    /// whose labels come from the call site itself (a panic's location, say) has no fixed set of
+    /// variants to wrap in a dedicated struct.
+    pub fn inc(&self, label_values: &[&str]) {
+        self.counter(label_values).inc()
     }
 
     /// Returns the child counter identified by these label values, given in the
