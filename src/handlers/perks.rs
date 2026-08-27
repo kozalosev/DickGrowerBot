@@ -6,7 +6,7 @@ use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
 use sqlx::{Pool, Postgres};
-use crate::handlers::utils::{AdditionalChange, ChangeSource, ConfigurablePerk, Perk, PerkContext, PerkOutcome};
+use crate::handlers::utils::{days_word_ru, AdditionalChange, ChangeSource, ConfigurablePerk, Perk, PerkContext, PerkOutcome};
 use crate::config::StreakBonusConfig;
 use crate::{config, repo};
 use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, LoanPayout, PerkName, PerkNote, Ratio};
@@ -153,7 +153,8 @@ impl Perk for StreakPerk {
             state: serde_json::to_value(state)
                 .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = %e, "couldn't serialize a streak"))
                 .ok(),
-            note: Some(PerkNote::new(t!("titles.perks.streak_note", locale = ctx.lang_code, days = streak).to_string())),
+            note: Some(PerkNote::new(t!("titles.perks.streak_note", locale = ctx.lang_code,
+                days = streak, word_days = days_word_ru(streak)).to_string())),
         }
     }
 

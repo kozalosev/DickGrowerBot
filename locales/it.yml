@@ -88,7 +88,7 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per %{days} giorni e si sono un po' accorciati:"
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm, testa alta!)"
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm)"
     recent:
       header: "✂️ <b>Chi si è accorciato di recente:</b>"
       line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm"

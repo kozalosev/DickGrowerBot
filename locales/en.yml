@@ -88,7 +88,7 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>Time to trim the neglected!</b> These dicks haven't grown in %{days} days and shrank a bit:"
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm, chin up!)"
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm)"
     recent:
       header: "✂️ <b>Who's been shrinking lately:</b>"
       line: "— <b>%{name}</b> lost <b>%{lost}</b> cm"

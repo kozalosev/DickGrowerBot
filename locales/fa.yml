@@ -88,7 +88,7 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>وقت کوتاه‌کردن فراموش‌شده‌هاست!</b> این کیرها %{days} روزه رشد نکردن و یه‌کم کوچیک شدن:"
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> <b>%{lost}</b> سانت از دست داد (الان <b>%{length}</b> سانته، ناراحت نباش!)"
+      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> <b>%{lost}</b> سانت از دست داد (الان <b>%{length}</b> سانته)"
     recent:
       header: "✂️ <b>کیا اخیراً کوچیک شدن:</b>"
       line: "— <b>%{name}</b> <b>%{lost}</b> سانت از دست داد"

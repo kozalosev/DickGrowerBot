@@ -15,7 +15,7 @@ use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
 use crate::handlers::{answer_callback_feature_disabled, banned_until_of, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
-use crate::handlers::utils::{callbacks, Incrementor};
+use crate::handlers::utils::{callbacks, days_word_ru, Incrementor};
 
 const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
@@ -190,7 +190,8 @@ pub(crate) async fn top_impl(
         let title = t!("commands.top.title", locale = &lang_code);
         let ending = t!("commands.top.ending", locale = &lang_code);
         let inactive_hint = if any_inactive {
-            format!("\n{}", t!("commands.top.ending_inactive", locale = &lang_code, days = config.inactivity_days))
+            format!("\n{}", t!("commands.top.ending_inactive", locale = &lang_code,
+                days = config.inactivity_days, word_days = days_word_ru(config.inactivity_days)))
         } else {
             String::new()
         };

@@ -10,7 +10,7 @@ use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Offset, Page};
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerDeps, HandlerResult};
-use crate::handlers::utils::callbacks;
+use crate::handlers::utils::{callbacks, days_word_ru};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::repo::{AdjacentDates, RecentShrink, Repositories};
 
@@ -99,7 +99,8 @@ pub(crate) fn render_shrinks_page(
         .collect::<Vec<_>>()
         .join("\n");
     let header_key = format!("{prefix}.header");
-    let header = t!(&header_key, locale = lang_code, days = config.daily_shrink.inactivity_days);
+    let header = t!(&header_key, locale = lang_code, days = config.daily_shrink.inactivity_days,
+        word_days = days_word_ru(config.daily_shrink.inactivity_days));
     ShrinksPage { lines: format!("{header}\n{lines}"), has_more_pages }
 }
 

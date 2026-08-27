@@ -11,7 +11,7 @@ pub use self_destruction::*;
 use teloxide::Bot;
 use teloxide::prelude::{Requester, UserId};
 use teloxide::types::{Chat, ChatKind, Message, PublicChatKind, User};
-use crate::domain::primitives::Username;
+use crate::domain::primitives::{DaysCount, Username};
 
 /// Whether the chat is a forum, i.e. a supergroup with topics turned on.
 ///
@@ -41,6 +41,22 @@ pub fn get_full_name(user: &User) -> Username {
         .map(|last_name| format!("{} {}", user.first_name, last_name))
         .unwrap_or(user.first_name.clone());
     Username::new(name)
+}
+
+/// The Russian declension of "day" a count governs: день for 1, дня for 2-4, дней for everything
+/// else — 11-14 always take the last form, which the last-digit rule alone gets wrong (11 ends in
+/// 1, but it's "11 дней", not "11 день"). `rust-i18n` has no CLDR plural support (issue #170), so
+/// this is the same one-off `word_*` treatment `get_chats_in_russian` (`handlers/promo.rs`) gives
+/// its own counted string, computed in Rust and interpolated as a plain argument.
+pub fn days_word_ru(n: DaysCount) -> &'static str {
+    if (11..=14).contains(&(n.value() % 100)) {
+        return "дней"
+    }
+    match n.value() % 10 {
+        1 => "день",
+        2..=4 => "дня",
+        _ => "дней",
+    }
 }
 
 pub mod date {
@@ -94,5 +110,17 @@ mod tests {
         let actual = date::get_time_till_next_day_string(&lang_code);
         let actual = &actual[actual.len()-expected.len()..];
         assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn days_word_ru_declines_by_the_last_two_digits() {
+        let cases = [
+            (1, "день"), (21, "день"),
+            (2, "дня"), (4, "дня"), (24, "дня"),
+            (5, "дней"), (0, "дней"), (11, "дней"), (12, "дней"), (14, "дней"), (111, "дней"),
+        ];
+        for (n, expected) in cases {
+            assert_eq!(days_word_ru(DaysCount::new(n)), expected, "n = {n}");
+        }
     }
 }
