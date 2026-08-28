@@ -71,6 +71,7 @@ impl AppConfig {
                 max_attempts: env_value!("DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
                 max_age: env_duration!("DAILY_SHRINK_BROADCAST_MAX_AGE", or = hours(48), at_least = secs(1)),
                 retention: env_duration!("DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY", or = days(3)),
+                language_sample: env_value!("MOST_POPULAR_LANGUAGE_SAMPLE_SIZE": Limit, or = 100, at_least = 1),
             },
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());

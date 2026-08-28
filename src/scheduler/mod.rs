@@ -98,6 +98,7 @@ pub fn spawn_broadcast_worker(
     repos: Repositories,
     language_service: LanguageService,
     topics: TopicPolicy,
+    cache: Cache,
     config: AppConfig,
 ) {
     if !config.daily_shrink.enabled() {
@@ -123,7 +124,7 @@ pub fn spawn_broadcast_worker(
             resilient(async {
                 let deps = BroadcastDeps {
                     bot: &bot, repos: &repos, language_service: &language_service,
-                    topics: &topics, config: &config,
+                    topics: &topics, cache: &cache, config: &config,
                 };
                 if let Err(e) = run_pending_broadcasts(deps).await {
                     tracing::error!(error = format!("{e:#}"), "a shrink broadcast run failed");

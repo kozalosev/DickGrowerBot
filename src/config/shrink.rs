@@ -47,6 +47,10 @@ pub struct BroadcastConfig {
     /// How long a finished row is kept before the cleaning process removes it. Zero keeps them for
     /// ever, which is what makes the queue's own history readable.
     pub retention: Duration,
+    /// How many of a chat's players the language tally looks at, when the chat has chosen no
+    /// language of its own. A tally does not become truer for having every last member in it, and
+    /// the whole roll of a large chat is a list the user-service then has to look up in one go.
+    pub language_sample: Limit,
 }
 
 impl DailyShrinkConfig {
@@ -70,6 +74,7 @@ impl Default for BroadcastConfig {
             max_attempts: AttemptsCount::new(3),
             max_age: Duration::from_hours(48),
             retention: Duration::from_hours(72),
+            language_sample: Limit::new(100),
         }
     }
 }

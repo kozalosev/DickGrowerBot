@@ -196,6 +196,38 @@ repository!(Shrinks,
             .context(format!("couldn't fetch shrinks of {chat_id} for {date}"))
     },
 
+    /// The same page as [`Self::get_shrinks_for_date`], for a caller that already holds the chat's
+    /// own key.
+    ///
+    /// That is the whole difference, and it is worth a method: without the join the predicate is a
+    /// plain equality on `Stale_Dick_Shrinks.chat_id`, which lands directly on
+    /// `stale_dick_shrinks_idx_chat_created_at`. The broadcast worker is the caller — it reads the
+    /// key out of the row it just claimed, where the other one would have had it look the chat up
+    /// by the Telegram id it had just been given in exchange for that very key.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, date = %date, offset = %offset, limit = %limit))]
+    pub async fn get_shrinks_for_internal_chat(
+        &self,
+        chat_id: InternalChatId,
+        date: NaiveDate,
+        offset: Offset,
+        limit: Limit,
+    ) -> anyhow::Result<Vec<RecentShrink>> {
+        sqlx::query_as!(RecentShrink,
+            r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
+                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length"
+                FROM Stale_Dick_Shrinks s
+                JOIN Users usr USING (uid)
+                JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
+                WHERE s.chat_id = $1 AND s.created_at = $2
+                ORDER BY s.lost_length DESC
+                OFFSET $3 LIMIT $4"#,
+                chat_id as InternalChatId, date, offset as Offset, limit as Limit)
+            .fetch_all(&self.pool)
+            .await
+            .context(format!("couldn't fetch shrinks of the chat with id = {chat_id} for {date}"))
+    },
+
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_latest_shrink_date(

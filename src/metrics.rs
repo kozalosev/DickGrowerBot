@@ -54,6 +54,8 @@ pub static CHAT_LANGUAGE: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
 pub static CMD_TOPICS: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_topics_usage_total", "count of /topics invocations and changes of the setting", ["invoked", "finished"]));
+pub static BROADCAST_LANGUAGE_TALLY: Lazy<CacheSourceCounters> = Lazy::new(||
+    CacheSourceCounters::new("broadcast_language_tally_get_total", "count of the language tallies the shrink broadcast needed for chats with no language of their own, split by whether they were served from cache or worked out afresh from the chat's players and the user-service"));
 pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
 pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||

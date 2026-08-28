@@ -181,7 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let throttled_bot = scheduler::throttled(bot.clone(), config::ThrottleConfig::from_env());
     scheduler::spawn_daily_shrink(repos.clone(), app_config.clone());
     scheduler::spawn_broadcast_worker(throttled_bot.clone(), repos.clone(), language_service.clone(),
-                                      topic_policy.clone(), app_config.clone());
+                                      topic_policy.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_broadcast_cleaner(repos.clone(), app_config.clone());
     scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());

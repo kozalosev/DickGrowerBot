@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Shrink_Broadcasts\n                    SET state = $2, finished_at = current_timestamp, lang_code = COALESCE($3, lang_code)\n                    WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        {
+          "Custom": {
+            "name": "broadcast_state",
+            "kind": {
+              "Enum": [
+                "created",
+                "sent",
+                "unreachable",
+                "expired",
+                "failed"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "language_code",
+            "kind": {
+              "Enum": [
+                "en",
+                "ru",
+                "it",
+                "fa",
+                "zh"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "296cca7e4bc073eaa7dc09ccb7cd473b2d97ddc62522dd3ff903c8796df90b71"
+}

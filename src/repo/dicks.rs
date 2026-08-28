@@ -109,18 +109,22 @@ impl Dicks {
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
-    /// Returns the uids of everyone who has a dick in the chat (i.e. its players).
+    /// The uids of up to `limit` of the chat's players, longest dick first.
+    ///
+    /// A sample rather than the roll: the one caller tallies the languages of whoever it gets, and
+    /// a tally does not become truer for having every last member in it — while a chat of thousands
+    /// would otherwise hand the user-service thousands of ids to look up, per chat, per night.
+    /// `length DESC` is not a judgement about who counts, only the order the index is already in.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
-    pub async fn get_player_uids(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<UserId>> {
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, limit = %limit))]
+    pub async fn get_player_uids_sample(&self, chat_id: InternalChatId, limit: Limit) -> anyhow::Result<Vec<UserId>> {
         sqlx::query_scalar!(
             r#"SELECT d.uid AS "uid: UserId" FROM Dicks d
-                JOIN Chats c ON c.id = d.chat_id
-                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text"#,
-                chat_id.value() as String)
+                WHERE d.chat_id = $1 ORDER BY d.length DESC LIMIT $2"#,
+                chat_id as InternalChatId, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't fetch player uids for {chat_id}"))
+            .context(format!("couldn't fetch a sample of player uids for {chat_id}"))
     }
 
     #[autometrics]
