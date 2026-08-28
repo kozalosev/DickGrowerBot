@@ -60,6 +60,7 @@ impl AppConfig {
             inactivity_days: env_value!("DAILY_SHRINK_INACTIVITY_DAYS": DaysCount, or = 7),
             ramp_up_days: env_value!("DAILY_SHRINK_RAMP_UP_DAYS": DaysCount, or = 7),
             batch_size: env_value!("DAILY_SHRINK_BATCH_SIZE": Limit, or = 100, at_least = 1),
+            batch_delay: env_duration!("DAILY_SHRINK_BATCH_DELAY"),
             broadcast: BroadcastConfig {
                 poll_interval: env_duration!("DAILY_SHRINK_BROADCAST_POLL", or = secs(5), at_least = secs(1)),
                 batch_size: env_value!("DAILY_SHRINK_BROADCAST_BATCH_SIZE": Limit, or = 200, at_least = 1),

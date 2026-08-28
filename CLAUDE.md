@@ -489,6 +489,18 @@ growing. Everything below follows from that.
   question needs a `DISTINCT` over about a million stale dicks, and it would exclude roughly one
   chat in eight, because nearly every chat has a neglected dick in it. A batch whose chats have
   nothing stale shrinks nothing and costs an index lookup.
+
+  **`DAILY_SHRINK_BATCH_DELAY` is the pace of that walk**, and zero — running the batches back to
+  back — is only right when the database has nothing else to do. It does: midnight is when the run
+  and the chats being answered compete for the same pool. Nothing waits on this job, so resting
+  between batches costs a longer run and nothing else. The smallest step is a second, since that is
+  what `parse_duration` understands.
+* **Every scheduler ticks with `MissedTickBehavior::Delay`** (`scheduler::paced`), not tokio's
+  default `Burst`. A tick that overran its period would otherwise be followed at once by as many
+  more as were missed, with no pause — and these loops overrun precisely when the database or
+  Telegram is already struggling, which is when catching up is the one thing that makes it worse.
+  Nothing is lost by it: none of them counts its ticks, each asks what is due now, so a tick that
+  never happens is a tick with nothing left to do.
 * **Nothing comes back from the statement but counts.** The shrinks are in `Stale_Dick_Shrinks` and
   the repository already reads exactly the page a summary needs, so the worker re-reads rather than
   carrying a payload. Page 0 therefore comes from the same `ORDER BY lost_length DESC` as pages 1+,
@@ -519,6 +531,7 @@ DAILY_SHRINK_INACTIVITY_DAYS=7
 DAILY_SHRINK_RAMP_UP_DAYS=7
 DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
 DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
+DAILY_SHRINK_BATCH_DELAY=0s            # rest between two batches; 0 => back to back
 DAILY_SHRINK_BROADCAST_POLL=5s
 DAILY_SHRINK_BROADCAST_BATCH_SIZE=200  # summaries one run claims
 DAILY_SHRINK_BROADCAST_CONCURRENCY=16  # how many it sends at once — the throughput knob

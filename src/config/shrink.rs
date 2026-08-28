@@ -13,6 +13,10 @@ pub struct DailyShrinkConfig {
     /// and the ones a failure costs, so a `/grow` sent at midnight waits behind one batch rather
     /// than behind every stale dick in the database.
     pub batch_size: Limit,
+    /// How long the run rests between two batches. Zero runs them back to back, which is what it did
+    /// before there was a knob for it. Nothing waits on this job, so the rest costs only a longer
+    /// run — and buys back the connections the chats being answered at midnight are queueing for.
+    pub batch_delay: Duration,
     pub broadcast: BroadcastConfig,
 }
 

@@ -112,7 +112,7 @@ pub fn spawn_broadcast_worker(
         concurrency = %config.daily_shrink.broadcast.concurrency,
         "the shrink broadcast worker has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK_BROADCAST.instrument(async move {
-        let mut ticker = tokio::time::interval(config.daily_shrink.broadcast.poll_interval);
+        let mut ticker = paced(config.daily_shrink.broadcast.poll_interval);
         loop {
             ticker.tick().await;
             // Set before any work of the tick, not after: a tick stuck inside claim_due or a send
@@ -151,7 +151,7 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
     tokio::spawn(metrics::TASK_DAILY_SHRINK_BROADCAST_CLEANING.instrument(async move {
         // Runs as often as it keeps, so a row lives between one and two retention periods. There's
         // nothing to gain from looking more often: nothing becomes stale in between.
-        let mut ticker = tokio::time::interval(retention);
+        let mut ticker = paced(retention);
         loop {
             ticker.tick().await;
 
@@ -180,7 +180,7 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
         concurrency = %self_destruction.concurrency, mode = %self_destruction.mode,
         "the self-destruction worker has started");
     tokio::spawn(metrics::TASK_SELF_DESTRUCTION.instrument(async move {
-        let mut ticker = tokio::time::interval(self_destruction.poll_interval);
+        let mut ticker = paced(self_destruction.poll_interval);
         loop {
             ticker.tick().await;
 
@@ -212,7 +212,7 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
     tokio::spawn(metrics::TASK_SELF_DESTRUCTION_CLEANING.instrument(async move {
         // Runs as often as it keeps, so a row lives between one and two retention periods. There's
         // nothing to gain from looking more often: nothing becomes stale in between.
-        let mut ticker = tokio::time::interval(retention);
+        let mut ticker = paced(retention);
         loop {
             ticker.tick().await;
 
@@ -236,13 +236,28 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 /// worker that died — which is what the alerts are watching for.
 pub fn spawn_queue_reporter(repos: Repositories) {
     tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(QUEUE_GAUGE_INTERVAL);
+        let mut ticker = paced(QUEUE_GAUGE_INTERVAL);
         loop {
             ticker.tick().await;
 
             resilient(report_queues(&repos)).await;
         }
     });
+}
+
+/// A ticker that puts `period` *between* the runs rather than between their start times.
+///
+/// `tokio`'s default is `Burst`: a tick that overran its period is followed immediately by as many
+/// more as were missed, with no pause at all. That is the wrong answer for every loop here — they
+/// overrun precisely when the database or Telegram is already struggling, and catching up is the one
+/// thing that makes it worse. `Delay` lets a slow run simply push the next one back.
+///
+/// Nothing is lost by it. None of these loops counts its ticks; each one asks what is due now, so a
+/// tick that never happens is a tick with nothing left to do.
+fn paced(period: Duration) -> tokio::time::Interval {
+    let mut ticker = tokio::time::interval(period);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker
 }
 
 /// Runs one tick of a scheduler loop without letting a panic inside it kill the whole task.
