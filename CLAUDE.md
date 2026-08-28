@@ -620,10 +620,40 @@ only; the `log::*` records of the libraries (teloxide, sqlx, reqwest) are captur
 `tracing-log` bridge, so everything shares one pipeline.
 
 ```
-RUST_LOG=info                                      # verbosity of the console and of the export
+RUST_LOG=info                                      # verbosity of the console and of the log export
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # spans, OTLP/gRPC; unset => spans are not exported
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:9428/insert/opentelemetry/v1/logs  # log records, OTLP/HTTP
+OTEL_SPAN_FILTER=info,h2=off,hyper=off,tower=off,teloxide=info,reqwest=info,sqlx=off  # what becomes a span
+OTEL_TRACES_SAMPLE_RATIO=1.0                       # the share of traces kept, parent-based
+OTEL_BSP_QUEUE_SIZE=8192                           # spans held while waiting to be sent
+OTEL_BSP_BATCH_SIZE=2048                           # spans per export
+OTEL_BSP_DELAY=2s                                  # how often the queue drains
 ```
+
+**`RUST_LOG` does not govern the spans.** The span layer has a filter of its own, and it used to be
+a hardcoded `trace` — so `sqlx` streamed an event per query into every span, and one broadcast tick
+turned a few hundred sends into tens of thousands of events, whatever `RUST_LOG` said. It is
+`OTEL_SPAN_FILTER` now, defaulting to `info` with `sqlx=off`, and the two verbosities are separate
+because they answer different questions: one is what a human reads, the other is how much of the
+program's shape is worth keeping.
+
+The bot's **per-item scheduler spans are written at `debug`** for the same reason
+(`send_and_record`, `resolve_broadcast_language`): a run reaches every chat that is owed a summary,
+so at `info` one midnight would be a few hundred thousand spans. `OTEL_SPAN_FILTER=debug` brings
+them back, which is what to set while looking into a worker. The run-level spans stay at `info` —
+there are only a few a minute, and they are what shows a tick as a whole.
+
+**The sampling is parent-based**, so a decision taken at the root holds for every span beneath it
+and a trace never arrives with holes. The unit being sampled is therefore a whole trace, and for a
+scheduler that trace is **one tick of its loop** — at `0.05` one tick in twenty is kept entire,
+rather than one span in twenty scattered across all of them.
+
+The batch settings exist because the SDK's stock queue of 2048 is smaller than a single broadcast
+tick, so the spans of a busy minute were dropped before the exporter thread woke up. Spans go out
+gzipped (`gzip-tonic`).
+
+**The layer is left off the subscriber entirely when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset.** It
+used to be attached regardless, building every span for a provider with no exporter behind it.
 
 The console layer is **always** on and is the fallback: `docker logs` and journald keep working, and
 it is what remains when the collector can't be reached. The two signals need two variables because

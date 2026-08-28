@@ -91,7 +91,10 @@ pub async fn clean_finished_broadcasts(repos: &Repositories, retention: Duration
 }
 
 /// Sends one summary and writes down what became of it.
-#[tracing::instrument(skip_all, fields(id = %broadcast.id, chat_id = %broadcast.chat_id, date = %broadcast.shrink_date))]
+///
+/// A span per chat, so it is `debug`: a run reaches every chat that is owed a summary, and at `info`
+/// one midnight would be a few hundred thousand spans. `OTEL_SPAN_FILTER=debug` brings them back.
+#[tracing::instrument(level = "debug", skip_all, fields(id = %broadcast.id, chat_id = %broadcast.chat_id, date = %broadcast.shrink_date))]
 async fn send_and_record(deps: BroadcastDeps<'_>, broadcast: ScheduledBroadcast) {
     let config = &deps.config.daily_shrink.broadcast;
     let id = broadcast.id;
@@ -271,7 +274,9 @@ fn is_final(error: &RequestError) -> bool {
 
 /// Picks the language for a chat's summary: the chat-wide override wins; otherwise, when the
 /// `getMany` toggle is on, the most popular language among the chat's players; English otherwise.
-#[tracing::instrument(skip_all)]
+///
+/// Called once per chat, so it is `debug` for the same reason as [`send_and_record`].
+#[tracing::instrument(level = "debug", skip_all)]
 async fn resolve_broadcast_language(deps: BroadcastDeps<'_>, chat: &ChatIdKind) -> SupportedLanguage {
     let BroadcastDeps { repos, language_service, config, .. } = deps;
     match repos.chats.get_chat_language(chat).await {

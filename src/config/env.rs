@@ -119,7 +119,7 @@ pub(crate) use env_value;
 /// alone — no rename, no code change, and no way for a name and a number to end up disagreeing.
 ///
 /// A bare number is seconds, which is what every value written before this meant.
-pub(super) struct EnvDuration<'a> {
+pub struct EnvDuration<'a> {
     key: &'a str,
     default: Duration,
     min: Option<Duration>,
@@ -183,19 +183,19 @@ pub(super) enum InvalidDuration {
 /// The spans a fallback is written in. `Duration::from_days` is still unstable, so one of the four
 /// has to be written out — and once one is, the other three earn their place by keeping every
 /// fallback in the config the same shape.
-pub(super) const fn secs(count: u64) -> Duration {
+pub const fn secs(count: u64) -> Duration {
     Duration::from_secs(count)
 }
 
-pub(super) const fn mins(count: u64) -> Duration {
+pub const fn mins(count: u64) -> Duration {
     Duration::from_mins(count)
 }
 
-pub(super) const fn hours(count: u64) -> Duration {
+pub const fn hours(count: u64) -> Duration {
     Duration::from_hours(count)
 }
 
-pub(super) const fn days(count: u64) -> Duration {
+pub const fn days(count: u64) -> Duration {
     Duration::from_hours(count * 24)
 }
 

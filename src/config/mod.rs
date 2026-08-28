@@ -6,7 +6,7 @@ mod self_destruction;
 mod shrink;
 mod throttle;
 mod incrementor;
-mod env;
+pub mod env;
 mod help;
 mod integrations;
 mod caches;

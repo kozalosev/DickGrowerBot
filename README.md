@@ -116,6 +116,23 @@ cannot be reached. Two more variables send the data to that stack, each optional
   included). The exported records carry the trace and span ids of the span they were written in, put
   there by the SDK, so a log line and a trace can be matched.
 
+Five more bound how many spans that first variable produces. They matter because the schedulers
+reach every chat at once: one broadcast run is a few hundred thousand sends, and at the stock
+settings it buries the collector.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `OTEL_SPAN_FILTER` | `info,h2=off,hyper=off,tower=off,teloxide=info,reqwest=info,sqlx=off` | The span layer's own verbosity, **separate from `RUST_LOG`** |
+| `OTEL_TRACES_SAMPLE_RATIO` | `1.0` | The share of traces kept, parent-based |
+| `OTEL_BSP_QUEUE_SIZE` | `8192` | Spans held while waiting to be sent |
+| `OTEL_BSP_BATCH_SIZE` | `2048` | Spans per export |
+| `OTEL_BSP_DELAY` | `2s` | How often the queue drains |
+
+`sqlx` is off in the filter because a query is the leaf of nearly every span here, and the bot's
+per-item scheduler spans are written at `debug` — so `OTEL_SPAN_FILTER=debug` is what brings back a
+span per chat while a worker is being looked into. The sampling is parent-based, so a whole trace is
+kept or dropped together; for a scheduler that trace is one tick of its loop.
+
 `docker-compose.yml` bundles an **optional** observability stack, gated behind the `tracing` Compose
 profile: [Jaeger](https://www.jaegertracing.io/) all-in-one for the spans and
 [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) for the records. The
