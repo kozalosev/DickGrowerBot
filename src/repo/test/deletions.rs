@@ -1,10 +1,11 @@
 use std::time::Duration;
 use domain_types::traits::SaturatingInto;
 use chrono::Utc;
+use sqlx::{Pool, Postgres};
 use crate::config::MessageGroup;
-use crate::domain::primitives::{Count, LanguageCode, Limit};
+use crate::domain::primitives::{LanguageCode, Limit};
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
-use crate::repo::{DeletionState, DeletionTarget, MessageKind, NewDeletion, ScheduledDeletion, ScheduledDeletions};
+use crate::repo::{DeletionState, DeletionTarget, MessageKind, NewDeletion, ScheduledDeletions};
 use crate::repo::test::{far_future, fresh_db};
 
 const CHAT_ID: i64 = -1001234567890;
@@ -14,6 +15,15 @@ fn chat_message(message_id: u32) -> DeletionTarget {
         chat_id: TelegramChatId::new(CHAT_ID),
         message_id: TelegramMessageId::new(message_id),
     }
+}
+
+/// What the table says became of each message. The repository no longer counts this — the queue's
+/// history is read by a dashboard panel, not by a gauge — so the tests read it the same way.
+async fn finished_states(db: &Pool<Postgres>) -> Vec<(String, i64)> {
+    sqlx::query!(r#"SELECT state::text AS "state!", count(*) AS "count!" FROM Scheduled_Message_Deletions
+            WHERE finished_at IS NOT NULL GROUP BY state ORDER BY 1"#)
+        .fetch_all(db).await.expect("couldn't count the finished deletions")
+        .into_iter().map(|row| (row.state, row.count)).collect()
 }
 
 fn due(target: DeletionTarget, kind: MessageKind) -> NewDeletion {
@@ -152,7 +162,7 @@ async fn a_postponed_message_counts_its_attempts() {
 #[tokio::test]
 async fn a_finished_message_is_kept_but_never_claimed() {
     let db = fresh_db().await;
-    let repo = ScheduledDeletions::new(db);
+    let repo = ScheduledDeletions::new(db.clone());
     repo.schedule(&[due(chat_message(1), MessageKind::Reply), due(chat_message(2), MessageKind::Command)])
         .await.expect("couldn't schedule the deletions");
     let claimed = repo.claim_due(Limit::new(10), Utc::now() - Duration::from_secs(1))
@@ -167,9 +177,8 @@ async fn a_finished_message_is_kept_but_never_claimed() {
     let pending = repo.count_pending().await.expect("couldn't count the pending deletions");
     assert_eq!(pending, 0);
 
-    let mut finished = repo.count_finished().await.expect("couldn't count the finished deletions");
-    finished.sort_by_key(|(state, _)| state.to_string());
-    assert_eq!(finished, vec![(DeletionState::Failed, Count::<ScheduledDeletion>::new(1)), (DeletionState::Removed, Count::<ScheduledDeletion>::new(1))]);
+    assert_eq!(finished_states(&db).await,
+        vec![("failed".to_owned(), 1), ("removed".to_owned(), 1)]);
 }
 
 /// Every terminal state has to survive the trip to the database and back, or a row would end up
@@ -178,7 +187,7 @@ async fn a_finished_message_is_kept_but_never_claimed() {
 #[tokio::test]
 async fn every_terminal_state_survives_the_round_trip() {
     let db = fresh_db().await;
-    let repo = ScheduledDeletions::new(db);
+    let repo = ScheduledDeletions::new(db.clone());
     let messages: Vec<_> = (1..=DeletionState::TERMINAL.len())
         .map(|i| due(chat_message(i.saturating_into()), MessageKind::Reply))
         .collect();
@@ -190,9 +199,9 @@ async fn every_terminal_state_survives_the_round_trip() {
         repo.finish(deletion.id, state).await.expect("couldn't finish the deletion");
     }
 
-    let finished = repo.count_finished().await.expect("couldn't count the finished deletions");
+    let finished = finished_states(&db).await;
     for state in DeletionState::TERMINAL {
-        assert!(finished.contains(&(state, Count::<ScheduledDeletion>::new(1))), "{state} is missing from {finished:?}");
+        assert!(finished.contains(&(state.to_string(), 1)), "{state} is missing from {finished:?}");
     }
 }
 
@@ -237,9 +246,7 @@ async fn a_row_that_addresses_no_message_is_given_up_on() {
         .await.expect("couldn't claim the deletions");
     assert!(claimed.is_empty());
 
-    let finished = repo.count_finished()
-        .await.expect("couldn't count the finished deletions");
-    assert_eq!(finished, vec![(DeletionState::Failed, Count::<ScheduledDeletion>::new(1))]);
+    assert_eq!(finished_states(&db).await, vec![("failed".to_owned(), 1)]);
     let claimed_again = repo.claim_due(Limit::new(10), Utc::now())
         .await.expect("couldn't claim the deletions");
     assert!(claimed_again.is_empty());
@@ -250,7 +257,7 @@ async fn a_row_that_addresses_no_message_is_given_up_on() {
 #[tokio::test]
 async fn a_removed_message_stays_until_it_is_cleaned_up() {
     let db = fresh_db().await;
-    let repo = ScheduledDeletions::new(db);
+    let repo = ScheduledDeletions::new(db.clone());
     repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
         .await.expect("couldn't schedule the deletion");
     let claimed = repo.claim_due(Limit::new(10), far_future())
@@ -261,8 +268,7 @@ async fn a_removed_message_stays_until_it_is_cleaned_up() {
 
     let pending = repo.count_pending().await.expect("couldn't count the pending deletions");
     assert_eq!(pending, 0);
-    let finished = repo.count_finished().await.expect("couldn't count the finished deletions");
-    assert_eq!(finished, vec![(DeletionState::Removed, Count::<ScheduledDeletion>::new(1))]);
+    assert_eq!(finished_states(&db).await, vec![("removed".to_owned(), 1)]);
 
     let removed = repo.delete_finished(Utc::now() + Duration::from_mins(10))
         .await.expect("couldn't clean the deletions up");

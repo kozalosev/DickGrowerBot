@@ -359,8 +359,8 @@ overhead.
 | anything else | unchanged; postponed by the back-off, `attempts` + 1 |
 
 **The counter counts endings, one per message.** `self_destruction_total{group,kind,outcome}` grows
-only when a row reaches a terminal state, and the `outcome` values are those states. So it shows the
-same four things as `self_destruction_finished{state}`, but as a rate instead of a current number.
+only when a row reaches a terminal state, and the `outcome` values are those states — a rate, where
+the table itself answers how many rows sit in each state right now.
 `scheduler::deletions::finish` writes the row and the counter together, so they can't say different
 things.
 
@@ -379,7 +379,10 @@ getting in their way. A message found missing at its **warning** ends there too,
 warned into the void and found missing again a grace period later — the notice is what a failed
 edit costs, but a message that is gone is not coming back.
 `SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
-stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
+stop disappearing, and it is a Grafana panel over the table rather than a gauge — the same trade the
+broadcast queue already made. As a gauge it was published from the deletion worker's own tick, so
+that query ran every `MSG_SELFDESTRUCT_POLL` — a scan of three days of finished rows, seventeen
+thousand times a day, to answer what one query answers when somebody asks.
 `scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY` days
 later — a task of its own, because clearing the history must never be part of the run that wrote it.
 **A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
@@ -550,12 +553,21 @@ around `request.send()` (`scheduler::broadcasts::send`), bounding the send itsel
 `warn!` — inside the `send_and_record` span, so the log line carries the `chat_id`/`id` of whichever
 summary was in flight, without having to reach for a debugger next time.
 
-**Those three are the only gauges, and only the worker's tick publishes them.** They exist because
-vmalert reads Prometheus and cannot query SQL; everything a human looks at — which chats failed and
-why, the states over time — is a panel over `Scheduled_Shrink_Broadcasts` through Grafana's Postgres
-datasource, which costs nothing when nobody is looking. A gauge over the finished rows was the
-opposite trade: grouping a few hundred thousand rows by state every five seconds so that a graph
-could show what one SQL query already answers.
+**Those three are the only gauges.** They exist because vmalert reads Prometheus and cannot query
+SQL; everything a human looks at — which chats failed and why, the states over time — is a panel over
+`Scheduled_Shrink_Broadcasts` through Grafana's Postgres datasource, which costs nothing when nobody
+is looking. A gauge over the finished rows was the opposite trade: grouping a few hundred thousand
+rows by state every five seconds so that a graph could show what one SQL query already answers.
+
+**The heartbeat is the worker's; the two depths belong to `spawn_queue_reporter`.**
+`daily_shrink_broadcast_last_tick_timestamp_seconds` has to be written by the tick it measures, so it
+stays there. `daily_shrink_broadcast_pending` and `self_destruction_pending` do not: counting a queue
+is a scan of its whole pending index, and hanging that off a five-second poll tied three table scans
+to the workers' cadence, day and night, whether or not either queue had anything in it. They go out
+every `scheduler::QUEUE_GAUGE_INTERVAL` (60s) from a task of their own — a constant on the same
+grounds as `SWEEP_INTERVAL`: it decides how fresh a gauge is, not whether anything works. The
+reporter runs whatever the features say, because a gauge that stops being published looks exactly
+like a worker that died, which is what the alerts are watching for.
 
 **A log line's level follows what was lost, not whether the code recovered.** A failed shrink page
 is an `error!`: those chats lost the day and nothing retries it. A failed metric publication is a

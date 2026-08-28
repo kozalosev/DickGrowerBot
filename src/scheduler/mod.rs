@@ -21,6 +21,14 @@ use shrink::run_daily_shrink;
 use deletions::{clean_finished_deletions, run_pending_deletions};
 use broadcasts::{clean_finished_broadcasts, run_pending_broadcasts, BroadcastDeps};
 
+/// How often the depth of the queues is published.
+///
+/// A constant rather than a variable, on the same grounds as the cache's sweep interval: it decides
+/// only how fresh a gauge is, not whether anything works. It is deliberately far longer than either
+/// worker's poll interval — counting a queue is a scan of its whole pending index, and at a few
+/// hundred thousand rows doing that every five seconds costs more than the work being measured.
+const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_secs(60);
+
 /// A bot that keeps the schedulers inside Telegram's rate limits.
 ///
 /// Both schedulers send to many chats at once, so they need this. They must also share one, because
@@ -119,9 +127,7 @@ pub fn spawn_broadcast_worker(
                 };
                 if let Err(e) = run_pending_broadcasts(deps).await {
                     tracing::error!(error = format!("{e:#}"), "a shrink broadcast run failed");
-                    return;
                 }
-                report_shrink_queue(&repos).await;
             }).await;
         }
     }));
@@ -182,9 +188,7 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
             resilient(async {
                 if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction, bot_admin_ttl).await {
                     tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
-                    return;
                 }
-                report_queue(&repos).await;
             }).await;
         }
     }));
@@ -214,10 +218,30 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
             resilient(async {
                 clean_finished_deletions(&repos, retention).await
                     .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished self-destructions failed"));
-                report_queue(&repos).await;
             }).await;
         }
     }));
+}
+
+/// Spawns the task that publishes how deep the two queues are.
+///
+/// A task of its own rather than a line at the end of each worker's tick: what the workers do and
+/// how often a gauge is worth refreshing are different questions, and answering them together tied
+/// three table scans to a five-second poll interval — day and night, whether or not either queue had
+/// anything in it.
+///
+/// It runs whatever the features say. Both gauges read tables that exist regardless, a disabled
+/// feature simply reports zero, and a gauge that stops being published is indistinguishable from a
+/// worker that died — which is what the alerts are watching for.
+pub fn spawn_queue_reporter(repos: Repositories) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(QUEUE_GAUGE_INTERVAL);
+        loop {
+            ticker.tick().await;
+
+            resilient(report_queues(&repos)).await;
+        }
+    });
 }
 
 /// Runs one tick of a scheduler loop without letting a panic inside it kill the whole task.
@@ -247,21 +271,20 @@ fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
     base.saturating_mul(factor).min(max)
 }
 
-/// Publishes how much the broadcast queue still owes and when the last shrink was.
+/// Publishes what the alerts read: the depth of both queues, and when the last shrink was.
 ///
-/// Only these two, and only from the worker's tick: they are what the alerts read, and vmalert
-/// can't ask the database itself. Everything a human looks at — which chats failed and why, the
-/// states over time — is a panel over `Scheduled_Shrink_Broadcasts` instead, which costs nothing
-/// when nobody is looking at it.
+/// Only these, and only because vmalert reads Prometheus and cannot ask the database itself.
+/// Everything a human looks at — which chats failed and why, the states over time — is a panel over
+/// the queue tables instead, which costs nothing when nobody is looking at it.
 ///
 /// The day of the last shrink is a gauge rather than a counter because it has to survive a restart:
 /// a counter incremented once a day reads zero both when nothing happened and when nobody scraped
 /// it in time, and there is no telling those apart afterwards.
 ///
-/// A failure here loses one sample of a gauge and nothing else — the queue, the rows and the worker
-/// are untouched, and the next tick publishes again — so it is a `warn`. It also runs every few
-/// seconds, and a database that is down has already been reported by the run that failed.
-async fn report_shrink_queue(repos: &Repositories) {
+/// A failure here loses one sample of a gauge and nothing else — the queues, the rows and the
+/// workers are untouched, and the next tick publishes again — so it is a `warn`. A database that is
+/// down has already been reported by the run that failed.
+async fn report_queues(repos: &Repositories) {
     match repos.broadcasts.count_pending().await {
         Ok(pending) => metrics::DAILY_SHRINK_BROADCAST_PENDING.set(pending.saturating_into()),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending shrink summaries"),
@@ -271,18 +294,9 @@ async fn report_shrink_queue(repos: &Repositories) {
         Ok(None) => {},
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the time of the last shrink"),
     }
-}
-
-/// Publishes the depth of the queue and of its backlog of finished rows. Both are read from the
-/// same database the run just used, so a failure here is only logged.
-async fn report_queue(repos: &Repositories) {
     match repos.deletions.count_pending().await {
         Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending.saturating_into()),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending self-destructions"),
-    }
-    match repos.deletions.count_finished().await {
-        Ok(finished) => metrics::SELF_DESTRUCTION_FINISHED.set_all(&finished),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the finished self-destructions"),
     }
 }
 
