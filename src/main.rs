@@ -16,6 +16,7 @@ mod observability;
 mod telegram_observer;
 mod scheduler;
 mod reload;
+mod shutdown;
 mod bans;
 mod topics;
 mod cleanup;
@@ -224,6 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
                 .dependencies(deps)
                 .build();
+            shutdown::spawn_stop_on_signal(dispatcher.shutdown_token());
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
 
             let srv = tokio::spawn(metrics::TASK_WEBHOOK_SERVER.instrument(async move {
@@ -245,26 +247,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => {
             tracing::info!("the polling dispatcher is activating");
 
+            let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
+                .default_handler(ignore_unknown_updates)
+                .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
+                .dependencies(deps)
+                .build();
+            shutdown::spawn_stop_on_signal(dispatcher.shutdown_token());
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
-                let listener = polling_default(bot.clone()).await;
+                let listener = polling_default(bot).await;
                 let listener_error_handler = ContextLoggingErrorHandler::new("An error from the update listener");
-                Dispatcher::builder(bot, handler)
-                    .default_handler(ignore_unknown_updates)
-                    .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
-                    .dependencies(deps)
-                    .enable_ctrlc_handler()
-                    .build()
-                    .dispatch_with_listener(listener, listener_error_handler)
-                    .await
+                dispatcher.dispatch_with_listener(listener, listener_error_handler).await
             }));
 
             let srv = tokio::spawn(metrics::TASK_METRICS_SERVER.instrument(async move {
                 let tcp_listener = tokio::net::TcpListener::bind(addr).await?;
                 axum::serve(tcp_listener, metrics_router.layer(prometheus_layer))
+                    // The webhook branch drains this server through the listener's stop flag; here
+                    // there is no such flag, so it listens for the signal itself.
                     .with_graceful_shutdown(async {
-                        tokio::signal::ctrl_c()
-                            .await
-                            .expect("failed to install CTRL+C signal handler");
+                        shutdown::stop_signal().await;
                         tracing::info!("shutting the metrics server down")
                     })
                     .await

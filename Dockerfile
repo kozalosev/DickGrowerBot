@@ -149,7 +149,6 @@ ARG REDIS_HOST
 ARG REDIS_PORT
 ARG REDIS_PASSWORD
 ARG CACHE_MODE
-STOPSIGNAL SIGHUP
 ENTRYPOINT [ "/usr/local/bin/dickGrowerBot" ]
 
 LABEL org.opencontainers.image.source=https://github.com/kozalosev/DickGrowerBot
