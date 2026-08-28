@@ -231,7 +231,7 @@ impl Dicks {
         user_id: UserId,
         change: LengthChange,
     ) -> anyhow::Result<Length> {
-        sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
+        sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3) WHERE chat_id = $1 AND uid = $2 RETURNING length",
                     chat_id_internal as InternalChatId, user_id as UserId, change.value())
             .fetch_one(&mut **tx)
             .await
@@ -292,7 +292,7 @@ impl Dicks {
     where E: Executor<'c, Database = Postgres>,
     {
         sqlx::query_scalar!(
-            "UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $3)
+            "UPDATE Dicks SET length = (length + $3)
                 WHERE chat_id = $1 AND uid = $2
                 RETURNING length",
                 chat_id_internal as InternalChatId, user_id as UserId, bonus.value())

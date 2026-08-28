@@ -8,8 +8,34 @@ use crate::repo::test::{fresh_db, get_chat_id_and_dicks, internal_chat_id, repos
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
+/// What the once-a-day trigger raises, and what `handlers::dick` turns back into the "come back
+/// tomorrow" notice.
+const TOMORROW_SQL_CODE: &str = "GD0E1";
+
 fn increment_of(value: i64) -> LengthChange {
     LengthChange::signed(value)
+}
+
+/// Whether this is the trigger refusing a second growth, rather than any other database error.
+fn is_refused_as_grown_today(e: &anyhow::Error) -> bool {
+    matches!(e.downcast_ref::<sqlx::Error>(),
+        Some(sqlx::Error::Database(db)) if db.code().as_deref() == Some(TOMORROW_SQL_CODE))
+}
+
+async fn bonus_attempts_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i32 {
+    sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2",
+            uid, internal_chat_id)
+        .fetch_one(db)
+        .await
+        .expect("couldn't read bonus_attempts")
+}
+
+async fn set_bonus_attempts(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64, attempts: i32) {
+    sqlx::query!("UPDATE Dicks SET bonus_attempts = $3 WHERE uid = $1 AND chat_id = $2",
+            uid, internal_chat_id, attempts)
+        .execute(db)
+        .await
+        .expect("couldn't set bonus_attempts");
 }
 
 #[tokio::test]
@@ -263,4 +289,111 @@ async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i64) {
     assert_eq!(d[0].length, length);
     assert_eq!(d[0].owner_uid, USER_ID);
     assert_eq!(d[0].owner_name, NAME);
+}
+
+/// The rule the whole trigger exists for. Nothing covered it before the trigger was narrowed to the
+/// statements that set `updated_at`, which is exactly when it became worth pinning down.
+#[tokio::test]
+async fn a_second_growth_on_the_same_day_is_refused() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await.expect("the first growth of the day must be allowed");
+
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await.map(|_| ())
+        .expect_err("the second growth of the day must be refused");
+    assert!(is_refused_as_grown_today(&refused), "unexpected error: {refused:#}");
+}
+
+/// The other half of the trigger's job: a bought attempt pays for a second growth, and is spent
+/// doing so.
+#[tokio::test]
+async fn a_bonus_attempt_pays_for_a_second_growth() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await.expect("couldn't create the dick");
+    let chat_id = internal_chat_id(&db).await;
+    set_bonus_attempts(&db, UID, chat_id, 1).await;
+
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await.expect("a bonus attempt must pay for the second growth");
+
+    assert_eq!(bonus_attempts_of(&db, UID, chat_id).await, 0, "the attempt must be spent");
+}
+
+/// The five writes that are not growths must leave the counter of bought attempts alone. They used
+/// to add one to it purely to get past the trigger, which subtracted the same one back; now the
+/// trigger is out of their way and the addition is gone, and these are what say the two changes
+/// cancelled out.
+#[tokio::test]
+async fn a_write_that_is_not_a_growth_spends_no_bonus_attempt() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &[])
+        .await.expect("couldn't create the dick");
+    let chat_id = internal_chat_id(&db).await;
+    set_bonus_attempts(&db, UID, chat_id, 2).await;
+
+    dicks.grow_no_attempts_check(&CHAT_ID_KIND, USER_ID, increment_of(7))
+        .await.expect("couldn't grow without the attempts check");
+
+    assert_eq!(bonus_attempts_of(&db, UID, chat_id).await, 2,
+        "a write that is not a growth must not spend an attempt");
+}
+
+/// The hole the narrowing could have left: if a non-growth write moved `updated_at`, or fired the
+/// guard, the day would reopen and the once-a-day rule would be worth nothing.
+#[tokio::test]
+async fn a_write_that_is_not_a_growth_does_not_reopen_the_day() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &[])
+        .await.expect("couldn't create the dick");
+
+    dicks.grow_no_attempts_check(&CHAT_ID_KIND, USER_ID, increment_of(-10))
+        .await.expect("couldn't apply the non-growth change");
+
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await.map(|_| ())
+        .expect_err("the day must still be closed");
+    assert!(is_refused_as_grown_today(&refused), "unexpected error: {refused:#}");
+}
+
+/// The invariant the four tests above rest on, checked against the schema itself: the guard watches
+/// `updated_at` and nothing else. A later migration that recreated the trigger without the column
+/// list would put every write on Dicks back under it — silently, since the behaviour only changes
+/// for the writes that carry a bonus attempt.
+#[tokio::test]
+async fn the_growth_trigger_watches_only_updated_at() {
+    let db = fresh_db().await;
+
+    let watched = watched_columns(&db, "dicks", "trg_check_and_update_dicks_timestamp").await;
+    assert_eq!(watched, vec!["updated_at".to_owned()]);
+
+    // A trigger with no column list at all reports none, which is what the assertion above would
+    // see if a later migration recreated ours without one. Checked against a real trigger rather
+    // than assumed, since the whole guard rests on the two cases being told apart.
+    let unscoped = watched_columns(
+        &db, "stale_dick_shrinks", "trg_forbid_stale_dick_shrinks_updates").await;
+    assert!(unscoped.is_empty(), "expected no column list, got {unscoped:?}");
+}
+
+/// The columns a row trigger is scoped to, as Postgres itself holds them. Empty when it watches the
+/// whole row.
+async fn watched_columns(db: &Pool<Postgres>, table: &str, trigger: &str) -> Vec<String> {
+    sqlx::query_scalar!(
+        r#"SELECT a.attname AS "name!" FROM pg_trigger t
+            JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = ANY(t.tgattr)
+            WHERE t.tgrelid = to_regclass($1) AND t.tgname = $2
+            ORDER BY a.attname"#, table, trigger)
+        .fetch_all(db)
+        .await
+        .expect("couldn't read the trigger's column list")
 }

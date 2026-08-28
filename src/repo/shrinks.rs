@@ -121,7 +121,7 @@ repository!(Shrinks,
                       AND d.updated_at <= current_timestamp - make_interval(days => $2::bigint::int)
                 ),
                 updated AS (
-                    UPDATE Dicks d SET length = d.length - v.loss, bonus_attempts = d.bonus_attempts + 1
+                    UPDATE Dicks d SET length = d.length - v.loss
                     FROM victims v WHERE d.uid = v.uid AND d.chat_id = v.chat_id
                     RETURNING d.uid, d.chat_id, v.loss AS loss
                 ),

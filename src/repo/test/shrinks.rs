@@ -25,6 +25,7 @@ async fn seed_aged_dick_with_bonus_attempts(
     sqlx::query!(
         "INSERT INTO Dicks (uid, chat_id, length, updated_at, bonus_attempts) \
             VALUES ($1, $2, $3, current_timestamp - make_interval(days => $4), $5)",
+        // The INSERT half of the trigger still decrements, so one more is inserted than is wanted.
         uid, internal_chat_id, length, days_ago, bonus_attempts + 1)
         .execute(db)
         .await

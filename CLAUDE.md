@@ -1074,6 +1074,34 @@ Each bot feature is a vertical slice: a file in `handlers/` (e.g. `dick.rs`, `pv
 by a matching file in `repo/` (`dicks.rs`, `pvpstats.rs`, `loans.rs`, …) that owns the
 SQL. When adding a feature, follow this pairing rather than mixing DB access into handlers.
 
+### What counts as a growth
+
+> A write to `Dicks` that sets `updated_at` is a growth: it is subject to the once-a-day rule and it
+> spends a bonus attempt. A write that leaves `updated_at` alone is not a growth, and must not touch
+> `bonus_attempts`.
+
+`create_or_grow` (`src/repo/dicks.rs`) is the only write in the bot that sets that column on purpose,
+and `trg_check_and_update_dicks_timestamp` is scoped to it — `BEFORE INSERT OR UPDATE OF updated_at`
+since migration 46. The column list is checked once per **statement**, so the daily shrink, the
+import, the promo codes and the two length adjustments never reach the PL/pgSQL body at all. That
+matters at the shrink's scale: one night updates about 1.3M rows, and each used to enter the
+function.
+
+Only the UPDATE half is narrowed. On INSERT there is no `OLD` row, so the day can never match and
+the guard cannot fire — but the decrement below it can, and both the chat merge
+(`src/repo/chats.rs`) and `create_or_grow` are written around its doing so. `seed_aged_dick_with_bonus_attempts`
+in the tests inserts one more attempt than it wants for the same reason.
+
+**The five non-growth writes used to carry `bonus_attempts + 1`** purely to get past the guard,
+which subtracted the same one straight back. With the trigger out of their way that addition would
+be a real grant, so it went in the same commit. Anything added to `Dicks` later inherits the rule:
+touch `updated_at` and the guard applies, leave it alone and `bonus_attempts` is not yours to move.
+
+`src/repo/test/dicks.rs` holds the guard for this: the once-a-day refusal, a bonus attempt paying
+for a second growth, a non-growth write spending none and not reopening the day, and an
+introspection of `pg_trigger` insisting the column list is exactly `[updated_at]` — checked against
+a trigger that has none, so the two cases are known to be told apart rather than assumed to be.
+
 ### Perks and the storage they are given
 
 A perk changes a length change: `handlers/perks.rs` holds them, `perks::all` registers them, and

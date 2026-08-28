@@ -111,7 +111,7 @@ repository!(Promo,
         user_id: UserId,
         bonus: PromoBonus,
     ) -> anyhow::Result<AffectedRows> {
-        let rows_affected = sqlx::query!("UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $2) WHERE uid = $1",
+        let rows_affected = sqlx::query!("UPDATE Dicks SET length = (length + $2) WHERE uid = $1",
                 user_id as UserId, i64::from(bonus.value()))
             .execute(&mut **tx)
             .await

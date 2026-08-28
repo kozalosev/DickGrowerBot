@@ -111,8 +111,7 @@ async fn test_borrow_without_dick() {
 }
 
 async fn set_length(db: &Pool<Postgres>, uid: i64, chat_id: i64, length: i64) {
-    // bonus_attempts = 1 bypasses the "already grown today" trigger (it decrements to 0 after)
-    sqlx::query!("UPDATE Dicks SET length = $3, bonus_attempts = 1 WHERE uid = $1 AND chat_id = (SELECT id FROM Chats WHERE chat_id = $2)",
+    sqlx::query!("UPDATE Dicks SET length = $3 WHERE uid = $1 AND chat_id = (SELECT id FROM Chats WHERE chat_id = $2)",
             uid, chat_id, length)
         .execute(db)
         .await

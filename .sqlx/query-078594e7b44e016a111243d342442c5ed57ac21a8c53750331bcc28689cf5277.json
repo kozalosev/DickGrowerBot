@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
+  "query": "UPDATE Dicks SET length = (length + $3)\n                WHERE chat_id = $1 AND uid = $2\n                RETURNING length",
   "describe": {
     "columns": [
       {
@@ -26,5 +26,5 @@
       false
     ]
   },
-  "hash": "b11c17408f048801036efdbd6dbad2231bf6cd436f0345b20f70298105628006"
+  "hash": "078594e7b44e016a111243d342442c5ed57ac21a8c53750331bcc28689cf5277"
 }
