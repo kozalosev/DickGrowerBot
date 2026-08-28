@@ -150,22 +150,37 @@ impl<'a> EnvDuration<'a> {
     }
 }
 
-/// A span written as a number and a unit — `30s`, `15m`, `1h`, `3d` — or a bare number, which is
-/// seconds. The letter may be upper case.
+/// A span written as a number and a unit — `250ms`, `30s`, `15m`, `1h`, `3d` — or a bare number,
+/// which is seconds. The letters may be upper case.
 pub(super) fn parse_duration(raw: &str) -> Result<Duration, InvalidDuration> {
     let raw = raw.trim();
     let last = raw.chars().next_back().ok_or(InvalidDuration::Empty)?;
-    // Only the four ASCII letters are ever sliced off, so the cut can't land inside a character.
-    let (number, seconds_per_unit) = match last.to_ascii_lowercase() {
-        's' => (&raw[..raw.len() - 1], 1),
-        'm' => (&raw[..raw.len() - 1], 60),
-        'h' => (&raw[..raw.len() - 1], 60 * 60),
-        'd' => (&raw[..raw.len() - 1], 60 * 60 * 24),
-        other if other.is_alphabetic() => return Err(InvalidDuration::Unit(last)),
-        _ => (raw, 1),
+    // `ms` is the only unit of two letters, and it ends in the same one as `s`, so it has to be
+    // tried first — otherwise every millisecond value would quietly read as that many seconds.
+    let (number, millis_per_unit) = if let Some(number) = strip_unit(raw, "ms") {
+        (number, 1)
+    } else {
+        // Only the four ASCII letters are ever sliced off, so the cut can't land inside a character.
+        match last.to_ascii_lowercase() {
+            's' => (&raw[..raw.len() - 1], 1_000),
+            'm' => (&raw[..raw.len() - 1], 60 * 1_000),
+            'h' => (&raw[..raw.len() - 1], 60 * 60 * 1_000),
+            'd' => (&raw[..raw.len() - 1], 60 * 60 * 24 * 1_000),
+            other if other.is_alphabetic() => return Err(InvalidDuration::Unit(last)),
+            _ => (raw, 1_000),
+        }
     };
     let count: u64 = number.trim().parse().map_err(InvalidDuration::Number)?;
-    Ok(Duration::from_secs(count.saturating_mul(seconds_per_unit)))
+    Ok(Duration::from_millis(count.saturating_mul(millis_per_unit)))
+}
+
+/// What comes before `unit`, when the value ends with it. `get` refuses a cut inside a character,
+/// so a value ending in a multi-byte character simply doesn't match.
+fn strip_unit<'a>(raw: &'a str, unit: &str) -> Option<&'a str> {
+    let start = raw.len().checked_sub(unit.len())?;
+    raw.get(start..)
+        .filter(|tail| tail.eq_ignore_ascii_case(unit))
+        .map(|_| &raw[..start])
 }
 
 /// Why a value isn't a span. Worth telling apart in the log: a number too large to hold is a
@@ -284,13 +299,27 @@ mod tests {
     /// by sixty or by eighty-six thousand.
     #[test]
     fn a_value_says_its_own_unit() {
+        assert_eq!(parse_duration("250ms").ok(), Some(Duration::from_millis(250)));
         assert_eq!(parse_duration("30s").ok(), Some(secs(30)));
         assert_eq!(parse_duration("15m").ok(), Some(mins(15)));
         assert_eq!(parse_duration("1h").ok(), Some(hours(1)));
         assert_eq!(parse_duration("3d").ok(), Some(days(3)));
-        // The letter may be shouted, and the value may have been typed with a space around it.
+        // The letters may be shouted, and the value may have been typed with a space around it.
         assert_eq!(parse_duration("15M").ok(), Some(mins(15)));
         assert_eq!(parse_duration(" 1H ").ok(), Some(hours(1)));
+        assert_eq!(parse_duration("250MS").ok(), Some(Duration::from_millis(250)));
+    }
+
+    /// `ms` and `m` end in different letters but `ms` and `s` do not, so the only way to read `5ms`
+    /// as five seconds is to look at the last letter first. A thousandfold error, and a silent one.
+    #[test]
+    fn milliseconds_are_not_mistaken_for_seconds_or_minutes() {
+        assert_eq!(parse_duration("5ms").ok(), Some(Duration::from_millis(5)));
+        assert_ne!(parse_duration("5ms").ok(), Some(secs(5)));
+        assert_ne!(parse_duration("5ms").ok(), Some(mins(5)));
+        // And the units of one letter still mean what they did.
+        assert_eq!(parse_duration("5s").ok(), Some(secs(5)));
+        assert_eq!(parse_duration("5m").ok(), Some(mins(5)));
     }
 
     /// Every value written before units were understood still means what it did, which is what lets
@@ -303,7 +332,7 @@ mod tests {
 
     #[test]
     fn anything_else_is_not_a_duration() {
-        for raw in ["", "   ", "5x", "m", "5m30s", "-5", "1.5h", "five", "5м"] {
+        for raw in ["", "   ", "5x", "m", "ms", "5m30s", "-5", "1.5h", "five", "5м", "5xs"] {
             assert!(parse_duration(raw).is_err(), "{raw:?} must not read as a duration");
         }
     }

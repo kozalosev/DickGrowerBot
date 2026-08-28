@@ -125,8 +125,13 @@ to.
 
 ### How a span of time is written
 
-Every setting that names one takes a number and a unit — `30s`, `15m`, `1h`, `3d`. A bare number is
-seconds, so a value written before this still means what it did.
+Every setting that names one takes a number and a unit — `250ms`, `30s`, `15m`, `1h`, `3d`. A bare
+number is seconds, so a value written before this still means what it did.
+
+`ms` is the only unit of two letters, and it ends in the same one as `s`, so `parse_duration` tries
+it before looking at the last letter. Read the other way round, `5ms` would be five *seconds* — a
+thousandfold error with nothing to show for itself, which is what `milliseconds_are_not_mistaken_for_seconds_or_minutes`
+is there to prevent.
 
 The unit is in the **value**, never in the name. A name that carried it (`BAN_LIST_REFRESH_SECONDS`)
 had to be renamed to change the unit, and gave two places for the unit to be stated and so one for
@@ -493,8 +498,8 @@ growing. Everything below follows from that.
   **`DAILY_SHRINK_BATCH_DELAY` is the pace of that walk**, and zero — running the batches back to
   back — is only right when the database has nothing else to do. It does: midnight is when the run
   and the chats being answered compete for the same pool. Nothing waits on this job, so resting
-  between batches costs a longer run and nothing else. The smallest step is a second, since that is
-  what `parse_duration` understands.
+  between batches costs a longer run and nothing else. `200ms` over ~200k chats adds about seven
+  minutes to it.
 * **Every scheduler ticks with `MissedTickBehavior::Delay`** (`scheduler::paced`), not tokio's
   default `Burst`. A tick that overran its period would otherwise be followed at once by as many
   more as were missed, with no pause — and these loops overrun precisely when the database or
