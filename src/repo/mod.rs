@@ -17,7 +17,7 @@ pub(crate) mod test;
 
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
-use sqlx::postgres::PgQueryResult;
+use sqlx::postgres::{PgConnectOptions, PgQueryResult};
 pub use users::*;
 pub use dicks::*;
 pub use chats::*;
@@ -78,6 +78,8 @@ impl Repositories {
 }
 
 pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Pool<Postgres>, anyhow::Error> {
+    migrate(config).await?;
+
     let pool = sqlx::postgres::PgPoolOptions::new()
         .after_connect(|_conn: &mut sqlx::PgConnection, _meta| Box::pin(async move {
             crate::metrics::DB_POOL_CONNECTIONS_OPENED.inc();
@@ -95,8 +97,25 @@ pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Po
         .min_connections(config.min_connections)
         .acquire_timeout(config.acquire_timeout)
         .connect(config.url.as_str()).await?;
-    sqlx::migrate!().run(&pool).await?;
     Ok(pool)
+}
+
+/// Brings the schema up to date through a pool of its own, thrown away as soon as it is done.
+///
+/// A `statement_timeout` in `DATABASE_URL` bounds every connection made from it, and a migration is
+/// the one thing that must not be bounded: building an index over millions of rows is meant to take
+/// minutes, and a schema change cut off halfway is worse than any slow query. A `CREATE INDEX
+/// CONCURRENTLY` can't even lift the limit for itself — it refuses to run in a transaction block,
+/// which is what a multi-statement query string becomes.
+async fn migrate(config: &DatabaseConfig) -> anyhow::Result<()> {
+    // Postgres takes the last of the repeated options, so this undoes whatever the URL asked for.
+    let connect_options: PgConnectOptions = config.url.as_str().parse()?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(connect_options.options([("statement_timeout", "0")])).await?;
+    sqlx::migrate!().run(&pool).await?;
+    pool.close().await;
+    Ok(())
 }
 
 

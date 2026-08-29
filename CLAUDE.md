@@ -182,6 +182,36 @@ itself; the shorter value is opted into, and is what keeps a handler's worst cas
 `PVP_LOCK_TIME`. Refusals under load mean `DATABASE_MAX_CONNECTIONS` is too small, not that
 this is too short.
 
+### How long one statement may run
+
+The bot has no variable for this: it is Postgres's own setting, and `DATABASE_URL` already has a
+place to carry those. It writes its own unit (`5s`, `500ms`), `0` means no limit, and in a URL the
+space is `%20` and the equals sign `%3D`.
+
+```
+DATABASE_URL=postgres://…/dickgrowerbotdb?options=-c%20statement_timeout%3D5s
+```
+
+In server-configs that URL is built by Compose substitution, so the setting is one there too —
+`…?options=-c%20statement_timeout%3D${DATABASE_STATEMENT_TIMEOUT:-0}`, with the value in `.env.sops`.
+
+The pool has a limit on *waiting* and none on *running*, which is the wrong way round when a plan
+goes wrong: a query with nothing to stop it holds its connection for as long as it likes, and enough
+of them empty the pool while the bot answers nobody. That is a silent failure — the queries are
+succeeding, slowly — where a cancelled statement is an error somebody can read. Keep it under
+`DATABASE_ACQUIRE_TIMEOUT`, so a starved pool refuses at the acquire rather than after the wait.
+
+**The migrations are exempt, and that is the one thing the code has to do about any of this.**
+`repo::migrate` builds a pool of one connection, appends `statement_timeout=0` to whatever the URL
+asked for — Postgres takes the last of the repeated options — runs the migrations and closes it,
+before `establish_database_connection` builds the real pool. A `CREATE INDEX CONCURRENTLY` over
+millions of rows is meant to take minutes and cannot lift the limit for itself: it refuses to run
+inside a transaction block, which is what a multi-statement query string becomes.
+
+A timeout is a backstop, not a fix: it makes a bad plan loud, and says nothing about why the plan is
+bad. That answer is in `EXPLAIN (ANALYZE, BUFFERS)`, and usually in the statistics behind it (see
+the daily shrink below).
+
 That list is only how fast a banned user sees the polite message — **the enforcement is migration
 36**, a `BEFORE UPDATE` trigger on `Users` that refuses any statement touching a banned user's row
 unless the statement changes `banned_until` itself (which is how the three admin functions pass).
@@ -526,6 +556,20 @@ growing. Everything below follows from that.
   and the chats being answered compete for the same pool. Nothing waits on this job, so resting
   between batches costs a longer run and nothing else. `200ms` over ~200k chats adds about seven
   minutes to it.
+* **`Stale_Dick_Shrinks` is analyzed a hundred times more eagerly than the stock table**
+  (migration 47, `autovacuum_analyze_scale_factor = 0.01`). A run writes a day's rows under a date
+  the table never held, and every summary is read back by that date within minutes — so the one
+  value the planner is asked about is the one its statistics know least about. A date past the end
+  of the histogram is estimated at a single row, and the plan that follows is right for one row and
+  ruinous for a million: a nested loop per row over `Users`, `Dicks` and `Chats`, seventeen seconds
+  and eleven million buffers to answer a page of ten, sixteen of those at once until the pool is
+  empty and the bot is answering nobody. With honest statistics the same query is a seek on
+  `stale_dick_shrinks_idx_chat_created_at` and costs a fraction of a millisecond. The stock
+  threshold — 50 rows plus a tenth of the table — is what let that happen: a night's insert is a
+  smaller share of it every month the table grows, so the statistics sat days out of date. A
+  hundredth keeps one night above the line. **When a night is slow again, this is the first thing to
+  check**, with `last_autoanalyze` in `pg_stat_user_tables`: autovacuum decides when, not us, and
+  the summaries of the first batches are claimable before it has had any reason to wake.
 * **Every scheduler ticks with `MissedTickBehavior::Delay`** (`scheduler::paced`), not tokio's
   default `Burst`. A tick that overran its period would otherwise be followed at once by as many
   more as were missed, with no pause — and these loops overrun precisely when the database or
