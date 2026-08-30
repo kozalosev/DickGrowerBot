@@ -876,17 +876,12 @@ repository!(Chats, with_feature_toggles,
         // Moving the dicks over rather than summing into the surviving rows: a user who only ever
         // played through inline mode has no row in the surviving chat at all, and updating in
         // place would skip them, leaving their length to be deleted below.
-        //
-        // `bonus_attempts` is incremented on both paths because the trigger on Dicks decrements it
-        // once per write; the increment merely cancels that out. It has to be spelled out again in
-        // the conflict branch: the BEFORE INSERT trigger runs before the conflict is detected, so
-        // by then `EXCLUDED` already carries the decremented value.
         let updated_dicks = sqlx::query!(
             "INSERT INTO Dicks (uid, chat_id, length, bonus_attempts, updated_at)
-                    SELECT uid, $1, length, bonus_attempts + 1, updated_at FROM Dicks WHERE chat_id = $2
+                    SELECT uid, $1, length, bonus_attempts, updated_at FROM Dicks WHERE chat_id = $2
                     ON CONFLICT (chat_id, uid) DO UPDATE SET
                         length = Dicks.length + EXCLUDED.length,
-                        bonus_attempts = Dicks.bonus_attempts + EXCLUDED.bonus_attempts + 1,
+                        bonus_attempts = Dicks.bonus_attempts + EXCLUDED.bonus_attempts,
                         updated_at = GREATEST(Dicks.updated_at, EXCLUDED.updated_at)",
                 state.main.internal_id as InternalChatId, state.deleted.0 as InternalChatId)
             .execute(&mut **tx)

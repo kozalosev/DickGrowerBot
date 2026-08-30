@@ -287,10 +287,6 @@ async fn upsert_chat() {
     let db = fresh_db().await;
     create_user(&db).await;
 
-    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
-        .execute(&db)
-        .await.expect("couldn't drop the trigger");
-
     let chats = repo::Chats::new(db.clone(), Default::default());
     let chat_id_full = ChatIdFull {
         id: TelegramChatId::new(CHAT_ID),
@@ -504,8 +500,7 @@ async fn merge_keeps_dicks_from_both_chats() {
         .await.expect("couldn't create the second user");
 
     chat.add_dicks().await;
-    // the trigger on Dicks spends one bonus attempt per write, including the inserts above, so the
-    // amounts actually stored are read back rather than assumed
+    // read back rather than assumed, so the assertion below is about the merge alone
     let kept = chat.bonus_attempts(UID, chat.id_row).await;
     let moved = chat.bonus_attempts(UID, chat.instance_row).await;
     let moved_only = chat.bonus_attempts(UID + 1, chat.instance_row).await;
@@ -516,7 +511,6 @@ async fn merge_keeps_dicks_from_both_chats() {
     assert_eq!(dicks.len(), 2, "both users must keep a dick in the surviving chat");
     assert_eq!(dicks[0].0, 3, "the dicks of a user present in both chats must be summed");
     assert_eq!(dicks[1].0, 7, "a dick present only in the merged-away chat must survive");
-    // the trigger decrements bonus_attempts once per write, which the merge compensates for
     assert_eq!((dicks[0].1, dicks[1].1), (kept + moved, moved_only),
         "the merge must neither lose nor invent bonus attempts");
 

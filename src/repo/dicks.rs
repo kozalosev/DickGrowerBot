@@ -49,6 +49,11 @@ impl Dicks {
         }
     }
 
+    /// Grows a dick, creating it on the first play. `None` when the day is already spent: the caller
+    /// grew today and has no bought attempt to pay for another.
+    ///
+    /// **The once-a-day rule lives in this statement and nowhere else.** A write to `Dicks` that
+    /// goes around it is not subject to it, so a growth belongs here.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id, increment = %increment))]
     pub async fn create_or_grow(
@@ -57,23 +62,32 @@ impl Dicks {
         chat_id: &ChatIdPartiality,
         increment: LengthChange,
         perk_states: &[PerkStateUpdate],
-    ) -> anyhow::Result<GrowthResult> {
+    ) -> anyhow::Result<Option<GrowthResult>> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;
         let new_length = sqlx::query_scalar!(
             "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
-                ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
+                ON CONFLICT (uid, chat_id) DO UPDATE SET
+                    length = (dicks.length + $3),
+                    updated_at = current_timestamp,
+                    bonus_attempts = GREATEST(dicks.bonus_attempts - 1, 0)
+                WHERE date(dicks.updated_at) <> current_date OR dicks.bonus_attempts > 0
                 RETURNING length",
                 uid as UserId, internal_chat_id as InternalChatId, increment.value())
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
             .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
+        // Nothing was written, so nothing is committed: a refused growth must leave no perk
+        // believing it happened. Dropping the transaction rolls it back.
+        let Some(new_length) = new_length else {
+            return Ok(None)
+        };
         PerkStates::write_all(&mut tx, internal_chat_id, uid, perk_states).await?;
         tx.commit().await?;
 
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
-        Ok(GrowthResult { new_length: Length::new(new_length), pos_in_top })
+        Ok(Some(GrowthResult { new_length: Length::new(new_length), pos_in_top }))
     }
 
     #[autometrics]

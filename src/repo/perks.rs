@@ -14,8 +14,7 @@ use crate::repository;
 /// database is having.
 ///
 /// The date is asked for here rather than taken from the clock of this process, because the
-/// once-a-day rule is a trigger comparing `current_date`. A perk that counts days has to count the
-/// same ones.
+/// once-a-day rule compares `current_date`. A perk that counts days has to count the same ones.
 pub struct PerkStatesSnapshot {
     pub today: NaiveDate,
     states: HashMap<PerkId, JsonValue>,
@@ -77,7 +76,7 @@ repository!(PerkStates,
 
     /// Stores what the perks made of a change. It takes someone else's transaction because that is
     /// the whole point: the states and the length they were computed for are written together, so
-    /// a growth the daily trigger refuses leaves no perk believing it happened.
+    /// a growth refused by the once-a-day rule leaves no perk believing it happened.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, uid = uid.value(), perks = states.len()))]
     pub async fn write_all(

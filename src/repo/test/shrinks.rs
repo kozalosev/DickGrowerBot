@@ -25,8 +25,7 @@ async fn seed_aged_dick_with_bonus_attempts(
     sqlx::query!(
         "INSERT INTO Dicks (uid, chat_id, length, updated_at, bonus_attempts) \
             VALUES ($1, $2, $3, current_timestamp - make_interval(days => $4), $5)",
-        // The INSERT half of the trigger still decrements, so one more is inserted than is wanted.
-        uid, internal_chat_id, length, days_ago, bonus_attempts + 1)
+        uid, internal_chat_id, length, days_ago, bonus_attempts)
         .execute(db)
         .await
         .expect("couldn't seed an aged dick with a bonus attempt");
@@ -142,8 +141,8 @@ async fn test_perform_daily_shrink() {
         .await.expect("couldn't create the zero-length user");
     seed_aged_dick(&db, chat_id, zero_uid, 0, 10).await;
 
-    // A stale, positive dick with a pending bonus attempt — shrinking it must not silently burn
-    // the bonus attempt (the Dicks trigger decrements it on every update unless counteracted).
+    // A stale, positive dick with a pending bonus attempt — shrinking it must not burn the attempt,
+    // since a shrink is not a growth.
     let bonus_uid = UID + 3;
     users.create_or_update(user_id(bonus_uid), "has-bonus")
         .await.expect("couldn't create the bonus user");

@@ -73,8 +73,7 @@ mod import_semantics {
         assert_eq!(after1.length, before1.length + 5);
         assert_eq!(after2.length, before2.length + 11, "the second user must not get the first one's length");
 
-        // An import is not a growth: it never touches updated_at, so the once-a-day trigger is out
-        // of its way entirely and the attempts are left exactly as they were.
+        // An import is not a growth, so the attempts are left exactly as they were.
         assert_eq!(after1.bonus_attempts, before1.bonus_attempts);
         assert_eq!(after2.bonus_attempts, before2.bonus_attempts);
 

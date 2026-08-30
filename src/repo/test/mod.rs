@@ -112,8 +112,8 @@ pub async fn create_chat(db: &Pool<Postgres>, telegram_id: i64) -> i64 {
 
 /// A dick inserted directly, with a length and an age of the test's choosing.
 ///
-/// A direct `INSERT` is the only way: the `Dicks` BEFORE UPDATE trigger forbids touching a row that
-/// was grown today, which a freshly created dick always is.
+/// A direct `INSERT` is the only way to give one an age: every write in the repositories stamps
+/// `updated_at` with the current time or leaves it where it is.
 pub async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, length: i64, days_ago: i32) {
     sqlx::query!(
         "INSERT INTO Dicks (uid, chat_id, length, updated_at) \

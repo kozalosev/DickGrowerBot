@@ -1151,31 +1151,32 @@ SQL. When adding a feature, follow this pairing rather than mixing DB access int
 
 ### What counts as a growth
 
-> A write to `Dicks` that sets `updated_at` is a growth: it is subject to the once-a-day rule and it
-> spends a bonus attempt. A write that leaves `updated_at` alone is not a growth, and must not touch
-> `bonus_attempts`.
+> `Dicks::create_or_grow` is the growth, and the only one. It is subject to the once-a-day rule and
+> it spends a bonus attempt. Every other write to `Dicks` is not a growth: it leaves `updated_at`
+> alone and `bonus_attempts` is not its to move.
 
-`create_or_grow` (`src/repo/dicks.rs`) is the only write in the bot that sets that column on purpose,
-and `trg_check_and_update_dicks_timestamp` is scoped to it — `BEFORE INSERT OR UPDATE OF updated_at`
-since migration 46. The column list is checked once per **statement**, so the daily shrink, the
-import, the promo codes and the two length adjustments never reach the PL/pgSQL body at all. That
-matters at the shrink's scale: one night updates about 1.3M rows, and each used to enter the
-function.
+**The rule lives in that one statement** (`src/repo/dicks.rs`), in the `WHERE` of its
+`ON CONFLICT DO UPDATE`: the row is rewritten only when the stored `updated_at` is of an earlier day
+or a bought attempt can pay for it, and the same statement spends the attempt. A refusal is
+therefore not an error but an empty answer — `create_or_grow` returns `Option`, like `set_dod_winner`
+beside it, and `handlers::dick` turns `None` into the "come back tomorrow" notice.
 
-Only the UPDATE half is narrowed. On INSERT there is no `OLD` row, so the day can never match and
-the guard cannot fire — but the decrement below it can, and both the chat merge
-(`src/repo/chats.rs`) and `create_or_grow` are written around its doing so. `seed_aged_dick_with_bonus_attempts`
-in the tests inserts one more attempt than it wants for the same reason.
+That is a change of kind, not only of place. `trg_check_and_update_dicks_timestamp` applied the rule
+to **any** statement that set `updated_at`, so the rule held whoever wrote the row; now it holds
+only for whoever goes through `create_or_grow`. A growth written by hand somewhere else would not be
+refused, and nothing in the schema would say so. What guards it instead is
+`src/repo/test/dicks.rs` — the once-a-day refusal, a bonus attempt paying for a second growth, a
+non-growth write spending none and not reopening the day — and this paragraph.
 
-**The five non-growth writes used to carry `bonus_attempts + 1`** purely to get past the guard,
-which subtracted the same one straight back. With the trigger out of their way that addition would
-be a real grant, so it went in the same commit. Anything added to `Dicks` later inherits the rule:
-touch `updated_at` and the guard applies, leave it alone and `bonus_attempts` is not yours to move.
+The trigger was worth removing because it had grown into a tax on everything around it. Its second
+half served `bonus_attempts`, which nothing in the bot ever grants, so the chat merge
+(`src/repo/chats.rs`) carried two `+1`s whose only purpose was to cancel a decrement it never
+wanted; three tests dropped the trigger outright to be able to write what they meant; and the
+refusal travelled as SQLSTATE `GD0E1`, spelled out in the handler and unpacked from
+`sqlx::Error::Database` twelve lines at a time.
 
-`src/repo/test/dicks.rs` holds the guard for this: the once-a-day refusal, a bonus attempt paying
-for a second growth, a non-growth write spending none and not reopening the day, and an
-introspection of `pg_trigger` insisting the column list is exactly `[updated_at]` — checked against
-a trigger that has none, so the two cases are known to be told apart rather than assumed to be.
+Nothing about the row lock changes: `ON CONFLICT DO UPDATE` takes it before the `WHERE` is
+evaluated, so two `/grow`s racing for the same dick serialise exactly as they did.
 
 ### Perks and the storage they are given
 
@@ -1192,15 +1193,17 @@ name afterwards.
 
 **A perk does not write.** `apply` returns its new state next to its change, and
 `Dicks::create_or_grow` writes the length and every blob in one transaction. That ordering is the
-whole point: the once-a-day rule is a trigger that raises `GD0E1` *after* the perks have run, and a
-rolled-back growth must leave no perk believing it happened. `LoanPayoutPerk` predates this and
+whole point: the once-a-day rule is applied by that statement, *after* the perks have run, and a
+refused growth must leave no perk believing it happened — which is why the empty answer returns
+before `PerkStates::write_all` and before the commit. `LoanPayoutPerk` predates this and
 still pays inside `apply`, which is why a refused growth can still spend a payment; moving it here
 is its own issue.
 
 Two things a perk is handed rather than fetching itself: `ChangeSource`, because a Dick of the Day
 award is not a growth and `dod_increment` shares the perk pipeline with `growth_increment`; and
-`today`, which is the **database's** `current_date`, because that is the calendar the daily trigger
-compares against. A perk counting days that asked this process's clock would count different ones.
+`today`, which is the **database's** `current_date`, because that is the calendar the once-a-day
+rule compares against. A perk counting days that asked this process's clock would count different
+ones.
 
 The streak perk (issue #156) is the first user of all this. It stores
 `{"streak": …, "max": …, "last_grow": …}` and multiplies the base increment by

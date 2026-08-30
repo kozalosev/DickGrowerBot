@@ -17,7 +17,6 @@ use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, Da
 use crate::handlers::{answer_callback_feature_disabled, banned_until_of, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, days_word_ru, Incrementor};
 
-const TOMORROW_SQL_CODE: &str = "GD0E1";
 const CALLBACK_PREFIX_TOP_PAGE: &str = "top:page:";
 
 #[derive(BotCommands, Clone)]
@@ -88,10 +87,10 @@ pub(crate) async fn grow_impl(
         .map(DaysCount::new)
         .ok_or_else(|| anyhow!("days since registration are too much: {days_since_registration}"))?;
     let increment = incr.growth_increment(uid, chat_id.kind(), days_since_registration, lang_code).await;
-    let grow_result = repos.dicks.create_or_grow(uid, chat_id, increment.total, &increment.perk_states).await;
+    let grow_result = repos.dicks.create_or_grow(uid, chat_id, increment.total, &increment.perk_states).await?;
 
     let (main_part, group) = match grow_result {
-        Ok(GrowthResult { new_length, pos_in_top }) => {
+        Some(GrowthResult { new_length, pos_in_top }) => {
             let event_key = if increment.total.value().is_negative() { "shrunk" } else { "grown" };
             let event_template = format!("commands.grow.direction.{event_key}");
             let event = t!(&event_template, locale = lang_code);
@@ -106,18 +105,7 @@ pub(crate) async fn grow_impl(
             };
             (text, MessageGroup::Event)
         },
-        Err(e) => {
-            let db_err = e.downcast::<sqlx::Error>()?;
-            if let sqlx::Error::Database(e) = db_err {
-                let text = e.code()
-                    .filter(|c| c == TOMORROW_SQL_CODE)
-                    .map(|_| t!("commands.grow.tomorrow", locale = lang_code).to_string())
-                    .ok_or(anyhow!(e))?;
-                (text, MessageGroup::Notice)
-            } else {
-                Err(db_err)?
-            }
-        }
+        None => (t!("commands.grow.tomorrow", locale = lang_code).to_string(), MessageGroup::Notice)
     };
     let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
     Ok(TaggedReply { text: format!("{main_part}{time_left_part}"), group })
