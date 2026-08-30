@@ -1157,7 +1157,8 @@ SQL. When adding a feature, follow this pairing rather than mixing DB access int
 
 **The rule lives in that one statement** (`src/repo/dicks.rs`), in the `WHERE` of its
 `ON CONFLICT DO UPDATE`: the row is rewritten only when the stored `updated_at` is of an earlier day
-or a bought attempt can pay for it, and the same statement spends the attempt. A refusal is
+or a bought attempt can pay for it, and the same statement spends the attempt — **only when one was
+needed**, so the day's first growth is free whatever the player has in store. A refusal is
 therefore not an error but an empty answer — `create_or_grow` returns `Option`, like `set_dod_winner`
 beside it, and `handlers::dick` turns `None` into the "come back tomorrow" notice.
 

@@ -54,6 +54,9 @@ impl Dicks {
     ///
     /// **The once-a-day rule lives in this statement and nowhere else.** A write to `Dicks` that
     /// goes around it is not subject to it, so a growth belongs here.
+    ///
+    /// An attempt is spent only on a growth that needs one — the day's first is free whatever the
+    /// caller has bought.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id, increment = %increment))]
     pub async fn create_or_grow(
@@ -71,7 +74,9 @@ impl Dicks {
                 ON CONFLICT (uid, chat_id) DO UPDATE SET
                     length = (dicks.length + $3),
                     updated_at = current_timestamp,
-                    bonus_attempts = GREATEST(dicks.bonus_attempts - 1, 0)
+                    bonus_attempts = CASE WHEN date(dicks.updated_at) = current_date
+                                          THEN dicks.bonus_attempts - 1
+                                          ELSE dicks.bonus_attempts END
                 WHERE date(dicks.updated_at) <> current_date OR dicks.bonus_attempts > 0
                 RETURNING length",
                 uid as UserId, internal_chat_id as InternalChatId, increment.value())

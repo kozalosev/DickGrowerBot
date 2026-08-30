@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)\n                ON CONFLICT (uid, chat_id) DO UPDATE SET\n                    length = (dicks.length + $3),\n                    updated_at = current_timestamp,\n                    bonus_attempts = CASE WHEN date(dicks.updated_at) = current_date\n                                          THEN dicks.bonus_attempts - 1\n                                          ELSE dicks.bonus_attempts END\n                WHERE date(dicks.updated_at) <> current_date OR dicks.bonus_attempts > 0\n                RETURNING length",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d271a215274f733def5cb36b908dd9965293c54f38e8bb0ea42bf3935fccc8d9"
+}

@@ -27,7 +27,7 @@ use broadcasts::{clean_finished_broadcasts, run_pending_broadcasts, BroadcastDep
 /// only how fresh a gauge is, not whether anything works. It is deliberately far longer than either
 /// worker's poll interval — counting a queue is a scan of its whole pending index, and at a few
 /// hundred thousand rows doing that every five seconds costs more than the work being measured.
-const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_secs(60);
+const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_mins(1);
 
 /// A bot that keeps the schedulers inside Telegram's rate limits.
 ///

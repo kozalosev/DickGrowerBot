@@ -323,6 +323,35 @@ async fn a_bonus_attempt_pays_for_a_second_growth() {
     assert_eq!(bonus_attempts_of(&db, UID, chat_id).await, 0, "the attempt must be spent");
 }
 
+/// An attempt is bought to grow twice in a day, so the day's first growth must not take one. It is
+/// free whatever the caller has in store.
+#[tokio::test]
+async fn the_first_growth_of_the_day_spends_no_bonus_attempt() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await
+        .expect("couldn't create the dick")
+        .expect("the first growth of the day must be allowed");
+    let chat_id = internal_chat_id(&db).await;
+    set_bonus_attempts(&db, UID, chat_id, 2).await;
+    // Back to yesterday, so the next growth is the first of its day and needs no attempt.
+    sqlx::query!("UPDATE Dicks SET updated_at = current_timestamp - make_interval(days => 1) \
+            WHERE uid = $1 AND chat_id = $2", UID, chat_id)
+        .execute(&db)
+        .await
+        .expect("couldn't age the dick");
+
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await
+        .expect("couldn't grow the dick")
+        .expect("the first growth of the day must be allowed");
+
+    assert_eq!(bonus_attempts_of(&db, UID, chat_id).await, 2,
+        "the day's first growth must not spend an attempt");
+}
+
 /// A write that is not a growth leaves the counter of bought attempts alone: only `create_or_grow`
 /// spends one.
 #[tokio::test]
