@@ -569,19 +569,12 @@ impl SplitChat {
             .await.expect("couldn't create battle stats");
     }
 
-    /// The insertion trigger stamps `created_at` with today's date, so a dated row can only be
-    /// planted past it — which is exactly what the merge has to do to keep the history intact.
+    /// Dated yesterday, so that the merge is seen to carry the date over rather than to restamp it.
     async fn add_dick_of_the_day(&self) {
-        sqlx::query!("ALTER TABLE Dick_of_Day DISABLE TRIGGER trg_check_dod_timestamp")
-            .execute(&self.db)
-            .await.expect("couldn't mute the trigger");
         sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid, created_at) VALUES ($1, $2, current_date - 1)",
                 self.instance_row, UID)
             .execute(&self.db)
             .await.expect("couldn't create a dick of the day");
-        sqlx::query!("ALTER TABLE Dick_of_Day ENABLE TRIGGER trg_check_dod_timestamp")
-            .execute(&self.db)
-            .await.expect("couldn't restore the trigger");
     }
 
     async fn add_shrinks(&self) {

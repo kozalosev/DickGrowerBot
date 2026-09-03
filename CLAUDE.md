@@ -1179,6 +1179,30 @@ refusal travelled as SQLSTATE `GD0E1`, spelled out in the handler and unpacked f
 Nothing about the row lock changes: `ON CONFLICT DO UPDATE` takes it before the `WHERE` is
 evaluated, so two `/grow`s racing for the same dick serialise exactly as they did.
 
+### One Dick of the Day per chat per day
+
+The same shape, one table over: `PRIMARY KEY (chat_id, created_at)` on `Dick_of_Day` **is** the
+rule, and `set_dod_winner` claims that key before it grows anybody. A conflict means the day is
+already won, so the growth never happens and the winner's name is read back for the answer;
+`Dicks::set_dod_winner` returns `DickOfDayResult` — `Chosen`, `AlreadyChosen(name)` or `NoDick` —
+rather than an `Option` beside an exception.
+
+Claiming first is what makes two `/dod`s in one chat serialise: the second waits on the index and
+is told it lost. `trg_check_dod_timestamp` could not do that. Its `SELECT` for an existing winner
+read past a concurrent election under READ COMMITTED, so the loser of a race got the primary key's
+own `23505` instead of the trigger's `GD0E2`, and the chat was shown an internal error.
+
+The name is read by **a second statement**, not by a `SELECT` beside the insert in one CTE: a
+data-modifying CTE shares one snapshot with the query next to it, so the row the winning election
+committed after ours began would not be visible there at all.
+
+Two things went with the trigger (migration 49). `Dick_of_Day.created_at` is no longer forced to
+today — the column's `DEFAULT current_date` is what the bot's own insert gets, and the chat merge
+is the only caller that names a date, which is precisely what it wants; `Chats::move_dicks_of_the_day`
+therefore no longer disables a trigger, and no longer holds an `ACCESS EXCLUSIVE` lock on the table
+for the rest of the merge. And `trg_forbid_dod_updates` is gone, so the table is append-only only
+because nothing in the bot updates it.
+
 ### Perks and the storage they are given
 
 A perk changes a length change: `handlers/perks.rs` holds them, `perks::all` registers them, and

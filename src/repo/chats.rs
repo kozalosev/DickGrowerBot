@@ -766,11 +766,6 @@ repository!(Chats, with_feature_toggles,
 ,
     /// An append-only history keyed by `(chat_id, created_at)`, where a day both chats crowned a
     /// winner keeps the main one's.
-    ///
-    /// The insertion trigger stamps `created_at` with the current date, which would restamp every
-    /// past win with today's, so it has to be muted for the move. The ACCESS EXCLUSIVE lock that
-    /// takes lasts until the transaction ends — acceptable for something that happens once in a
-    /// chat's lifetime. An early return rolls the muting back along with everything else.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_dicks_of_the_day(
@@ -778,10 +773,6 @@ repository!(Chats, with_feature_toggles,
         main_id: InternalChatId,
         deleted_id: InternalChatId,
     ) -> anyhow::Result<u64> {
-        sqlx::query!("ALTER TABLE Dick_of_Day DISABLE TRIGGER trg_check_dod_timestamp")
-            .execute(&mut **tx)
-            .await
-            .context("couldn't mute the insertion trigger of Dick_of_Day")?;
         let moved = sqlx::query!(
             "INSERT INTO Dick_of_Day (chat_id, winner_uid, created_at)
                     SELECT $1, winner_uid, created_at FROM Dick_of_Day WHERE chat_id = $2
@@ -791,10 +782,6 @@ repository!(Chats, with_feature_toggles,
             .await
             .context(format!("couldn't move the dicks of the day from the chat with id = {deleted_id} to {main_id}"))?
             .rows_affected();
-        sqlx::query!("ALTER TABLE Dick_of_Day ENABLE TRIGGER trg_check_dod_timestamp")
-            .execute(&mut **tx)
-            .await
-            .context("couldn't restore the insertion trigger of Dick_of_Day")?;
         sqlx::query!("DELETE FROM Dick_of_Day WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await

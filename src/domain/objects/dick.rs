@@ -1,4 +1,4 @@
-use crate::domain::primitives::{Length, Position, UserId};
+use crate::domain::primitives::{Length, Position, UserId, Username};
 
 #[derive(Debug)]
 pub struct Dick {
@@ -12,4 +12,12 @@ pub struct Dick {
 pub struct GrowthResult {
     pub new_length: Length,
     pub pos_in_top: Option<Position>,
+}
+
+/// What came of an election. `AlreadyChosen` carries today's winner, since that is what the chat
+/// is told; `NoDick` means the elected member has nothing to grow.
+pub enum DickOfDayResult {
+    Chosen(GrowthResult),
+    AlreadyChosen(Username),
+    NoDick,
 }

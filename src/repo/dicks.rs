@@ -4,8 +4,8 @@ use futures::TryFutureExt;
 use domain_types::traits::SaturatingInto;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
-use crate::domain::objects::{Dick, GrowthResult, PerkStateUpdate};
-use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length};
+use crate::domain::objects::{Dick, DickOfDayResult, GrowthResult, PerkStateUpdate};
+use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
 use super::{Chats, PerkStates};
 
@@ -173,6 +173,12 @@ impl Dicks {
             .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
+    /// Crowns the Dick of the Day, growing the winner by `bonus`.
+    ///
+    /// **One winner a day per chat is the primary key of `Dick_of_Day`**, and the election starts
+    /// by claiming that key: a chat that already has today's winner conflicts, and only then is
+    /// the name of that winner read. Claiming it first also serialises two elections racing in one
+    /// chat, since the second waits on the index rather than reading past it.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id, bonus = %bonus))]
     pub async fn set_dod_winner(
@@ -181,20 +187,26 @@ impl Dicks {
         user_id: UserId,
         bonus: LengthChange,
         perk_states: &[PerkStateUpdate],
-    ) -> anyhow::Result<Option<GrowthResult>> {
+    ) -> anyhow::Result<DickOfDayResult> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;
-        let new_length = match Self::grow_no_attempts_check_internal(&mut *tx, internal_chat_id, user_id, bonus).await? {
-            Some(length) => length,
-            None => return Ok(None)
+        // Nothing is committed on either early return: the day belongs to somebody else, or the
+        // member elected has no dick to grow, and neither must leave a perk believing otherwise.
+        if !Self::claim_the_day(&mut tx, internal_chat_id, user_id).await? {
+            return self.get_dod_winner_name(internal_chat_id)
+                .map_ok(DickOfDayResult::AlreadyChosen)
+                .await
+        }
+        let Some(new_length) = Self::grow_no_attempts_check_internal(&mut *tx, internal_chat_id, user_id, bonus).await?
+        else {
+            return Ok(DickOfDayResult::NoDick)
         };
-        Self::insert_to_dod_table(&mut tx, internal_chat_id, user_id).await?;
         PerkStates::write_all(&mut tx, internal_chat_id, user_id, perk_states).await?;
         tx.commit().await?;
 
         let pos_in_top = self.get_position_in_top(internal_chat_id, user_id).await?;
-        Ok(Some(GrowthResult { new_length, pos_in_top }))
+        Ok(DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }))
     }
 
     #[autometrics]
@@ -321,18 +333,39 @@ impl Dicks {
             .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
     }
 
+    /// Crowns `user_id`, unless the chat already has a winner today — which is what `false` means.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = user_id.value()))]
-    async fn insert_to_dod_table(
+    async fn claim_the_day(
         tx: &mut Transaction<'_, Postgres>,
         chat_id_internal: InternalChatId,
         user_id: UserId,
-    ) -> anyhow::Result<()> {
-        sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
+    ) -> anyhow::Result<bool> {
+        sqlx::query!(
+            "INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)
+                ON CONFLICT (chat_id, created_at) DO NOTHING",
                 chat_id_internal as InternalChatId, user_id as UserId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))?;
-        Ok(())
+            .map(|result| result.rows_affected() > 0)
+            .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))
+    }
+
+    /// The name of the chat's winner of today, read after an election has lost the day to them.
+    ///
+    /// A statement of its own rather than a branch of the insert above: a data-modifying CTE and
+    /// the query beside it share one snapshot, so a row the winning election committed after ours
+    /// began would be invisible to a `SELECT` in the same statement.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal))]
+    async fn get_dod_winner_name(&self, chat_id_internal: InternalChatId) -> anyhow::Result<Username> {
+        sqlx::query_scalar!(
+            r#"SELECT u.name AS "name: Username" FROM Dick_of_Day dod
+                JOIN Users u ON u.uid = dod.winner_uid
+                WHERE dod.chat_id = $1 AND dod.created_at = current_date"#,
+                chat_id_internal as InternalChatId)
+            .fetch_one(&self.pool)
+            .await
+            .context(format!("couldn't fetch the dick of the day of {chat_id_internal}"))
     }
 }

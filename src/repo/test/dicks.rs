@@ -1,7 +1,8 @@
 use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use crate::config::FeatureToggles;
-use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position};
+use crate::domain::objects::{DickOfDayResult, GrowthResult};
+use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
 use crate::repo::test::{fresh_db, get_chat_id_and_dicks, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID_KIND, NAME, UID, USER_ID};
@@ -18,6 +19,22 @@ async fn bonus_attempts_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64)
         .fetch_one(db)
         .await
         .expect("couldn't read bonus_attempts")
+}
+
+/// Crowns `user_id` and insists the election went through.
+async fn elect(
+    dicks: &repo::Dicks,
+    chat_id: &ChatIdPartiality,
+    user_id: UserId,
+    increment: i64,
+) -> GrowthResult {
+    let result = dicks.set_dod_winner(chat_id, user_id, increment_of(increment), &[])
+        .await.expect("couldn't elect a winner");
+    match result {
+        DickOfDayResult::Chosen(growth) => growth,
+        DickOfDayResult::AlreadyChosen(name) => panic!("the day was already won by {name}"),
+        DickOfDayResult::NoDick => panic!("the winner hasn't a dick"),
+    }
 }
 
 async fn set_bonus_attempts(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64, attempts: i32) {
@@ -50,10 +67,7 @@ async fn test_all() {
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment), &[])
-        .await
-        .expect("couldn't elect a winner")
-        .expect("the winner hasn't a dick");
+    let growth = elect(&dicks, &chat_id_partiality, user_id, increment).await;
     assert_eq!(growth.pos_in_top, Some(Position::new(1)));
     let new_length = 2 * increment;
     assert_eq!(growth.new_length, new_length);
@@ -88,10 +102,7 @@ async fn test_all_with_top_pagination_disabled() {
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment), &[])
-        .await
-        .expect("couldn't elect a winner")
-        .expect("the winner hasn't a dick");
+    let growth = elect(&dicks, &chat_id_partiality, user_id, increment).await;
     assert_eq!(growth.pos_in_top, None);
     let new_length = 2 * increment;
     assert_eq!(growth.new_length, new_length);
@@ -283,6 +294,33 @@ async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i64) {
     assert_eq!(d[0].length, length);
     assert_eq!(d[0].owner_uid, USER_ID);
     assert_eq!(d[0].owner_name, NAME);
+}
+
+/// One winner a day per chat: the second election of the day names the first one's winner and
+/// leaves their dick alone.
+#[tokio::test]
+async fn a_second_election_on_the_same_day_is_refused() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    let chat_id = ChatIdPartiality::from(CHAT_ID_KIND);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &chat_id, increment_of(5), &[])
+        .await
+        .expect("couldn't create the dick")
+        .expect("the first growth of the day must be allowed");
+
+    let growth = elect(&dicks, &chat_id, USER_ID, 5).await;
+    assert_eq!(growth.new_length, 10);
+
+    let refused = dicks.set_dod_winner(&chat_id, USER_ID, increment_of(5), &[])
+        .await.expect("the second election must be refused, not fail");
+    let DickOfDayResult::AlreadyChosen(name) = refused else {
+        panic!("the second election of the day must be refused")
+    };
+    assert_eq!(name.value(), NAME);
+
+    let length = dicks.fetch_length(USER_ID, &CHAT_ID_KIND).await.expect("couldn't fetch the length");
+    assert_eq!(length, 10, "a refused election must grow nobody");
 }
 
 /// The once-a-day rule itself: the growth `create_or_grow` refuses is the one it answers `None` to.
