@@ -4,6 +4,7 @@
 #![recursion_limit = "256"]
 
 mod domain;
+mod customization;
 mod error_handler;
 mod handlers;
 mod repo;

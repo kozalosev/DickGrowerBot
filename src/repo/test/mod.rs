@@ -12,6 +12,7 @@ mod bans;
 mod broadcasts;
 mod deletions;
 mod perks;
+mod customizations;
 
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -214,4 +215,3 @@ async fn connect_and_migrate(url: Url) -> Pool<Postgres> {
     repo::establish_database_connection(&conf)
         .await.expect("couldn't establish a database connection")
 }
-
