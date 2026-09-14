@@ -103,7 +103,7 @@ where
 macro_rules! env_value {
     ($key:literal : $type:ty $(, or = $default:expr)? $(, at_least = $min:expr)?) => {{
         #[allow(unused_mut)]
-        let mut value = $crate::config::env::EnvValue::<$type>::of($key);
+        let mut value = $crate::config::EnvValue::<$type>::of($key);
         $( value = value.or(<$type>::new($default)); )?
         $( value = value.at_least(<$type>::new($min)); )?
         value.read()
@@ -221,7 +221,7 @@ pub const fn days(count: u64) -> Duration {
 macro_rules! env_duration {
     ($key:literal $(, or = $default:expr)? $(, at_least = $min:expr)?) => {{
         #[allow(unused_mut)]
-        let mut value = $crate::config::env::EnvDuration::new($key);
+        let mut value = $crate::config::EnvDuration::new($key);
         $( value = value.or($default); )?
         $( value = value.at_least($min); )?
         value.read()

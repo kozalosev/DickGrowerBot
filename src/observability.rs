@@ -10,7 +10,7 @@ use opentelemetry_sdk::trace::{BatchConfigBuilder, BatchSpanProcessor, Sampler, 
 use tracing_subscriber::filter::{filter_fn, FilterExt};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use domain_types::literal;
-use crate::config::env::{env_duration, secs};
+use crate::config::{env_duration, secs};
 use crate::config::get_env_value_or_default;
 use crate::domain::primitives::{Coefficient, Ratio};
 
