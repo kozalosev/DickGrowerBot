@@ -172,7 +172,10 @@ commands:
         singular: "Il tuo pene si è ridotto di <b>%{growth}</b> cm in un gruppo."
         plural: "Il tuo pene si è ridotto di <b>%{growth}</b> cm in <b>%{affected_chats}</b> gruppi!"
     errors:
-      no_activations_left: "Mi dispiace ma questo codice promozionale non esiste o è scaduto 😞"
+      not_found: "Mi dispiace ma questo codice promozionale non esiste 😞"
+      not_started: "Questo codice promozionale non è ancora attivo — riprova più tardi ⏳"
+      expired: "Questo codice promozionale è scaduto 😞"
+      exhausted: "Mi dispiace, ma questo codice promozionale è già stato utilizzato il numero massimo di volte 😞"
       invalid_format: "Questo non sembra un codice promozionale 🤔 Sono lunghi da 3 a 16 caratteri: lettere, numeri, trattini e trattini bassi."
       already_activated: "Sembra che tu abbia già utilizzato questo codice promozionale 🤨"
       no_dicks: "Non hai ancora alcun pene. 🤔 Devi aggiungermi ad un gruppo ed eseguire il comando <code>/grow</code>!"
