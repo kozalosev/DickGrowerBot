@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT state::text AS \"state!\", count(*) AS \"count!\" FROM Scheduled_Message_Deletions\n            WHERE finished_at IS NOT NULL GROUP BY state ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "9e386785754445fceb4c3da7f2d6cf86e07b93db7204f5193dedee0ee3bdf545"
+}

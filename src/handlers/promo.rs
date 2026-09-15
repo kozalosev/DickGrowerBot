@@ -138,11 +138,10 @@ pub(crate) async fn promo_activation_impl(
                 .to_string()
         },
         Err(e) => {
-            let suffix = match e {
+            let t_key = match e {
                 ActivationError::Other(e) => Err(e)?,
-                e => format!("{e}")
+                e => format!("commands.promo.errors.{e}")
             };
-            let t_key = format!("commands.promo.errors.{suffix}");
             t!(&t_key, locale = &lang_code).to_string()
         }
     };

@@ -85,8 +85,8 @@ async fn a_state_is_written_by_the_growth_and_read_back() {
         "the tests and the database must agree on the day, or the streak arithmetic is untestable");
 }
 
-/// The reason the states are written by the growth instead of by the perk: the daily trigger
-/// refuses the second growth, and nothing of what the perks decided may survive that.
+/// The reason the states are written by the growth instead of by the perk: the second growth of the
+/// day is refused, and nothing of what the perks decided may survive that.
 #[tokio::test]
 async fn a_refused_growth_stores_nothing() {
     let db = fresh_db().await;
@@ -101,12 +101,14 @@ async fn a_refused_growth_stores_nothing() {
 
     let first = PerkStateUpdate { perk_id, state: state_of(1) };
     dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[first])
-        .await.expect("couldn't grow the dick");
+        .await
+        .expect("couldn't grow the dick")
+        .expect("the first growth of the day must be allowed");
 
     let second = PerkStateUpdate { perk_id, state: state_of(2) };
     let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[second])
-        .await;
-    assert!(refused.is_err(), "the second growth of the day must be refused");
+        .await.expect("the second growth must be refused, not fail");
+    assert!(refused.is_none(), "the second growth of the day must be refused");
 
     let stored = perk_states.read(USER_ID, &CHAT_ID_KIND)
         .await.expect("couldn't read the stored state");

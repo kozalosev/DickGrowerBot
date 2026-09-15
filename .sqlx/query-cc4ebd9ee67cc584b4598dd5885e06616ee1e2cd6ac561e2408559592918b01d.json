@@ -1,23 +1,22 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
+  "query": "SELECT d.uid AS \"uid: UserId\" FROM Dicks d\n                WHERE d.chat_id = $1 ORDER BY d.length DESC LIMIT $2",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "length",
+        "name": "uid: UserId",
         "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "dicks",
-            "name": "length"
+            "name": "uid"
           }
         }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
         "Int8",
         "Int8"
       ]
@@ -26,5 +25,5 @@
       false
     ]
   },
-  "hash": "b11c17408f048801036efdbd6dbad2231bf6cd436f0345b20f70298105628006"
+  "hash": "cc4ebd9ee67cc584b4598dd5885e06616ee1e2cd6ac561e2408559592918b01d"
 }

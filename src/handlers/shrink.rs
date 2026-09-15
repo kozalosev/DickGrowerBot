@@ -7,8 +7,8 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup};
 use crate::config::AppConfig;
-use crate::domain::primitives::{LanguageCode, Offset, Page};
-use crate::domain::primitives::chat::ChatIdKind;
+use crate::domain::primitives::{LanguageCode, Limit, Offset, Page};
+use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerDeps, HandlerResult};
 use crate::handlers::utils::{callbacks, days_word_ru};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
@@ -113,13 +113,46 @@ pub(crate) async fn shrinks_page_impl(
     date: NaiveDate,
     page: Page,
 ) -> anyhow::Result<ShrinksPage> {
-    let offset = Offset::calculate(page, config.top_limit);
-    let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
+    let (offset, query_limit) = page_bounds(config, page);
     let shrinks = repos.shrinks
         .get_shrinks_for_date(chat_id, date, offset, query_limit)
         .await?;
+    Ok(render_page(&shrinks, config, lang_code, view))
+}
+
+/// The same page for a caller that holds the chat's own key rather than its Telegram id.
+pub(crate) async fn shrinks_page_for_internal_chat(
+    repos: &Repositories,
+    config: &AppConfig,
+    chat_id: InternalChatId,
+    lang_code: &LanguageCode,
+    view: ShrinkView,
+    date: NaiveDate,
+    page: Page,
+) -> anyhow::Result<ShrinksPage> {
+    let (offset, query_limit) = page_bounds(config, page);
+    let shrinks = repos.shrinks
+        .get_shrinks_for_internal_chat(chat_id, date, offset, query_limit)
+        .await?;
+    Ok(render_page(&shrinks, config, lang_code, view))
+}
+
+/// Where a page starts, and one row more than it holds — that extra row is how a full page is told
+/// from the last one without a second query counting the rest.
+fn page_bounds(config: &AppConfig, page: Page) -> (Offset, Limit) {
+    (Offset::calculate(page, config.top_limit), config.top_limit + 1)
+}
+
+/// Renders what [`page_bounds`] fetched, reading the extra row as "there is more" and leaving it
+/// out of the text.
+fn render_page(
+    shrinks: &[RecentShrink],
+    config: &AppConfig,
+    lang_code: &LanguageCode,
+    view: ShrinkView,
+) -> ShrinksPage {
     let has_more_pages = shrinks.len() > usize::from(config.top_limit);
-    Ok(render_shrinks_page(&shrinks, config, lang_code, view, has_more_pages))
+    render_shrinks_page(shrinks, config, lang_code, view, has_more_pages)
 }
 
 /// `None` when no button would do anything, so callers never attach an empty or dead row.

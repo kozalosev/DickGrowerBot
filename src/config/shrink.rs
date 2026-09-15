@@ -13,6 +13,10 @@ pub struct DailyShrinkConfig {
     /// and the ones a failure costs, so a `/grow` sent at midnight waits behind one batch rather
     /// than behind every stale dick in the database.
     pub batch_size: Limit,
+    /// How long the run rests between two batches. Zero runs them back to back, which is what it did
+    /// before there was a knob for it. Nothing waits on this job, so the rest costs only a longer
+    /// run — and buys back the connections the chats being answered at midnight are queueing for.
+    pub batch_delay: Duration,
     pub broadcast: BroadcastConfig,
 }
 
@@ -47,6 +51,10 @@ pub struct BroadcastConfig {
     /// How long a finished row is kept before the cleaning process removes it. Zero keeps them for
     /// ever, which is what makes the queue's own history readable.
     pub retention: Duration,
+    /// How many of a chat's players the language tally looks at, when the chat has chosen no
+    /// language of its own. A tally does not become truer for having every last member in it, and
+    /// the whole roll of a large chat is a list the user-service then has to look up in one go.
+    pub language_sample: Limit,
 }
 
 impl DailyShrinkConfig {
@@ -70,6 +78,7 @@ impl Default for BroadcastConfig {
             max_attempts: AttemptsCount::new(3),
             max_age: Duration::from_hours(48),
             retention: Duration::from_hours(72),
+            language_sample: Limit::new(100),
         }
     }
 }

@@ -44,6 +44,14 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
             },
             Ok(outcome) => total += outcome,
         }
+
+        // The run has the whole day ahead of it and nobody waiting on it, while the chats it shares
+        // the database with are being answered right now. Resting between batches trades a run that
+        // takes longer for handlers that keep their connections — which is the better trade at
+        // midnight, when a `/grow` queues behind whatever this is doing.
+        if !shrink_config.batch_delay.is_zero() {
+            tokio::time::sleep(shrink_config.batch_delay).await;
+        }
     }
 
     metrics::DAILY_SHRINK.victims_to_broadcast(total.to_broadcast.value());

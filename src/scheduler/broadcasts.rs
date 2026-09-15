@@ -10,15 +10,23 @@ use teloxide::sugar::request::RequestLinkPreviewExt;
 use teloxide::types::{ChatId, ReplyMarkup, UserId as TeloxideUserId};
 use teloxide::types::ParseMode::Html;
 use domain_types::traits::ApproxInto;
+use crate::cache::{Cache, CacheKey};
 use crate::config::AppConfig;
 use crate::domain::primitives::{LanguageCode, Page, ScheduledBroadcastId, SupportedLanguage};
-use crate::domain::primitives::chat::ChatIdKind;
-use crate::handlers::shrink::{build_shrink_keyboard, shrinks_page_impl, ShrinkView};
+use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
+use crate::handlers::shrink::{build_shrink_keyboard, shrinks_page_for_internal_chat, ShrinkView};
 use crate::metrics;
 use crate::repo::{BroadcastState, Repositories, ScheduledBroadcast};
 use super::backoff;
 use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
+
+/// Keyed by chat, because what is cached is which language that chat's players speak.
+#[derive(derive_more::Display)]
+#[display("chat:{}:broadcast_language", _0.qualified())]
+struct BroadcastLanguageKey(ChatIdKind);
+
+impl CacheKey for BroadcastLanguageKey {}
 
 /// The services every summary needs, bundled so the per-chat calls stay readable.
 #[derive(Clone, Copy)]
@@ -27,6 +35,7 @@ pub struct BroadcastDeps<'a> {
     pub repos: &'a Repositories,
     pub language_service: &'a LanguageService,
     pub topics: &'a TopicPolicy,
+    pub cache: &'a Cache,
     pub config: &'a AppConfig,
 }
 
@@ -91,28 +100,33 @@ pub async fn clean_finished_broadcasts(repos: &Repositories, retention: Duration
 }
 
 /// Sends one summary and writes down what became of it.
-#[tracing::instrument(skip_all, fields(id = %broadcast.id, chat_id = %broadcast.chat_id, date = %broadcast.shrink_date))]
+///
+/// A span per chat, so it is `debug`: a run reaches every chat that is owed a summary, and at `info`
+/// one midnight would be a few hundred thousand spans. `OTEL_SPAN_FILTER=debug` brings them back.
+#[tracing::instrument(level = "debug", skip_all, fields(id = %broadcast.id, chat_id = %broadcast.chat_id, date = %broadcast.shrink_date))]
 async fn send_and_record(deps: BroadcastDeps<'_>, broadcast: ScheduledBroadcast) {
     let config = &deps.config.daily_shrink.broadcast;
     let id = broadcast.id;
     let failures = broadcast.attempts;
-    let outcome = send(deps, &broadcast).await;
+    // The language travels back out so that the row can remember it: whatever happens to this
+    // attempt, the next one must not work it out again, nor answer the chat in a different language.
+    let (outcome, lang) = send(deps, &broadcast).await;
     tracing::debug!(?outcome, "the shrink summary is dealt with");
 
     // Only an ending is counted, and each one only once, so the outcomes add up to the number of
     // summaries. A retry is a step, not an ending, and has a counter of its own.
     let result = match outcome {
-        Outcome::Sent => finish(deps.repos, id, BroadcastState::Sent).await,
-        Outcome::Expired => finish(deps.repos, id, BroadcastState::Expired).await,
-        Outcome::Unreachable => finish(deps.repos, id, BroadcastState::Unreachable).await,
-        Outcome::Failed => finish(deps.repos, id, BroadcastState::Failed).await,
+        Outcome::Sent => finish(deps.repos, id, BroadcastState::Sent, lang).await,
+        Outcome::Expired => finish(deps.repos, id, BroadcastState::Expired, lang).await,
+        Outcome::Unreachable => finish(deps.repos, id, BroadcastState::Unreachable, lang).await,
+        Outcome::Failed => finish(deps.repos, id, BroadcastState::Failed, lang).await,
         Outcome::Retry => {
             metrics::DAILY_SHRINK.broadcast_retried();
             let next_attempt = Utc::now() + backoff(config.retry_delay, failures, config.max_retry_delay);
-            match deps.repos.broadcasts.postpone(id, next_attempt).await {
+            match deps.repos.broadcasts.postpone(id, next_attempt, lang).await {
                 Ok(attempts) if attempts >= config.max_attempts => {
                     tracing::warn!(attempts = %attempts, "giving up on a shrink summary");
-                    finish(deps.repos, id, BroadcastState::Failed).await
+                    finish(deps.repos, id, BroadcastState::Failed, lang).await
                 },
                 other => other.map(|_| ()),
             }
@@ -129,37 +143,44 @@ async fn finish(
     repos: &Repositories,
     id: ScheduledBroadcastId,
     state: BroadcastState,
+    lang: Option<SupportedLanguage>,
 ) -> anyhow::Result<()> {
     metrics::DAILY_SHRINK.broadcast_finished(state);
-    repos.broadcasts.finish(id, state).await
+    repos.broadcasts.finish(id, state, lang).await
 }
 
 /// Sends page 0 of the chat's shrink list for the day the row names, and says what became of it.
 ///
 /// The page comes from the same query the "next page" button uses, so what a chat reads first and
 /// what it reads after tapping are one list rather than two orderings of it.
-async fn send(deps: BroadcastDeps<'_>, broadcast: &ScheduledBroadcast) -> Outcome {
+async fn send(deps: BroadcastDeps<'_>, broadcast: &ScheduledBroadcast) -> (Outcome, Option<SupportedLanguage>) {
     let BroadcastDeps { bot, repos, topics, config, .. } = deps;
     let broadcast_config = &config.daily_shrink.broadcast;
 
     // A summary that waited this long has stopped being news, and the chat has the `shrinks`
-    // command for the history. Only a queue that fell behind can bring one here.
+    // command for the history. Only a queue that fell behind can bring one here. Checked before
+    // anything is resolved or rendered, so an expired row costs neither a query nor a request.
     let age = (Utc::now() - broadcast.created_at).to_std().unwrap_or(Duration::ZERO);
     if age > broadcast_config.max_age {
         tracing::warn!(created_at = %broadcast.created_at, "the shrink summary got too old to be worth sending");
-        return Outcome::Expired
+        return (Outcome::Expired, None)
     }
 
     let chat = ChatIdKind::from(broadcast.chat_id);
-    let lang = resolve_broadcast_language(deps, &chat).await;
+    // What an earlier attempt settled on wins outright: it is already what this chat was going to
+    // be told, and re-deciding could answer the same list in another language.
+    let lang = match broadcast.lang_code {
+        Some(lang) => lang,
+        None => resolve_broadcast_language(deps, &chat, broadcast.internal_chat_id).await,
+    };
     let lang_code = LanguageCode::new(lang.to_string());
 
-    let page = match shrinks_page_impl(repos, config, &chat, &lang_code,
-                                       ShrinkView::Broadcast, broadcast.shrink_date, Page::first()).await {
+    let page = match shrinks_page_for_internal_chat(repos, config, broadcast.internal_chat_id, &lang_code,
+                                                    ShrinkView::Broadcast, broadcast.shrink_date, Page::first()).await {
         Ok(page) => page,
         Err(e) => {
             tracing::warn!(error = format!("{e:#}"), "couldn't render the shrink summary");
-            return Outcome::Retry
+            return (Outcome::Retry, Some(lang))
         },
     };
     // A single day by definition, so day-navigation (`adjacent`) is always `None`.
@@ -185,14 +206,15 @@ async fn send(deps: BroadcastDeps<'_>, broadcast: &ScheduledBroadcast) -> Outcom
     // also hang before that even starts — stuck inside Throttle's own queue, waiting on a lock its
     // worker never unlocks. That wait has no timeout of its own, and it blocks this whole tick (and
     // so every tick after it) until something ends it. This is that something.
-    match tokio::time::timeout(broadcast_config.send_timeout, request.send()).await {
+    let outcome = match tokio::time::timeout(broadcast_config.send_timeout, request.send()).await {
         Ok(sent) => outcome_of(sent.map(|_| ()), repos, broadcast).await,
         Err(_) => {
             tracing::warn!(timeout = ?broadcast_config.send_timeout,
                 "sending the shrink summary timed out, retrying it later");
             Outcome::Retry
         },
-    }
+    };
+    (outcome, Some(lang))
 }
 
 /// Turns the answer of the Bot API into an outcome, remembering what it says about the chat.
@@ -271,32 +293,59 @@ fn is_final(error: &RequestError) -> bool {
 
 /// Picks the language for a chat's summary: the chat-wide override wins; otherwise, when the
 /// `getMany` toggle is on, the most popular language among the chat's players; English otherwise.
-#[tracing::instrument(skip_all)]
-async fn resolve_broadcast_language(deps: BroadcastDeps<'_>, chat: &ChatIdKind) -> SupportedLanguage {
-    let BroadcastDeps { repos, language_service, config, .. } = deps;
-    match repos.chats.get_chat_language(chat).await {
-        Ok(Some(lang)) => {
-            metrics::BROADCAST_LANGUAGE.decided_by_chat();
-            return lang
-        }
-        Ok(None) => {}
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the language of the chat"),
+///
+/// Both steps read through the cache, which is what makes this affordable at all: the override goes
+/// through [`LanguageService::chat_language`] rather than the repository beneath it, and the tally —
+/// a query plus a call to the user-service — is kept under a key of its own. Every chat is a miss
+/// the first night and a hit on the ones after, which is the difference the cache is here for.
+///
+/// Called once per chat, so it is `debug` for the same reason as [`send_and_record`].
+#[tracing::instrument(level = "debug", skip_all)]
+async fn resolve_broadcast_language(
+    deps: BroadcastDeps<'_>,
+    chat: &ChatIdKind,
+    internal_chat_id: InternalChatId,
+) -> SupportedLanguage {
+    let BroadcastDeps { language_service, config, .. } = deps;
+    if let Some(lang) = language_service.chat_language(chat).await {
+        metrics::BROADCAST_LANGUAGE.decided_by_chat();
+        return lang
     }
 
-    if config.features.most_popular_language_enabled {
-        let uids: Vec<TeloxideUserId> = repos.dicks.get_player_uids(chat).await
+    if config.features.most_popular_language_enabled
+        && let Some(lang) = tallied_language(deps, chat, internal_chat_id).await
+    {
+        metrics::BROADCAST_LANGUAGE.decided_by_tally();
+        return lang
+    }
+    metrics::BROADCAST_LANGUAGE.defaulted();
+    SupportedLanguage::EN
+}
+
+/// The most popular language among a sample of the chat's players, kept for as long as
+/// `BROADCAST_LANGUAGE_CACHE_TIME` says.
+///
+/// "No answer" is cached as readily as an answer: a chat whose players the user-service has never
+/// heard of is the commonest case there is, and asking again every night would cost exactly what
+/// asking the first time did.
+async fn tallied_language(
+    deps: BroadcastDeps<'_>,
+    chat: &ChatIdKind,
+    internal_chat_id: InternalChatId,
+) -> Option<SupportedLanguage> {
+    let BroadcastDeps { repos, language_service, cache, config, .. } = deps;
+    let key = BroadcastLanguageKey(chat.clone());
+    let ttl = config.caches.broadcast_language;
+    cache.read_through(key, ttl, &metrics::BROADCAST_LANGUAGE_TALLY, || async {
+        let uids: Vec<TeloxideUserId> = repos.dicks
+            .get_player_uids_sample(internal_chat_id, config.daily_shrink.broadcast.language_sample).await
             .inspect_err(|e| tracing::warn!(error = format!("{e:#}"), "couldn't list the players of the chat"))
             .unwrap_or_default()
             .into_iter()
             .map(Into::into)
             .collect();
-        if let Some(lang) = language_service.popular_language(&uids).await {
-            metrics::BROADCAST_LANGUAGE.decided_by_tally();
-            return lang;
-        }
-    }
-    metrics::BROADCAST_LANGUAGE.defaulted();
-    SupportedLanguage::EN
+        language_service.popular_language(&uids).await
+    }).await
 }
 
 #[cfg(test)]

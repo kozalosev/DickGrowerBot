@@ -35,13 +35,11 @@ async fn test_all() {
     assert_eq!(stats.max_length, 20);
     assert_eq!(stats.total_length, 30);
 
-    sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
-        .execute(&db)
-        .await.expect("couldn't drop the trigger");
-
-    dicks.create_or_grow(uid, &ChatIdPartiality::Specific(chat_id_1), increment_of(-20), &[]).await
+    // Both dicks have spent their day above, so the negative lengths the stats are read from come
+    // from the write that isn't subject to the once-a-day rule.
+    dicks.grow_no_attempts_check(&chat_id_1, uid, increment_of(-20)).await
         .expect("couldn't shrink the dick in the first chat");
-    dicks.create_or_grow(uid, &ChatIdPartiality::Specific(chat_id_2), increment_of(-40), &[]).await
+    dicks.grow_no_attempts_check(&chat_id_2, uid, increment_of(-40)).await
         .expect("couldn't shrink the dick in the second chat");
     let stats = personal_stats.get_personal_stats(uid).await
         .expect("couldn't fetch the stats with negative lengths");

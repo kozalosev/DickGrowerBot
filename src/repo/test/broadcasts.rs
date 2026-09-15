@@ -2,7 +2,7 @@ use std::time::Duration;
 use chrono::Utc;
 use sqlx::{Pool, Postgres};
 use crate::repo::{BroadcastState, ScheduledBroadcasts};
-use crate::domain::primitives::Limit;
+use crate::domain::primitives::{Limit, SupportedLanguage};
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo::test::{create_chat, far_future, fresh_db};
 
@@ -37,8 +37,37 @@ async fn a_queued_summary_is_claimed_with_the_chat_it_is_owed_to() {
 
     assert_eq!(claimed.len(), 1);
     assert_eq!(claimed[0].chat_id, TelegramChatId::new(-1001234567890));
+    let internal_id: u64 = internal_id.try_into().expect("a bigserial is positive");
+    assert_eq!(claimed[0].internal_chat_id.value(), internal_id);
     assert_eq!(claimed[0].shrink_date, Utc::now().date_naive());
     assert_eq!(claimed[0].attempts, 0);
+    assert_eq!(claimed[0].lang_code, None, "nothing has worked the language out yet");
+}
+
+/// The language a first attempt settled on comes back with the next claim, which is what saves the
+/// retry a chat-settings lookup, a query for the players and a call to the user-service — and what
+/// keeps a chat from being answered in one language and then another.
+#[tokio::test]
+async fn the_language_of_an_attempt_is_remembered_for_the_next_one() {
+    let db = fresh_db().await;
+    let repo = ScheduledBroadcasts::new(db.clone());
+    queue(&db, create_chat(&db, -1001234567890).await, 0).await;
+    let claimed = repo.claim_due(Limit::new(10), Utc::now() - Duration::from_secs(1))
+        .await.expect("couldn't claim the summaries");
+
+    repo.postpone(claimed[0].id, Utc::now() - Duration::from_secs(1), Some(SupportedLanguage::RU))
+        .await.expect("couldn't postpone the summary");
+
+    let again = repo.claim_due(Limit::new(10), far_future())
+        .await.expect("couldn't claim the summaries");
+    assert_eq!(again[0].lang_code, Some(SupportedLanguage::RU));
+
+    // A later write that worked out no language must not erase the one that did.
+    repo.postpone(again[0].id, Utc::now() - Duration::from_secs(1), None)
+        .await.expect("couldn't postpone the summary");
+    let third = repo.claim_due(Limit::new(10), far_future())
+        .await.expect("couldn't claim the summaries");
+    assert_eq!(third[0].lang_code, Some(SupportedLanguage::RU));
 }
 
 /// The whole point of the lease: a summary being sent is invisible to everyone else, and
@@ -112,7 +141,7 @@ async fn a_postponed_summary_counts_its_attempts() {
     let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
 
-    let attempts = repo.postpone(claimed[0].id, Utc::now() - Duration::from_secs(1))
+    let attempts = repo.postpone(claimed[0].id, Utc::now() - Duration::from_secs(1), None)
         .await.expect("couldn't postpone the summary");
     assert_eq!(attempts, 1);
 
@@ -136,9 +165,9 @@ async fn a_finished_summary_is_kept_but_never_claimed() {
         .await.expect("couldn't claim the summaries");
     assert_eq!(claimed.len(), 2);
 
-    repo.finish(claimed[0].id, BroadcastState::Sent)
+    repo.finish(claimed[0].id, BroadcastState::Sent, None)
         .await.expect("couldn't finish the summary");
-    repo.finish(claimed[1].id, BroadcastState::Unreachable)
+    repo.finish(claimed[1].id, BroadcastState::Unreachable, None)
         .await.expect("couldn't finish the summary");
 
     let claimed_again = repo.claim_due(Limit::new(10), far_future())
@@ -166,7 +195,7 @@ async fn every_terminal_state_survives_the_round_trip() {
         .await.expect("couldn't claim the summaries");
 
     for (broadcast, state) in claimed.iter().zip(BroadcastState::TERMINAL) {
-        repo.finish(broadcast.id, state)
+        repo.finish(broadcast.id, state, None)
             .await.expect("couldn't finish the summary");
     }
 
@@ -184,7 +213,7 @@ async fn only_the_finished_rows_are_cleaned_up() {
     queue(&db, create_chat(&db, -1009876543210).await, 0).await;
     let claimed = repo.claim_due(Limit::new(10), far_future())
         .await.expect("couldn't claim the summaries");
-    repo.finish(claimed[0].id, BroadcastState::Sent)
+    repo.finish(claimed[0].id, BroadcastState::Sent, None)
         .await.expect("couldn't finish the summary");
 
     // Nothing has been finished for long enough yet.

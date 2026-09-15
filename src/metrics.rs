@@ -7,8 +7,8 @@ use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
 use crate::config::MessageGroup;
-use crate::domain::primitives::{Count, SupportedLanguage};
-use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
+use crate::domain::primitives::SupportedLanguage;
+use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind};
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
 static REGISTRY: Lazy<prometheus::Registry> = Lazy::new(prometheus::Registry::new);
@@ -54,6 +54,8 @@ pub static CHAT_LANGUAGE: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_language_get_total", "count of chat-wide language resolutions, split by whether they were served from cache or read from the database"));
 pub static CMD_TOPICS: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_topics_usage_total", "count of /topics invocations and changes of the setting", ["invoked", "finished"]));
+pub static BROADCAST_LANGUAGE_TALLY: Lazy<CacheSourceCounters> = Lazy::new(||
+    CacheSourceCounters::new("broadcast_language_tally_get_total", "count of the language tallies the shrink broadcast needed for chats with no language of their own, split by whether they were served from cache or worked out afresh from the chat's players and the user-service"));
 pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
 pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
@@ -81,7 +83,7 @@ pub static USED_LANGUAGE: Lazy<SpokenLanguageCounter> = Lazy::new(||
 pub static UPDATE_KIND: Lazy<UpdateKindCounter> = Lazy::new(||
     UpdateKindCounter::new("update_kind_total", "count of all updates received from Telegram, by update kind — the total is the bot's real update rate, and the breakdown shows how much of it is traffic no handler acts on"));
 pub static SELF_DESTRUCTION: Lazy<SelfDestructionCounters> = Lazy::new(||
-    SelfDestructionCounters::new("self_destruction_total", "count of the messages the self-destruction feature has finished with, by message group, kind (reply/command/inline) and the state the message ended in. These are the same four states as in self_destruction_finished, but counted once per message instead of shown as a current number"));
+    SelfDestructionCounters::new("self_destruction_total", "count of the messages the self-destruction feature has finished with, by message group, kind (reply/command/inline) and the state the message ended in. How many rows currently sit in each state is a question for Scheduled_Message_Deletions itself, through Grafana's Postgres datasource"));
 pub static SELF_DESTRUCTION_RETRIES: Lazy<SelfDestructionRetryCounters> = Lazy::new(||
     SelfDestructionRetryCounters::new("self_destruction_retries_total", "count of the attempts that failed but were worth trying again, by message group and kind. Kept out of self_destruction_total because a message can be retried many times and still end as removed"));
 pub static SELF_DESTRUCTION_PENDING: Lazy<Gauge> = Lazy::new(||
@@ -92,8 +94,6 @@ pub static SELF_DESTRUCTION_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
         &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
 pub static SELF_DESTRUCTION_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_batch_limit", "the value of MSG_SELFDESTRUCT_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
-pub static SELF_DESTRUCTION_FINISHED: Lazy<SelfDestructionFinishedGauges> = Lazy::new(||
-    SelfDestructionFinishedGauges::new("self_destruction_finished", "number of self-destructions that are done with and kept for inspection until the cleaning process runs, by state: removed (the bot took the message down), removed_before (someone else had already done it), expired (the message outlived Telegram's 48-hour limit while it waited) or failed (every attempt was refused)"));
 pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
     AnnouncementCounter::new("announcement_shown_total", "count of announcements shown at the end of the Dick of the Day message, split by the recipient's language"));
 pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
@@ -281,7 +281,6 @@ impl prometheus::core::Collector for DbPoolCollector {
 
 pub struct Counter(IntCounter);
 pub struct Gauge(prometheus::IntGauge);
-pub struct GaugeVec(prometheus::IntGaugeVec);
 pub struct CounterVec(IntCounterVec);
 pub struct Histogram(prometheus::Histogram);
 pub struct HistogramVec(prometheus::HistogramVec);
@@ -363,22 +362,6 @@ impl Gauge {
     /// happens instead.
     pub fn set(&self, value: i64) {
         self.0.set(value)
-    }
-}
-
-impl GaugeVec {
-    fn new(name: &str, help: &str, labels: &[&str]) -> Self {
-        let inner = prometheus::IntGaugeVec::new(Opts::new(name, help), labels)
-            .unwrap_or_else(|e| panic!("unable to create the {name} gauge vec: {e}"));
-        REGISTRY.register(Box::new(inner.clone()))
-            .unwrap_or_else(|e| panic!("unable to register the {name} gauge vec: {e}"));
-        Self(inner)
-    }
-
-    /// Returns the child gauge identified by these label values, given in the same order as the
-    /// labels passed to [`GaugeVec::new`].
-    fn gauge(&self, label_values: &[&str]) -> Gauge {
-        Gauge(self.0.with_label_values(label_values))
     }
 }
 
@@ -741,31 +724,6 @@ impl SelfDestructionRetryCounters {
     }
 }
 
-/// The rows the self-destruction is done with, by the state they were left in — the queue's own
-/// history, kept until the cleaning process removes it.
-pub struct SelfDestructionFinishedGauges(GaugeVec);
-
-impl SelfDestructionFinishedGauges {
-    fn new(name: &str, help: &str) -> Self {
-        let vec = GaugeVec::new(name, help, &["state"]);
-        for state in DeletionState::TERMINAL {
-            vec.gauge(&[&state.to_string()]).set(0);
-        }
-        Self(vec)
-    }
-
-    /// Publishes one count per terminal state. Every state is written on each call, so one that has
-    /// just been cleaned away goes back to zero instead of keeping its last value for ever.
-    pub fn set_all(&self, counts: &[(DeletionState, Count<ScheduledDeletion>)]) {
-        for state in DeletionState::TERMINAL {
-            let count = counts.iter()
-                .find(|(counted, _)| *counted == state)
-                .map_or(Count::default(), |(_, count)| *count);
-            self.0.gauge(&[&state.to_string()]).set(count.saturating_into());
-        }
-    }
-}
-
 /// Counts announcements actually shown at the end of the Dick of the Day message, labeled by the
 /// recipient's resolved [`SupportedLanguage`] (with fallback, the audience's language — not
 /// necessarily the language the borrowed text is written in).
@@ -964,12 +922,10 @@ mod tests {
     use once_cell::sync::Lazy;
     use strum::IntoEnumIterator;
     use crate::config::MessageGroup;
-    use crate::domain::primitives::Count;
-    use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind, ScheduledDeletion};
+    use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
                 BROADCAST_LANGUAGE, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
-                SELF_DESTRUCTION_FINISHED, SELF_DESTRUCTION_RETRIES,
-                SelfDestructionFinishedGauges, TASK_DAILY_SHRINK, language_label, render_metrics};
+                SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.
@@ -1053,34 +1009,6 @@ mod tests {
             assert!(rendered.contains(&series), "{series} is missing from:
 {rendered}");
         }
-    }
-
-    /// The ratio between these states is what tells a healthy queue from a stuck one, so all of
-    /// them have to be there from the start — including on a bot that has never failed a deletion.
-    #[test]
-    fn every_finished_self_destruction_state_is_exported() {
-        Lazy::force(&SELF_DESTRUCTION_FINISHED);
-        let rendered = render_metrics();
-
-        for state in DeletionState::TERMINAL {
-            let series = format!("self_destruction_finished{{state=\"{state}\"}}");
-            assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
-        }
-    }
-
-    /// A state that has just been cleaned away must fall back to zero rather than keep the last
-    /// number it was given.
-    #[test]
-    fn a_cleaned_state_goes_back_to_zero() {
-        let gauges = SelfDestructionFinishedGauges::new("test_self_destruction_finished",
-            "the finished self-destructions of the test");
-
-        gauges.set_all(&[(DeletionState::Failed, Count::<ScheduledDeletion>::new(3))]);
-        assert_eq!(gauges.0.gauge(&["failed"]).0.get(), 3);
-        assert_eq!(gauges.0.gauge(&["expired"]).0.get(), 0);
-
-        gauges.set_all(&[]);
-        assert_eq!(gauges.0.gauge(&["failed"]).0.get(), 0);
     }
 
     /// We alert on counters that stop growing, so every series must exist from the start.

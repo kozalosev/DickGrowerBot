@@ -123,10 +123,41 @@ as long as it listens, so `establish_database_connection` builds the pool
 `LISTENER_CONNECTIONS` larger and `DATABASE_MAX_CONNECTIONS` keeps meaning what an operator set it
 to.
 
+### What each signal means
+
+| Signal | Meaning | Handled in |
+|---|---|---|
+| `SIGHUP` | reload the announcements and the ban list | `reload.rs` |
+| `SIGTERM` | stop, gracefully | `shutdown.rs` |
+| `SIGINT` | the same, from a terminal | `shutdown.rs` |
+
+**A signal cannot mean two things**, which is the whole reason this table exists. The `Dockerfile`
+carried `STOPSIGNAL SIGHUP`, so `docker stop` — every deploy — asked the bot to *reload*. Nothing
+stopped, Docker waited out its timeout and killed the process, and everything that only happens on a
+clean exit never happened: the last batch of spans and log records was dropped, and
+`BatchSpanProcessor`'s count of spans it had to drop (which is only reported at shutdown) was never
+printed. `STOPSIGNAL` is gone, so Docker's default `SIGTERM` applies.
+
+Both branches of `main` stop through the dispatcher's `ShutdownToken`, not through teloxide's
+`enable_ctrlc_handler` — that one listens for Ctrl-C alone, and a container is never stopped with
+Ctrl-C. The webhook branch had no handler at all, so production had nothing listening for anything.
+
+**Stopping the dispatcher is the only lever needed**, because it stops its update listener too, and
+that is what the webhook server's graceful shutdown waits on. So one token drains the whole thing in
+order: no new updates, then the ones in flight, then the HTTP server, then `Telemetry::shutdown`
+flushes what the exporters still hold. The polling branch has no such flag on its metrics server, so
+that one listens for the signal itself — every listener of a signal receives it, so the two do not
+compete.
+
 ### How a span of time is written
 
-Every setting that names one takes a number and a unit — `30s`, `15m`, `1h`, `3d`. A bare number is
-seconds, so a value written before this still means what it did.
+Every setting that names one takes a number and a unit — `250ms`, `30s`, `15m`, `1h`, `3d`. A bare
+number is seconds, so a value written before this still means what it did.
+
+`ms` is the only unit of two letters, and it ends in the same one as `s`, so `parse_duration` tries
+it before looking at the last letter. Read the other way round, `5ms` would be five *seconds* — a
+thousandfold error with nothing to show for itself, which is what `milliseconds_are_not_mistaken_for_seconds_or_minutes`
+is there to prevent.
 
 The unit is in the **value**, never in the name. A name that carried it (`BAN_LIST_REFRESH_SECONDS`)
 had to be renamed to change the unit, and gave two places for the unit to be stated and so one for
@@ -150,6 +181,36 @@ creates no connections. The default matches sqlx so that reading the variable ch
 itself; the shorter value is opted into, and is what keeps a handler's worst case comfortably inside
 `PVP_LOCK_TIME`. Refusals under load mean `DATABASE_MAX_CONNECTIONS` is too small, not that
 this is too short.
+
+### How long one statement may run
+
+The bot has no variable for this: it is Postgres's own setting, and `DATABASE_URL` already has a
+place to carry those. It writes its own unit (`5s`, `500ms`), `0` means no limit, and in a URL the
+space is `%20` and the equals sign `%3D`.
+
+```
+DATABASE_URL=postgres://…/dickgrowerbotdb?options=-c%20statement_timeout%3D5s
+```
+
+In server-configs that URL is built by Compose substitution, so the setting is one there too —
+`…?options=-c%20statement_timeout%3D${DATABASE_STATEMENT_TIMEOUT:-0}`, with the value in `.env.sops`.
+
+The pool has a limit on *waiting* and none on *running*, which is the wrong way round when a plan
+goes wrong: a query with nothing to stop it holds its connection for as long as it likes, and enough
+of them empty the pool while the bot answers nobody. That is a silent failure — the queries are
+succeeding, slowly — where a cancelled statement is an error somebody can read. Keep it under
+`DATABASE_ACQUIRE_TIMEOUT`, so a starved pool refuses at the acquire rather than after the wait.
+
+**The migrations are exempt, and that is the one thing the code has to do about any of this.**
+`repo::migrate` builds a pool of one connection, appends `statement_timeout=0` to whatever the URL
+asked for — Postgres takes the last of the repeated options — runs the migrations and closes it,
+before `establish_database_connection` builds the real pool. A `CREATE INDEX CONCURRENTLY` over
+millions of rows is meant to take minutes and cannot lift the limit for itself: it refuses to run
+inside a transaction block, which is what a multi-statement query string becomes.
+
+A timeout is a backstop, not a fix: it makes a bad plan loud, and says nothing about why the plan is
+bad. That answer is in `EXPLAIN (ANALYZE, BUFFERS)`, and usually in the statistics behind it (see
+the daily shrink below).
 
 That list is only how fast a banned user sees the polite message — **the enforcement is migration
 36**, a `BEFORE UPDATE` trigger on `Users` that refuses any statement touching a banned user's row
@@ -359,8 +420,8 @@ overhead.
 | anything else | unchanged; postponed by the back-off, `attempts` + 1 |
 
 **The counter counts endings, one per message.** `self_destruction_total{group,kind,outcome}` grows
-only when a row reaches a terminal state, and the `outcome` values are those states. So it shows the
-same four things as `self_destruction_finished{state}`, but as a rate instead of a current number.
+only when a row reaches a terminal state, and the `outcome` values are those states — a rate, where
+the table itself answers how many rows sit in each state right now.
 `scheduler::deletions::finish` writes the row and the counter together, so they can't say different
 things.
 
@@ -379,7 +440,10 @@ getting in their way. A message found missing at its **warning** ends there too,
 warned into the void and found missing again a grace period later — the notice is what a failed
 edit costs, but a message that is gone is not coming back.
 `SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
-stop disappearing; the same numbers are exported as `self_destruction_finished{state}`.
+stop disappearing, and it is a Grafana panel over the table rather than a gauge — the same trade the
+broadcast queue already made. As a gauge it was published from the deletion worker's own tick, so
+that query ran every `MSG_SELFDESTRUCT_POLL` — a scan of three days of finished rows, seventeen
+thousand times a day, to answer what one query answers when somebody asks.
 `scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY` days
 later — a task of its own, because clearing the history must never be part of the run that wrote it.
 **A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
@@ -486,11 +550,40 @@ growing. Everything below follows from that.
   question needs a `DISTINCT` over about a million stale dicks, and it would exclude roughly one
   chat in eight, because nearly every chat has a neglected dick in it. A batch whose chats have
   nothing stale shrinks nothing and costs an index lookup.
+
+  **`DAILY_SHRINK_BATCH_DELAY` is the pace of that walk**, and zero — running the batches back to
+  back — is only right when the database has nothing else to do. It does: midnight is when the run
+  and the chats being answered compete for the same pool. Nothing waits on this job, so resting
+  between batches costs a longer run and nothing else. `200ms` over ~200k chats adds about seven
+  minutes to it.
+* **`Stale_Dick_Shrinks` is analyzed a hundred times more eagerly than the stock table**
+  (migration 47, `autovacuum_analyze_scale_factor = 0.01`). A run writes a day's rows under a date
+  the table never held, and every summary is read back by that date within minutes — so the one
+  value the planner is asked about is the one its statistics know least about. A date past the end
+  of the histogram is estimated at a single row, and the plan that follows is right for one row and
+  ruinous for a million: a nested loop per row over `Users`, `Dicks` and `Chats`, seventeen seconds
+  and eleven million buffers to answer a page of ten, sixteen of those at once until the pool is
+  empty and the bot is answering nobody. With honest statistics the same query is a seek on
+  `stale_dick_shrinks_idx_chat_created_at` and costs a fraction of a millisecond. The stock
+  threshold — 50 rows plus a tenth of the table — is what let that happen: a night's insert is a
+  smaller share of it every month the table grows, so the statistics sat days out of date. A
+  hundredth keeps one night above the line. **When a night is slow again, this is the first thing to
+  check**, with `last_autoanalyze` in `pg_stat_user_tables`: autovacuum decides when, not us, and
+  the summaries of the first batches are claimable before it has had any reason to wake.
+* **Every scheduler ticks with `MissedTickBehavior::Delay`** (`scheduler::paced`), not tokio's
+  default `Burst`. A tick that overran its period would otherwise be followed at once by as many
+  more as were missed, with no pause — and these loops overrun precisely when the database or
+  Telegram is already struggling, which is when catching up is the one thing that makes it worse.
+  Nothing is lost by it: none of them counts its ticks, each asks what is due now, so a tick that
+  never happens is a tick with nothing left to do.
 * **Nothing comes back from the statement but counts.** The shrinks are in `Stale_Dick_Shrinks` and
-  `get_shrinks_for_date` already reads exactly the page a summary needs, so the worker re-reads
-  rather than carrying a payload. Page 0 therefore comes from the same `ORDER BY lost_length DESC`
-  as pages 1+, which the in-memory version did not — its "next page" button could repeat or skip
-  people.
+  the repository already reads exactly the page a summary needs, so the worker re-reads rather than
+  carrying a payload. Page 0 therefore comes from the same `ORDER BY lost_length DESC` as pages 1+,
+  which the in-memory version did not — its "next page" button could repeat or skip people.
+  The worker uses `get_shrinks_for_internal_chat`, not the `get_shrinks_for_date` the chat commands
+  use: `claim_due` hands it the row's own `Chats` key, so the predicate is a plain equality that
+  lands on `stale_dick_shrinks_idx_chat_created_at` instead of a join to `Chats` with an `OR` across
+  `chat_id` and `chat_instance`.
 * **The worker is a copy of `scheduler/deletions.rs`**: claim-with-lease, `for_each_concurrent`,
   exponential back-off, `finish()` writing the row and the counter together. `UNIQUE (chat_id,
   shrink_date)` makes the enqueue idempotent, so re-running a day can't double-send. The two
@@ -513,6 +606,7 @@ DAILY_SHRINK_INACTIVITY_DAYS=7
 DAILY_SHRINK_RAMP_UP_DAYS=7
 DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
 DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
+DAILY_SHRINK_BATCH_DELAY=0s            # rest between two batches; 0 => back to back
 DAILY_SHRINK_BROADCAST_POLL=5s
 DAILY_SHRINK_BROADCAST_BATCH_SIZE=200  # summaries one run claims
 DAILY_SHRINK_BROADCAST_CONCURRENCY=16  # how many it sends at once — the throughput knob
@@ -550,12 +644,21 @@ around `request.send()` (`scheduler::broadcasts::send`), bounding the send itsel
 `warn!` — inside the `send_and_record` span, so the log line carries the `chat_id`/`id` of whichever
 summary was in flight, without having to reach for a debugger next time.
 
-**Those three are the only gauges, and only the worker's tick publishes them.** They exist because
-vmalert reads Prometheus and cannot query SQL; everything a human looks at — which chats failed and
-why, the states over time — is a panel over `Scheduled_Shrink_Broadcasts` through Grafana's Postgres
-datasource, which costs nothing when nobody is looking. A gauge over the finished rows was the
-opposite trade: grouping a few hundred thousand rows by state every five seconds so that a graph
-could show what one SQL query already answers.
+**Those three are the only gauges.** They exist because vmalert reads Prometheus and cannot query
+SQL; everything a human looks at — which chats failed and why, the states over time — is a panel over
+`Scheduled_Shrink_Broadcasts` through Grafana's Postgres datasource, which costs nothing when nobody
+is looking. A gauge over the finished rows was the opposite trade: grouping a few hundred thousand
+rows by state every five seconds so that a graph could show what one SQL query already answers.
+
+**The heartbeat is the worker's; the two depths belong to `spawn_queue_reporter`.**
+`daily_shrink_broadcast_last_tick_timestamp_seconds` has to be written by the tick it measures, so it
+stays there. `daily_shrink_broadcast_pending` and `self_destruction_pending` do not: counting a queue
+is a scan of its whole pending index, and hanging that off a five-second poll tied three table scans
+to the workers' cadence, day and night, whether or not either queue had anything in it. They go out
+every `scheduler::QUEUE_GAUGE_INTERVAL` (60s) from a task of their own — a constant on the same
+grounds as `SWEEP_INTERVAL`: it decides how fresh a gauge is, not whether anything works. The
+reporter runs whatever the features say, because a gauge that stops being published looks exactly
+like a worker that died, which is what the alerts are watching for.
 
 **A log line's level follows what was lost, not whether the code recovered.** A failed shrink page
 is an `error!`: those chats lost the day and nothing retries it. A failed metric publication is a
@@ -620,10 +723,40 @@ only; the `log::*` records of the libraries (teloxide, sqlx, reqwest) are captur
 `tracing-log` bridge, so everything shares one pipeline.
 
 ```
-RUST_LOG=info                                      # verbosity of the console and of the export
+RUST_LOG=info                                      # verbosity of the console and of the log export
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # spans, OTLP/gRPC; unset => spans are not exported
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:9428/insert/opentelemetry/v1/logs  # log records, OTLP/HTTP
+OTEL_SPAN_FILTER=info,h2=off,hyper=off,tower=off,teloxide=info,reqwest=info,sqlx=off  # what becomes a span
+OTEL_TRACES_SAMPLE_RATIO=1.0                       # the share of traces kept, parent-based
+OTEL_BSP_QUEUE_SIZE=8192                           # spans held while waiting to be sent
+OTEL_BSP_BATCH_SIZE=2048                           # spans per export
+OTEL_BSP_DELAY=2s                                  # how often the queue drains
 ```
+
+**`RUST_LOG` does not govern the spans.** The span layer has a filter of its own, and it used to be
+a hardcoded `trace` — so `sqlx` streamed an event per query into every span, and one broadcast tick
+turned a few hundred sends into tens of thousands of events, whatever `RUST_LOG` said. It is
+`OTEL_SPAN_FILTER` now, defaulting to `info` with `sqlx=off`, and the two verbosities are separate
+because they answer different questions: one is what a human reads, the other is how much of the
+program's shape is worth keeping.
+
+The bot's **per-item scheduler spans are written at `debug`** for the same reason
+(`send_and_record`, `resolve_broadcast_language`): a run reaches every chat that is owed a summary,
+so at `info` one midnight would be a few hundred thousand spans. `OTEL_SPAN_FILTER=debug` brings
+them back, which is what to set while looking into a worker. The run-level spans stay at `info` —
+there are only a few a minute, and they are what shows a tick as a whole.
+
+**The sampling is parent-based**, so a decision taken at the root holds for every span beneath it
+and a trace never arrives with holes. The unit being sampled is therefore a whole trace, and for a
+scheduler that trace is **one tick of its loop** — at `0.05` one tick in twenty is kept entire,
+rather than one span in twenty scattered across all of them.
+
+The batch settings exist because the SDK's stock queue of 2048 is smaller than a single broadcast
+tick, so the spans of a busy minute were dropped before the exporter thread woke up. Spans go out
+gzipped (`gzip-tonic`).
+
+**The layer is left off the subscriber entirely when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset.** It
+used to be attached regardless, building every span for a provider with no exporter behind it.
 
 The console layer is **always** on and is the fallback: `docker logs` and journald keep working, and
 it is what remains when the collector can't be reached. The two signals need two variables because
@@ -918,6 +1051,34 @@ everyone and overrides each user's own preference. The chat-wide setting is stor
 CHAT_LANGUAGE_CACHE_TIME=1h   # optional TTL for the per-chat language cache (we own the data)
 ```
 
+**The shrink broadcast resolves a language per chat, and that is the most expensive thing a summary
+needs.** A chat with no language of its own falls back to a tally of what its players speak, which
+costs a query *and* a call to the user-service — once per chat, on every chat that is owed a
+summary. So both halves read through the store: the override goes through
+`LanguageService::chat_language` rather than the repository beneath it, and the tally is kept under
+a key of its own. Every chat is a miss the first night and a hit on the ones after, which is the
+whole point.
+
+```
+MOST_POPULAR_LANGUAGE_SAMPLE_SIZE=100  # players the tally looks at
+BROADCAST_LANGUAGE_CACHE_TIME=7d       # how long its answer is kept
+```
+
+The sample exists because a tally does not become truer for having every last member in it, while
+the full roll of a large chat is a list the user-service then has to look up in one go. The lifetime
+is far longer than the other per-chat settings because what it caches — which language a group
+speaks — changes on the scale of months, and because it is the only one whose miss costs two
+round trips instead of one. "No answer" is cached as readily as an answer: a chat whose players the
+service has never heard of is the commonest case there is.
+
+**The language is also written into the row** (`Scheduled_Shrink_Broadcasts.lang_code`, migration
+45), and a claim that finds it there skips the resolving entirely. The cache and the column are not
+the same thing: the cache is best-effort and shared, the column is durable and belongs to that one
+summary. It rides along with `finish`/`postpone` rather than travelling in a statement of its own —
+the row is being written anyway, and an extra round trip here would have spent in advance exactly
+what the column saves. A `NULL` leaves what is stored alone, so an attempt that never got as far as
+working the language out cannot erase one that did.
+
 The proto contract is vendored as the `user-service-proto` git submodule and compiled by
 `build.rs` (via `tonic-prost-build`), so **`protoc` must be installed** and the submodule
 checked out to build:
@@ -988,6 +1149,60 @@ Each bot feature is a vertical slice: a file in `handlers/` (e.g. `dick.rs`, `pv
 by a matching file in `repo/` (`dicks.rs`, `pvpstats.rs`, `loans.rs`, …) that owns the
 SQL. When adding a feature, follow this pairing rather than mixing DB access into handlers.
 
+### What counts as a growth
+
+> `Dicks::create_or_grow` is the growth, and the only one. It is subject to the once-a-day rule and
+> it spends a bonus attempt. Every other write to `Dicks` is not a growth: it leaves `updated_at`
+> alone and `bonus_attempts` is not its to move.
+
+**The rule lives in that one statement** (`src/repo/dicks.rs`), in the `WHERE` of its
+`ON CONFLICT DO UPDATE`: the row is rewritten only when the stored `updated_at` is of an earlier day
+or a bought attempt can pay for it, and the same statement spends the attempt — **only when one was
+needed**, so the day's first growth is free whatever the player has in store. A refusal is
+therefore not an error but an empty answer — `create_or_grow` returns `Option`, like `set_dod_winner`
+beside it, and `handlers::dick` turns `None` into the "come back tomorrow" notice.
+
+That is a change of kind, not only of place. `trg_check_and_update_dicks_timestamp` applied the rule
+to **any** statement that set `updated_at`, so the rule held whoever wrote the row; now it holds
+only for whoever goes through `create_or_grow`. A growth written by hand somewhere else would not be
+refused, and nothing in the schema would say so. What guards it instead is
+`src/repo/test/dicks.rs` — the once-a-day refusal, a bonus attempt paying for a second growth, a
+non-growth write spending none and not reopening the day — and this paragraph.
+
+The trigger was worth removing because it had grown into a tax on everything around it. Its second
+half served `bonus_attempts`, which nothing in the bot ever grants, so the chat merge
+(`src/repo/chats.rs`) carried two `+1`s whose only purpose was to cancel a decrement it never
+wanted; three tests dropped the trigger outright to be able to write what they meant; and the
+refusal travelled as SQLSTATE `GD0E1`, spelled out in the handler and unpacked from
+`sqlx::Error::Database` twelve lines at a time.
+
+Nothing about the row lock changes: `ON CONFLICT DO UPDATE` takes it before the `WHERE` is
+evaluated, so two `/grow`s racing for the same dick serialise exactly as they did.
+
+### One Dick of the Day per chat per day
+
+The same shape, one table over: `PRIMARY KEY (chat_id, created_at)` on `Dick_of_Day` **is** the
+rule, and `set_dod_winner` claims that key before it grows anybody. A conflict means the day is
+already won, so the growth never happens and the winner's name is read back for the answer;
+`Dicks::set_dod_winner` returns `DickOfDayResult` — `Chosen`, `AlreadyChosen(name)` or `NoDick` —
+rather than an `Option` beside an exception.
+
+Claiming first is what makes two `/dod`s in one chat serialise: the second waits on the index and
+is told it lost. `trg_check_dod_timestamp` could not do that. Its `SELECT` for an existing winner
+read past a concurrent election under READ COMMITTED, so the loser of a race got the primary key's
+own `23505` instead of the trigger's `GD0E2`, and the chat was shown an internal error.
+
+The name is read by **a second statement**, not by a `SELECT` beside the insert in one CTE: a
+data-modifying CTE shares one snapshot with the query next to it, so the row the winning election
+committed after ours began would not be visible there at all.
+
+Two things went with the trigger (migration 49). `Dick_of_Day.created_at` is no longer forced to
+today — the column's `DEFAULT current_date` is what the bot's own insert gets, and the chat merge
+is the only caller that names a date, which is precisely what it wants; `Chats::move_dicks_of_the_day`
+therefore no longer disables a trigger, and no longer holds an `ACCESS EXCLUSIVE` lock on the table
+for the rest of the merge. And `trg_forbid_dod_updates` is gone, so the table is append-only only
+because nothing in the bot updates it.
+
 ### Perks and the storage they are given
 
 A perk changes a length change: `handlers/perks.rs` holds them, `perks::all` registers them, and
@@ -1003,15 +1218,17 @@ name afterwards.
 
 **A perk does not write.** `apply` returns its new state next to its change, and
 `Dicks::create_or_grow` writes the length and every blob in one transaction. That ordering is the
-whole point: the once-a-day rule is a trigger that raises `GD0E1` *after* the perks have run, and a
-rolled-back growth must leave no perk believing it happened. `LoanPayoutPerk` predates this and
+whole point: the once-a-day rule is applied by that statement, *after* the perks have run, and a
+refused growth must leave no perk believing it happened — which is why the empty answer returns
+before `PerkStates::write_all` and before the commit. `LoanPayoutPerk` predates this and
 still pays inside `apply`, which is why a refused growth can still spend a payment; moving it here
 is its own issue.
 
 Two things a perk is handed rather than fetching itself: `ChangeSource`, because a Dick of the Day
 award is not a growth and `dod_increment` shares the perk pipeline with `growth_increment`; and
-`today`, which is the **database's** `current_date`, because that is the calendar the daily trigger
-compares against. A perk counting days that asked this process's clock would count different ones.
+`today`, which is the **database's** `current_date`, because that is the calendar the once-a-day
+rule compares against. A perk counting days that asked this process's clock would count different
+ones.
 
 The streak perk (issue #156) is the first user of all this. It stores
 `{"streak": …, "max": …, "last_grow": …}` and multiplies the base increment by

@@ -766,11 +766,6 @@ repository!(Chats, with_feature_toggles,
 ,
     /// An append-only history keyed by `(chat_id, created_at)`, where a day both chats crowned a
     /// winner keeps the main one's.
-    ///
-    /// The insertion trigger stamps `created_at` with the current date, which would restamp every
-    /// past win with today's, so it has to be muted for the move. The ACCESS EXCLUSIVE lock that
-    /// takes lasts until the transaction ends — acceptable for something that happens once in a
-    /// chat's lifetime. An early return rolls the muting back along with everything else.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
     async fn move_dicks_of_the_day(
@@ -778,10 +773,6 @@ repository!(Chats, with_feature_toggles,
         main_id: InternalChatId,
         deleted_id: InternalChatId,
     ) -> anyhow::Result<u64> {
-        sqlx::query!("ALTER TABLE Dick_of_Day DISABLE TRIGGER trg_check_dod_timestamp")
-            .execute(&mut **tx)
-            .await
-            .context("couldn't mute the insertion trigger of Dick_of_Day")?;
         let moved = sqlx::query!(
             "INSERT INTO Dick_of_Day (chat_id, winner_uid, created_at)
                     SELECT $1, winner_uid, created_at FROM Dick_of_Day WHERE chat_id = $2
@@ -791,10 +782,6 @@ repository!(Chats, with_feature_toggles,
             .await
             .context(format!("couldn't move the dicks of the day from the chat with id = {deleted_id} to {main_id}"))?
             .rows_affected();
-        sqlx::query!("ALTER TABLE Dick_of_Day ENABLE TRIGGER trg_check_dod_timestamp")
-            .execute(&mut **tx)
-            .await
-            .context("couldn't restore the insertion trigger of Dick_of_Day")?;
         sqlx::query!("DELETE FROM Dick_of_Day WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
@@ -876,17 +863,12 @@ repository!(Chats, with_feature_toggles,
         // Moving the dicks over rather than summing into the surviving rows: a user who only ever
         // played through inline mode has no row in the surviving chat at all, and updating in
         // place would skip them, leaving their length to be deleted below.
-        //
-        // `bonus_attempts` is incremented on both paths because the trigger on Dicks decrements it
-        // once per write; the increment merely cancels that out. It has to be spelled out again in
-        // the conflict branch: the BEFORE INSERT trigger runs before the conflict is detected, so
-        // by then `EXCLUDED` already carries the decremented value.
         let updated_dicks = sqlx::query!(
             "INSERT INTO Dicks (uid, chat_id, length, bonus_attempts, updated_at)
-                    SELECT uid, $1, length, bonus_attempts + 1, updated_at FROM Dicks WHERE chat_id = $2
+                    SELECT uid, $1, length, bonus_attempts, updated_at FROM Dicks WHERE chat_id = $2
                     ON CONFLICT (chat_id, uid) DO UPDATE SET
                         length = Dicks.length + EXCLUDED.length,
-                        bonus_attempts = Dicks.bonus_attempts + EXCLUDED.bonus_attempts + 1,
+                        bonus_attempts = Dicks.bonus_attempts + EXCLUDED.bonus_attempts,
                         updated_at = GREATEST(Dicks.updated_at, EXCLUDED.updated_at)",
                 state.main.internal_id as InternalChatId, state.deleted.0 as InternalChatId)
             .execute(&mut **tx)

@@ -1,7 +1,8 @@
 use num_traits::ToPrimitive;
 use sqlx::{Pool, Postgres};
 use crate::config::FeatureToggles;
-use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position};
+use crate::domain::objects::{DickOfDayResult, GrowthResult};
+use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
 use crate::repo::test::{fresh_db, get_chat_id_and_dicks, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID_KIND, NAME, UID, USER_ID};
@@ -10,6 +11,38 @@ const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
 fn increment_of(value: i64) -> LengthChange {
     LengthChange::signed(value)
+}
+
+async fn bonus_attempts_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i32 {
+    sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2",
+            uid, internal_chat_id)
+        .fetch_one(db)
+        .await
+        .expect("couldn't read bonus_attempts")
+}
+
+/// Crowns `user_id` and insists the election went through.
+async fn elect(
+    dicks: &repo::Dicks,
+    chat_id: &ChatIdPartiality,
+    user_id: UserId,
+    increment: i64,
+) -> GrowthResult {
+    let result = dicks.set_dod_winner(chat_id, user_id, increment_of(increment), &[])
+        .await.expect("couldn't elect a winner");
+    match result {
+        DickOfDayResult::Chosen(growth) => growth,
+        DickOfDayResult::AlreadyChosen(name) => panic!("the day was already won by {name}"),
+        DickOfDayResult::NoDick => panic!("the winner hasn't a dick"),
+    }
+}
+
+async fn set_bonus_attempts(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64, attempts: i32) {
+    sqlx::query!("UPDATE Dicks SET bonus_attempts = $3 WHERE uid = $1 AND chat_id = $2",
+            uid, internal_chat_id, attempts)
+        .execute(db)
+        .await
+        .expect("couldn't set bonus_attempts");
 }
 
 #[tokio::test]
@@ -27,15 +60,14 @@ async fn test_all() {
 
     let increment = 5;
     let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &[])
-        .await.expect("couldn't grow a dick");
+        .await
+        .expect("couldn't grow a dick")
+        .expect("the first growth of the day must be allowed");
     assert_eq!(growth.pos_in_top, Some(Position::new(1)));
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment), &[])
-        .await
-        .expect("couldn't elect a winner")
-        .expect("the winner hasn't a dick");
+    let growth = elect(&dicks, &chat_id_partiality, user_id, increment).await;
     assert_eq!(growth.pos_in_top, Some(Position::new(1)));
     let new_length = 2 * increment;
     assert_eq!(growth.new_length, new_length);
@@ -63,15 +95,14 @@ async fn test_all_with_top_pagination_disabled() {
 
     let increment = 5;
     let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &[])
-        .await.expect("couldn't grow a dick");
+        .await
+        .expect("couldn't grow a dick")
+        .expect("the first growth of the day must be allowed");
     assert_eq!(growth.pos_in_top, None);
     assert_eq!(growth.new_length, increment);
     check_top(&dicks, &chat_id, increment).await;
 
-    let growth = dicks.set_dod_winner(&chat_id_partiality, user_id, increment_of(increment), &[])
-        .await
-        .expect("couldn't elect a winner")
-        .expect("the winner hasn't a dick");
+    let growth = elect(&dicks, &chat_id_partiality, user_id, increment).await;
     assert_eq!(growth.pos_in_top, None);
     let new_length = 2 * increment;
     assert_eq!(growth.new_length, new_length);
@@ -263,4 +294,139 @@ async fn check_top(dicks: &repo::Dicks, chat_id: &ChatIdKind, length: i64) {
     assert_eq!(d[0].length, length);
     assert_eq!(d[0].owner_uid, USER_ID);
     assert_eq!(d[0].owner_name, NAME);
+}
+
+/// One winner a day per chat: the second election of the day names the first one's winner and
+/// leaves their dick alone.
+#[tokio::test]
+async fn a_second_election_on_the_same_day_is_refused() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    let chat_id = ChatIdPartiality::from(CHAT_ID_KIND);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &chat_id, increment_of(5), &[])
+        .await
+        .expect("couldn't create the dick")
+        .expect("the first growth of the day must be allowed");
+
+    let growth = elect(&dicks, &chat_id, USER_ID, 5).await;
+    assert_eq!(growth.new_length, 10);
+
+    let refused = dicks.set_dod_winner(&chat_id, USER_ID, increment_of(5), &[])
+        .await.expect("the second election must be refused, not fail");
+    let DickOfDayResult::AlreadyChosen(name) = refused else {
+        panic!("the second election of the day must be refused")
+    };
+    assert_eq!(name.value(), NAME);
+
+    let length = dicks.fetch_length(USER_ID, &CHAT_ID_KIND).await.expect("couldn't fetch the length");
+    assert_eq!(length, 10, "a refused election must grow nobody");
+}
+
+/// The once-a-day rule itself: the growth `create_or_grow` refuses is the one it answers `None` to.
+#[tokio::test]
+async fn a_second_growth_on_the_same_day_is_refused() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await
+        .expect("couldn't grow the dick")
+        .expect("the first growth of the day must be allowed");
+
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await.expect("the second growth must be refused, not fail");
+    assert!(refused.is_none(), "the second growth of the day must be refused");
+}
+
+/// The other half of the rule: a bought attempt pays for a second growth, and is spent doing so.
+#[tokio::test]
+async fn a_bonus_attempt_pays_for_a_second_growth() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await
+        .expect("couldn't create the dick")
+        .expect("the first growth of the day must be allowed");
+    let chat_id = internal_chat_id(&db).await;
+    set_bonus_attempts(&db, UID, chat_id, 1).await;
+
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await
+        .expect("couldn't grow the dick")
+        .expect("a bonus attempt must pay for the second growth");
+
+    assert_eq!(bonus_attempts_of(&db, UID, chat_id).await, 0, "the attempt must be spent");
+}
+
+/// An attempt is bought to grow twice in a day, so the day's first growth must not take one. It is
+/// free whatever the caller has in store.
+#[tokio::test]
+async fn the_first_growth_of_the_day_spends_no_bonus_attempt() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await
+        .expect("couldn't create the dick")
+        .expect("the first growth of the day must be allowed");
+    let chat_id = internal_chat_id(&db).await;
+    set_bonus_attempts(&db, UID, chat_id, 2).await;
+    // Back to yesterday, so the next growth is the first of its day and needs no attempt.
+    sqlx::query!("UPDATE Dicks SET updated_at = current_timestamp - make_interval(days => 1) \
+            WHERE uid = $1 AND chat_id = $2", UID, chat_id)
+        .execute(&db)
+        .await
+        .expect("couldn't age the dick");
+
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await
+        .expect("couldn't grow the dick")
+        .expect("the first growth of the day must be allowed");
+
+    assert_eq!(bonus_attempts_of(&db, UID, chat_id).await, 2,
+        "the day's first growth must not spend an attempt");
+}
+
+/// A write that is not a growth leaves the counter of bought attempts alone: only `create_or_grow`
+/// spends one.
+#[tokio::test]
+async fn a_write_that_is_not_a_growth_spends_no_bonus_attempt() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &[])
+        .await
+        .expect("couldn't create the dick")
+        .expect("the first growth of the day must be allowed");
+    let chat_id = internal_chat_id(&db).await;
+    set_bonus_attempts(&db, UID, chat_id, 2).await;
+
+    dicks.grow_no_attempts_check(&CHAT_ID_KIND, USER_ID, increment_of(7))
+        .await.expect("couldn't grow without the attempts check");
+
+    assert_eq!(bonus_attempts_of(&db, UID, chat_id).await, 2,
+        "a write that is not a growth must not spend an attempt");
+}
+
+/// A non-growth write moves neither `updated_at` nor the day with it, so the rule still holds after
+/// one. Without this the day would reopen on every lost battle.
+#[tokio::test]
+async fn a_write_that_is_not_a_growth_does_not_reopen_the_day() {
+    let db = fresh_db().await;
+    let repo::Repositories { dicks, users, .. } = repos(&db);
+    users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &[])
+        .await
+        .expect("couldn't create the dick")
+        .expect("the first growth of the day must be allowed");
+
+    dicks.grow_no_attempts_check(&CHAT_ID_KIND, USER_ID, increment_of(-10))
+        .await.expect("couldn't apply the non-growth change");
+
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+        .await.expect("the growth must be refused, not fail");
+    assert!(refused.is_none(), "the day must still be closed");
 }

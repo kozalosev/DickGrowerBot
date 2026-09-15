@@ -1,5 +1,4 @@
 use autometrics::autometrics;
-use std::borrow::Cow;
 use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -7,12 +6,10 @@ use teloxide::macros::BotCommands;
 use teloxide::types::{LinkPreviewOptions, Message};
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
-use crate::domain::objects::GrowthResult;
-use crate::domain::primitives::{LanguageCode, Username};
+use crate::domain::objects::{DickOfDayResult, GrowthResult};
+use crate::domain::primitives::LanguageCode;
 use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::Incrementor;
-
-const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "snake_case")]
@@ -66,9 +63,9 @@ pub(crate) async fn dick_of_day_impl(
         Some(winner) => {
             let increment = incr.dod_increment(winner.uid, chat_id.kind(), lang_code).await;
             let dod_result = repos.dicks.set_dod_winner(chat_id, winner.uid, increment.total,
-                                                        &increment.perk_states).await;
+                                                        &increment.perk_states).await?;
             let (main_part, group) = match dod_result {
-                Ok(Some(GrowthResult { new_length, pos_in_top })) => {
+                DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }) => {
                     let answer = t!("commands.dod.result", locale = lang_code,
                         uid = winner.uid, name = winner.name.escaped(), growth = increment.total, length = new_length);
                     let perks_part = increment.perks_part_of_answer(lang_code);
@@ -80,22 +77,16 @@ pub(crate) async fn dick_of_day_impl(
                     };
                     (text, MessageGroup::Event)
                 },
-                Ok(None) => {
+                DickOfDayResult::AlreadyChosen(name) => {
+                    let text = t!("commands.dod.already_chosen", locale = lang_code,
+                        name = name.escaped()).to_string();
+                    (text, MessageGroup::Notice)
+                }
+                DickOfDayResult::NoDick => {
                     tracing::error!(uid = %winner.uid, chat_id = %chat_id,
                         "there was an attempt to set a non-existent dick as a winner");
                     let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
                     (text, MessageGroup::Notice)
-                }
-                Err(e) => {
-                    match e.downcast::<sqlx::Error>()? {
-                        sqlx::Error::Database(e)
-                        if e.code() == Some(Cow::Borrowed(DOD_ALREADY_CHOSEN_SQL_CODE)) => {
-                            let name = Username::new(e.message().to_owned()).escaped();
-                            let text = t!("commands.dod.already_chosen", locale = lang_code, name = name).to_string();
-                            (text, MessageGroup::Notice)
-                        }
-                        e => Err(e)?
-                    }
                 }
             };
             let time_left_part = utils::date::get_time_till_next_day_string(lang_code);

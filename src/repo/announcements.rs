@@ -116,8 +116,8 @@ impl Announcements {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, lang_code = %lang_code))]
     async fn increment_times_shown(&self, chat_id: InternalChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
-        sqlx::query!("UPDATE Announcements SET times_shown = times_shown + 1 WHERE chat_id = $1 AND language::text = $2",
-                chat_id as InternalChatId, lang_code as &LanguageCode)
+        sqlx::query!("UPDATE Announcements SET times_shown = times_shown + 1 WHERE chat_id = $1 AND language = $2",
+                chat_id as InternalChatId, lang_code.to_supported_language() as SupportedLanguage)
             .execute(&self.pool)
             .await
             .map_err(Into::into)

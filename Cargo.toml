@@ -43,7 +43,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "jso
 tracing-opentelemetry = "0.33.0"
 opentelemetry = "0.32.0"
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic"] }
+opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic", "gzip-tonic"] }
 opentelemetry-appender-tracing = { version = "0.32.0", features = ["experimental_span_attributes"] }
 tonic-tracing-opentelemetry = "0.38.0"
 tower = "0.5.3"

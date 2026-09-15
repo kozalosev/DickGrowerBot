@@ -42,8 +42,7 @@ pub enum DeletionState {
 }
 
 impl DeletionState {
-    /// The states a row never leaves. What is kept in the table until the cleaning process runs,
-    /// and what the gauges of [`crate::metrics::SELF_DESTRUCTION_FINISHED`] are split by.
+    /// The states a row never leaves. What is kept in the table until the cleaning process runs.
     pub const TERMINAL: [Self; 4] = [Self::Removed, Self::RemovedBefore, Self::Expired, Self::Failed];
 }
 
@@ -217,20 +216,6 @@ repository!(ScheduledDeletions,
             .fetch_one(&self.pool)
             .await
             .context("couldn't count the pending deletions")
-    },
-
-    /// How many rows are finished but not yet cleaned, by state — the queue's own history, and the
-    /// first thing to look at when messages stop disappearing.
-    #[autometrics]
-    #[tracing::instrument(skip_all)]
-    pub async fn count_finished(&self) -> anyhow::Result<Vec<(DeletionState, Count<ScheduledDeletion>)>> {
-        let rows = sqlx::query!(
-            r#"SELECT state AS "state: DeletionState", count(*) AS "count!: Count<ScheduledDeletion>"
-                FROM Scheduled_Message_Deletions WHERE finished_at IS NOT NULL GROUP BY state"#)
-            .fetch_all(&self.pool)
-            .await
-            .context("couldn't count the finished deletions")?;
-        Ok(rows.into_iter().map(|row| (row.state, row.count)).collect())
     },
 
     /// Records that the message now carries the warning and moves it to the end of the grace period.
