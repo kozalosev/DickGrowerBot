@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO User_Customizations (uid, customization_id) VALUES ($1, 'future-id')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e15b5845e8236373b966fdfe002992862859b8f8d00a3a9ad1da88b2dd9d944a"
+}
