@@ -62,6 +62,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["rustls", 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 serde-saphyr = "1.0.0-rc.1"
+serde_with = "3.21.0"
 # HTML and templates
 tinytemplate = "1.2.1"
 # Derive macros

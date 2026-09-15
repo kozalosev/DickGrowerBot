@@ -64,7 +64,8 @@ through an explicit list. Every new variable goes into **all** of these:
    means the variable never reaches the container**, no matter what `.env` says;
 4. `Dockerfile` — the `ARG` list at the bottom. It changes nothing at runtime (`ARG` is build-time
    only), but the list is kept complete as the inventory of what the image understands;
-5. `README.md` and this file — what it does and what happens when it is unset;
+5. this file — what it does and what happens when it is unset. **Not `README.md`**: it is the
+   project's index, and a variable's name, default or tuning advice is not what belongs there;
 6. the server-configs repo — `DickGrowerBot/docker-compose.yml` (the same `environment:` list) and
    `DickGrowerBot/.env.sops` (the value itself, through `make secret-edit`).
 
@@ -90,6 +91,23 @@ BOT_HTTP_TIMEOUT=17s        # total per-request timeout; teloxide default when u
 Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are auto-detected by
 reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read only by the stock
 `Bot::from_env()` client (i.e. when both timeouts are unset).
+
+### Optional: what the help mentions
+
+```
+HELP_AUCTION_BOT=DickAuctionBot  # the bot auctioning promo codes; unset or empty => not mentioned
+```
+
+The help is rendered once, at startup, from `help::Context`. A paragraph about something that may
+be absent sits inside `{{ if … }}`. `/support` and `/cleanup` follow `commands::CommandToggles`, the
+same switches that hide those commands from the menu; the auctions paragraph follows
+`HELP_AUCTION_BOT`; and the streak paragraph follows the perk, whose grades render as an empty
+string — which `{{ if }}` takes as false — when `STREAK_BONUS_GRADES` is empty or `DISABLE_STREAK`
+is set.
+
+tinytemplate reads the context through `Serialize`, never through `Display` — `render` turns it
+into a `serde_json::Value` before any formatter sees it. So a `Username` that must be shown with its
+`@` is marked `#[serde_as(as = "DisplayFromStr")]`; the derived `Serialize` writes the bare name.
 
 ### Optional: /support and user bans
 
@@ -1231,15 +1249,30 @@ rule compares against. A perk counting days that asked this process's clock woul
 ones.
 
 The streak perk (issue #156) is the first user of all this. It stores
-`{"streak": …, "max": …, "last_grow": …}` and multiplies the base increment by
-`STREAK_BONUS_RATIO_PER_DAY` for each consecutive day, up to `STREAK_BONUS_MAX_DAYS`. **A shrink is
-multiplied too.** Only playing on a *later* day advances the count — a second growth on the same
-day, bought with `bonus_attempts`, is paid the same bonus and leaves it alone.
+`{"streak": …, "max": …, "last_grow": …}` and adds a centimetre for every **grade** the streak has
+reached — `STREAK_BONUS_GRADES` lists the days they start on (`StreakGrades`). Only playing on a
+*later* day advances the count — a second growth on the same day, bought with `bonus_attempts`, is
+paid the same bonus and leaves it alone.
 
 ```
-STREAK_BONUS_RATIO_PER_DAY=0.05  # of the roll, per consecutive day; 0 => the perk is off
-STREAK_BONUS_MAX_DAYS=20         # days that still count, so the cap is x2; 0 => the perk is off
+STREAK_BONUS_GRADES=2,4,8,16,32  # the day each +1 cm starts on; empty => the perk is off
 ```
+
+Three things about that shape are deliberate:
+
+* **The bonus is a length, not a share of the roll.** A share scales the swings together with the
+  average, so a veteran's worst day would be twice a newcomer's and luck would outweigh the streak
+  exactly as much as it did on day one. A fixed length moves the average and leaves the swings alone.
+* **It is visible from the second day.** The perks' part of the answer is printed only when their
+  change is non-zero, and a share of a small roll rounds to nothing — a bonus nobody sees teaches
+  nobody how it works. The note names the next grade (`titles.perks.streak.next_grade`) for the
+  same reason: an irregular step can't be learned by watching it.
+* **The grades lengthen as they go**, so a long streak still has a next step without the bonus
+  outgrowing the rolls.
+
+**A shrink gets the same centimetres**, so a long enough streak cancels it: with the default list
+and the default range, a month in a row outweighs the worst roll of −5. That is accepted as what a
+month of daily play earns; inactivity still costs length through the daily shrink.
 
 Unlike `help-pussies`, it is **on by default** (`PerksConfig::default`), so it works without a
 change to server-configs.

@@ -1,5 +1,6 @@
 use teloxide::types::Me;
-use crate::config::env::get_env_mandatory_value;
+use crate::commands::CommandToggles;
+use crate::config::env::{get_env_mandatory_value, get_optional_env_string};
 use crate::domain::primitives::{Percentage, Username};
 use crate::handlers::perks::{HelpPussiesPerk, StreakPerk};
 use crate::handlers::utils::Incrementor;
@@ -10,6 +11,7 @@ pub fn build_context_for_help_messages(
     me: &Me,
     incr: &Incrementor,
     competitor_bots: &[&str],
+    toggles: &CommandToggles,
 ) -> anyhow::Result<help::Context> {
     let other_bots = competitor_bots
         .iter()
@@ -17,7 +19,6 @@ pub fn build_context_for_help_messages(
         .collect::<Vec<String>>()
         .join(", ");
     let incr_cfg = incr.get_config();
-    let streak = incr.find_perk_config::<StreakPerk>();
 
     Ok(help::Context {
         bot_name: Username::from(me.username()),
@@ -29,14 +30,14 @@ pub fn build_context_for_help_messages(
         admin_chat_ru: get_env_mandatory_value("HELP_ADMIN_CHAT_RU")?,
         admin_chat_en: get_env_mandatory_value("HELP_ADMIN_CHAT_EN")?,
         git_repo: get_env_mandatory_value("HELP_GIT_REPO")?,
+        support_enabled: toggles.support_enabled,
+        cleanup_enabled: toggles.cleanup_enabled,
+        auction_bot: get_optional_env_string("HELP_AUCTION_BOT").map(Username::new),
         help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
             .map(Percentage::from)
             .unwrap_or(literal!(Percentage = 0)),
-        streak_bonus_percentage_per_day: streak.as_ref()
-            .map(|cfg| Percentage::from(cfg.ratio_per_day))
-            .unwrap_or(literal!(Percentage = 0)),
-        streak_bonus_max_days: streak
-            .map(|cfg| cfg.max_days)
+        streak_bonus_grades: incr.find_perk_config::<StreakPerk>()
+            .map(|grades| grades.to_string())
             .unwrap_or_default(),
     })
 }

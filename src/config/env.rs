@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -193,6 +194,20 @@ pub(super) enum InvalidDuration {
     Unit(char),
     #[display("{_0}")]
     Number(std::num::ParseIntError),
+}
+
+/// The items of a comma-separated list, trimmed, with the empty ones left out.
+pub(super) fn list_items(raw: &str) -> impl Iterator<Item = &str> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+}
+
+/// A comma-separated list of numbers, sorted and without repetitions. An empty value is an empty list.
+pub(super) fn parse_sorted_numbers(raw: &str) -> Result<BTreeSet<u32>, std::num::ParseIntError> {
+    list_items(raw)
+        .map(str::parse)
+        .collect()
 }
 
 /// The spans a fallback is written in. `Duration::from_days` is still unstable, so one of the four

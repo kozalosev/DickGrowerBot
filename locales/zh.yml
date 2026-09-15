@@ -207,10 +207,14 @@ titles:
     some: "\n\n下次尝试在 <b>%{hours}</b>小时 <b>%{minutes}</b>分钟后。"
   perks:
     top_line: "以下特权影响了结果"
-    help-pussies: "深洞"
-    loan-payout: "小贷人员"
-    streak: "日复一日"
-    streak_note: "连续 %{days} 天"
+    help-pussies:
+      name: "深洞"
+    loan-payout:
+      name: "小贷人员"
+    streak:
+      name: "日复一日"
+      note: "连续 %{days} 天"
+      next_grade: "第 %{next_day} 天起 +%{next_bonus}"
 setup:
   text: "本群不是超级群组，因此通过内联模式调用我时，我无法识别它。\n\n请<b>点击一次</b>下方按钮以在此激活我——之后一切将正常运作。\n\n在按钮被点击之前，如果本群升级为超级群组，通过内联模式游玩的一切都会丢失。"
   button: "激活"
