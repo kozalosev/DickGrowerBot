@@ -207,10 +207,14 @@ titles:
     some: "\n\nProssimo tentativo tra <b>%{hours}</b>h <b>%{minutes}</b>m."
   perks:
     top_line: "I seguenti vantaggi hanno influenzato il risultato:"
-    help-pussies: "buco profondo"
-    loan-payout: "microdebitore"
-    streak: "giorno dopo giorno"
-    streak_note: "%{days} giorni di fila"
+    help-pussies:
+      name: "buco profondo"
+    loan-payout:
+      name: "microdebitore"
+    streak:
+      name: "giorno dopo giorno"
+      note: "%{days} giorni di fila"
+      next_grade: "+%{next_bonus} dal giorno %{next_day}"
 setup:
   text: "Questo gruppo non è un supergruppo, perciò non riesco a riconoscerlo quando vengo chiamato in modalità inline.\n\nPremi il pulsante qui sotto <b>una volta</b> per attivarmi qui — dopodiché tutto funzionerà come al solito.\n\nFinché non viene premuto, tutto ciò che è stato giocato in modalità inline andrà perso se il gruppo diventa un supergruppo."
   button: "Attiva"

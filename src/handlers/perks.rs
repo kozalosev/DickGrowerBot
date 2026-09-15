@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
 use sqlx::{Pool, Postgres};
 use crate::handlers::utils::{days_word_ru, AdditionalChange, ChangeSource, ConfigurablePerk, Perk, PerkContext, PerkOutcome};
-use crate::config::StreakBonusConfig;
+use crate::config::StreakGrades;
 use crate::{config, repo};
 use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, LoanPayout, PerkName, PerkNote, Ratio};
 use domain_types::literal;
@@ -25,7 +25,7 @@ pub fn all(pool: &Pool<Postgres>, cfg: &config::AppConfig) -> Vec<Box<dyn Perk>>
             coefficient: perks.help_pussies_ratio,
         }),
         Box::new(LoanPayoutPerk { loans }),
-        Box::new(StreakPerk { config: perks.streak_bonus })
+        Box::new(StreakPerk { grades: perks.streak_grades.clone() })
     ]
 }
 
@@ -109,9 +109,10 @@ impl Perk for LoanPayoutPerk {
     }
 }
 
-/// Multiplies a growth by how many days in a row its owner has played. A shrink is multiplied too.
+/// Adds a centimetre to a growth for every grade its owner's days in a row have reached. A shrink
+/// gets the same centimetres, which soften it.
 pub struct StreakPerk {
-    config: StreakBonusConfig,
+    grades: StreakGrades,
 }
 
 /// What a streak needs to remember. `last_grow` is a date rather than a count of days, because the
@@ -144,17 +145,20 @@ impl Perk for StreakPerk {
         let max = previous.map_or(streak, |prev| prev.max.max(streak));
         let state = StreakState { streak, max, last_grow: ctx.today };
 
-        let days = f64::from((streak - 1).min(self.config.max_days).value());
-        let base: f64 = ctx.intent.base_increment.value().approx_into();
-        let change: i64 = (self.config.ratio_per_day.scale(base) * days).round().saturating_into();
+        let bonus: i64 = self.grades.reached(streak).saturating_into();
+        let days = t!("titles.perks.streak.note", locale = ctx.lang_code,
+            days = streak, word_days = days_word_ru(streak));
+        let note = self.grades.next(streak)
+            .map(|next_day| t!("titles.perks.streak.next_grade", locale = ctx.lang_code,
+                next_bonus = bonus + 1, next_day = next_day))
+            .map_or_else(|| days.to_string(), |next_grade| format!("{days}; {next_grade}"));
 
         PerkOutcome {
-            change: AdditionalChange(LengthChange::signed(change)),
+            change: AdditionalChange(LengthChange::signed(bonus)),
             state: serde_json::to_value(state)
                 .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = %e, "couldn't serialize a streak"))
                 .ok(),
-            note: Some(PerkNote::new(t!("titles.perks.streak_note", locale = ctx.lang_code,
-                days = streak, word_days = days_word_ru(streak)).to_string())),
+            note: Some(PerkNote::new(note)),
         }
     }
 
@@ -165,15 +169,15 @@ impl Perk for StreakPerk {
     }
 
     fn enabled(&self) -> bool {
-        self.config.ratio_per_day > literal!(Ratio = 0.0) && self.config.max_days > DaysCount::new(0)
+        !self.grades.is_empty()
     }
 }
 
 impl ConfigurablePerk for StreakPerk {
-    type Config = StreakBonusConfig;
+    type Config = StreakGrades;
 
     fn get_config(&self) -> Self::Config {
-        self.config
+        self.grades.clone()
     }
 }
 
@@ -190,7 +194,6 @@ mod test {
     use chrono::NaiveDate;
     use domain_types::literal;
     use sqlx::types::JsonValue;
-    use crate::config::StreakBonusConfig;
     use crate::handlers::perks::{HelpPussiesPerk, LoanPayoutPerk, StreakPerk, StreakState};
     use crate::handlers::utils::{ChangeIntent, ChangeSource, DickId, Perk, PerkContext};
     use crate::{config, repo};
@@ -217,13 +220,13 @@ mod test {
             let invalid_perk = HelpPussiesPerk { coefficient: literal!(Ratio = 0.0) };
             assert!(!invalid_perk.enabled())
         }
-        
+
         let perk = HelpPussiesPerk { coefficient: literal!(Ratio = 0.5) };
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
         let change_intent_positive_length = ChangeIntent { current_length: Length::new(1), base_increment: LengthIncrement::new(1).into() };
         let change_intent_negative_length_positive_increment = ChangeIntent { current_length: Length::new(-1), base_increment: LengthIncrement::new(1).into() };
         let change_intent_negative_length_negative_increment = ChangeIntent { current_length: Length::new(-1), base_increment: SignedLengthChange::new(-1).into() };
-        
+
         assert!(perk.enabled());
         assert_eq!(perk.apply(ctx(&dick_id, change_intent_positive_length)).await.change.0.value(), 0);
         assert_eq!(perk.apply(ctx(&dick_id, change_intent_negative_length_positive_increment)).await.change.0.value(), 1);
@@ -245,7 +248,7 @@ mod test {
             let users = repo::Users::new(db.clone());
             users.create_or_update(USER_ID, "")
                 .await.expect("couldn't create a user");
-            
+
             let dicks = repo::Dicks::new(db, Default::default());
             // the length must be negative to be eligible for a loan
             dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(-10), &[])
@@ -281,13 +284,10 @@ mod test {
         assert_eq!(debt, Debt::new(9));
     }
 
-    /// Half of the roll per day, three days at most, so the numbers are worth reading.
+    /// Grades on the second, third and fifth days, so every case is a few days away.
     fn streak_perk() -> StreakPerk {
         StreakPerk {
-            config: StreakBonusConfig {
-                ratio_per_day: literal!(Ratio = 0.5),
-                max_days: DaysCount::new(3),
-            },
+            grades: "2,3,5".parse().expect("couldn't parse the grades"),
         }
     }
 
@@ -313,7 +313,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn a_day_in_a_row_multiplies_the_roll_in_both_directions() {
+    async fn every_grade_reached_adds_a_centimetre_whatever_the_roll() {
         let perk = streak_perk();
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
         let yesterday = today().pred_opt().expect("a valid date");
@@ -321,17 +321,35 @@ mod test {
 
         let gain = ChangeIntent { current_length: Length::new(0), base_increment: LengthIncrement::new(10).into() };
         let outcome = perk.apply(PerkContext { state: Some(&stored_streak), ..ctx(&dick_id, gain) }).await;
-        // the third day in a row: two days count, half of the roll each
-        assert_eq!(outcome.change.0.value(), 10);
+        // the third day in a row has reached the grades of the second and the third
+        assert_eq!(outcome.change.0.value(), 2);
         assert_eq!(outcome.state.expect("the streak must be remembered"), stored(3, 3, today()));
 
         let loss = ChangeIntent { current_length: Length::new(0), base_increment: SignedLengthChange::new(-10).into() };
         let outcome = perk.apply(PerkContext { state: Some(&stored_streak), ..ctx(&dick_id, loss) }).await;
-        assert_eq!(outcome.change.0.value(), -10, "a shrink must be multiplied just the same");
+        assert_eq!(outcome.change.0.value(), 2, "a shrink must be softened by the same centimetres");
     }
 
     #[tokio::test]
-    async fn a_long_streak_stops_counting_at_the_configured_day() {
+    async fn the_note_names_the_next_grade_until_the_last_one() {
+        let perk = streak_perk();
+        let dick_id = DickId(USER_ID, CHAT_ID_KIND);
+        let yesterday = today().pred_opt().expect("a valid date");
+        let intent = ChangeIntent { current_length: Length::new(0), base_increment: LengthIncrement::new(10).into() };
+
+        let before_last = stored(2, 2, yesterday);
+        let outcome = perk.apply(PerkContext { state: Some(&before_last), ..ctx(&dick_id, intent) }).await;
+        let note = outcome.note.expect("a streak must be noted").to_string();
+        assert_eq!(note, "3 days in a row; +3 from day 5");
+
+        let after_last = stored(4, 4, yesterday);
+        let outcome = perk.apply(PerkContext { state: Some(&after_last), ..ctx(&dick_id, intent) }).await;
+        let note = outcome.note.expect("a streak must be noted").to_string();
+        assert_eq!(note, "5 days in a row");
+    }
+
+    #[tokio::test]
+    async fn a_long_streak_stops_growing_at_the_last_grade() {
         let perk = streak_perk();
         let dick_id = DickId(USER_ID, CHAT_ID_KIND);
         let yesterday = today().pred_opt().expect("a valid date");
@@ -339,8 +357,7 @@ mod test {
         let intent = ChangeIntent { current_length: Length::new(0), base_increment: LengthIncrement::new(10).into() };
 
         let outcome = perk.apply(PerkContext { state: Some(&stored_streak), ..ctx(&dick_id, intent) }).await;
-        // three days at most, half of the roll each
-        assert_eq!(outcome.change.0.value(), 15);
+        assert_eq!(outcome.change.0.value(), 3);
         assert_eq!(outcome.state.expect("the streak must be remembered"), stored(100, 100, today()));
     }
 
@@ -352,7 +369,7 @@ mod test {
         let intent = ChangeIntent { current_length: Length::new(0), base_increment: LengthIncrement::new(10).into() };
 
         let outcome = perk.apply(PerkContext { state: Some(&stored_streak), ..ctx(&dick_id, intent) }).await;
-        assert_eq!(outcome.change.0.value(), 10, "the extra attempt is paid the same bonus");
+        assert_eq!(outcome.change.0.value(), 2, "the extra attempt is paid the same bonus");
         assert_eq!(outcome.state.expect("the streak must be remembered"), stored(3, 5, today()));
     }
 
@@ -387,16 +404,11 @@ mod test {
     }
 
     #[test]
-    fn the_streak_is_off_when_either_of_its_numbers_is_zero() {
-        let without_ratio = StreakPerk {
-            config: StreakBonusConfig { ratio_per_day: literal!(Ratio = 0.0), ..Default::default() },
+    fn the_streak_is_off_without_grades() {
+        let without_grades = StreakPerk {
+            grades: "".parse().expect("couldn't parse the grades"),
         };
-        assert!(!without_ratio.enabled());
-
-        let without_days = StreakPerk {
-            config: StreakBonusConfig { max_days: DaysCount::new(0), ..Default::default() },
-        };
-        assert!(!without_days.enabled());
+        assert!(!without_grades.enabled());
 
         assert!(streak_perk().enabled());
     }

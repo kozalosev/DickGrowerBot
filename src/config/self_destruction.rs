@@ -1,5 +1,6 @@
 use std::str::FromStr;
 use std::time::Duration;
+use crate::config::env::{list_items, parse_sorted_numbers};
 use crate::domain::objects::ChatCleanupSettings;
 use crate::domain::primitives::{AttemptsCount, DelayMinutes, Limit};
 
@@ -52,9 +53,7 @@ impl FromStr for InlineGroups {
     type Err = strum::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
+        list_items(s)
             .try_fold(0, |acc, name| MessageGroup::from_str(&name.to_lowercase())
                 .map(|group| acc | Self::bit(group)))
             .map(Self)
@@ -104,21 +103,18 @@ impl FromStr for DelayOptions {
     type Err = std::num::ParseIntError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut minutes = s.split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.parse::<u32>())
-            .collect::<Result<Vec<_>, _>>()?;
-        minutes.retain(|value| {
-            let acceptable = *value > 0 && u64::from(*value) * 60 <= MAX_DELAY.as_secs();
-            if !acceptable {
-                tracing::warn!(minutes = %value, "a suggested delay is dropped: it is either zero or past the limit");
-            }
-            acceptable
-        });
-        minutes.sort_unstable();
-        minutes.dedup();
-        Ok(Self(minutes.into_iter().map(DelayMinutes::new).collect()))
+        let minutes = parse_sorted_numbers(s)?
+            .into_iter()
+            .filter(|value| {
+                let acceptable = *value > 0 && u64::from(*value) * 60 <= MAX_DELAY.as_secs();
+                if !acceptable {
+                    tracing::warn!(minutes = %value, "a suggested delay is dropped: it is either zero or past the limit");
+                }
+                acceptable
+            })
+            .map(DelayMinutes::new)
+            .collect();
+        Ok(Self(minutes))
     }
 }
 

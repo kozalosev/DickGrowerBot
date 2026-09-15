@@ -195,10 +195,14 @@ titles:
     some: "\n\n下次嘗試在 <b>%{hours}</b>小時 <b>%{minutes}</b>分鐘後。"
   perks:
     top_line: "以下特權影響了結果"
-    help-pussies: "深洞"
-    loan-payout: "貸款人"
-    streak: "日復一日"
-    streak_note: "連續 %{days} 天"
+    help-pussies:
+      name: "深洞"
+    loan-payout:
+      name: "貸款人"
+    streak:
+      name: "日復一日"
+      note: "連續 %{days} 天"
+      next_grade: "第 %{next_day} 天起 +%{next_bonus}"
 setup:
   text: "本群不是超級群組，因此透過內聯模式呼叫我時，我無法識別它。\n\n請<b>點擊一次</b>下方按鈕以在此啟用我——之後一切將正常運作。\n\n在按鈕被點擊之前，如果本群升級為超級群組，透過內聯模式遊玩的一切都會遺失。"
   button: "啟用"

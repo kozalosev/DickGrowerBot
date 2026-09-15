@@ -17,7 +17,6 @@ pub fn build_context_for_help_messages(
         .collect::<Vec<String>>()
         .join(", ");
     let incr_cfg = incr.get_config();
-    let streak = incr.find_perk_config::<StreakPerk>();
 
     Ok(help::Context {
         bot_name: Username::from(me.username()),
@@ -32,11 +31,8 @@ pub fn build_context_for_help_messages(
         help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
             .map(Percentage::from)
             .unwrap_or(literal!(Percentage = 0)),
-        streak_bonus_percentage_per_day: streak.as_ref()
-            .map(|cfg| Percentage::from(cfg.ratio_per_day))
-            .unwrap_or(literal!(Percentage = 0)),
-        streak_bonus_max_days: streak
-            .map(|cfg| cfg.max_days)
+        streak_bonus_grades: incr.find_perk_config::<StreakPerk>()
+            .map(|grades| grades.to_string())
             .unwrap_or_default(),
     })
 }

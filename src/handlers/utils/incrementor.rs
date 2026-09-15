@@ -303,7 +303,7 @@ impl Increment {
             let top_line = t!("titles.perks.top_line", locale = lang_code);
             let perks = self.by_perks.iter()
                 .map(|(perk, effect)| {
-                    let t_key = format!("titles.perks.{perk}");
+                    let t_key = format!("titles.perks.{perk}.name");
                     let name = t!(&t_key, locale = lang_code);
                     let value = effect.change;
                     match &effect.note {
