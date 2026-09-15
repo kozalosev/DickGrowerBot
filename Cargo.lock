@@ -845,6 +845,7 @@ dependencies = [
  "serde",
  "serde-saphyr 1.0.0-rc.1",
  "serde_json",
+ "serde_with",
  "sha2 0.11.0",
  "sqlx",
  "strum",

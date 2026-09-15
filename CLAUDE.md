@@ -92,6 +92,23 @@ Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are 
 reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read only by the stock
 `Bot::from_env()` client (i.e. when both timeouts are unset).
 
+### Optional: what the help mentions
+
+```
+HELP_AUCTION_BOT=DickAuctionBot  # the bot auctioning promo codes; unset or empty => not mentioned
+```
+
+The help is rendered once, at startup, from `help::Context`. A paragraph about something that may
+be absent sits inside `{{ if … }}`. `/support` and `/cleanup` follow `commands::CommandToggles`, the
+same switches that hide those commands from the menu; the auctions paragraph follows
+`HELP_AUCTION_BOT`; and the streak paragraph follows the perk, whose grades render as an empty
+string — which `{{ if }}` takes as false — when `STREAK_BONUS_GRADES` is empty or `DISABLE_STREAK`
+is set.
+
+tinytemplate reads the context through `Serialize`, never through `Display` — `render` turns it
+into a `serde_json::Value` before any formatter sees it. So a `Username` that must be shown with its
+`@` is marked `#[serde_as(as = "DisplayFromStr")]`; the derived `Serialize` writes the bare name.
+
 ### Optional: /support and user bans
 
 ```
