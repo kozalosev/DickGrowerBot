@@ -150,6 +150,30 @@ async fn a_code_outside_its_window_is_reported_by_its_side() {
         .await.expect("a code is still valid on the last day of its window");
 }
 
+/// A window may not end before it starts, but it may end on the day it starts.
+#[tokio::test]
+async fn a_window_cannot_end_before_it_starts() {
+    let db = fresh_db().await;
+
+    let promo = repo::Promo::new(db.clone());
+    promo.create_promo_code(PromoCodeParams{
+        code: literal!(PromoCode = PROMO_CODE),
+        bonus_length: PromoBonus::new(PROMO_BONUS),
+        capacity: PromoCapacity::new(1),
+    }).await.expect("couldn't create a promo code");
+
+    sqlx::query!("UPDATE Promo_Codes SET until = since WHERE code = $1", PROMO_CODE)
+        .execute(&db)
+        .await.expect("a window of a single day must be allowed");
+
+    let err = sqlx::query!("UPDATE Promo_Codes SET until = since - 1 WHERE code = $1", PROMO_CODE)
+        .execute(&db)
+        .await.expect_err("a window ending before it starts must be refused");
+    let constraint = err.as_database_error()
+        .and_then(|e| e.constraint());
+    assert_eq!(constraint, Some("promo_code_window"));
+}
+
 async fn check_capacity(db: &Pool<Postgres>, expected: i32) {
     let row = sqlx::query!("SELECT capacity FROM Promo_Codes WHERE code = $1", PROMO_CODE)
         .fetch_one(db)
