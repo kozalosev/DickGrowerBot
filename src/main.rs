@@ -79,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             HandlerDeps { repos, config, self_destruction, lang_resolver }
         })
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
+        .branch(Update::filter_message().filter(handlers::is_support_reply).endpoint(handlers::support_reply_handler))
         // /topics goes above the gate it configures, or a chat could lock itself out of its own
         // setting. Being a branch of its own, it needs no exemption inside the gate: this one
         // matches first, and only what falls through reaches the gate below.
