@@ -42,8 +42,8 @@ pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
     Counter::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
-pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(||
-    ComplexCommandCounters::new("command_import_usage_total", "count of /import invocations and successes", ["invoked", "finished"]));
+pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(||
+    ImportCommandCounters::new());
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
@@ -291,6 +291,7 @@ pub struct ComplexCommandCounters {
     invoked: Counter,
     finished: Counter,
 }
+pub struct ImportCommandCounters(CounterVec);
 pub struct BothModesCounters {
     pub chat: Counter,
     pub inline: Counter,
@@ -438,6 +439,26 @@ impl ComplexCommandCounters {
 
     pub fn finished(&self) {
         self.finished.inc()
+    }
+}
+
+impl ImportCommandCounters {
+    fn new() -> Self {
+        let vec = CounterVec::new("command_import_usage_total", "count of /import invocations and successes by source bot", &["state", "bot"]);
+        for state in ["invoked", "finished"] {
+            for bot in ["pipisabot", "kraft28_bot", "none"] {
+                vec.counter(&[state, bot]);
+            }
+        }
+        Self(vec)
+    }
+
+    pub fn invoked(&self, bot: &str) {
+        self.0.counter(&["invoked", bot]).inc()
+    }
+
+    pub fn finished(&self, bot: &str) {
+        self.0.counter(&["finished", bot]).inc()
     }
 }
 
@@ -936,7 +957,7 @@ mod tests {
     use crate::config::MessageGroup;
     use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-                BROADCAST_LANGUAGE, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
+                BROADCAST_LANGUAGE, CMD_IMPORT, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
                 SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
@@ -949,6 +970,18 @@ mod tests {
         for outcome in ChatMigrationOutcome::iter() {
             let series = format!("chat_migration_total{{outcome=\"{outcome}\"}}");
             assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
+    }
+
+    #[test]
+    fn import_counter_has_only_the_supported_source_labels() {
+        Lazy::force(&CMD_IMPORT);
+        let rendered = render_metrics();
+        for state in ["invoked", "finished"] {
+            for bot in ["pipisabot", "kraft28_bot", "none"] {
+                let series = format!("command_import_usage_total{{bot=\"{bot}\",state=\"{state}\"}}");
+                assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+            }
         }
     }
 

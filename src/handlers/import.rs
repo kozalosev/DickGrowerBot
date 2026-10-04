@@ -19,7 +19,7 @@ pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 const MAX_MEMBERS_FOR_IMPORT: usize = 10;
 
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?)(\.{3})? — (?<length>\d+) см.")
+    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?)(\.{3})? — (?<length>\d+) см\.?")
         .expect("TOP_LINE_REGEXP is invalid")
 });
 
@@ -37,6 +37,13 @@ enum OriginalBotKind {
 }
 
 impl OriginalBotKind {
+    fn metric_label(&self) -> &'static str {
+        match self {
+            OriginalBotKind::Pipisa => "pipisabot",
+            OriginalBotKind::Kraft28 => "kraft28_bot",
+        }
+    }
+
     fn convert_name(&self, name: &str) -> String {
         match self {
             OriginalBotKind::Pipisa => {
@@ -105,6 +112,17 @@ struct ImportResult {
 #[derive(Debug)]
 struct InvalidLines(Vec<String>);
 
+#[derive(Debug)]
+struct NothingFound;
+
+impl Display for NothingFound {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no leaderboard entries found")
+    }
+}
+
+impl std::error::Error for NothingFound {}
+
 // Required only to wrap the error by anyhow!()
 impl Display for InvalidLines {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -123,12 +141,14 @@ pub async fn import_cmd_handler(
 ) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
-    metrics::CMD_IMPORT.invoked();
-    let answer = match check_and_parse_message(&bot, bot_info.id, &msg, &repos).await {
+    let parsed = check_and_parse_message(&bot, bot_info.id, &msg, &repos).await;
+    let source = parsed.as_ref().map_or("none", |p| p.0.metric_label());
+    metrics::CMD_IMPORT.invoked(source);
+    let answer = match parsed {
         Ok(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {
                 Ok(r) => {
-                    metrics::CMD_IMPORT.finished();
+                    metrics::CMD_IMPORT.finished(source);
                     let imported = r.imported.into_iter()
                         .map(|u| t!("commands.import.result.line.imported", locale = &lang_code,
                             name = u.name.escaped(),
@@ -165,7 +185,9 @@ pub async fn import_cmd_handler(
                         .collect::<Vec<String>>()
                         .join("\n\n")
                 }
-                Err(e) => if let Some(InvalidLines(lines)) = e.downcast_ref() {
+                Err(e) => if e.is::<NothingFound>() {
+                    t!("commands.import.errors.nothing_found", locale = &lang_code).to_string()
+                } else if let Some(InvalidLines(lines)) = e.downcast_ref() {
                     tracing::error!(lines = ?lines, "invalid lines in the imported message");
                     let invalid_lines = lines.iter()
                         .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
@@ -257,6 +279,7 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = chat_id.0))]
 async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseResult) -> anyhow::Result<ImportResult> {
+    let top = parse_import_users(&parsed.1)?;
     let chat_id_kind = chat_id.into();
     let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)
         .await?.into_iter()
@@ -271,19 +294,6 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .collect();
     let member_names: HashSet<_> = HashSet::from_iter(members.keys());
 
-    let top = parse_top_lines(&parsed.1);
-    let invalid_lines: Vec<String> = top.iter()
-        .filter(|pos| pos.is_err())
-        .map(|pos| pos.as_ref().unwrap_err().clone())
-        .collect();
-    if !invalid_lines.is_empty() {
-        bail!(InvalidLines(invalid_lines))
-    }
-
-    let top: Vec<OriginalUser> = top.into_iter()
-        .flatten()
-        .filter_map(map_user)
-        .collect();
     let (existing, not_existing): (Vec<OriginalUser>, Vec<OriginalUser>) = top.into_iter()
         .partition(|u| member_names.contains(u.name.as_ref()));
     let existing: Vec<UserInfo> = existing.into_iter()
@@ -318,6 +328,26 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         already_present,
         not_found
     })
+}
+
+fn parse_import_users(text: &str) -> anyhow::Result<Vec<OriginalUser>> {
+    let top = parse_top_lines(text);
+    let invalid_lines: Vec<String> = top.iter()
+        .filter(|pos| pos.is_err())
+        .map(|pos| pos.as_ref().unwrap_err().clone())
+        .collect();
+    if !invalid_lines.is_empty() {
+        bail!(InvalidLines(invalid_lines))
+    }
+
+    let top: Vec<OriginalUser> = top.into_iter()
+        .flatten()
+        .filter_map(map_user)
+        .collect();
+    if top.is_empty() {
+        bail!(NothingFound)
+    }
+    Ok(top)
 }
 
 fn parse_top_lines(text: &str) -> Vec<Result<Captures<'_>, String>> {
@@ -395,5 +425,22 @@ mod tests {
         assert!(top[0].is_ok());
         assert_eq!(top[1].as_ref().unwrap_err(), "not a valid line");
         assert!(top[2].is_ok());
+    }
+
+    #[test]
+    fn parses_kraft28_lines_ending_at_centimetres() {
+        let text = "Рейтинг гравців:\n\n1. Alice — 97 см\n2. Bob — 79 см\n3. Carol — 3 см";
+        let users = parse_import_users(text).expect("the leaderboard should be recognised");
+        assert_eq!(users.len(), 3);
+        assert_eq!(users[0].name.value(), "Alice");
+        assert_eq!(users[0].length, 97);
+        assert_eq!(users[2].length, 3);
+    }
+
+    #[test]
+    fn a_reply_without_leaderboard_entries_is_an_error() {
+        let err = parse_import_users("Рейтинг гравців:\n\nNo entries yet")
+            .err().expect("an empty import must be rejected");
+        assert!(err.is::<NothingFound>());
     }
 }
