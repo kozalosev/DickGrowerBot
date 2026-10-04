@@ -278,6 +278,7 @@ impl Incrementor {
         let total = (base + additional_change)
             .inspect_err(|e| tracing::error!(dick = %dick, error = %e, "an overflow in the increment calculation"))
             .unwrap_or(base);
+        let total = nonzero_growth_total(base, total, source);
 
         if base == total && !additional_change.is_zero() {
             tracing::info!(perks = ?by_perks, "some perks affected the calculation");
@@ -320,6 +321,16 @@ impl Increment {
     }
 }
 
+fn nonzero_growth_total(base: LengthChange, total: LengthChange, source: ChangeSource) -> LengthChange {
+    // The base roll excludes zero, but perks can cancel it out. Preserve the direction
+    // of the roll while ensuring that a daily growth always changes the length.
+    if source == ChangeSource::Growth && total.is_zero() {
+        LengthChange::signed(base.value().signum())
+    } else {
+        total
+    }
+}
+
 fn get_base_increment<T>(range: RangeInclusive<T>, sign_ratio: Ratio) -> T
 where
     T: PrimInt + PartialOrd + SampleUniform + From<i8>
@@ -350,8 +361,16 @@ where
 #[cfg(test)]
 mod test {
     use domain_types::literal;
-    use crate::domain::primitives::Ratio;
-    use super::get_base_increment;
+    use crate::domain::primitives::{LengthChange, Ratio};
+    use super::{get_base_increment, nonzero_growth_total, ChangeSource};
+
+    #[test]
+    fn perks_cannot_cancel_daily_growth() {
+        assert_eq!(nonzero_growth_total(LengthChange::signed(4), LengthChange::signed(0), ChangeSource::Growth).value(), 1);
+        assert_eq!(nonzero_growth_total(LengthChange::signed(-3), LengthChange::signed(0), ChangeSource::Growth).value(), -1);
+        assert_eq!(nonzero_growth_total(LengthChange::signed(4), LengthChange::signed(2), ChangeSource::Growth).value(), 2);
+        assert_eq!(nonzero_growth_total(LengthChange::signed(4), LengthChange::signed(0), ChangeSource::DickOfDay).value(), 0);
+    }
 
     #[test]
     fn test_gen_increment() {
@@ -408,6 +427,7 @@ mod test_incrementor {
         test_growth_increment_base(&incr).await;
         test_dod_increment_base(&incr).await;
         test_with_perks(&incr).await;
+        test_perks_cannot_cancel_growth(&incr).await;
         test_perk_with_overflow(&incr).await;
     }
 
@@ -511,5 +531,21 @@ mod test_incrementor {
         let increment = incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang()).await;
         assert_eq!(increment.base, increment.total);
         assert!(increment.by_perks.is_empty());
+    }
+
+    async fn test_perks_cannot_cancel_growth(incr: &Incrementor) {
+        let mut incr = incr.clone();
+        incr.config.growth_range = 1..=1;
+        incr.set_perks(vec![AddPerk::boxed(-1)]);
+        let positive = incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0), &lang()).await;
+        assert_eq!(positive.base.value(), 1);
+        assert_eq!(positive.total.value(), 1);
+
+        incr.config.growth_range = -1..=-1;
+        incr.config.grow_shrink_ratio = literal!(Ratio = 0.0);
+        incr.set_perks(vec![AddPerk::boxed(1)]);
+        let negative = incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(2), &lang()).await;
+        assert_eq!(negative.base.value(), -1);
+        assert_eq!(negative.total.value(), -1);
     }
 }
