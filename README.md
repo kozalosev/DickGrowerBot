@@ -13,6 +13,8 @@ _(compared with some competitors)_
 * A way to play the game without the necessity to add the bot into a group (via inline queries with a callback button).
 * Import from _@pipisabot_ and _@kraft28_bot_ (not tested! help of its users is required).
 * PvP fights with statistics.
+* Trusted built-in name decorations in `/top` and inline top, stored independently from any future
+  shop or payment mechanics (`CUSTOMIZATIONS_ENABLED=false` disables rendering and its lookup).
 
 ### Soon (but not very, I guess)
 * an option to show mercy and return the award for the battle back;
