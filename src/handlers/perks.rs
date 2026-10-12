@@ -262,25 +262,25 @@ mod test {
 
         assert!(perk.enabled());
         {
-            let mut growth = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
+            let mut growth_tx = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
                 .await.expect("couldn't begin a growth");
-            let chat_id = growth.key().chat_id;
-            let mut attempt = growth.attempt()
+            let chat_id = growth_tx.key().chat_id;
+            let mut attempt = growth_tx.attempt()
                 .await.expect("couldn't start an attempt");
             let ctx = ctx_internal(chat_id, &mut attempt, &dick_id, change_intent_positive_increment);
             assert_eq!(perk.apply(ctx).await.expect("couldn't apply the perk").change.0.value(), 0);
             attempt.rollback().await.expect("couldn't roll the attempt back");
-            growth.rollback().await.expect("couldn't roll the growth back");
+            growth_tx.rollback().await.expect("couldn't roll the growth back");
         }
 
         let borrow_result = loans.borrow(USER_ID, &CHAT_ID_KIND, Debt::new(10))
             .await.expect("couldn't create a loan");
         assert_eq!(borrow_result, repo::BorrowResult::Granted);
 
-        let mut growth = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
+        let mut growth_tx = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
             .await.expect("couldn't begin a growth");
-        let chat_id = growth.key().chat_id;
-        let mut attempt = growth.attempt()
+        let chat_id = growth_tx.key().chat_id;
+        let mut attempt = growth_tx.attempt()
             .await.expect("couldn't start an attempt");
 
         let ctx = ctx_internal(chat_id, &mut attempt, &dick_id, change_intent_positive_increment);
@@ -303,7 +303,7 @@ mod test {
 
         // nothing is kept unless the growth is
         attempt.rollback().await.expect("couldn't roll the attempt back");
-        growth.rollback().await.expect("couldn't roll the growth back");
+        growth_tx.rollback().await.expect("couldn't roll the growth back");
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")

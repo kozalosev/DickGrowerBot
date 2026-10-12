@@ -1208,7 +1208,7 @@ SQL. When adding a feature, follow this pairing rather than mixing DB access int
 
 ### What counts as a growth
 
-> `Growth::commit_growth` is the growth, and the only one. It is subject to the once-a-day rule and
+> `GrowthTx::commit_growth` is the growth, and the only one. It is subject to the once-a-day rule and
 > it spends a bonus attempt. Every other write to `Dicks` is not a growth: it leaves `updated_at`
 > alone and `bonus_attempts` is not its to move.
 
@@ -1240,9 +1240,9 @@ evaluated, so two `/grow`s racing for the same dick serialise exactly as they di
 
 The same shape, one table over: `PRIMARY KEY (chat_id, created_at)` on `Dick_of_Day` **is** the
 rule, and `Dicks::begin_dod` claims that key before it grows anybody. A conflict means the day is
-already won, so the growth never happens and the winner's name is read back for the answer;
-`Growth::commit_dod` returns `DickOfDayResult` — `Chosen`, `AlreadyChosen(name)` or `NoDick` —
-rather than an `Option` beside an exception.
+already won, so the growth never happens and the winner's name is read back for the answer:
+`begin_dod` returns `DickOfDayIntentStatus` — `Vacant(growth_tx)` or `AlreadyChosen(name)` — and only a vacant day
+reaches `GrowthTx::commit_dod`, which returns `DickOfDayResult`, `Chosen` or `NoDick`.
 
 Claiming first is what makes two `/dod`s in one chat serialise: the second waits on the index and
 is told it lost. `trg_check_dod_timestamp` could not do that. Its `SELECT` for an existing winner
@@ -1274,9 +1274,9 @@ needs no migration, only a row in `Perks`, and that name-to-id dictionary is rea
 name afterwards.
 
 **A growth is one transaction, and the perks write through it.** `Dicks::begin_growth` (or
-`begin_dod`) opens a `Growth`, which owns the transaction; `Incrementor::growth_increment` takes it
+`begin_dod`) opens a `GrowthTx`, which owns the transaction; `Incrementor::growth_increment` takes it
 by `&mut`, hands the perks its connection as `PerkContext::conn`, and the caller ends it with
-`Growth::commit_growth` / `commit_dod`. Dropping a `Growth` rolls everything back — which is what a
+`GrowthTx::commit_growth` / `commit_dod`. Dropping a `GrowthTx` rolls everything back — which is what a
 refused growth is: the once-a-day rule is the upsert in `commit_growth`, *after* the perks have
 run, and a perk that wrote something (a loan payout, its state) leaves no trace when it says no.
 The Telegram answer is sent after the commit, never inside the transaction.

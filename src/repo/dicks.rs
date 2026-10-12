@@ -41,8 +41,8 @@ pub struct Dicks {
 }
 
 /// What claiming the day for the Dick of the Day election came to.
-pub enum DodClaim {
-    Won(Growth),
+pub enum DickOfDayIntentStatus {
+    Vacant(GrowthTx),
     AlreadyChosen(Username),
 }
 
@@ -65,11 +65,11 @@ impl Dicks {
     /// Starts a growth: a transaction that holds the dick's row until it is committed or dropped.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id))]
-    pub async fn begin_growth(&self, uid: UserId, chat_id: &ChatIdPartiality) -> anyhow::Result<Growth> {
+    pub async fn begin_growth(&self, uid: UserId, chat_id: &ChatIdPartiality) -> anyhow::Result<GrowthTx> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
         let mut tx = self.pool.begin().await?;
         Self::lock_dick(&mut tx, internal_chat_id, uid).await?;
-        Ok(Growth {
+        Ok(GrowthTx {
             tx,
             top_unlimited: self.features.top_unlimited,
             key: DickKey {
@@ -191,22 +191,22 @@ impl Dicks {
     ///
     /// **One winner a day per chat is the primary key of `Dick_of_Day`**, and the election starts
     /// by claiming that key: a chat that already has today's winner conflicts, and only then is
-    /// the name of that winner read. Claiming it first also serialises two elections racing in one
+    /// the name of that winner read. Claiming it first also serializes two elections racing in one
     /// chat, since the second waits on the index rather than reading past it.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id))]
-    pub async fn begin_dod(&self, chat_id: &ChatIdPartiality, user_id: UserId) -> anyhow::Result<DodClaim> {
+    pub async fn begin_dod(&self, chat_id: &ChatIdPartiality, user_id: UserId) -> anyhow::Result<DickOfDayIntentStatus> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;
         if !Self::claim_the_day(&mut tx, internal_chat_id, user_id).await? {
             tx.rollback().await?;
             return self.get_dod_winner_name(internal_chat_id)
-                .map_ok(DodClaim::AlreadyChosen)
+                .map_ok(DickOfDayIntentStatus::AlreadyChosen)
                 .await
         }
         Self::lock_dick(&mut tx, internal_chat_id, user_id).await?;
-        Ok(DodClaim::Won(Growth {
+        Ok(DickOfDayIntentStatus::Vacant(GrowthTx {
             tx,
             top_unlimited: self.features.top_unlimited,
             key: DickKey {
@@ -215,20 +215,6 @@ impl Dicks {
                 chat_kind: chat_id.kind(),
             },
         }))
-    }
-
-    /// Crowns the Dick of the Day without any perks, growing the winner by `bonus`.
-    #[cfg(test)]
-    pub async fn set_dod_winner(
-        &self,
-        chat_id: &ChatIdPartiality,
-        user_id: UserId,
-        bonus: LengthChange,
-    ) -> anyhow::Result<DickOfDayResult> {
-        match self.begin_dod(chat_id, user_id).await? {
-            DodClaim::AlreadyChosen(name) => Ok(DickOfDayResult::AlreadyChosen(name)),
-            DodClaim::Won(growth) => growth.commit_dod(bonus).await,
-        }
     }
 
     #[autometrics]
@@ -423,13 +409,13 @@ impl Dicks {
 /// One growth of one dick, from the first read of the perks to the commit. Everything done through
 /// it is a single transaction: dropping it without a `commit_*` rolls the lot back, which is what
 /// a refused growth, a failed perk and a forgotten commit all come to.
-pub struct Growth {
+pub struct GrowthTx {
     tx: Transaction<'static, Postgres>,
     top_unlimited: bool,
     key: DickKey,
 }
 
-impl Growth {
+impl GrowthTx {
     pub fn key(&self) -> &DickKey {
         &self.key
     }

@@ -13,7 +13,7 @@ use rand::RngExt;
 use rust_i18n::t;
 use sqlx::types::JsonValue;
 use sqlx::PgConnection;
-use crate::repo::{self, Dicks, Growth, PerkStates};
+use crate::repo::{self, Dicks, GrowthTx, PerkStates};
 use crate::config::IncrementorConfig;
 use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
@@ -212,7 +212,7 @@ impl Incrementor {
     /// the total, or drops it to undo everything the perks wrote.
     pub async fn growth_increment(
         &self,
-        growth: &mut Growth,
+        growth_tx: &mut GrowthTx,
         days_since_registration: DaysCount,
         lang_code: &LanguageCode,
     ) -> Increment {
@@ -221,14 +221,14 @@ impl Incrementor {
         } else {
             literal!(Ratio = 1.0)
         };
-        self.nonzero_increment(growth, ChangeSource::Growth, lang_code, || {
+        self.nonzero_increment(growth_tx, ChangeSource::Growth, lang_code, || {
             let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
             SignedLengthChange::new(base_incr.into())
         }).await
     }
 
-    pub async fn dod_increment(&self, growth: &mut Growth, lang_code: &LanguageCode) -> Increment {
-        self.nonzero_increment(growth, ChangeSource::DickOfDay, lang_code, || {
+    pub async fn dod_increment(&self, growth_tx: &mut GrowthTx, lang_code: &LanguageCode) -> Increment {
+        self.nonzero_increment(growth_tx, ChangeSource::DickOfDay, lang_code, || {
             let base_incr = rand::rng().random_range(self.config.dod_bonus_range.clone());
             SignedLengthChange::new(base_incr.into())
         }).await
@@ -238,14 +238,14 @@ impl Incrementor {
     /// ends the rerolls and the perks are skipped.
     async fn nonzero_increment(
         &self,
-        growth: &mut Growth,
+        growth_tx: &mut GrowthTx,
         source: ChangeSource,
         lang_code: &LanguageCode,
         roll_base: impl Fn() -> BaseIncrement,
     ) -> Increment {
-        let dick = DickId(growth.key().uid, growth.key().chat_kind.clone());
+        let dick = DickId(growth_tx.key().uid, growth_tx.key().chat_kind.clone());
         for _ in 0..MAX_REROLLS {
-            match self.try_base(growth, &dick, roll_base(), source, lang_code).await {
+            match self.try_base(growth_tx, &dick, roll_base(), source, lang_code).await {
                 Ok(Some(increment)) => return increment,
                 Ok(None) => tracing::debug!(%dick, "perks cancelled the increment, rerolling the base"),
                 Err(e) => {
@@ -262,16 +262,15 @@ impl Incrementor {
     /// rolled back with whatever the perks wrote when they leave nothing or fail.
     async fn try_base(
         &self,
-        growth: &mut Growth,
+        growth_tx: &mut GrowthTx,
         dick: &DickId,
         base: BaseIncrement,
         source: ChangeSource,
         lang_code: &LanguageCode,
     ) -> anyhow::Result<Option<Increment>> {
-        let chat_id = growth.key().chat_id;
-        let mut attempt = growth.attempt().await?;
-        let applied = self.add_additional_incr(&mut attempt, dick, chat_id, base, source, lang_code).await;
-        match applied {
+        let chat_id = growth_tx.key().chat_id;
+        let mut attempt = growth_tx.attempt().await?;
+        match self.add_additional_incr(&mut attempt, dick, chat_id, base, source, lang_code).await {
             Ok(increment) if !increment.total.is_zero() => {
                 attempt.commit().await?;
                 Ok(Some(increment))
@@ -306,7 +305,7 @@ impl Incrementor {
 
         let mut additional_change = SignedLengthChange::new(0);
         let mut by_perks = HashMap::new();
-        let mut new_states = Vec::new();
+        let mut perk_states = Vec::new();
         for RegisteredPerk { id, perk } in self.perks.iter() {
             let ctx = PerkContext {
                 dick_id: dick,
@@ -320,7 +319,7 @@ impl Incrementor {
             };
             let PerkOutcome { change: AdditionalChange(ac), state, note } = perk.apply(ctx).await?;
             if let Some(state) = state {
-                new_states.push(PerkStateUpdate { perk_id: *id, state });
+                perk_states.push(PerkStateUpdate { perk_id: *id, state });
             }
             if !ac.is_zero() {
                 let change = SignedLengthChange::new(ac.value());
@@ -333,7 +332,7 @@ impl Incrementor {
 
         let total = (base + additional_change)
             .context("an overflow in the increment calculation")?;
-        PerkStates::write_all_internal(conn, chat_id, dick.0, &new_states).await?;
+        PerkStates::write_all_internal(conn, chat_id, dick.0, &perk_states).await?;
         Ok(Increment { base, by_perks, total })
     }
 }
@@ -438,9 +437,8 @@ mod test_incrementor {
     use crate::handlers::perks::LoanPayoutPerk;
     use crate::handlers::utils::{AdditionalChange, Incrementor, Perk, PerkContext, PerkOutcome};
     use crate::repo;
-    use crate::repo::Growth;
-    use crate::repo::test::dicks::{create_dick, create_user};
-    use crate::repo::test::{CHAT_ID_KIND, fresh_db, UID, CHAT_ID, USER_ID};
+    use crate::repo::GrowthTx;
+    use crate::repo::test::{CHAT_ID_KIND, create_dick, create_user, fresh_db, UID, CHAT_ID, USER_ID};
 
     #[tokio::test]
     async fn test_incrementor() {
@@ -484,9 +482,9 @@ mod test_incrementor {
         sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
             .execute(&db)
             .await.expect("couldn't move the last growth to yesterday");
-        let mut growth = begin(&dicks).await;
-        let increment = incr.growth_increment(&mut growth, DaysCount::new(10), &lang()).await;
-        growth.commit_growth(increment.total)
+        let mut growth_tx = begin(&dicks).await;
+        let increment = incr.growth_increment(&mut growth_tx, DaysCount::new(10), &lang()).await;
+        growth_tx.commit_growth(increment.total)
             .await.expect("couldn't commit the growth");
         assert_eq!(increment.total.value(), 3);
         assert_eq!(debt_of(&loans).await, 10);
@@ -499,9 +497,9 @@ mod test_incrementor {
         sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
             .execute(&db)
             .await.expect("couldn't move the last growth to yesterday again");
-        let mut growth = begin(&dicks).await;
-        let increment = incr.growth_increment(&mut growth, DaysCount::new(10), &lang()).await;
-        growth.commit_growth(increment.total)
+        let mut growth_tx = begin(&dicks).await;
+        let increment = incr.growth_increment(&mut growth_tx, DaysCount::new(10), &lang()).await;
+        growth_tx.commit_growth(increment.total)
             .await.expect("couldn't commit the growth");
         assert_eq!(increment.total.value(), 2);
         assert_eq!(debt_of(&loans).await, 8);
@@ -530,8 +528,8 @@ mod test_incrementor {
             .await.expect("couldn't move the last growth to yesterday");
 
         // the growth holds the dick and the loan, and the borrowing has to queue behind it
-        let mut growth = begin(&dicks).await;
-        let increment = incr.growth_increment(&mut growth, DaysCount::new(10), &lang()).await;
+        let mut growth_tx = begin(&dicks).await;
+        let increment = incr.growth_increment(&mut growth_tx, DaysCount::new(10), &lang()).await;
         let borrowing = tokio::spawn({
             let loans = loans.clone();
             async move { loans.borrow(USER_ID, &CHAT_ID_KIND, Debt::new(5)).await }
@@ -539,7 +537,7 @@ mod test_incrementor {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert!(!borrowing.is_finished(), "the borrowing must wait for the growth that holds the dick");
 
-        let grown = growth.commit_growth(increment.total)
+        let grown = growth_tx.commit_growth(increment.total)
             .await.expect("couldn't commit the growth");
         let borrowed = tokio::time::timeout(std::time::Duration::from_secs(10), borrowing)
             .await.expect("the borrowing must go on once the growth is committed")
@@ -586,7 +584,7 @@ mod test_incrementor {
         }
     }
 
-    async fn begin(dicks: &repo::Dicks) -> Growth {
+    async fn begin(dicks: &repo::Dicks) -> GrowthTx {
         dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
             .await.expect("couldn't begin a growth")
     }
@@ -598,8 +596,8 @@ mod test_incrementor {
     async fn test_growth_increment_base(incr: &Incrementor, dicks: &repo::Dicks) {
         let lang_code = lang();
         for _ in 0..100 {
-            let mut growth = begin(dicks).await;
-            let val = incr.growth_increment(&mut growth, DaysCount::new(1), &lang_code).await;
+            let mut growth_tx = begin(dicks).await;
+            let val = incr.growth_increment(&mut growth_tx, DaysCount::new(1), &lang_code).await;
             assert_eq!(val.base, val.total);
             assert_ne!(val.base.value(), 0);
             assert!(val.base.value() >= -1);
@@ -607,8 +605,8 @@ mod test_incrementor {
         }
 
         for _ in 0..100 {
-            let mut growth = begin(dicks).await;
-            let val = incr.growth_increment(&mut growth, DaysCount::new(0), &lang_code).await;
+            let mut growth_tx = begin(dicks).await;
+            let val = incr.growth_increment(&mut growth_tx, DaysCount::new(0), &lang_code).await;
             assert_eq!(val.base, val.total);
             assert!(val.base.value() > 0);
         }
@@ -617,8 +615,8 @@ mod test_incrementor {
     async fn test_dod_increment_base(incr: &Incrementor, dicks: &repo::Dicks) {
         let lang_code = lang();
         for _ in 0..100 {
-            let mut growth = begin(dicks).await;
-            let val = incr.dod_increment(&mut growth, &lang_code).await;
+            let mut growth_tx = begin(dicks).await;
+            let val = incr.dod_increment(&mut growth_tx, &lang_code).await;
             assert_eq!(val.base, val.total);
             assert!(val.base.value() == 1 || val.base.value() == 2);
         }
@@ -713,11 +711,11 @@ mod test_incrementor {
         }
 
         for _ in 0..100 {
-            let mut growth = begin(dicks).await;
-            let growth_val = incr.growth_increment(&mut growth, DaysCount::new(1), &lang_code).await;
+            let mut growth_tx = begin(dicks).await;
+            let growth_val = incr.growth_increment(&mut growth_tx, DaysCount::new(1), &lang_code).await;
             assertions!(growth_val);
-            let mut growth = begin(dicks).await;
-            let dod_val = incr.dod_increment(&mut growth, &lang_code).await;
+            let mut growth_tx = begin(dicks).await;
+            let dod_val = incr.dod_increment(&mut growth_tx, &lang_code).await;
             assertions!(dod_val);
         }
     }
@@ -747,12 +745,12 @@ mod test_incrementor {
         let mut incr = incr.clone();
         incr.set_perks(vec![AddPerk::boxed(2), Box::new(FailingPerk)]);
 
-        let mut growth = begin(dicks).await;
-        let increment = incr.dod_increment(&mut growth, &lang()).await;
+        let mut growth_tx = begin(dicks).await;
+        let increment = incr.dod_increment(&mut growth_tx, &lang()).await;
         assert_eq!(increment.base, increment.total);
         assert!(increment.by_perks.is_empty());
 
-        let result = growth.commit_dod(increment.total)
+        let result = growth_tx.commit_dod(increment.total)
             .await.expect("the growth must still be usable after a perk failed");
         assert!(matches!(result, DickOfDayResult::NoDick | DickOfDayResult::Chosen(_)));
     }
@@ -763,8 +761,8 @@ mod test_incrementor {
         let perk_add_max_int = AddPerk::boxed(i64::MAX);
         incr.set_perks(vec![perk_add_max_int.clone()]);
 
-        let mut growth = begin(dicks).await;
-        let increment = incr.dod_increment(&mut growth, &lang()).await;
+        let mut growth_tx = begin(dicks).await;
+        let increment = incr.dod_increment(&mut growth_tx, &lang()).await;
         assert_eq!(increment.base, increment.total);
         assert!(increment.by_perks.is_empty());
     }
@@ -773,24 +771,24 @@ mod test_incrementor {
         let mut incr = incr.clone();
         incr.config.growth_range = 1..=1;
         incr.set_perks(vec![AddPerk::boxed(-1)]);
-        let mut growth = begin(dicks).await;
-        let positive = incr.growth_increment(&mut growth, DaysCount::new(0), &lang()).await;
+        let mut growth_tx = begin(dicks).await;
+        let positive = incr.growth_increment(&mut growth_tx, DaysCount::new(0), &lang()).await;
         assert_eq!(positive.base.value(), 1);
         assert_eq!(positive.total.value(), 1);
 
         incr.config.growth_range = -1..=-1;
         incr.config.grow_shrink_ratio = literal!(Ratio = 0.0);
         incr.set_perks(vec![AddPerk::boxed(1)]);
-        let mut growth = begin(dicks).await;
-        let negative = incr.growth_increment(&mut growth, DaysCount::new(2), &lang()).await;
+        let mut growth_tx = begin(dicks).await;
+        let negative = incr.growth_increment(&mut growth_tx, DaysCount::new(2), &lang()).await;
         assert_eq!(negative.base.value(), -1);
         assert_eq!(negative.total.value(), -1);
 
         incr.config.growth_range = 1..=1;
         let perk = CancelFirstPerk::boxed(3);
         incr.set_perks(vec![perk.clone()]);
-        let mut growth = begin(dicks).await;
-        let rerolled = incr.growth_increment(&mut growth, DaysCount::new(0), &lang()).await;
+        let mut growth_tx = begin(dicks).await;
+        let rerolled = incr.growth_increment(&mut growth_tx, DaysCount::new(0), &lang()).await;
         assert_eq!(rerolled.total.value(), 1);
         assert_eq!(perk.calls(), 4);
     }
@@ -799,15 +797,15 @@ mod test_incrementor {
         let mut incr = incr.clone();
         incr.config.dod_bonus_range = 1..=1;
         incr.set_perks(vec![AddPerk::boxed(-1)]);
-        let mut growth = begin(dicks).await;
-        let cancelled = incr.dod_increment(&mut growth, &lang()).await;
+        let mut growth_tx = begin(dicks).await;
+        let cancelled = incr.dod_increment(&mut growth_tx, &lang()).await;
         assert_eq!(cancelled.base.value(), 1);
         assert_eq!(cancelled.total.value(), 1);
 
         let perk = CancelFirstPerk::boxed(3);
         incr.set_perks(vec![perk.clone()]);
-        let mut growth = begin(dicks).await;
-        let rerolled = incr.dod_increment(&mut growth, &lang()).await;
+        let mut growth_tx = begin(dicks).await;
+        let rerolled = incr.dod_increment(&mut growth_tx, &lang()).await;
         assert_eq!(rerolled.total.value(), 1);
         assert_eq!(perk.calls(), 4);
     }

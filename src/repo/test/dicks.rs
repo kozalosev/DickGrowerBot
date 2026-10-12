@@ -5,20 +5,13 @@ use crate::domain::objects::{DickOfDayResult, GrowthResult};
 use crate::domain::primitives::{Bet, DaysCount, Length, LengthChange, Limit, Offset, Position, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
 use crate::repo;
-use crate::repo::test::{fresh_db, get_chat_id_and_dicks, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID_KIND, NAME, UID, USER_ID};
+use crate::repo::DickOfDayIntentStatus;
+use crate::repo::test::{bonus_attempts_of, fresh_db, get_chat_id_and_dicks, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID_KIND, NAME, UID, USER_ID};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 
 fn increment_of(value: i64) -> LengthChange {
     LengthChange::signed(value)
-}
-
-async fn bonus_attempts_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i32 {
-    sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2",
-            uid, internal_chat_id)
-        .fetch_one(db)
-        .await
-        .expect("couldn't read bonus_attempts")
 }
 
 /// Crowns `user_id` and insists the election went through.
@@ -28,11 +21,15 @@ async fn elect(
     user_id: UserId,
     increment: i64,
 ) -> GrowthResult {
-    let result = dicks.set_dod_winner(chat_id, user_id, increment_of(increment))
+    let status = dicks.begin_dod(chat_id, user_id)
+        .await.expect("couldn't begin the election");
+    let DickOfDayIntentStatus::Vacant(growth_tx) = status else {
+        panic!("the day was already won")
+    };
+    let result = growth_tx.commit_dod(increment_of(increment))
         .await.expect("couldn't elect a winner");
     match result {
         DickOfDayResult::Chosen(growth) => growth,
-        DickOfDayResult::AlreadyChosen(name) => panic!("the day was already won by {name}"),
         DickOfDayResult::NoDick => panic!("the winner hasn't a dick"),
     }
 }
@@ -312,9 +309,9 @@ async fn a_second_election_on_the_same_day_is_refused() {
     let growth = elect(&dicks, &chat_id, USER_ID, 5).await;
     assert_eq!(growth.new_length, 10);
 
-    let refused = dicks.set_dod_winner(&chat_id, USER_ID, increment_of(5))
+    let refused = dicks.begin_dod(&chat_id, USER_ID)
         .await.expect("the second election must be refused, not fail");
-    let DickOfDayResult::AlreadyChosen(name) = refused else {
+    let DickOfDayIntentStatus::AlreadyChosen(name) = refused else {
         panic!("the second election of the day must be refused")
     };
     assert_eq!(name.value(), NAME);

@@ -2,7 +2,7 @@ use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio};
 use crate::domain::primitives::chat::{InternalChatId, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{fresh_db, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
+use crate::repo::test::{bonus_attempts_of, fresh_db, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
 use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
@@ -35,13 +35,6 @@ async fn seed_aged_dick_with_bonus_attempts(
 /// positive; the tests hold it as an `i64` because that is what sqlx reads it back as.
 fn internal(chat_id: i64) -> InternalChatId {
     InternalChatId::new(chat_id.try_into().expect("the internal chat id must be positive"))
-}
-
-async fn bonus_attempts_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i32 {
-    sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2", uid, internal_chat_id)
-        .fetch_one(db)
-        .await
-        .expect("couldn't read bonus_attempts")
 }
 
 async fn logged_shrinks_count(db: &Pool<Postgres>, uid: i64) -> i64 {

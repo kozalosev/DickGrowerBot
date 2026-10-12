@@ -16,12 +16,13 @@ async fn grow_storing(
     perk_id: PerkId,
     state: JsonValue,
 ) -> anyhow::Result<Option<GrowthResult>> {
-    let mut growth = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into()).await?;
-    let (chat_id, uid) = (growth.key().chat_id, growth.key().uid);
-    let mut attempt = growth.attempt().await?;
-    repo::PerkStates::write_all_internal(&mut attempt, chat_id, uid, &[PerkStateUpdate { perk_id, state }]).await?;
+    let mut growth_tx = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into()).await?;
+    let (chat_id, uid) = (growth_tx.key().chat_id, growth_tx.key().uid);
+    let mut attempt = growth_tx.attempt().await?;
+    let perk_states = &[PerkStateUpdate { perk_id, state }];
+    repo::PerkStates::write_all_internal(&mut attempt, chat_id, uid, perk_states).await?;
     attempt.commit().await?;
-    growth.commit_growth(LengthChange::signed(5)).await
+    growth_tx.commit_growth(LengthChange::signed(5)).await
 }
 
 async fn insert_perk(db: &sqlx::Pool<sqlx::Postgres>, name: &str) -> anyhow::Result<()> {
