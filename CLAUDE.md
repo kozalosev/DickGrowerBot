@@ -1277,9 +1277,15 @@ name afterwards.
 `Dicks::create_or_grow` writes the length and every blob in one transaction. That ordering is the
 whole point: the once-a-day rule is applied by that statement, *after* the perks have run, and a
 refused growth must leave no perk believing it happened — which is why the empty answer returns
-before `PerkStates::write_all` and before the commit. `LoanPayoutPerk` predates this and
-still pays inside `apply`, which is why a refused growth can still spend a payment; moving it here
-is its own issue.
+before `PerkStates::write_all` and before the commit. The loan payout travels the same way: the
+perk reports it in `PerkOutcome::loan_payout`, and `Dicks::write_perk_writes` takes it off the debt
+(`Loans::pay_in_tx`) in that transaction. Everything a perk wants written is one `PerkWrites`.
+
+**`apply` must have no side effects**, because it may run several times for one growth. When perks
+cancel a roll out to zero, `Incrementor::nonzero_increment` rolls the base again and applies every
+perk to the new roll, up to `MAX_REROLLS` times; if they still cancel it, the bare base is used and
+the perks are skipped. A perk that paid or stored something inside `apply` would do it once per
+attempt, for a result that is then thrown away.
 
 Two things a perk is handed rather than fetching itself: `ChangeSource`, because a Dick of the Day
 award is not a growth and `dod_increment` shares the perk pipeline with `growth_increment`; and

@@ -28,7 +28,7 @@ async fn elect(
     user_id: UserId,
     increment: i64,
 ) -> GrowthResult {
-    let result = dicks.set_dod_winner(chat_id, user_id, increment_of(increment), &[])
+    let result = dicks.set_dod_winner(chat_id, user_id, increment_of(increment), &Default::default())
         .await.expect("couldn't elect a winner");
     match result {
         DickOfDayResult::Chosen(growth) => growth,
@@ -59,7 +59,7 @@ async fn test_all() {
     assert_eq!(d.len(), 0);
 
     let increment = 5;
-    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &[])
+    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &Default::default())
         .await
         .expect("couldn't grow a dick")
         .expect("the first growth of the day must be allowed");
@@ -94,7 +94,7 @@ async fn test_all_with_top_pagination_disabled() {
     assert_eq!(d.len(), 0);
 
     let increment = 5;
-    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &[])
+    let growth = dicks.create_or_grow(user_id, &chat_id_partiality, increment_of(increment), &Default::default())
         .await
         .expect("couldn't grow a dick")
         .expect("the first growth of the day must be allowed");
@@ -146,7 +146,7 @@ async fn test_hide_inactive_zero_length_from_top() {
 
     // An active player with a positive length — always visible.
     create_user(&db).await;
-    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5), &Default::default())
         .await.expect("couldn't grow the active dick");
     let internal_chat_id = internal_chat_id(&db).await;
 
@@ -160,7 +160,7 @@ async fn test_hide_inactive_zero_length_from_top() {
     let fresh_uid = UID + 2;
     users.create_or_update(user_id(fresh_uid), "fresh-zero")
         .await.expect("couldn't create the fresh user");
-    dicks.create_or_grow(user_id(fresh_uid), &chat_id_partiality, increment_of(0), &[])
+    dicks.create_or_grow(user_id(fresh_uid), &chat_id_partiality, increment_of(0), &Default::default())
         .await.expect("couldn't create the fresh zero-length dick");
 
     let top = dicks.get_top(&chat_id, Offset::new(0), Limit::new(10), INACTIVITY_DAYS)
@@ -188,7 +188,7 @@ async fn test_hide_inactive_zero_length_from_top_disabled() {
     let chat_id_partiality = chat_id.clone().into();
 
     create_user(&db).await;
-    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &chat_id_partiality, increment_of(5), &Default::default())
         .await.expect("couldn't grow the active dick");
     let internal_chat_id = internal_chat_id(&db).await;
 
@@ -217,7 +217,7 @@ async fn test_pvp() {
     }
     {
         create_user(&db).await;
-        dicks.create_or_grow(uid, chat_id_part, increment_of(1), &[])
+        dicks.create_or_grow(uid, chat_id_part, increment_of(1), &Default::default())
             .await
             .expect("couldn't create a dick");
 
@@ -267,13 +267,13 @@ pub async fn create_another_user_and_dick(
     let uid2 = user_id(UID + n - 1);
     users.create_or_update(uid2, name)
         .await.unwrap_or_else(|_| panic!("couldn't create a user #{n}"));
-    dicks.create_or_grow(uid2, chat_id, increment_of(increment), &[])
+    dicks.create_or_grow(uid2, chat_id, increment_of(increment), &Default::default())
         .await.unwrap_or_else(|_| panic!("couldn't create a dick #{n}"));
 }
 
 pub async fn create_dick(db: &Pool<Postgres>) {
     let (chat_id, dicks) = get_chat_id_and_dicks(db);
-    dicks.create_or_grow(USER_ID, &chat_id.into(), increment_of(0), &[])
+    dicks.create_or_grow(USER_ID, &chat_id.into(), increment_of(0), &Default::default())
         .await
         .expect("couldn't create a dick");
 }
@@ -304,7 +304,7 @@ async fn a_second_election_on_the_same_day_is_refused() {
     let repo::Repositories { dicks, users, .. } = repos(&db);
     let chat_id = ChatIdPartiality::from(CHAT_ID_KIND);
     users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
-    dicks.create_or_grow(USER_ID, &chat_id, increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &chat_id, increment_of(5), &Default::default())
         .await
         .expect("couldn't create the dick")
         .expect("the first growth of the day must be allowed");
@@ -312,7 +312,7 @@ async fn a_second_election_on_the_same_day_is_refused() {
     let growth = elect(&dicks, &chat_id, USER_ID, 5).await;
     assert_eq!(growth.new_length, 10);
 
-    let refused = dicks.set_dod_winner(&chat_id, USER_ID, increment_of(5), &[])
+    let refused = dicks.set_dod_winner(&chat_id, USER_ID, increment_of(5), &Default::default())
         .await.expect("the second election must be refused, not fail");
     let DickOfDayResult::AlreadyChosen(name) = refused else {
         panic!("the second election of the day must be refused")
@@ -330,12 +330,12 @@ async fn a_second_growth_on_the_same_day_is_refused() {
     let repo::Repositories { dicks, users, .. } = repos(&db);
     users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
 
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &Default::default())
         .await
         .expect("couldn't grow the dick")
         .expect("the first growth of the day must be allowed");
 
-    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &Default::default())
         .await.expect("the second growth must be refused, not fail");
     assert!(refused.is_none(), "the second growth of the day must be refused");
 }
@@ -346,14 +346,14 @@ async fn a_bonus_attempt_pays_for_a_second_growth() {
     let db = fresh_db().await;
     let repo::Repositories { dicks, users, .. } = repos(&db);
     users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &Default::default())
         .await
         .expect("couldn't create the dick")
         .expect("the first growth of the day must be allowed");
     let chat_id = internal_chat_id(&db).await;
     set_bonus_attempts(&db, UID, chat_id, 1).await;
 
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &Default::default())
         .await
         .expect("couldn't grow the dick")
         .expect("a bonus attempt must pay for the second growth");
@@ -368,7 +368,7 @@ async fn the_first_growth_of_the_day_spends_no_bonus_attempt() {
     let db = fresh_db().await;
     let repo::Repositories { dicks, users, .. } = repos(&db);
     users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &Default::default())
         .await
         .expect("couldn't create the dick")
         .expect("the first growth of the day must be allowed");
@@ -381,7 +381,7 @@ async fn the_first_growth_of_the_day_spends_no_bonus_attempt() {
         .await
         .expect("couldn't age the dick");
 
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &Default::default())
         .await
         .expect("couldn't grow the dick")
         .expect("the first growth of the day must be allowed");
@@ -397,7 +397,7 @@ async fn a_write_that_is_not_a_growth_spends_no_bonus_attempt() {
     let db = fresh_db().await;
     let repo::Repositories { dicks, users, .. } = repos(&db);
     users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &[])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &Default::default())
         .await
         .expect("couldn't create the dick")
         .expect("the first growth of the day must be allowed");
@@ -418,7 +418,7 @@ async fn a_write_that_is_not_a_growth_does_not_reopen_the_day() {
     let db = fresh_db().await;
     let repo::Repositories { dicks, users, .. } = repos(&db);
     users.create_or_update(USER_ID, NAME).await.expect("couldn't create the user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &[])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(100), &Default::default())
         .await
         .expect("couldn't create the dick")
         .expect("the first growth of the day must be allowed");
@@ -426,7 +426,7 @@ async fn a_write_that_is_not_a_growth_does_not_reopen_the_day() {
     dicks.grow_no_attempts_check(&CHAT_ID_KIND, USER_ID, increment_of(-10))
         .await.expect("couldn't apply the non-growth change");
 
-    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &[])
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), increment_of(5), &Default::default())
         .await.expect("the growth must be refused, not fail");
     assert!(refused.is_none(), "the day must still be closed");
 }

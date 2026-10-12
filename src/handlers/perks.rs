@@ -99,12 +99,13 @@ impl Perk for LoanPayoutPerk {
                 tracing::error!(payout = payout_value, dick_id = %dick_id, error = %e, "the loan payout is invalid");
                 LoanPayout::new(0)
             });
-        match self.loans.pay(dick_id.0, &dick_id.1, payout).await {
-            Ok(()) => AdditionalChange(LengthChange::signed(-i64::from(payout.value()))).into(),
-            Err(e) => {
-                tracing::error!(payout = %payout, dick_id = %dick_id, error = %e, "couldn't pay for the loan");
-                AdditionalChange::zero().into()
-            }
+        if payout.is_zero() {
+            return AdditionalChange::zero().into()
+        }
+        PerkOutcome {
+            change: AdditionalChange(LengthChange::signed(-i64::from(payout.value()))),
+            loan_payout: Some(payout),
+            ..AdditionalChange::zero().into()
         }
     }
 }
@@ -159,6 +160,7 @@ impl Perk for StreakPerk {
                 .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = %e, "couldn't serialize a streak"))
                 .ok(),
             note: Some(PerkNote::new(note)),
+            loan_payout: None,
         }
     }
 
@@ -251,7 +253,7 @@ mod test {
 
             let dicks = repo::Dicks::new(db, Default::default());
             // the length must be negative to be eligible for a loan
-            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(-10), &[])
+            dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(-10), &Default::default())
                 .await.expect("couldn't create a dick");
         }
 
@@ -268,20 +270,23 @@ mod test {
             .await.expect("couldn't create a loan");
         assert_eq!(borrow_result, repo::BorrowResult::Granted);
 
-        assert_eq!(perk.apply(ctx(&dick_id, change_intent_positive_increment)).await.change.0.value(), -1);
-        let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
-            .await.expect("couldn't fetch the active loan")
-            .expect("loan must be found")
-            .debt;
-        assert_eq!(debt, Debt::new(9));
+        let outcome = perk.apply(ctx(&dick_id, change_intent_positive_increment)).await;
+        assert_eq!(outcome.change.0.value(), -1);
+        assert_eq!(outcome.loan_payout.map(|payout| payout.value()), Some(1));
 
-        assert_eq!(perk.apply(ctx(&dick_id, change_intent_positive_increment_small)).await.change.0.value(), 0);
-        assert_eq!(perk.apply(ctx(&dick_id, change_intent_negative_increment)).await.change.0.value(), 0);
+        let outcome = perk.apply(ctx(&dick_id, change_intent_positive_increment_small)).await;
+        assert_eq!(outcome.change.0.value(), 0);
+        assert!(outcome.loan_payout.is_none());
+        let outcome = perk.apply(ctx(&dick_id, change_intent_negative_increment)).await;
+        assert_eq!(outcome.change.0.value(), 0);
+        assert!(outcome.loan_payout.is_none());
+
+        // applying a perk only reports the payout; the debt changes when the growth is written
         let debt = loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")
             .debt;
-        assert_eq!(debt, Debt::new(9));
+        assert_eq!(debt, Debt::new(10));
     }
 
     /// Grades on the second, third and fifth days, so every case is a few days away.

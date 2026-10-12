@@ -1,7 +1,8 @@
 use domain_types::traits::SaturatingInto;
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
-use crate::domain::primitives::{Debt, LoanPayout, PayoutRatio};
+use crate::domain::objects::PerkWrites;
+use crate::domain::primitives::{Debt, LengthChange, LoanPayout, PayoutRatio};
 use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
 use crate::repo::test::{fresh_db, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
@@ -121,4 +122,45 @@ async fn set_length(db: &Pool<Postgres>, uid: i64, chat_id: i64, length: i64) {
 /// A debt is a positive amount owed; the length it was borrowed against is its negation.
 fn length_of(debt: Debt) -> i64 {
     debt.saturating_into()
+}
+
+#[tokio::test]
+async fn a_payout_is_taken_with_the_growth_and_only_with_it() {
+    let db = fresh_db().await;
+    create_user(&db).await;
+    create_dick(&db).await;
+
+    let chat_id = CHAT_ID_KIND;
+    let loans = repo::Loans::new(db.clone(), &config::AppConfig {
+        loan_payout_ratio: literal!(PayoutRatio = 0.5),
+        ..Default::default()
+    });
+    set_length(&db, UID, CHAT_ID, -10).await;
+    let borrowed = loans.borrow(USER_ID, &chat_id, Debt::new(10))
+        .await.expect("couldn't apply for a loan");
+    assert_eq!(borrowed, BorrowResult::Granted);
+
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let writes = PerkWrites { loan_payout: Some(LoanPayout::new(3)), ..Default::default() };
+
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &writes)
+        .await.expect("couldn't try to grow the dick");
+    assert!(refused.is_none());
+    let debt = loans.get_active_loan(USER_ID, &chat_id)
+        .await.expect("couldn't fetch the loan after the refusal")
+        .expect("the loan must be present")
+        .debt;
+    assert_eq!(debt, 10);
+
+    sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
+        .execute(&db)
+        .await.expect("couldn't move the last growth to yesterday");
+    let grown = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &writes)
+        .await.expect("couldn't grow the dick");
+    assert!(grown.is_some());
+    let debt = loans.get_active_loan(USER_ID, &chat_id)
+        .await.expect("couldn't fetch the loan after the growth")
+        .expect("the loan must be present")
+        .debt;
+    assert_eq!(debt, 7);
 }

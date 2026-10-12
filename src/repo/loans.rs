@@ -98,6 +98,24 @@ impl Loans {
             .and_then(ensure_only_one_row_updated)
             .context(format!("couldn't pay for a loan: {chat_id}, {uid}, {value}"))
     }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_id, value = %value))]
+    pub async fn pay_in_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        chat_id: InternalChatId,
+        uid: UserId,
+        value: LoanPayout,
+    ) -> anyhow::Result<()> {
+        sqlx::query!("UPDATE Loans SET debt = debt - $3
+                        WHERE uid = $1 AND chat_id = $2 AND repaid_at IS NULL",
+                uid as UserId, chat_id as InternalChatId, value as LoanPayout)
+            .execute(&mut **tx)
+            .await
+            .map_err(Into::into)
+            .and_then(ensure_only_one_row_updated)
+            .context(format!("couldn't pay for a loan in the transaction: {chat_id}, {uid}, {value}"))
+    }
 }
 
 #[autometrics]

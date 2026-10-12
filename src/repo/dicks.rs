@@ -4,10 +4,10 @@ use futures::TryFutureExt;
 use domain_types::traits::SaturatingInto;
 use sqlx::{Executor, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
-use crate::domain::objects::{Dick, DickOfDayResult, GrowthResult, PerkStateUpdate};
+use crate::domain::objects::{Dick, DickOfDayResult, GrowthResult, PerkWrites};
 use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
-use super::{Chats, PerkStates};
+use super::{Chats, Loans, PerkStates};
 
 /// The database projection of a [`Dick`]. `position` is a `ROW_NUMBER()` (a plain `int8`),
 /// so it's decoded as `i64` here and converted to the `Position` domain type at this boundary
@@ -64,7 +64,7 @@ impl Dicks {
         uid: UserId,
         chat_id: &ChatIdPartiality,
         increment: LengthChange,
-        perk_states: &[PerkStateUpdate],
+        perk_writes: &PerkWrites,
     ) -> anyhow::Result<Option<GrowthResult>> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
@@ -88,7 +88,7 @@ impl Dicks {
         let Some(new_length) = new_length else {
             return Ok(None)
         };
-        PerkStates::write_all(&mut tx, internal_chat_id, uid, perk_states).await?;
+        Self::write_perk_writes(&mut tx, internal_chat_id, uid, perk_writes).await?;
         tx.commit().await?;
 
         let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
@@ -186,7 +186,7 @@ impl Dicks {
         chat_id: &ChatIdPartiality,
         user_id: UserId,
         bonus: LengthChange,
-        perk_states: &[PerkStateUpdate],
+        perk_writes: &PerkWrites,
     ) -> anyhow::Result<DickOfDayResult> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
@@ -202,7 +202,7 @@ impl Dicks {
         else {
             return Ok(DickOfDayResult::NoDick)
         };
-        PerkStates::write_all(&mut tx, internal_chat_id, user_id, perk_states).await?;
+        Self::write_perk_writes(&mut tx, internal_chat_id, user_id, perk_writes).await?;
         tx.commit().await?;
 
         let pos_in_top = self.get_position_in_top(internal_chat_id, user_id).await?;
@@ -331,6 +331,19 @@ impl Dicks {
             .await
             .map(|maybe_length| maybe_length.map(Length::new))
             .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
+    }
+
+    async fn write_perk_writes(
+        tx: &mut Transaction<'_, Postgres>,
+        internal_chat_id: InternalChatId,
+        uid: UserId,
+        writes: &PerkWrites,
+    ) -> anyhow::Result<()> {
+        PerkStates::write_all(tx, internal_chat_id, uid, &writes.states).await?;
+        if let Some(payout) = writes.loan_payout {
+            Loans::pay_in_tx(tx, internal_chat_id, uid, payout).await?;
+        }
+        Ok(())
     }
 
     /// Crowns `user_id`, unless the chat already has a winner today — which is what `false` means.

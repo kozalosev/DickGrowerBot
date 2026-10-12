@@ -1,6 +1,6 @@
 use domain_types::literal;
 use sqlx::types::JsonValue;
-use crate::domain::objects::PerkStateUpdate;
+use crate::domain::objects::{PerkStateUpdate, PerkWrites};
 use crate::domain::primitives::{LengthChange, PerkName};
 use crate::repo;
 use crate::repo::test::dicks::create_user;
@@ -75,7 +75,7 @@ async fn a_state_is_written_by_the_growth_and_read_back() {
     assert!(empty.of(perk_id).is_none());
 
     let update = PerkStateUpdate { perk_id, state: state_of(1) };
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[update])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &PerkWrites { states: vec![update], ..Default::default() })
         .await.expect("couldn't grow the dick");
 
     let stored = perk_states.read(USER_ID, &CHAT_ID_KIND)
@@ -100,13 +100,13 @@ async fn a_refused_growth_stores_nothing() {
     let perk_id = ids[&name];
 
     let first = PerkStateUpdate { perk_id, state: state_of(1) };
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[first])
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &PerkWrites { states: vec![first], ..Default::default() })
         .await
         .expect("couldn't grow the dick")
         .expect("the first growth of the day must be allowed");
 
     let second = PerkStateUpdate { perk_id, state: state_of(2) };
-    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[second])
+    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &PerkWrites { states: vec![second], ..Default::default() })
         .await.expect("the second growth must be refused, not fail");
     assert!(refused.is_none(), "the second growth of the day must be refused");
 

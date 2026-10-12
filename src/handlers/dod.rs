@@ -63,7 +63,7 @@ pub(crate) async fn dick_of_day_impl(
         Some(winner) => {
             let increment = incr.dod_increment(winner.uid, chat_id.kind(), lang_code).await;
             let dod_result = repos.dicks.set_dod_winner(chat_id, winner.uid, increment.total,
-                                                        &increment.perk_states).await?;
+                                                        &increment.writes).await?;
             let (main_part, group) = match dod_result {
                 DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }) => {
                     let answer = t!("commands.dod.result", locale = lang_code,

@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use derive_more::Display;
 use downcast_rs::{Downcast, impl_downcast};
+use futures::{future, stream, StreamExt};
 use num_traits::PrimInt;
 use rand::distr::uniform::SampleUniform;
 use rand::RngExt;
@@ -14,10 +15,12 @@ use rust_i18n::t;
 use sqlx::types::JsonValue;
 use crate::repo;
 use crate::config::IncrementorConfig;
-use crate::domain::objects::PerkStateUpdate;
+use crate::domain::objects::{PerkStateUpdate, PerkWrites};
 use crate::domain::primitives::chat::ChatIdKind;
-use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
+use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, LoanPayout, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
 use domain_types::literal;
+
+const MAX_REROLLS: usize = 10;
 
 #[derive(Clone)]
 pub struct Incrementor {
@@ -87,11 +90,13 @@ pub struct PerkOutcome {
     /// Extra detail for the "perks affected the result" line, e.g. how long a streak has grown to.
     /// Shown only next to a non-zero change.
     pub note: Option<PerkNote>,
+    /// Taken off the loan once the change is written, not while the perk is being applied.
+    pub loan_payout: Option<LoanPayout>,
 }
 
 impl From<AdditionalChange> for PerkOutcome {
     fn from(change: AdditionalChange) -> Self {
-        Self { change, state: None, note: None }
+        Self { change, state: None, note: None, loan_payout: None }
     }
 }
 
@@ -115,7 +120,7 @@ pub struct Increment {
     pub base: LengthChange,
     pub by_perks: HashMap<PerkName, PerkEffect>,
     pub total: LengthChange,
-    pub perk_states: Vec<PerkStateUpdate>,
+    pub writes: PerkWrites,
 }
 
 #[derive(Clone)]
@@ -217,14 +222,41 @@ impl Incrementor {
         } else {
             literal!(Ratio = 1.0)
         };
-        let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
-        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into()), ChangeSource::Growth, lang_code).await
+        self.nonzero_increment(dick_id, ChangeSource::Growth, lang_code, || {
+            let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
+            SignedLengthChange::new(base_incr.into())
+        }).await
     }
 
     pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind, lang_code: &LanguageCode) -> Increment {
         let dick_id = DickId(user_id, chat_id);
-        let base_incr = rand::rng().random_range(self.config.dod_bonus_range.clone());
-        self.add_additional_incr(dick_id, SignedLengthChange::new(base_incr.into()), ChangeSource::DickOfDay, lang_code).await
+        self.nonzero_increment(dick_id, ChangeSource::DickOfDay, lang_code, || {
+            let base_incr = rand::rng().random_range(self.config.dod_bonus_range.clone());
+            SignedLengthChange::new(base_incr.into())
+        }).await
+    }
+
+    async fn nonzero_increment(
+        &self,
+        dick: DickId,
+        source: ChangeSource,
+        lang_code: &LanguageCode,
+        roll_base: impl Fn() -> BaseIncrement + Sync,
+    ) -> Increment {
+        stream::repeat_with(&roll_base)
+            .take(MAX_REROLLS)
+            .then(|base| self.add_additional_incr(dick.clone(), base, source, lang_code))
+            .inspect(|increment| if increment.total.is_zero() {
+                tracing::debug!(%dick, "perks cancelled the increment, rerolling the base");
+            })
+            .filter(|increment| future::ready(!increment.total.is_zero()))
+            .boxed()
+            .next()
+            .await
+            .unwrap_or_else(|| {
+                tracing::warn!(%dick, "perks kept cancelling the increment, skipping them");
+                roll_base().only()
+            })
     }
 
     async fn add_additional_incr(
@@ -252,7 +284,7 @@ impl Incrementor {
 
         let mut additional_change = SignedLengthChange::new(0);
         let mut by_perks = HashMap::new();
-        let mut perk_states = Vec::new();
+        let mut writes = PerkWrites::default();
         for RegisteredPerk { id, perk } in self.perks.iter() {
             let ctx = PerkContext {
                 dick_id: &dick,
@@ -262,9 +294,12 @@ impl Incrementor {
                 today: states.today,
                 lang_code,
             };
-            let PerkOutcome { change: AdditionalChange(ac), state, note } = perk.apply(ctx).await;
+            let PerkOutcome { change: AdditionalChange(ac), state, note, loan_payout } = perk.apply(ctx).await;
             if let Some(state) = state {
-                perk_states.push(PerkStateUpdate { perk_id: *id, state });
+                writes.states.push(PerkStateUpdate { perk_id: *id, state });
+            }
+            if loan_payout.is_some() {
+                writes.loan_payout = loan_payout;
             }
             if !ac.is_zero() {
                 let change = SignedLengthChange::new(ac.value());
@@ -278,14 +313,13 @@ impl Incrementor {
         let total = (base + additional_change)
             .inspect_err(|e| tracing::error!(dick = %dick, error = %e, "an overflow in the increment calculation"))
             .unwrap_or(base);
-        let total = nonzero_growth_total(base, total, source);
 
         if base == total && !additional_change.is_zero() {
             tracing::info!(perks = ?by_perks, "some perks affected the calculation");
             by_perks.clear();
         }
 
-        Increment { base, by_perks, total, perk_states }
+        Increment { base, by_perks, total, writes }
     }
 }
 
@@ -295,7 +329,7 @@ impl Increment {
             base,
             by_perks: HashMap::default(),
             total: base,
-            perk_states: Vec::default(),
+            writes: PerkWrites::default(),
         }
     }
 
@@ -318,16 +352,6 @@ impl Increment {
         } else {
             String::default()
         }
-    }
-}
-
-fn nonzero_growth_total(base: LengthChange, total: LengthChange, source: ChangeSource) -> LengthChange {
-    // The base roll excludes zero, but perks can cancel it out. Preserve the direction
-    // of the roll while ensuring that a daily growth always changes the length.
-    if source == ChangeSource::Growth && total.is_zero() {
-        LengthChange::signed(base.value().signum())
-    } else {
-        total
     }
 }
 
@@ -361,16 +385,8 @@ where
 #[cfg(test)]
 mod test {
     use domain_types::literal;
-    use crate::domain::primitives::{LengthChange, Ratio};
-    use super::{get_base_increment, nonzero_growth_total, ChangeSource};
-
-    #[test]
-    fn perks_cannot_cancel_daily_growth() {
-        assert_eq!(nonzero_growth_total(LengthChange::signed(4), LengthChange::signed(0), ChangeSource::Growth).value(), 1);
-        assert_eq!(nonzero_growth_total(LengthChange::signed(-3), LengthChange::signed(0), ChangeSource::Growth).value(), -1);
-        assert_eq!(nonzero_growth_total(LengthChange::signed(4), LengthChange::signed(2), ChangeSource::Growth).value(), 2);
-        assert_eq!(nonzero_growth_total(LengthChange::signed(4), LengthChange::signed(0), ChangeSource::DickOfDay).value(), 0);
-    }
+    use crate::domain::primitives::Ratio;
+    use super::get_base_increment;
 
     #[test]
     fn test_gen_increment() {
@@ -398,6 +414,8 @@ mod test {
 mod test_incrementor {
     use domain_types::literal;
     use std::iter::zip;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
     use futures::future::join_all;
@@ -428,6 +446,7 @@ mod test_incrementor {
         test_dod_increment_base(&incr).await;
         test_with_perks(&incr).await;
         test_perks_cannot_cancel_growth(&incr).await;
+        test_perks_cannot_cancel_dod(&incr).await;
         test_perk_with_overflow(&incr).await;
     }
 
@@ -465,33 +484,76 @@ mod test_incrementor {
         assert!(val.iter().all(|n| { n.base.value() == 1 || n.base.value() == 2 }))
     }
 
-    #[derive(Clone)]
-    struct AddPerk {
-        value: i64,
-        name: PerkName,
-    }
-
-    impl AddPerk {
-        fn boxed(value: i64) -> Box<Self> {
-            Box::new(Self {
-                value,
-                name: PerkName::of(format!("add-perk-{value}")).expect("a valid perk name")
-            })
-        }
+    /// What a test perk has to say; the rest of `Perk` is the same for all of them.
+    trait TestPerk: Send + Sync + 'static {
+        fn label(&self) -> String;
+        fn change(&self, ctx: &PerkContext<'_>) -> LengthChange;
     }
 
     #[async_trait]
-    impl Perk for AddPerk {
+    impl<T: TestPerk> Perk for T {
         fn name(&self) -> PerkName {
-            self.name.clone()
+            PerkName::of(self.label()).expect("a valid perk name")
         }
 
-        async fn apply(&self, _: PerkContext<'_>) -> PerkOutcome {
-            AdditionalChange(LengthChange::signed(self.value)).into()
+        async fn apply(&self, ctx: PerkContext<'_>) -> PerkOutcome {
+            AdditionalChange(self.change(&ctx)).into()
         }
 
         fn enabled(&self) -> bool {
             true
+        }
+    }
+
+    #[derive(Clone)]
+    struct AddPerk {
+        value: i64,
+    }
+
+    impl AddPerk {
+        fn boxed(value: i64) -> Box<Self> {
+            Box::new(Self { value })
+        }
+    }
+
+    impl TestPerk for AddPerk {
+        fn label(&self) -> String {
+            format!("add-perk-{}", self.value)
+        }
+
+        fn change(&self, _: &PerkContext<'_>) -> LengthChange {
+            LengthChange::signed(self.value)
+        }
+    }
+
+    /// Cancels the base increment out completely on its first `times` calls and does nothing after.
+    #[derive(Clone)]
+    struct CancelFirstPerk {
+        times: usize,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl CancelFirstPerk {
+        fn boxed(times: usize) -> Box<Self> {
+            Box::new(Self { times, calls: Arc::new(AtomicUsize::new(0)) })
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl TestPerk for CancelFirstPerk {
+        fn label(&self) -> String {
+            format!("cancel-first-{}", self.times)
+        }
+
+        fn change(&self, ctx: &PerkContext<'_>) -> LengthChange {
+            if self.calls.fetch_add(1, Ordering::SeqCst) < self.times {
+                LengthChange::signed(-ctx.intent.base_increment.value())
+            } else {
+                LengthChange::signed(0)
+            }
         }
     }
 
@@ -547,5 +609,27 @@ mod test_incrementor {
         let negative = incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(2), &lang()).await;
         assert_eq!(negative.base.value(), -1);
         assert_eq!(negative.total.value(), -1);
+
+        incr.config.growth_range = 1..=1;
+        let perk = CancelFirstPerk::boxed(3);
+        incr.set_perks(vec![perk.clone()]);
+        let rerolled = incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0), &lang()).await;
+        assert_eq!(rerolled.total.value(), 1);
+        assert_eq!(perk.calls(), 4);
+    }
+
+    async fn test_perks_cannot_cancel_dod(incr: &Incrementor) {
+        let mut incr = incr.clone();
+        incr.config.dod_bonus_range = 1..=1;
+        incr.set_perks(vec![AddPerk::boxed(-1)]);
+        let cancelled = incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang()).await;
+        assert_eq!(cancelled.base.value(), 1);
+        assert_eq!(cancelled.total.value(), 1);
+
+        let perk = CancelFirstPerk::boxed(3);
+        incr.set_perks(vec![perk.clone()]);
+        let rerolled = incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang()).await;
+        assert_eq!(rerolled.total.value(), 1);
+        assert_eq!(perk.calls(), 4);
     }
 }
