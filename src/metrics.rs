@@ -26,6 +26,8 @@ pub static CMD_SUPPORT_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_support_usage_total", "count of /support invocations"));
 pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
     Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
+pub static RATE_LIMITED_UPDATES: Lazy<Counter> = Lazy::new(||
+    Counter::new("rate_limited_updates_total", "count of updates dropped because their sender or their chat went over RATE_LIMIT_USER_REQUESTS or RATE_LIMIT_CHAT_REQUESTS; only the first RATE_LIMIT_WARNINGS of them in a window are answered"));
 pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_grow_usage_total", "count of /grow invocations"));
 pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
@@ -94,6 +96,8 @@ pub static SELF_DESTRUCTION_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
         &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
 pub static SELF_DESTRUCTION_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_batch_limit", "the value of MSG_SELFDESTRUCT_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
+pub static SELF_DESTRUCTION_PAUSED: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("self_destruction_paused", "1 while the deletion worker rests because Telegram refused MSG_SELFDESTRUCT_PAUSE_THRESHOLD requests in a minute with a rate limit, 0 otherwise. The messages are still scheduled and are taken away once it is back to 0"));
 pub static SELF_DESTRUCTION_LAST_TICK_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_last_tick_timestamp_seconds", "when the worker's loop last came back around to ticker.tick(), as a Unix timestamp. Set at the very top of every iteration, before a message is claimed or acted on, so a tick stuck inside one request (or inside claim_due) is visible within a poll interval or two. self_destruction_pending cannot stand in for it: that gauge is published by the queue reporter, a task of its own, so it keeps updating while this worker is dead. Alert when time() minus this passes a few times MSG_SELFDESTRUCT_POLL"));
 pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
@@ -185,6 +189,7 @@ fn force_registration() {
     Lazy::force(&CMD_PRIVACY_COUNTER);
     Lazy::force(&CMD_SUPPORT_COUNTER);
     Lazy::force(&BANNED_UPDATES_BLOCKED);
+    Lazy::force(&RATE_LIMITED_UPDATES);
     Lazy::force(&CMD_GROW_COUNTER);
     Lazy::force(&CMD_TOP_COUNTER);
     Lazy::force(&CMD_LOAN_COUNTER);
@@ -208,6 +213,7 @@ fn force_registration() {
     Lazy::force(&BROADCAST_LANGUAGE);
     Lazy::force(&USER_SERVICE_LANGUAGES_BATCH_SIZE);
     Lazy::force(&TOPIC_RESTRICTED);
+    Lazy::force(&SELF_DESTRUCTION_PAUSED);
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&UPDATE_KIND);
     Lazy::force(&SELF_DESTRUCTION);

@@ -1,6 +1,7 @@
 use std::time::Duration;
 use crate::config::env::get_optional_env_duration;
 use teloxide::Bot;
+use crate::telegram_backoff::TelegramBackoff;
 use crate::telegram_observer::TelegramObserver;
 
 /// Configuration of the bot's HTTP client (the one talking to the Telegram Bot API).
@@ -28,7 +29,7 @@ impl BotConfig {
 
     /// Reads the config from the environment and builds the bot with the HTTP client
     /// configured accordingly.
-    pub fn build_bot() -> anyhow::Result<Bot> {
+    pub fn build_bot(backoff: TelegramBackoff) -> anyhow::Result<Bot> {
         let cfg = Self::from_env();
         let bot = if cfg.connect_timeout.is_none() && cfg.timeout.is_none() {
             // Nothing to configure => keep teloxide's stock client (it also honors TELOXIDE_PROXY).
@@ -45,6 +46,6 @@ impl BotConfig {
             }
             Bot::from_env_with_client(builder.build()?)
         };
-        Ok(bot.set_observer(TelegramObserver))
+        Ok(bot.set_observer(TelegramObserver(backoff)))
     }
 }

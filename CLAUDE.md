@@ -141,6 +141,40 @@ as long as it listens, so `establish_database_connection` builds the pool
 `LISTENER_CONNECTIONS` larger and `DATABASE_MAX_CONNECTIONS` keeps meaning what an operator set it
 to.
 
+### Optional: rate limiting
+
+```
+RATE_LIMIT_USER_REQUESTS=20   # requests per window per user; 0 => off
+RATE_LIMIT_CHAT_REQUESTS=60   # requests per window per chat; 0 => off
+RATE_LIMIT_WINDOW=1m
+RATE_LIMIT_WARNINGS=3         # requests over a limit that are still told so
+```
+
+This protects the bot against a flood. One account sending `/help` at 150 a second used up
+Telegram's quota answering it, and every real user waited 20 seconds or got nothing.
+`rate_limit::RateLimiter` counts each request twice, against the sender and against the chat, in a
+fixed window kept in the store (`Cache::increment`: `INCR` plus an `EXPIRE` set only by the first
+hit, as one Lua script). The counter that has gone further past its limit decides.
+
+**Only what the bot would answer is counted**: our own commands (`checks::is_our_command`, the same
+name check the topics gate uses), button presses and inline queries. A group where the bot reads
+every message would otherwise use up its chatty members' allowance on messages the bot ignores. The
+second step of a `/support` or `/promo` dialogue is a plain message, so it is free too. An inline
+query has no chat, so only the user's counter applies to it.
+
+**Only the first `RATE_LIMIT_WARNINGS` requests over a limit get an answer.** Each answer is a
+request to Telegram, and a flood that is answered request by request spends the very quota the
+limit exists to protect. The rest are dropped without a reply and counted in
+`rate_limited_updates_total`. A button press or an inline query is answered with the window as its
+`cache_time`, so Telegram answers the repeats itself and they never reach the bot.
+
+**It fails open.** A store that can't be asked lets the request through. It uses
+`Cache::or_local()`, as the locks do, so `CACHE_MODE=DISABLED` doesn't switch the protection off.
+
+It is the **first** branch of the dispatcher tree, above the setup message and `/topics`. A flood
+has to be stopped before it costs a query, and it may sit there because it writes nothing for the
+sender, which is the property the ban gate's ordering depends on.
+
 ### What each signal means
 
 | Signal | Meaning | Handled in |
@@ -474,6 +508,26 @@ per failure already recorded, capped at `MSG_SELFDESTRUCT_MAX_RETRY_DELAY`
 `postpone` that follows: the delay has to be known before it is written. Keep the cap well under
 Telegram's 48 hours. Without a cap the doubling would push an old row past that limit, and every
 attempt after it is refused for sure.
+
+**The worker rests while Telegram is refusing us.** Every deletion and every warning is a request
+to Telegram, and under a flood they compete with the answers to users for a quota that is already
+spent. `telegram_backoff::TelegramBackoff` counts the `RetryAfter` refusals that `TelegramObserver`
+sees (it sits under every adaptor, so it sees the refusals of the answers, the broadcast and the
+worker alike).
+When `MSG_SELFDESTRUCT_PAUSE_THRESHOLD` of them arrive within a minute, the worker skips its ticks
+for `MSG_SELFDESTRUCT_PAUSE_FOR`, and `self_destruction_paused` reads 1.
+
+```
+MSG_SELFDESTRUCT_PAUSE_THRESHOLD=30  # refusals per minute; 0 => never pauses
+MSG_SELFDESTRUCT_PAUSE_FOR=10m
+```
+
+**Only the worker pauses, never the scheduling.** A late deletion is fine, but a message that stays
+for ever because it was sent during a flood is not. The rows wait with `fire_after` already past,
+and the first tick after the pause claims them, bounded by the batch size and the concurrency as
+always. If the catch-up provokes refusals again, the worker simply pauses again. The heartbeat is
+still written on the skipped ticks, since a resting worker isn't a dead one. The threshold is well
+above the occasional 429 the midnight broadcast gets, which `Throttle` retries on its own.
 
 **Only `MAX_AGE` stays a constant** (`scheduler::deletions`). 48 hours is Telegram's number, and a
 setting for it would be a knob that changes nothing. Everything else the worker uses — the batch

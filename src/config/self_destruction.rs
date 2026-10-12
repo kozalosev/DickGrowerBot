@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use crate::config::env::{list_items, parse_sorted_numbers};
 use crate::domain::objects::ChatCleanupSettings;
-use crate::domain::primitives::{AttemptsCount, DelayMinutes, Limit};
+use crate::domain::primitives::{AttemptsCount, DelayMinutes, Limit, RateLimit};
 
 pub use crate::domain::enums::MessageGroup;
 
@@ -171,6 +171,11 @@ pub struct SelfDestructionConfig {
     /// How long a finished row (expired or failed) is kept before the cleaning process removes it.
     /// Zero keeps them for ever, which is what makes the queue's own history readable.
     pub retention: Duration,
+    /// How many of Telegram's rate-limit refusals in a minute stop the worker for a while. Zero
+    /// never stops it.
+    pub pause_threshold: RateLimit,
+    /// How long the worker rests once they do.
+    pub pause_for: Duration,
 }
 
 impl SelfDestructionConfig {

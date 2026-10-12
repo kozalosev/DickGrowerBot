@@ -14,6 +14,7 @@ use crate::config::{get_env_value_or_default, AppConfig, ThrottleConfig};
 use crate::domain::primitives::AttemptsCount;
 use crate::handlers::utils::date::duration_till_next_day;
 use crate::metrics;
+use crate::telegram_backoff::TelegramBackoff;
 use crate::repo::Repositories;
 use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
@@ -166,7 +167,13 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
 /// Spawns the task that removes the messages whose self-destruction has come due. No-op when every
 /// group is permanent. Unlike the two schedulers above, this one survives a restart: the messages
 /// it acts on are rows, and the tick after the restart finds every one that fell due meanwhile.
-pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cache, config: AppConfig) {
+pub fn spawn_deletion_worker(
+    bot: Throttle<Bot>,
+    repos: Repositories,
+    cache: Cache,
+    config: AppConfig,
+    telegram_backoff: TelegramBackoff,
+) {
     let self_destruction = config.self_destruction;
     let bot_admin_ttl = config.caches.bot_admin;
     if !self_destruction.enabled() {
@@ -190,6 +197,10 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
             // Set before any work of the tick: one stuck inside claim_due or a request must stop
             // moving this forward.
             metrics::SELF_DESTRUCTION_LAST_TICK_TIMESTAMP.set(chrono::Utc::now().timestamp());
+            // The due rows wait for the first tick after the pause.
+            if telegram_backoff.is_backing_off() {
+                continue
+            }
 
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.

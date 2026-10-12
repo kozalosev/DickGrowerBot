@@ -82,6 +82,11 @@ const FALSE: &[u8] = b"0";
 static UNLOCK: Lazy<redis::Script> = Lazy::new(|| redis::Script::new(
     "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"));
 
+/// Counts one more hit, starting the lifetime only with the first: a window that moved with every
+/// hit would never close under a steady stream of them. A script for the same reason as [`UNLOCK`].
+static INCREMENT: Lazy<redis::Script> = Lazy::new(|| redis::Script::new(
+    "local n = redis.call('incr', KEYS[1]) if n == 1 then redis.call('expire', KEYS[1], ARGV[1]) end return n"));
+
 /// A handle on the kept values. Cheap to clone — the clones share one multiplexed connection, or
 /// one local store.
 #[derive(Clone)]
@@ -217,6 +222,23 @@ impl Cache {
                 .invoke_async::<usize>(&mut state.conn.clone()).await)
                 .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't free a lock, leaving it to run out"))
                 .is_ok_and(|freed| freed > 0),
+        }
+    }
+
+    /// Adds one to the counter under this key and answers with the new count. The lifetime is set
+    /// by the hit that creates the counter and left alone by the rest, so it is a fixed window.
+    ///
+    /// `None` means the store couldn't be asked, which a caller counts as the first hit.
+    pub async fn increment(&self, key: impl CacheKey, ttl: Duration) -> Option<u64> {
+        let key = full_key(key);
+        match self.backend.route() {
+            Route::Disabled => None,
+            Route::Local(store) => Some(store.increment(&key, ttl)),
+            Route::Redis(state) => state.health.record(INCREMENT.key(&key).arg(ttl.as_secs().max(1))
+                .invoke_async::<i64>(&mut state.conn.clone()).await)
+                .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't count a hit"))
+                .ok()
+                .map(|count| count.saturating_into()),
         }
     }
 
@@ -440,6 +462,21 @@ impl LocalStore {
                 true
             }
         }
+    }
+
+    /// The local half of [`INCREMENT`]. The count is kept as a decimal string, which is what lets
+    /// [`sync_fallback_to_redis`] hand it to a Redis that will go on counting from it.
+    fn increment(&self, key: &str, ttl: Duration) -> u64 {
+        let now = Instant::now();
+        let mut entries = self.entries();
+        let (count, until) = entries.get(key)
+            .filter(|entry| entry.until > now)
+            .and_then(|entry| std::str::from_utf8(&entry.bytes).ok()?
+                .parse::<u64>().ok()
+                .map(|count| (count.saturating_add(1), entry.until)))
+            .unwrap_or((1, now + ttl));
+        entries.insert(key.to_owned(), Entry { bytes: count.to_string().into_bytes(), until });
+        count
     }
 
     fn remove(&self, key: &str) -> bool {
@@ -727,6 +764,32 @@ mod test {
             assert!(cache.lock(key, Duration::from_secs(1)).await.is_some());
             tokio::time::sleep(Duration::from_millis(1500)).await;
             assert!(cache.lock(key, Duration::from_secs(1)).await.is_some());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn a_counter_counts_its_hits() {
+        on_both_backends(|cache| async move {
+            let key = TestKey(30);
+
+            assert_eq!(cache.increment(key, A_MINUTE).await, Some(1));
+            assert_eq!(cache.increment(key, A_MINUTE).await, Some(2));
+            assert_eq!(cache.increment(key, A_MINUTE).await, Some(3));
+        }).await;
+    }
+
+    /// The window is fixed: the later hits don't push its end, or a steady stream would never let
+    /// the counter go.
+    #[tokio::test]
+    async fn a_counter_starts_again_once_its_window_is_over() {
+        on_both_backends(|cache| async move {
+            let key = TestKey(31);
+
+            assert_eq!(cache.increment(key, Duration::from_secs(1)).await, Some(1));
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            assert_eq!(cache.increment(key, Duration::from_secs(1)).await, Some(2));
+            tokio::time::sleep(Duration::from_millis(900)).await;
+            assert_eq!(cache.increment(key, Duration::from_secs(1)).await, Some(1));
         }).await;
     }
 

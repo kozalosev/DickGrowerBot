@@ -270,7 +270,9 @@ pub mod checks {
     use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
     use crate::handlers::utils::is_forum;
     use crate::metrics;
+    use crate::rate_limit::{RateLimiter, Verdict};
     use crate::topics::TopicPolicy;
+    use domain_types::traits::SaturatingInto;
     use super::{reply_html, topics, HandlerResult, BAN_DATE_FORMAT};
 
     pub fn is_group_chat(msg: Message) -> bool {
@@ -372,9 +374,12 @@ pub mod checks {
     /// `/topics` is *not* exempted here. It is a branch of its own above this gate, so its messages
     /// never reach the predicate.
     fn is_gated_by_topic(msg: &Message, me: &Me) -> bool {
-        if !is_forum(&msg.chat) {
-            return false
-        }
+        is_forum(&msg.chat) && is_our_command(msg, me)
+    }
+
+    /// Whether the message is one of our commands: by name, and by the `@username` when Telegram's
+    /// menu appended one, since a group tends to hold several bots.
+    fn is_our_command(msg: &Message, me: &Me) -> bool {
         let Some(command) = msg.text().or_else(|| msg.caption())
             .and_then(|text| text.split_whitespace().next())
             .and_then(|word| word.strip_prefix('/'))
@@ -453,6 +458,68 @@ pub mod checks {
         Ok(())
     }
 
+    /// The verdict on a request that went over a limit, or `None` for one that may go on. Only
+    /// what the bot would answer is counted: our commands, the buttons and the inline queries.
+    /// Chatter in a group the bot reads in full, and the second step of a dialogue, are left alone.
+    pub async fn rate_limit_exceeded(upd: Update, me: Me, limiter: RateLimiter) -> Option<Verdict> {
+        let (uid, chat): (_, Option<ChatIdKind>) = match &upd.kind {
+            UpdateKind::Message(msg) if is_our_command(msg, &me) => (msg.from.as_ref(), Some(msg.chat.id.into())),
+            UpdateKind::CallbackQuery(query) => {
+                let chat = query.message.as_ref()
+                    .map_or_else(|| query.chat_instance.clone().into(), |msg| msg.chat().id.into());
+                (Some(&query.from), Some(chat))
+            }
+            UpdateKind::InlineQuery(query) => (Some(&query.from), None),
+            _ => return None,
+        };
+        let verdict = limiter.hit(uid.map(UserId::from), chat).await;
+        (verdict != Verdict::Allowed).then_some(verdict)
+    }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = ?upd.from().map(|u| u.id.0), ?verdict, lang_code = tracing::field::Empty))]
+    pub async fn handle_rate_limited(
+        bot: Bot,
+        upd: Update,
+        verdict: Verdict,
+        limiter: RateLimiter,
+        deps: HandlerDeps,
+    ) -> HandlerResult {
+        metrics::RATE_LIMITED_UPDATES.inc();
+        if verdict != Verdict::Warn {
+            return Ok(())
+        }
+
+        let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
+        let lang_code = lang_resolver.execute().await;
+        let answer = t!("errors.rate_limited", locale = &lang_code).to_string();
+        let cache_time = limiter.window().as_secs().saturating_into();
+
+        match upd.kind {
+            UpdateKind::Message(msg) => {
+                reply_html_ephemeral!(bot, msg, answer, self_destruction, MessageGroup::Notice, lang_code);
+            }
+            UpdateKind::CallbackQuery(query) => {
+                bot.answer_callback_query(query.id)
+                    .show_alert(true)
+                    .text(answer)
+                    .cache_time(cache_time)
+                    .await?;
+            }
+            UpdateKind::InlineQuery(query) => {
+                let title = t!("errors.rate_limited_inline_title", locale = &lang_code);
+                let content = InputMessageContent::Text(InputMessageContentText::new(answer));
+                let article = InlineQueryResultArticle::new("rate_limited", title, content);
+                bot.answer_inline_query(query.id, vec![article.into()])
+                    .is_personal(true)
+                    .cache_time(cache_time)
+                    .await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn banned_until(upd: &Update, ban_list: BanList) -> Option<DateTime<Utc>> {
         upd.from()
            .map(UserId::from)
@@ -521,7 +588,7 @@ pub mod checks {
     mod test {
         use teloxide::types::{CallbackQuery, Me, Message};
         use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
-        use super::{callback_topic, is_gated_by_topic};
+        use super::{callback_topic, is_gated_by_topic, is_our_command};
 
         /// A message of the given text, in a supergroup that either is a forum or isn't. Built
         /// from JSON because a `Message` has far more fields than a test wants to name.
@@ -597,6 +664,15 @@ pub mod checks {
         #[test]
         fn test_the_topics_command_is_exempted_by_the_branch_order_only() {
             assert!(is_gated_by_topic(&message("/topics", true, Some(42)), &me()));
+        }
+
+        /// The rate limiter counts the commands in every chat, a forum or not.
+        #[test]
+        fn test_our_commands_are_recognized_outside_forums_too() {
+            assert!(is_our_command(&message("/help", false, None), &me()));
+            assert!(is_our_command(&message("/help@DickGrowerBot", false, None), &me()));
+            assert!(!is_our_command(&message("/help@SomeOtherBot", false, None), &me()));
+            assert!(!is_our_command(&message("help me", false, None), &me()));
         }
 
         fn callback(data: &str, message: Option<Message>) -> CallbackQuery {
