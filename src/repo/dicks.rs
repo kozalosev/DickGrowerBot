@@ -56,7 +56,13 @@ impl Dicks {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
         let mut tx = self.pool.begin().await?;
         Self::lock_dick(&mut tx, internal_chat_id, uid).await?;
-        Ok(Growth { tx, dicks: self.clone(), uid, chat: internal_chat_id, chat_kind: chat_id.kind() })
+        Ok(Growth {
+            tx,
+            top_unlimited: self.features.top_unlimited,
+            uid,
+            chat: internal_chat_id,
+            chat_kind: chat_id.kind(),
+        })
     }
 
     /// Grows a dick without any perks, creating it on the first play. `None` when the day is
@@ -75,7 +81,7 @@ impl Dicks {
     }
 
     /// The length as the transaction sees it, zero for a dick that doesn't exist yet.
-    pub async fn fetch_length_in(
+    pub async fn fetch_length_internal(
         conn: &mut PgConnection,
         uid: UserId,
         chat_id: InternalChatId,
@@ -187,7 +193,7 @@ impl Dicks {
         Self::lock_dick(&mut tx, internal_chat_id, user_id).await?;
         Ok(DodStart::Started(Growth {
             tx,
-            dicks: self.clone(),
+            top_unlimited: self.features.top_unlimited,
             uid: user_id,
             chat: internal_chat_id,
             chat_kind: chat_id.kind(),
@@ -276,7 +282,20 @@ impl Dicks {
         chat_id_internal: InternalChatId,
         uid: UserId,
     ) -> anyhow::Result<Option<Position>> {
-        if !self.features.top_unlimited {
+        Self::get_position_in_top_internal(&self.pool, self.features.top_unlimited, chat_id_internal, uid).await
+    }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = uid.value()))]
+    async fn get_position_in_top_internal<'c, E>(
+        executor: E,
+        enabled: bool,
+        chat_id_internal: InternalChatId,
+        uid: UserId,
+    ) -> anyhow::Result<Option<Position>>
+    where E: Executor<'c, Database = Postgres>,
+    {
+        if !enabled {
             return Ok(None)
         }
         sqlx::query_scalar!(
@@ -288,7 +307,7 @@ impl Dicks {
                 ) AS _
                 WHERE uid = $2"#,
                 chat_id_internal as InternalChatId, uid as UserId)
-            .fetch_one(&self.pool)
+            .fetch_one(executor)
             .await
             .map(|pos| Some(Position::new(pos.saturating_into())))
             .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
@@ -395,7 +414,7 @@ pub enum DodStart {
 /// a refused growth, a failed perk and a forgotten commit all come to.
 pub struct Growth {
     tx: Transaction<'static, Postgres>,
-    dicks: Dicks,
+    top_unlimited: bool,
     uid: UserId,
     chat: InternalChatId,
     chat_kind: ChatIdKind,
@@ -455,9 +474,8 @@ impl Growth {
             self.rollback().await?;
             return Ok(None)
         };
+        let pos_in_top = Dicks::get_position_in_top_internal(&mut *self.tx, self.top_unlimited, chat, uid).await?;
         self.tx.commit().await?;
-
-        let pos_in_top = self.dicks.get_position_in_top(chat, uid).await?;
         Ok(Some(GrowthResult { new_length: Length::new(new_length), pos_in_top }))
     }
 
@@ -470,9 +488,8 @@ impl Growth {
             self.rollback().await?;
             return Ok(DickOfDayResult::NoDick)
         };
+        let pos_in_top = Dicks::get_position_in_top_internal(&mut *self.tx, self.top_unlimited, chat, uid).await?;
         self.tx.commit().await?;
-
-        let pos_in_top = self.dicks.get_position_in_top(chat, uid).await?;
         Ok(DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }))
     }
 }

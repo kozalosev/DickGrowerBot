@@ -70,7 +70,7 @@ impl Perk for LoanPayoutPerk {
 
     async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome> {
         let dick_id = ctx.dick_id;
-        let Some(loan) = repo::Loans::get_active_loan_for_update(ctx.conn, dick_id.0, ctx.chat).await? else {
+        let Some(loan) = repo::Loans::get_active_loan_internal_for_update(ctx.conn, dick_id.0, ctx.chat).await? else {
             return Ok(AdditionalChange::zero().into())
         };
         let (debt, payout_coefficient) = (loan.debt, loan.payout_ratio);
@@ -92,7 +92,7 @@ impl Perk for LoanPayoutPerk {
         if payout.is_zero() {
             return Ok(AdditionalChange::zero().into())
         }
-        repo::Loans::pay_in(ctx.conn, ctx.chat, dick_id.0, payout).await?;
+        repo::Loans::pay_internal(ctx.conn, ctx.chat, dick_id.0, payout).await?;
         Ok(AdditionalChange(LengthChange::signed(-i64::from(payout.value()))).into())
     }
 }
@@ -199,10 +199,10 @@ mod test {
 
     /// A growth with nothing remembered about it, which is what both of the stateless perks get.
     fn ctx<'a>(conn: &'a mut PgConnection, dick_id: &'a DickId, intent: ChangeIntent) -> PerkContext<'a> {
-        ctx_in(InternalChatId::new(1), conn, dick_id, intent)
+        ctx_internal(InternalChatId::new(1), conn, dick_id, intent)
     }
 
-    fn ctx_in<'a>(
+    fn ctx_internal<'a>(
         chat: InternalChatId,
         conn: &'a mut PgConnection,
         dick_id: &'a DickId,
@@ -267,7 +267,7 @@ mod test {
             let chat = growth.chat();
             let mut attempt = growth.attempt()
                 .await.expect("couldn't start an attempt");
-            let ctx = ctx_in(chat, &mut attempt, &dick_id, change_intent_positive_increment);
+            let ctx = ctx_internal(chat, &mut attempt, &dick_id, change_intent_positive_increment);
             assert_eq!(perk.apply(ctx).await.expect("couldn't apply the perk").change.0.value(), 0);
             attempt.rollback().await.expect("couldn't roll the attempt back");
             growth.rollback().await.expect("couldn't roll the growth back");
@@ -283,19 +283,19 @@ mod test {
         let mut attempt = growth.attempt()
             .await.expect("couldn't start an attempt");
 
-        let ctx = ctx_in(chat, &mut attempt, &dick_id, change_intent_positive_increment);
+        let ctx = ctx_internal(chat, &mut attempt, &dick_id, change_intent_positive_increment);
         assert_eq!(perk.apply(ctx).await.expect("couldn't apply the perk").change.0.value(), -1);
-        let debt = repo::Loans::get_active_loan_for_update(&mut attempt, USER_ID, chat)
+        let debt = repo::Loans::get_active_loan_internal_for_update(&mut attempt, USER_ID, chat)
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")
             .debt;
         assert_eq!(debt, Debt::new(9));
 
-        let ctx = ctx_in(chat, &mut attempt, &dick_id, change_intent_positive_increment_small);
+        let ctx = ctx_internal(chat, &mut attempt, &dick_id, change_intent_positive_increment_small);
         assert_eq!(perk.apply(ctx).await.expect("couldn't apply the perk").change.0.value(), 0);
-        let ctx = ctx_in(chat, &mut attempt, &dick_id, change_intent_negative_increment);
+        let ctx = ctx_internal(chat, &mut attempt, &dick_id, change_intent_negative_increment);
         assert_eq!(perk.apply(ctx).await.expect("couldn't apply the perk").change.0.value(), 0);
-        let debt = repo::Loans::get_active_loan_for_update(&mut attempt, USER_ID, chat)
+        let debt = repo::Loans::get_active_loan_internal_for_update(&mut attempt, USER_ID, chat)
             .await.expect("couldn't fetch the active loan")
             .expect("loan must be found")
             .debt;

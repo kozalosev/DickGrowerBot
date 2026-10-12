@@ -131,7 +131,7 @@ async fn grow_paying(dicks: &repo::Dicks, payout: LoanPayout, keep: bool) -> Opt
     let (chat, uid) = (growth.chat(), growth.uid());
     let mut attempt = growth.attempt()
         .await.expect("couldn't start an attempt");
-    repo::Loans::pay_in(&mut attempt, chat, uid, payout)
+    repo::Loans::pay_internal(&mut attempt, chat, uid, payout)
         .await.expect("couldn't pay the loan");
     if keep {
         attempt.commit().await.expect("couldn't keep the attempt");

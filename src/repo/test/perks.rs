@@ -19,7 +19,7 @@ async fn grow_storing(
     let mut growth = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into()).await?;
     let (chat, uid) = (growth.chat(), growth.uid());
     let mut attempt = growth.attempt().await?;
-    repo::PerkStates::write_in(&mut attempt, chat, uid, perk_id, &state).await?;
+    repo::PerkStates::write_internal(&mut attempt, chat, uid, perk_id, &state).await?;
     attempt.commit().await?;
     growth.commit_growth(LengthChange::signed(5)).await
 }

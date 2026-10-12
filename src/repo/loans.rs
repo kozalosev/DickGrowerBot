@@ -73,7 +73,7 @@ impl Loans {
             return Ok(BorrowResult::NotEligible)
         }
 
-        match get_active_loan_in_tx(&mut tx, user_id, chat_internal_id).await? {
+        match lock_active_loan_internal(&mut tx, user_id, chat_internal_id).await? {
             Some(LoanEntity { id, .. }) => refinance_loan(&mut tx, id, value, self.payout_ratio).await?,
             None => create_loan(&mut tx, chat_internal_id, user_id, value, self.payout_ratio).await?
         };
@@ -101,7 +101,7 @@ impl Loans {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_id, value = %value))]
-    pub async fn pay_in(
+    pub async fn pay_internal(
         conn: &mut PgConnection,
         chat_id: InternalChatId,
         uid: UserId,
@@ -120,12 +120,12 @@ impl Loans {
     /// The loan of the dick with its row locked, so the debt can't change under whoever pays it.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_id))]
-    pub async fn get_active_loan_for_update(
+    pub async fn get_active_loan_internal_for_update(
         conn: &mut PgConnection,
         uid: UserId,
         chat_id: InternalChatId,
     ) -> anyhow::Result<Option<Loan>> {
-        get_active_loan_in_tx(conn, uid, chat_id)
+        lock_active_loan_internal(conn, uid, chat_id)
             .await
             .map(|maybe_loan| maybe_loan.map(Loan::from))
     }
@@ -147,7 +147,7 @@ async fn fetch_length_locked(
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_internal_id))]
-async fn get_active_loan_in_tx(
+async fn lock_active_loan_internal(
     conn: &mut PgConnection,
     uid: UserId,
     chat_internal_id: InternalChatId,

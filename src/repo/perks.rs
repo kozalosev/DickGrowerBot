@@ -76,7 +76,7 @@ repository!(PerkStates,
     /// What the perks of a dick know as the transaction sees it.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_id))]
-    pub async fn read_in(
+    pub async fn read_internal(
         conn: &mut PgConnection,
         uid: UserId,
         chat_id: InternalChatId,
@@ -102,7 +102,7 @@ repository!(PerkStates,
     /// written together with the length it was computed for, or not at all.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, uid = uid.value(), perk_id = perk_id.value()))]
-    pub async fn write_in(
+    pub async fn write_internal(
         conn: &mut PgConnection,
         chat_id: InternalChatId,
         uid: UserId,

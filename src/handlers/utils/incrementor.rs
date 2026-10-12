@@ -233,8 +233,8 @@ impl Incrementor {
         }).await
     }
 
-    /// Every attempt is a savepoint: it is released when the perks leave something of the roll and
-    /// rolled back otherwise, together with whatever the perks wrote.
+    /// Rolls the base again for as long as the perks cancel it out. Any failure along the way
+    /// ends the rerolls and the perks are skipped.
     async fn nonzero_increment(
         &self,
         growth: &mut Growth,
@@ -243,38 +243,47 @@ impl Incrementor {
         roll_base: impl Fn() -> BaseIncrement,
     ) -> Increment {
         let dick = DickId(growth.uid(), growth.chat_kind().clone());
-        let chat = growth.chat();
         for _ in 0..MAX_REROLLS {
-            let Ok(mut attempt) = growth.attempt().await
-                .inspect_err(|e| tracing::error!(%dick, error = format!("{e:#}"), "couldn't start an attempt"))
-            else {
-                break
-            };
-            let applied = self.add_additional_incr(&mut attempt, &dick, chat, roll_base(), source, lang_code).await;
-            match applied {
-                Ok(increment) if !increment.total.is_zero() => {
-                    let Ok(()) = attempt.commit().await
-                        .inspect_err(|e| tracing::error!(%dick, error = %e, "couldn't release an attempt"))
-                    else {
-                        break
-                    };
-                    return increment
-                },
-                Ok(_) => tracing::debug!(%dick, "perks cancelled the increment, rerolling the base"),
+            match self.try_base(growth, &dick, roll_base(), source, lang_code).await {
+                Ok(Some(increment)) => return increment,
+                Ok(None) => tracing::debug!(%dick, "perks cancelled the increment, rerolling the base"),
                 Err(e) => {
                     tracing::error!(%dick, error = format!("{e:#}"), "couldn't apply the perks");
-                    let _ = attempt.rollback().await;
                     break
                 },
             }
-            let Ok(()) = attempt.rollback().await
-                .inspect_err(|e| tracing::error!(%dick, error = %e, "couldn't roll an attempt back"))
-            else {
-                break
-            };
         }
         tracing::warn!(%dick, "the perks were skipped");
         roll_base().only()
+    }
+
+    /// One attempt is a savepoint: it is released when the perks leave something of the roll, and
+    /// rolled back with whatever the perks wrote when they leave nothing or fail.
+    async fn try_base(
+        &self,
+        growth: &mut Growth,
+        dick: &DickId,
+        base: BaseIncrement,
+        source: ChangeSource,
+        lang_code: &LanguageCode,
+    ) -> anyhow::Result<Option<Increment>> {
+        let chat = growth.chat();
+        let mut attempt = growth.attempt().await?;
+        let applied = self.add_additional_incr(&mut attempt, dick, chat, base, source, lang_code).await;
+        match applied {
+            Ok(increment) if !increment.total.is_zero() => {
+                attempt.commit().await?;
+                Ok(Some(increment))
+            },
+            Ok(_) => {
+                attempt.rollback().await?;
+                Ok(None)
+            },
+            Err(e) => {
+                let _ = attempt.rollback().await;
+                Err(e)
+            },
+        }
     }
 
     async fn add_additional_incr(
@@ -286,8 +295,8 @@ impl Incrementor {
         source: ChangeSource,
         lang_code: &LanguageCode,
     ) -> anyhow::Result<Increment> {
-        let current_length = Dicks::fetch_length_in(conn, dick.0, chat).await?;
-        let states = PerkStates::read_in(conn, dick.0, chat).await?;
+        let current_length = Dicks::fetch_length_internal(conn, dick.0, chat).await?;
+        let states = PerkStates::read_internal(conn, dick.0, chat).await?;
         let base = LengthChange::from(base_increment);
         let change_intent = ChangeIntent {
             base_increment: base,
@@ -309,7 +318,7 @@ impl Incrementor {
             };
             let PerkOutcome { change: AdditionalChange(ac), state, note } = perk.apply(ctx).await?;
             if let Some(state) = state {
-                PerkStates::write_in(conn, chat, dick.0, *id, &state).await?;
+                PerkStates::write_internal(conn, chat, dick.0, *id, &state).await?;
             }
             if !ac.is_zero() {
                 let change = SignedLengthChange::new(ac.value());
@@ -493,6 +502,51 @@ mod test_incrementor {
             .await.expect("couldn't commit the growth");
         assert_eq!(increment.total.value(), 2);
         assert_eq!(debt_of(&loans).await, 8);
+    }
+
+    /// A growth locks the dick and then the loan, and `Loans::borrow` does the same, so the two can
+    /// run at once without waiting for each other and without losing either change.
+    #[tokio::test]
+    async fn a_growth_and_a_borrowing_do_not_deadlock() {
+        let db = fresh_db().await;
+        create_user(&db).await;
+        create_dick(&db).await;
+        let dicks = repo::Dicks::new(db.clone(), Default::default());
+        let loans = take_loan(&db, literal!(PayoutRatio = 0.5)).await;
+        let mut incr = incrementor(&db, IncrementorConfig {
+            growth_range: 4..=4,
+            grow_shrink_ratio: literal!(Ratio = 1.0),
+            newcomers_grace_days: DaysCount::new(0),
+            dod_bonus_range: 1..=1,
+            perks: Default::default(),
+        });
+        incr.set_perks(vec![Box::new(LoanPayoutPerk)]);
+        // borrowing has just brought the length back to zero, and a loan needs a negative one
+        sqlx::query("UPDATE Dicks SET length = -10, updated_at = updated_at - interval '1 day'")
+            .execute(&db)
+            .await.expect("couldn't move the last growth to yesterday");
+
+        // the growth holds the dick and the loan, and the borrowing has to queue behind it
+        let mut growth = begin(&dicks).await;
+        let increment = incr.growth_increment(&mut growth, DaysCount::new(10), &lang()).await;
+        let borrowing = tokio::spawn({
+            let loans = loans.clone();
+            async move { loans.borrow(USER_ID, &CHAT_ID_KIND, Debt::new(5)).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!borrowing.is_finished(), "the borrowing must wait for the growth that holds the dick");
+
+        let grown = growth.commit_growth(increment.total)
+            .await.expect("couldn't commit the growth");
+        let borrowed = tokio::time::timeout(std::time::Duration::from_secs(10), borrowing)
+            .await.expect("the borrowing must go on once the growth is committed")
+            .expect("the borrowing must not panic")
+            .expect("couldn't refinance the loan");
+
+        assert!(grown.is_some());
+        assert_eq!(borrowed, repo::BorrowResult::Granted);
+        // ten owed, two paid out of the growth, five more borrowed
+        assert_eq!(debt_of(&loans).await, 13);
     }
 
     /// Replaces the loan of the dick with a new one of ten.
