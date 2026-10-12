@@ -15,6 +15,7 @@ use sqlx::types::JsonValue;
 use sqlx::PgConnection;
 use crate::repo::{self, Dicks, Growth, PerkStates};
 use crate::config::IncrementorConfig;
+use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
 use domain_types::literal;
@@ -319,7 +320,7 @@ impl Incrementor {
             };
             let PerkOutcome { change: AdditionalChange(ac), state, note } = perk.apply(ctx).await?;
             if let Some(state) = state {
-                new_states.push((*id, state));
+                new_states.push(PerkStateUpdate { perk_id: *id, state });
             }
             if !ac.is_zero() {
                 let change = SignedLengthChange::new(ac.value());

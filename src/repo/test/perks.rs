@@ -1,6 +1,6 @@
 use domain_types::literal;
 use sqlx::types::JsonValue;
-use crate::domain::objects::GrowthResult;
+use crate::domain::objects::{GrowthResult, PerkStateUpdate};
 use crate::domain::primitives::{LengthChange, PerkId, PerkName};
 use crate::repo;
 use crate::repo::test::dicks::create_user;
@@ -19,7 +19,7 @@ async fn grow_storing(
     let mut growth = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into()).await?;
     let (chat_id, uid) = (growth.key().chat_id, growth.key().uid);
     let mut attempt = growth.attempt().await?;
-    repo::PerkStates::write_all_internal(&mut attempt, chat_id, uid, &[(perk_id, state)]).await?;
+    repo::PerkStates::write_all_internal(&mut attempt, chat_id, uid, &[PerkStateUpdate { perk_id, state }]).await?;
     attempt.commit().await?;
     growth.commit_growth(LengthChange::signed(5)).await
 }

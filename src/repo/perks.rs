@@ -5,6 +5,7 @@ use chrono::NaiveDate;
 use domain_types::traits::SaturatingInto;
 use sqlx::types::JsonValue;
 use sqlx::PgConnection;
+use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::domain::primitives::{PerkId, PerkName, UserId};
 use crate::repository;
@@ -106,15 +107,15 @@ repository!(PerkStates,
         conn: &mut PgConnection,
         chat_id: InternalChatId,
         uid: UserId,
-        states: &[(PerkId, JsonValue)],
+        states: &[PerkStateUpdate],
     ) -> anyhow::Result<()> {
         if states.is_empty() {
             return Ok(())
         }
         let (perk_ids, values): (Vec<i16>, Vec<JsonValue>) = states.iter()
-            .map(|(perk_id, state)| {
-                let perk_id: i16 = perk_id.value().saturating_into();
-                (perk_id, state.clone())
+            .map(|update| {
+                let perk_id: i16 = update.perk_id.value().saturating_into();
+                (perk_id, update.state.clone())
             })
             .unzip();
         sqlx::query!(
