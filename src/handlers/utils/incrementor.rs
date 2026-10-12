@@ -30,6 +30,7 @@ pub struct Incrementor {
 }
 
 #[async_trait]
+#[allow(clippy::double_must_use)]
 pub trait Perk: Send + Sync + Downcast {
     fn name(&self) -> PerkName;
     async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome>;
