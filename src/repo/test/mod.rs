@@ -1,5 +1,5 @@
 mod users;
-mod dicks;
+pub(crate) mod dicks;
 mod chats;
 mod import;
 mod promo;

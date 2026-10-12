@@ -1,7 +1,7 @@
 use autometrics::autometrics;
 use anyhow::Context;
 use domain_types::traits::SaturatingInto;
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgConnection, Postgres, Transaction};
 
 use crate::config;
 use crate::domain::objects::Loan;
@@ -101,8 +101,8 @@ impl Loans {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_id, value = %value))]
-    pub async fn pay_in_tx(
-        tx: &mut Transaction<'_, Postgres>,
+    pub async fn pay_in(
+        conn: &mut PgConnection,
         chat_id: InternalChatId,
         uid: UserId,
         value: LoanPayout,
@@ -110,11 +110,24 @@ impl Loans {
         sqlx::query!("UPDATE Loans SET debt = debt - $3
                         WHERE uid = $1 AND chat_id = $2 AND repaid_at IS NULL",
                 uid as UserId, chat_id as InternalChatId, value as LoanPayout)
-            .execute(&mut **tx)
+            .execute(conn)
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
             .context(format!("couldn't pay for a loan in the transaction: {chat_id}, {uid}, {value}"))
+    }
+
+    /// The loan of the dick with its row locked, so the debt can't change under whoever pays it.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_id))]
+    pub async fn get_active_loan_for_update(
+        conn: &mut PgConnection,
+        uid: UserId,
+        chat_id: InternalChatId,
+    ) -> anyhow::Result<Option<Loan>> {
+        get_active_loan_in_tx(conn, uid, chat_id)
+            .await
+            .map(|maybe_loan| maybe_loan.map(Loan::from))
     }
 }
 
@@ -135,16 +148,16 @@ async fn fetch_length_locked(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_internal_id))]
 async fn get_active_loan_in_tx(
-    tx: &mut Transaction<'_, Postgres>,
+    conn: &mut PgConnection,
     uid: UserId,
     chat_internal_id: InternalChatId,
 ) -> anyhow::Result<Option<LoanEntity>> {
     let maybe_loan = sqlx::query_as!(LoanEntity,
             r#"SELECT id AS "id: LoanId", debt AS "debt: Debt", payout_ratio AS "payout_ratio: PayoutRatio" FROM loans
                     WHERE uid = $1 AND chat_id = $2
-                    AND repaid_at IS NULL"#,
+                    AND repaid_at IS NULL FOR UPDATE"#,
                 uid as UserId, chat_internal_id as InternalChatId)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(conn)
         .await
         .context(format!("couldn't get an active loan for internal {chat_internal_id} and {uid}"))?;
     Ok(maybe_loan)

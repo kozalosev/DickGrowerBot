@@ -7,6 +7,7 @@ use teloxide::types::{LinkPreviewOptions, Message};
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::{DickOfDayResult, GrowthResult};
+use crate::repo::DodStart;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::Incrementor;
@@ -61,11 +62,16 @@ pub(crate) async fn dick_of_day_impl(
     };
     let (answer, group) = match winner {
         Some(winner) => {
-            let increment = incr.dod_increment(winner.uid, chat_id.kind(), lang_code).await;
-            let dod_result = repos.dicks.set_dod_winner(chat_id, winner.uid, increment.total,
-                                                        &increment.writes).await?;
-            let (main_part, group) = match dod_result {
-                DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }) => {
+            let (dod_result, increment) = match repos.dicks.begin_dod(chat_id, winner.uid).await? {
+                DodStart::AlreadyChosen(name) => (DickOfDayResult::AlreadyChosen(name), None),
+                DodStart::Started(mut growth) => {
+                    let increment = incr.dod_increment(&mut growth, lang_code).await;
+                    let result = growth.commit_dod(increment.total).await?;
+                    (result, Some(increment))
+                }
+            };
+            let (main_part, group) = match (dod_result, increment) {
+                (DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }), Some(increment)) => {
                     let answer = t!("commands.dod.result", locale = lang_code,
                         uid = winner.uid, name = winner.name.escaped(), growth = increment.total, length = new_length);
                     let perks_part = increment.perks_part_of_answer(lang_code);
@@ -77,17 +83,18 @@ pub(crate) async fn dick_of_day_impl(
                     };
                     (text, MessageGroup::Event)
                 },
-                DickOfDayResult::AlreadyChosen(name) => {
+                (DickOfDayResult::AlreadyChosen(name), _) => {
                     let text = t!("commands.dod.already_chosen", locale = lang_code,
                         name = name.escaped()).to_string();
                     (text, MessageGroup::Notice)
                 }
-                DickOfDayResult::NoDick => {
+                (DickOfDayResult::NoDick, _) => {
                     tracing::error!(uid = %winner.uid, chat_id = %chat_id,
                         "there was an attempt to set a non-existent dick as a winner");
                     let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
                     (text, MessageGroup::Notice)
-                }
+                },
+                (DickOfDayResult::Chosen(_), None) => anyhow::bail!("a winner was crowned without an increment"),
             };
             let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
             (format!("{main_part}{time_left_part}"), group)

@@ -6,7 +6,6 @@ mod tghack;
 mod stats;
 mod topics;
 mod cleanup;
-mod perk;
 
 pub use announcement::*;
 pub use user::*;
@@ -16,4 +15,3 @@ pub use tghack::*;
 pub use stats::*;
 pub use topics::*;
 pub use cleanup::*;
-pub use perk::*;

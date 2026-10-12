@@ -1208,7 +1208,7 @@ SQL. When adding a feature, follow this pairing rather than mixing DB access int
 
 ### What counts as a growth
 
-> `Dicks::create_or_grow` is the growth, and the only one. It is subject to the once-a-day rule and
+> `Growth::commit_growth` is the growth, and the only one. It is subject to the once-a-day rule and
 > it spends a bonus attempt. Every other write to `Dicks` is not a growth: it leaves `updated_at`
 > alone and `bonus_attempts` is not its to move.
 
@@ -1216,12 +1216,12 @@ SQL. When adding a feature, follow this pairing rather than mixing DB access int
 `ON CONFLICT DO UPDATE`: the row is rewritten only when the stored `updated_at` is of an earlier day
 or a bought attempt can pay for it, and the same statement spends the attempt — **only when one was
 needed**, so the day's first growth is free whatever the player has in store. A refusal is
-therefore not an error but an empty answer — `create_or_grow` returns `Option`, like `set_dod_winner`
+therefore not an error but an empty answer — `commit_growth` returns `Option`, like `commit_dod`
 beside it, and `handlers::dick` turns `None` into the "come back tomorrow" notice.
 
 That is a change of kind, not only of place. `trg_check_and_update_dicks_timestamp` applied the rule
 to **any** statement that set `updated_at`, so the rule held whoever wrote the row; now it holds
-only for whoever goes through `create_or_grow`. A growth written by hand somewhere else would not be
+only for whoever goes through `commit_growth`. A growth written by hand somewhere else would not be
 refused, and nothing in the schema would say so. What guards it instead is
 `src/repo/test/dicks.rs` — the once-a-day refusal, a bonus attempt paying for a second growth, a
 non-growth write spending none and not reopening the day — and this paragraph.
@@ -1239,9 +1239,9 @@ evaluated, so two `/grow`s racing for the same dick serialise exactly as they di
 ### One Dick of the Day per chat per day
 
 The same shape, one table over: `PRIMARY KEY (chat_id, created_at)` on `Dick_of_Day` **is** the
-rule, and `set_dod_winner` claims that key before it grows anybody. A conflict means the day is
+rule, and `Dicks::begin_dod` claims that key before it grows anybody. A conflict means the day is
 already won, so the growth never happens and the winner's name is read back for the answer;
-`Dicks::set_dod_winner` returns `DickOfDayResult` — `Chosen`, `AlreadyChosen(name)` or `NoDick` —
+`Growth::commit_dod` returns `DickOfDayResult` — `Chosen`, `AlreadyChosen(name)` or `NoDick` —
 rather than an `Option` beside an exception.
 
 Claiming first is what makes two `/dod`s in one chat serialise: the second waits on the index and
@@ -1273,19 +1273,29 @@ needs no migration, only a row in `Perks`, and that name-to-id dictionary is rea
 `Incrementor::new` at startup, in a single statement for all of them. Nothing looks a perk up by
 name afterwards.
 
-**A perk does not write.** `apply` returns its new state next to its change, and
-`Dicks::create_or_grow` writes the length and every blob in one transaction. That ordering is the
-whole point: the once-a-day rule is applied by that statement, *after* the perks have run, and a
-refused growth must leave no perk believing it happened — which is why the empty answer returns
-before `PerkStates::write_all` and before the commit. The loan payout travels the same way: the
-perk reports it in `PerkOutcome::loan_payout`, and `Dicks::write_perk_writes` takes it off the debt
-(`Loans::pay_in_tx`) in that transaction. Everything a perk wants written is one `PerkWrites`.
+**A growth is one transaction, and the perks write through it.** `Dicks::begin_growth` (or
+`begin_dod`) opens a `Growth`, which owns the transaction; `Incrementor::growth_increment` takes it
+by `&mut`, hands the perks its connection as `PerkContext::conn`, and the caller ends it with
+`Growth::commit_growth` / `commit_dod`. Dropping a `Growth` rolls everything back — which is what a
+refused growth is: the once-a-day rule is the upsert in `commit_growth`, *after* the perks have
+run, and a perk that wrote something (a loan payout, its state) leaves no trace when it says no.
+The Telegram answer is sent after the commit, never inside the transaction.
 
-**`apply` must have no side effects**, because it may run several times for one growth. When perks
-cancel a roll out to zero, `Incrementor::nonzero_increment` rolls the base again and applies every
-perk to the new roll, up to `MAX_REROLLS` times; if they still cancel it, the bare base is used and
-the perks are skipped. A perk that paid or stored something inside `apply` would do it once per
-attempt, for a result that is then thrown away.
+**Every attempt is a savepoint.** When the perks cancel a roll out to zero,
+`Incrementor::nonzero_increment` rolls its savepoint back — the perks' writes with it — and rolls
+the base again, up to `MAX_REROLLS` times; if they still cancel it, the bare base is used and the
+perks are skipped. A perk's state is written by the incrementor from `PerkOutcome::state`, inside
+the attempt; anything else a perk needs to write goes through `ctx.conn` itself, as
+`LoanPayoutPerk` does.
+
+**A perk's error ends the attempt, and the perks with it.** `apply` returns a `Result` because a
+failed statement poisons a Postgres transaction (`25P02`): nothing after it would work, so the
+attempt is rolled back and the bare base is used — as it is for an `i64` overflow of the sum.
+
+**The dick's row is locked first, the loan's second**, the same order `Loans::borrow` takes them
+in (`begin_growth` locks the dick, `LoanPayoutPerk` locks the loan with `FOR UPDATE`). The payout
+is therefore computed against the debt it will be taken from. Keep that order for any perk that
+locks something of its own.
 
 Two things a perk is handed rather than fetching itself: `ChangeSource`, because a Dick of the Day
 award is not a growth and `dod_increment` shares the perk pipeline with `growth_increment`; and

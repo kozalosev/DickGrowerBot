@@ -124,7 +124,7 @@ async fn test_perform_daily_shrink() {
     // A fresh dick for USER_ID — also creates the Chats row. It must NOT be shrunk (grown today).
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100))
         .await.expect("couldn't create the fresh dick");
     let chat_id = internal_chat_id(&db).await;
 
@@ -183,7 +183,7 @@ async fn test_perform_daily_shrink_reports_unreachable_chats() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100))
         .await.expect("couldn't create the dick");
     let chat_id = internal_chat_id(&db).await;
 
@@ -242,7 +242,7 @@ async fn test_perform_daily_shrink_queues_one_summary_per_chat_and_day() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100))
         .await.expect("couldn't create the fresh dick");
     let chat_id = internal_chat_id(&db).await;
 
@@ -272,7 +272,7 @@ async fn test_perform_daily_shrink_ramps_up_the_ratio() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create a dummy dick and the Chats row");
     let chat_id = internal_chat_id(&db).await;
 
@@ -316,7 +316,7 @@ async fn test_perform_daily_shrink_floor_reaches_exactly_zero() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create a dummy dick and the Chats row");
     let chat_id = internal_chat_id(&db).await;
 
@@ -348,7 +348,7 @@ async fn test_perform_daily_shrink_rejects_overflowing_grace_days_instead_of_wra
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create a dummy dick and the Chats row");
     let chat_id = internal_chat_id(&db).await;
 
@@ -373,7 +373,7 @@ async fn test_get_shrinks_for_date_only_returns_that_day() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(100))
         .await.expect("couldn't create the fresh dick");
     let chat_id = internal_chat_id(&db).await;
 
@@ -405,7 +405,7 @@ async fn test_get_shrinks_for_date_pages() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create a dummy dick");
     let chat_id = internal_chat_id(&db).await;
 
@@ -443,7 +443,7 @@ async fn test_get_latest_shrink_date_returns_none_without_history() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create a dummy dick");
 
     let date = shrinks.get_latest_shrink_date(&CHAT_ID_KIND).await
@@ -461,7 +461,7 @@ async fn test_get_latest_and_adjacent_shrink_dates() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user and the Chats row");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create a dummy dick");
     let chat_id = internal_chat_id(&db).await;
 
@@ -506,7 +506,7 @@ async fn test_get_player_uids_sample() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create the first dick");
     let chat_id = internal_chat_id(&db).await;
 
@@ -536,7 +536,7 @@ async fn the_player_sample_stops_at_its_limit() {
 
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the primary user");
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1), &Default::default())
+    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(1))
         .await.expect("couldn't create the first dick");
     let chat_id = internal_chat_id(&db).await;
 

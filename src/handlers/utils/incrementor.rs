@@ -2,22 +2,21 @@ use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use domain_types::traits::SaturatingInto;
 use std::sync::Arc;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use derive_more::Display;
 use downcast_rs::{Downcast, impl_downcast};
-use futures::{future, stream, StreamExt};
 use num_traits::PrimInt;
 use rand::distr::uniform::SampleUniform;
 use rand::RngExt;
 use rust_i18n::t;
 use sqlx::types::JsonValue;
-use crate::repo;
+use sqlx::PgConnection;
+use crate::repo::{self, Dicks, Growth, PerkStates};
 use crate::config::IncrementorConfig;
-use crate::domain::objects::{PerkStateUpdate, PerkWrites};
-use crate::domain::primitives::chat::ChatIdKind;
-use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, LoanPayout, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
+use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
+use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
 use domain_types::literal;
 
 const MAX_REROLLS: usize = 10;
@@ -26,14 +25,13 @@ const MAX_REROLLS: usize = 10;
 pub struct Incrementor {
     config: IncrementorConfig,
     perks: Vec<RegisteredPerk>,
-    dicks: repo::Dicks,
     perk_states: repo::PerkStates,
 }
 
 #[async_trait]
 pub trait Perk: Send + Sync + Downcast {
     fn name(&self) -> PerkName;
-    async fn apply(&self, ctx: PerkContext<'_>) -> PerkOutcome;
+    async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome>;
 
     /// What the perk has to say about its owner in `/stats`. Nothing, unless it says otherwise.
     fn stats_line(&self, _state: Option<&JsonValue>, _lang_code: &LanguageCode) -> Option<String> {
@@ -73,30 +71,33 @@ pub enum ChangeSource {
 
 /// Everything a perk is given: the change it may alter, what it stored the last time, and the day
 /// the database is having.
+///
+/// `conn` is the transaction of the growth. Whatever a perk writes through it is kept only if the
+/// attempt is, and undone together with the rest when the base is rolled again.
 pub struct PerkContext<'a> {
     pub dick_id: &'a DickId,
+    pub chat: InternalChatId,
     pub intent: ChangeIntent,
     pub source: ChangeSource,
     pub state: Option<&'a JsonValue>,
     pub today: NaiveDate,
     pub lang_code: &'a LanguageCode,
+    pub conn: &'a mut PgConnection,
 }
 
-/// What a perk made of it. The state travels with the change instead of being stored on the spot,
-/// so it is written in the transaction that writes the length — or not at all.
+/// What a perk made of it. The state is stored by the caller, in the same attempt as everything
+/// else the perk wrote.
 pub struct PerkOutcome {
     pub change: AdditionalChange,
     pub state: Option<JsonValue>,
     /// Extra detail for the "perks affected the result" line, e.g. how long a streak has grown to.
     /// Shown only next to a non-zero change.
     pub note: Option<PerkNote>,
-    /// Taken off the loan once the change is written, not while the perk is being applied.
-    pub loan_payout: Option<LoanPayout>,
 }
 
 impl From<AdditionalChange> for PerkOutcome {
     fn from(change: AdditionalChange) -> Self {
-        Self { change, state: None, note: None, loan_payout: None }
+        Self { change, state: None, note: None }
     }
 }
 
@@ -120,7 +121,6 @@ pub struct Increment {
     pub base: LengthChange,
     pub by_perks: HashMap<PerkName, PerkEffect>,
     pub total: LengthChange,
-    pub writes: PerkWrites,
 }
 
 #[derive(Clone)]
@@ -140,7 +140,6 @@ impl BaseIncrement {
 impl Incrementor {
     pub async fn new(
         config: IncrementorConfig,
-        dicks: &repo::Dicks,
         perk_states: &repo::PerkStates,
         perks: Vec<Box<dyn Perk>>,
     ) -> anyhow::Result<Self> {
@@ -165,7 +164,6 @@ impl Incrementor {
         Ok(Self {
             config,
             perks,
-            dicks: dicks.clone(),
             perk_states: perk_states.clone(),
         })
     }
@@ -209,73 +207,87 @@ impl Incrementor {
             .collect();
     }
 
+    /// The growth of the dick, which is the transaction `growth` holds. The caller commits it with
+    /// the total, or drops it to undo everything the perks wrote.
     pub async fn growth_increment(
         &self,
-        user_id: UserId,
-        chat_id: ChatIdKind,
+        growth: &mut Growth,
         days_since_registration: DaysCount,
         lang_code: &LanguageCode,
     ) -> Increment {
-        let dick_id = DickId(user_id, chat_id);
         let grow_shrink_ratio = if days_since_registration > self.config.newcomers_grace_days {
             self.config.grow_shrink_ratio
         } else {
             literal!(Ratio = 1.0)
         };
-        self.nonzero_increment(dick_id, ChangeSource::Growth, lang_code, || {
+        self.nonzero_increment(growth, ChangeSource::Growth, lang_code, || {
             let base_incr = get_base_increment(self.config.growth_range.clone(), grow_shrink_ratio);
             SignedLengthChange::new(base_incr.into())
         }).await
     }
 
-    pub async fn dod_increment(&self, user_id: UserId, chat_id: ChatIdKind, lang_code: &LanguageCode) -> Increment {
-        let dick_id = DickId(user_id, chat_id);
-        self.nonzero_increment(dick_id, ChangeSource::DickOfDay, lang_code, || {
+    pub async fn dod_increment(&self, growth: &mut Growth, lang_code: &LanguageCode) -> Increment {
+        self.nonzero_increment(growth, ChangeSource::DickOfDay, lang_code, || {
             let base_incr = rand::rng().random_range(self.config.dod_bonus_range.clone());
             SignedLengthChange::new(base_incr.into())
         }).await
     }
 
+    /// Every attempt is a savepoint: it is released when the perks leave something of the roll and
+    /// rolled back otherwise, together with whatever the perks wrote.
     async fn nonzero_increment(
         &self,
-        dick: DickId,
+        growth: &mut Growth,
         source: ChangeSource,
         lang_code: &LanguageCode,
-        roll_base: impl Fn() -> BaseIncrement + Sync,
+        roll_base: impl Fn() -> BaseIncrement,
     ) -> Increment {
-        stream::repeat_with(&roll_base)
-            .take(MAX_REROLLS)
-            .then(|base| self.add_additional_incr(dick.clone(), base, source, lang_code))
-            .inspect(|increment| if increment.total.is_zero() {
-                tracing::debug!(%dick, "perks cancelled the increment, rerolling the base");
-            })
-            .filter(|increment| future::ready(!increment.total.is_zero()))
-            .boxed()
-            .next()
-            .await
-            .unwrap_or_else(|| {
-                tracing::warn!(%dick, "perks kept cancelling the increment, skipping them");
-                roll_base().only()
-            })
+        let dick = DickId(growth.uid(), growth.chat_kind().clone());
+        let chat = growth.chat();
+        for _ in 0..MAX_REROLLS {
+            let Ok(mut attempt) = growth.attempt().await
+                .inspect_err(|e| tracing::error!(%dick, error = format!("{e:#}"), "couldn't start an attempt"))
+            else {
+                break
+            };
+            let applied = self.add_additional_incr(&mut attempt, &dick, chat, roll_base(), source, lang_code).await;
+            match applied {
+                Ok(increment) if !increment.total.is_zero() => {
+                    let Ok(()) = attempt.commit().await
+                        .inspect_err(|e| tracing::error!(%dick, error = %e, "couldn't release an attempt"))
+                    else {
+                        break
+                    };
+                    return increment
+                },
+                Ok(_) => tracing::debug!(%dick, "perks cancelled the increment, rerolling the base"),
+                Err(e) => {
+                    tracing::error!(%dick, error = format!("{e:#}"), "couldn't apply the perks");
+                    let _ = attempt.rollback().await;
+                    break
+                },
+            }
+            let Ok(()) = attempt.rollback().await
+                .inspect_err(|e| tracing::error!(%dick, error = %e, "couldn't roll an attempt back"))
+            else {
+                break
+            };
+        }
+        tracing::warn!(%dick, "the perks were skipped");
+        roll_base().only()
     }
 
     async fn add_additional_incr(
         &self,
-        dick: DickId,
+        conn: &mut PgConnection,
+        dick: &DickId,
+        chat: InternalChatId,
         base_increment: BaseIncrement,
         source: ChangeSource,
         lang_code: &LanguageCode,
-    ) -> Increment {
-        let Ok(current_length) = self.dicks.fetch_length(dick.0, &dick.1).await
-            .inspect_err(|e| tracing::error!(error = %e, "couldn't fetch the length of a dick"))
-        else {
-            return base_increment.only()
-        };
-        let Ok(states) = self.perk_states.read(dick.0, &dick.1).await
-            .inspect_err(|e| tracing::error!(error = %e, "couldn't fetch the perk states of a dick"))
-        else {
-            return base_increment.only()
-        };
+    ) -> anyhow::Result<Increment> {
+        let current_length = Dicks::fetch_length_in(conn, dick.0, chat).await?;
+        let states = PerkStates::read_in(conn, dick.0, chat).await?;
         let base = LengthChange::from(base_increment);
         let change_intent = ChangeIntent {
             base_increment: base,
@@ -284,22 +296,20 @@ impl Incrementor {
 
         let mut additional_change = SignedLengthChange::new(0);
         let mut by_perks = HashMap::new();
-        let mut writes = PerkWrites::default();
         for RegisteredPerk { id, perk } in self.perks.iter() {
             let ctx = PerkContext {
-                dick_id: &dick,
+                dick_id: dick,
+                chat,
                 intent: change_intent,
                 source,
                 state: states.of(*id),
                 today: states.today,
                 lang_code,
+                conn: &mut *conn,
             };
-            let PerkOutcome { change: AdditionalChange(ac), state, note, loan_payout } = perk.apply(ctx).await;
+            let PerkOutcome { change: AdditionalChange(ac), state, note } = perk.apply(ctx).await?;
             if let Some(state) = state {
-                writes.states.push(PerkStateUpdate { perk_id: *id, state });
-            }
-            if loan_payout.is_some() {
-                writes.loan_payout = loan_payout;
+                PerkStates::write_in(conn, chat, dick.0, *id, &state).await?;
             }
             if !ac.is_zero() {
                 let change = SignedLengthChange::new(ac.value());
@@ -311,15 +321,8 @@ impl Incrementor {
         }
 
         let total = (base + additional_change)
-            .inspect_err(|e| tracing::error!(dick = %dick, error = %e, "an overflow in the increment calculation"))
-            .unwrap_or(base);
-
-        if base == total && !additional_change.is_zero() {
-            tracing::info!(perks = ?by_perks, "some perks affected the calculation");
-            by_perks.clear();
-        }
-
-        Increment { base, by_perks, total, writes }
+            .context("an overflow in the increment calculation")?;
+        Ok(Increment { base, by_perks, total })
     }
 }
 
@@ -329,7 +332,6 @@ impl Increment {
             base,
             by_perks: HashMap::default(),
             total: base,
-            writes: PerkWrites::default(),
         }
     }
 
@@ -413,75 +415,156 @@ mod test {
 #[cfg(test)]
 mod test_incrementor {
     use domain_types::literal;
-    use std::iter::zip;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
-    use futures::future::join_all;
+    use sqlx::{Pool, Postgres};
     use crate::config::IncrementorConfig;
-    use crate::domain::primitives::{DaysCount, LanguageCode, LengthChange, PerkName, Ratio};
+    use crate::domain::objects::DickOfDayResult;
+    use crate::domain::primitives::{Debt, DaysCount, LanguageCode, LengthChange, PayoutRatio, PerkName, Ratio};
+    use crate::handlers::perks::LoanPayoutPerk;
     use crate::handlers::utils::{AdditionalChange, Incrementor, Perk, PerkContext, PerkOutcome};
     use crate::repo;
-    use crate::repo::test::{CHAT_ID_KIND, fresh_db, USER_ID};
+    use crate::repo::Growth;
+    use crate::repo::test::dicks::{create_dick, create_user};
+    use crate::repo::test::{CHAT_ID_KIND, fresh_db, UID, CHAT_ID, USER_ID};
 
     #[tokio::test]
     async fn test_incrementor() {
         let db = fresh_db().await;
         let dicks = repo::Dicks::new(db.clone(), Default::default());
-        let incr = Incrementor {
-            config: IncrementorConfig {
-                growth_range: -1..=1,
-                grow_shrink_ratio: literal!(Ratio = 0.5),
-                newcomers_grace_days: DaysCount::new(1),
-                dod_bonus_range: 1..=2,
-                perks: Default::default(),
-            },
-            dicks,
-            perk_states: repo::PerkStates::new(db),
-            perks: Vec::default()
+        let incr = incrementor(&db, IncrementorConfig {
+            growth_range: -1..=1,
+            grow_shrink_ratio: literal!(Ratio = 0.5),
+            newcomers_grace_days: DaysCount::new(1),
+            dod_bonus_range: 1..=2,
+            perks: Default::default(),
+        });
+
+        test_growth_increment_base(&incr, &dicks).await;
+        test_dod_increment_base(&incr, &dicks).await;
+        test_with_perks(&incr, &dicks).await;
+        test_perks_cannot_cancel_growth(&incr, &dicks).await;
+        test_perks_cannot_cancel_dod(&incr, &dicks).await;
+        test_perk_with_overflow(&incr, &dicks).await;
+        test_failing_perk(&incr, &dicks).await;
+    }
+
+    #[tokio::test]
+    async fn a_reroll_takes_back_what_the_perks_wrote() {
+        let db = fresh_db().await;
+        create_user(&db).await;
+        create_dick(&db).await;
+        let dicks = repo::Dicks::new(db.clone(), Default::default());
+        let config = IncrementorConfig {
+            growth_range: 3..=3,
+            grow_shrink_ratio: literal!(Ratio = 1.0),
+            newcomers_grace_days: DaysCount::new(0),
+            dod_bonus_range: 1..=1,
+            perks: Default::default(),
         };
 
-        test_growth_increment_base(&incr).await;
-        test_dod_increment_base(&incr).await;
-        test_with_perks(&incr).await;
-        test_perks_cannot_cancel_growth(&incr).await;
-        test_perks_cannot_cancel_dod(&incr).await;
-        test_perk_with_overflow(&incr).await;
+        // the payout cancels the whole roll out, so every attempt pays and is rolled back
+        let loans = take_loan(&db, literal!(PayoutRatio = 0.9)).await;
+        let mut incr = incrementor(&db, config.clone());
+        incr.set_perks(vec![Box::new(LoanPayoutPerk)]);
+        sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
+            .execute(&db)
+            .await.expect("couldn't move the last growth to yesterday");
+        let mut growth = begin(&dicks).await;
+        let increment = incr.growth_increment(&mut growth, DaysCount::new(10), &lang()).await;
+        growth.commit_growth(increment.total)
+            .await.expect("couldn't commit the growth");
+        assert_eq!(increment.total.value(), 3);
+        assert_eq!(debt_of(&loans).await, 10);
+
+        // half of the roll is paid, so the first attempt is kept and pays once
+        let loans = take_loan(&db, literal!(PayoutRatio = 0.5)).await;
+        let config = IncrementorConfig { growth_range: 4..=4, ..config };
+        let mut incr = incrementor(&db, config);
+        incr.set_perks(vec![Box::new(LoanPayoutPerk)]);
+        sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
+            .execute(&db)
+            .await.expect("couldn't move the last growth to yesterday again");
+        let mut growth = begin(&dicks).await;
+        let increment = incr.growth_increment(&mut growth, DaysCount::new(10), &lang()).await;
+        growth.commit_growth(increment.total)
+            .await.expect("couldn't commit the growth");
+        assert_eq!(increment.total.value(), 2);
+        assert_eq!(debt_of(&loans).await, 8);
+    }
+
+    /// Replaces the loan of the dick with a new one of ten.
+    async fn take_loan(db: &Pool<Postgres>, payout_ratio: PayoutRatio) -> repo::Loans {
+        sqlx::query("DELETE FROM Loans")
+            .execute(db)
+            .await.expect("couldn't remove the old loans");
+        sqlx::query("UPDATE Dicks SET length = -10 WHERE uid = $1 AND chat_id = (SELECT id FROM Chats WHERE chat_id = $2)")
+            .bind(UID)
+            .bind(CHAT_ID)
+            .execute(db)
+            .await.expect("couldn't set the length");
+        let loans = repo::Loans::new(db.clone(), &crate::config::AppConfig {
+            loan_payout_ratio: payout_ratio,
+            ..Default::default()
+        });
+        loans.borrow(USER_ID, &CHAT_ID_KIND, Debt::new(10))
+            .await.expect("couldn't apply for a loan");
+        loans
+    }
+
+    async fn debt_of(loans: &repo::Loans) -> Debt {
+        loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
+            .await.expect("couldn't fetch the loan")
+            .expect("the loan must be present")
+            .debt
+    }
+
+    fn incrementor(db: &Pool<Postgres>, config: IncrementorConfig) -> Incrementor {
+        Incrementor {
+            config,
+            perk_states: repo::PerkStates::new(db.clone()),
+            perks: Vec::default()
+        }
+    }
+
+    async fn begin(dicks: &repo::Dicks) -> Growth {
+        dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
+            .await.expect("couldn't begin a growth")
     }
 
     fn lang() -> LanguageCode {
         LanguageCode::new("en".to_owned())
     }
 
-    async fn test_growth_increment_base(incr: &Incrementor) {
+    async fn test_growth_increment_base(incr: &Incrementor, dicks: &repo::Dicks) {
         let lang_code = lang();
-        let lazy_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1), &lang_code));
-        for fut in lazy_vals {
-            let val = fut.await;
+        for _ in 0..100 {
+            let mut growth = begin(dicks).await;
+            let val = incr.growth_increment(&mut growth, DaysCount::new(1), &lang_code).await;
             assert_eq!(val.base, val.total);
             assert_ne!(val.base.value(), 0);
             assert!(val.base.value() >= -1);
             assert!(val.base.value() <= 1);
         }
 
-        let lazy_positive_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0), &lang_code));
-        for fut in lazy_positive_vals {
-            let val = fut.await;
+        for _ in 0..100 {
+            let mut growth = begin(dicks).await;
+            let val = incr.growth_increment(&mut growth, DaysCount::new(0), &lang_code).await;
             assert_eq!(val.base, val.total);
             assert!(val.base.value() > 0);
         }
     }
 
-    async fn test_dod_increment_base(incr: &Incrementor) {
+    async fn test_dod_increment_base(incr: &Incrementor, dicks: &repo::Dicks) {
         let lang_code = lang();
-        let val = (0..100)
-            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang_code));
-        let val = join_all(val).await;
-        assert!(val.iter().all(|n| { n.base == n.total }));
-        assert!(val.iter().all(|n| { n.base.value() == 1 || n.base.value() == 2 }))
+        for _ in 0..100 {
+            let mut growth = begin(dicks).await;
+            let val = incr.dod_increment(&mut growth, &lang_code).await;
+            assert_eq!(val.base, val.total);
+            assert!(val.base.value() == 1 || val.base.value() == 2);
+        }
     }
 
     /// What a test perk has to say; the rest of `Perk` is the same for all of them.
@@ -496,8 +579,8 @@ mod test_incrementor {
             PerkName::of(self.label()).expect("a valid perk name")
         }
 
-        async fn apply(&self, ctx: PerkContext<'_>) -> PerkOutcome {
-            AdditionalChange(self.change(&ctx)).into()
+        async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome> {
+            Ok(AdditionalChange(self.change(&ctx)).into())
         }
 
         fn enabled(&self) -> bool {
@@ -557,17 +640,12 @@ mod test_incrementor {
         }
     }
 
-    async fn test_with_perks(incr: &Incrementor) {
+    async fn test_with_perks(incr: &Incrementor, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
         let perk_plus2 = AddPerk::boxed(2);
         let perk_minus1 = AddPerk::boxed(-1);
         incr.set_perks(vec![perk_plus2.clone(), perk_minus1.clone()]);
         let lang_code = lang();
-
-        let growth_lazy_vals = (0..100)
-            .map(|_| incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(1), &lang_code));
-        let dod_lazy_vals = (0..100)
-            .map(|_| incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang_code));
 
         macro_rules! assertions {
             ($val:ident) => {
@@ -577,58 +655,102 @@ mod test_incrementor {
             };
         }
 
-        for (growth_fut, dod_fut) in zip(growth_lazy_vals, dod_lazy_vals) {
-            let (growth_val, dod_val) = (growth_fut.await, dod_fut.await);
+        for _ in 0..100 {
+            let mut growth = begin(dicks).await;
+            let growth_val = incr.growth_increment(&mut growth, DaysCount::new(1), &lang_code).await;
             assertions!(growth_val);
+            let mut growth = begin(dicks).await;
+            let dod_val = incr.dod_increment(&mut growth, &lang_code).await;
             assertions!(dod_val);
         }
     }
-    
-    async fn test_perk_with_overflow(incr: &Incrementor) {
+
+    /// A perk whose query fails, which poisons a Postgres transaction unless it is rolled back.
+    struct FailingPerk;
+
+    #[async_trait]
+    impl Perk for FailingPerk {
+        fn name(&self) -> PerkName {
+            literal!(PerkName = "failing")
+        }
+
+        async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome> {
+            sqlx::query("SELECT * FROM there_is_no_such_table")
+                .execute(ctx.conn)
+                .await?;
+            Ok(AdditionalChange::zero().into())
+        }
+
+        fn enabled(&self) -> bool {
+            true
+        }
+    }
+
+    async fn test_failing_perk(incr: &Incrementor, dicks: &repo::Dicks) {
+        let mut incr = incr.clone();
+        incr.set_perks(vec![AddPerk::boxed(2), Box::new(FailingPerk)]);
+
+        let mut growth = begin(dicks).await;
+        let increment = incr.dod_increment(&mut growth, &lang()).await;
+        assert_eq!(increment.base, increment.total);
+        assert!(increment.by_perks.is_empty());
+
+        let result = growth.commit_dod(increment.total)
+            .await.expect("the growth must still be usable after a perk failed");
+        assert!(matches!(result, DickOfDayResult::NoDick | DickOfDayResult::Chosen(_)));
+    }
+
+    async fn test_perk_with_overflow(incr: &Incrementor, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
         // lengths are i64 now, so only an i64 overflow triggers the fallback
         let perk_add_max_int = AddPerk::boxed(i64::MAX);
         incr.set_perks(vec![perk_add_max_int.clone()]);
 
-        let increment = incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang()).await;
+        let mut growth = begin(dicks).await;
+        let increment = incr.dod_increment(&mut growth, &lang()).await;
         assert_eq!(increment.base, increment.total);
         assert!(increment.by_perks.is_empty());
     }
 
-    async fn test_perks_cannot_cancel_growth(incr: &Incrementor) {
+    async fn test_perks_cannot_cancel_growth(incr: &Incrementor, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
         incr.config.growth_range = 1..=1;
         incr.set_perks(vec![AddPerk::boxed(-1)]);
-        let positive = incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0), &lang()).await;
+        let mut growth = begin(dicks).await;
+        let positive = incr.growth_increment(&mut growth, DaysCount::new(0), &lang()).await;
         assert_eq!(positive.base.value(), 1);
         assert_eq!(positive.total.value(), 1);
 
         incr.config.growth_range = -1..=-1;
         incr.config.grow_shrink_ratio = literal!(Ratio = 0.0);
         incr.set_perks(vec![AddPerk::boxed(1)]);
-        let negative = incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(2), &lang()).await;
+        let mut growth = begin(dicks).await;
+        let negative = incr.growth_increment(&mut growth, DaysCount::new(2), &lang()).await;
         assert_eq!(negative.base.value(), -1);
         assert_eq!(negative.total.value(), -1);
 
         incr.config.growth_range = 1..=1;
         let perk = CancelFirstPerk::boxed(3);
         incr.set_perks(vec![perk.clone()]);
-        let rerolled = incr.growth_increment(USER_ID, CHAT_ID_KIND, DaysCount::new(0), &lang()).await;
+        let mut growth = begin(dicks).await;
+        let rerolled = incr.growth_increment(&mut growth, DaysCount::new(0), &lang()).await;
         assert_eq!(rerolled.total.value(), 1);
         assert_eq!(perk.calls(), 4);
     }
 
-    async fn test_perks_cannot_cancel_dod(incr: &Incrementor) {
+    async fn test_perks_cannot_cancel_dod(incr: &Incrementor, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
         incr.config.dod_bonus_range = 1..=1;
         incr.set_perks(vec![AddPerk::boxed(-1)]);
-        let cancelled = incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang()).await;
+        let mut growth = begin(dicks).await;
+        let cancelled = incr.dod_increment(&mut growth, &lang()).await;
         assert_eq!(cancelled.base.value(), 1);
         assert_eq!(cancelled.total.value(), 1);
 
         let perk = CancelFirstPerk::boxed(3);
         incr.set_perks(vec![perk.clone()]);
-        let rerolled = incr.dod_increment(USER_ID, CHAT_ID_KIND, &lang()).await;
+        let mut growth = begin(dicks).await;
+        let rerolled = incr.dod_increment(&mut growth, &lang()).await;
         assert_eq!(rerolled.total.value(), 1);
         assert_eq!(perk.calls(), 4);
     }

@@ -158,9 +158,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
     let me = bot.get_me().await?;
-    let perks = handlers::perks::all(&db_conn, &app_config);
+    let perks = handlers::perks::all(&app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
-                                                        &repos.dicks, &repos.perk_states, perks).await?;
+                                                        &repos.perk_states, perks).await?;
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES,
                                                                &command_toggles)?;
     let help_container = help::render_help_messages(help_context)?;

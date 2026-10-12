@@ -2,12 +2,12 @@ use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use futures::TryFutureExt;
 use domain_types::traits::SaturatingInto;
-use sqlx::{Executor, Pool, Postgres, Transaction};
+use sqlx::{Acquire, Executor, PgConnection, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
-use crate::domain::objects::{Dick, DickOfDayResult, GrowthResult, PerkWrites};
+use crate::domain::objects::{Dick, DickOfDayResult, GrowthResult};
 use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
-use super::{Chats, Loans, PerkStates};
+use super::Chats;
 
 /// The database projection of a [`Dick`]. `position` is a `ROW_NUMBER()` (a plain `int8`),
 /// so it's decoded as `i64` here and converted to the `Position` domain type at this boundary
@@ -49,50 +49,43 @@ impl Dicks {
         }
     }
 
-    /// Grows a dick, creating it on the first play. `None` when the day is already spent: the caller
-    /// grew today and has no bought attempt to pay for another.
-    ///
-    /// **The once-a-day rule lives in this statement and nowhere else.** A write to `Dicks` that
-    /// goes around it is not subject to it, so a growth belongs here.
-    ///
-    /// An attempt is spent only on a growth that needs one — the day's first is free whatever the
-    /// caller has bought.
+    /// Starts a growth: a transaction that holds the dick's row until it is committed or dropped.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id, increment = %increment))]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id))]
+    pub async fn begin_growth(&self, uid: UserId, chat_id: &ChatIdPartiality) -> anyhow::Result<Growth> {
+        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::lock_dick(&mut tx, internal_chat_id, uid).await?;
+        Ok(Growth { tx, dicks: self.clone(), uid, chat: internal_chat_id, chat_kind: chat_id.kind() })
+    }
+
+    /// Grows a dick without any perks, creating it on the first play. `None` when the day is
+    /// already spent: the caller grew today and has no bought attempt to pay for another.
+    #[cfg(test)]
     pub async fn create_or_grow(
         &self,
         uid: UserId,
         chat_id: &ChatIdPartiality,
         increment: LengthChange,
-        perk_writes: &PerkWrites,
     ) -> anyhow::Result<Option<GrowthResult>> {
-        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
-
-        let mut tx = self.pool.begin().await?;
-        let new_length = sqlx::query_scalar!(
-            "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
-                ON CONFLICT (uid, chat_id) DO UPDATE SET
-                    length = (dicks.length + $3),
-                    updated_at = current_timestamp,
-                    bonus_attempts = CASE WHEN date(dicks.updated_at) = current_date
-                                          THEN dicks.bonus_attempts - 1
-                                          ELSE dicks.bonus_attempts END
-                WHERE date(dicks.updated_at) <> current_date OR dicks.bonus_attempts > 0
-                RETURNING length",
-                uid as UserId, internal_chat_id as InternalChatId, increment.value())
-            .fetch_optional(&mut *tx)
+        self.begin_growth(uid, chat_id)
+            .await?
+            .commit_growth(increment)
             .await
-            .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
-        // Nothing was written, so nothing is committed: a refused growth must leave no perk
-        // believing it happened. Dropping the transaction rolls it back.
-        let Some(new_length) = new_length else {
-            return Ok(None)
-        };
-        Self::write_perk_writes(&mut tx, internal_chat_id, uid, perk_writes).await?;
-        tx.commit().await?;
+    }
 
-        let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
-        Ok(Some(GrowthResult { new_length: Length::new(new_length), pos_in_top }))
+    /// The length as the transaction sees it, zero for a dick that doesn't exist yet.
+    pub async fn fetch_length_in(
+        conn: &mut PgConnection,
+        uid: UserId,
+        chat_id: InternalChatId,
+    ) -> anyhow::Result<Length> {
+        sqlx::query_scalar!("SELECT length FROM Dicks WHERE chat_id = $1 AND uid = $2",
+                chat_id as InternalChatId, uid as UserId)
+            .fetch_optional(conn)
+            .await
+            .map(|maybe_length| maybe_length.map(Length::new).unwrap_or_default())
+            .context(format!("couldn't fetch the length of {uid} in {chat_id}"))
     }
 
     #[autometrics]
@@ -173,40 +166,46 @@ impl Dicks {
             .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
-    /// Crowns the Dick of the Day, growing the winner by `bonus`.
+    /// Starts the election of the Dick of the Day.
     ///
     /// **One winner a day per chat is the primary key of `Dick_of_Day`**, and the election starts
     /// by claiming that key: a chat that already has today's winner conflicts, and only then is
     /// the name of that winner read. Claiming it first also serialises two elections racing in one
     /// chat, since the second waits on the index rather than reading past it.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id, bonus = %bonus))]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id))]
+    pub async fn begin_dod(&self, chat_id: &ChatIdPartiality, user_id: UserId) -> anyhow::Result<DodStart> {
+        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
+
+        let mut tx = self.pool.begin().await?;
+        if !Self::claim_the_day(&mut tx, internal_chat_id, user_id).await? {
+            tx.rollback().await?;
+            return self.get_dod_winner_name(internal_chat_id)
+                .map_ok(DodStart::AlreadyChosen)
+                .await
+        }
+        Self::lock_dick(&mut tx, internal_chat_id, user_id).await?;
+        Ok(DodStart::Started(Growth {
+            tx,
+            dicks: self.clone(),
+            uid: user_id,
+            chat: internal_chat_id,
+            chat_kind: chat_id.kind(),
+        }))
+    }
+
+    /// Crowns the Dick of the Day without any perks, growing the winner by `bonus`.
+    #[cfg(test)]
     pub async fn set_dod_winner(
         &self,
         chat_id: &ChatIdPartiality,
         user_id: UserId,
         bonus: LengthChange,
-        perk_writes: &PerkWrites,
     ) -> anyhow::Result<DickOfDayResult> {
-        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
-
-        let mut tx = self.pool.begin().await?;
-        // Nothing is committed on either early return: the day belongs to somebody else, or the
-        // member elected has no dick to grow, and neither must leave a perk believing otherwise.
-        if !Self::claim_the_day(&mut tx, internal_chat_id, user_id).await? {
-            return self.get_dod_winner_name(internal_chat_id)
-                .map_ok(DickOfDayResult::AlreadyChosen)
-                .await
+        match self.begin_dod(chat_id, user_id).await? {
+            DodStart::AlreadyChosen(name) => Ok(DickOfDayResult::AlreadyChosen(name)),
+            DodStart::Started(growth) => growth.commit_dod(bonus).await,
         }
-        let Some(new_length) = Self::grow_no_attempts_check_internal(&mut *tx, internal_chat_id, user_id, bonus).await?
-        else {
-            return Ok(DickOfDayResult::NoDick)
-        };
-        Self::write_perk_writes(&mut tx, internal_chat_id, user_id, perk_writes).await?;
-        tx.commit().await?;
-
-        let pos_in_top = self.get_position_in_top(internal_chat_id, user_id).await?;
-        Ok(DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }))
     }
 
     #[autometrics]
@@ -333,17 +332,19 @@ impl Dicks {
             .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
     }
 
-    async fn write_perk_writes(
-        tx: &mut Transaction<'_, Postgres>,
-        internal_chat_id: InternalChatId,
+    /// Locks the dick's row, if there is one. Taken first in every transaction that also locks the
+    /// dick's loan, so that two of them can't wait for each other.
+    async fn lock_dick(
+        conn: &mut PgConnection,
+        chat: InternalChatId,
         uid: UserId,
-        writes: &PerkWrites,
     ) -> anyhow::Result<()> {
-        PerkStates::write_all(tx, internal_chat_id, uid, &writes.states).await?;
-        if let Some(payout) = writes.loan_payout {
-            Loans::pay_in_tx(tx, internal_chat_id, uid, payout).await?;
-        }
-        Ok(())
+        sqlx::query!("SELECT uid FROM Dicks WHERE chat_id = $1 AND uid = $2 FOR UPDATE",
+                chat as InternalChatId, uid as UserId)
+            .fetch_optional(conn)
+            .await
+            .map(|_| ())
+            .context(format!("couldn't lock the dick of {uid} in {chat}"))
     }
 
     /// Crowns `user_id`, unless the chat already has a winner today — which is what `false` means.
@@ -380,5 +381,98 @@ impl Dicks {
             .fetch_one(&self.pool)
             .await
             .context(format!("couldn't fetch the dick of the day of {chat_id_internal}"))
+    }
+}
+
+/// How the election of a Dick of the Day started.
+pub enum DodStart {
+    Started(Growth),
+    AlreadyChosen(Username),
+}
+
+/// One growth of one dick, from the first read of the perks to the commit. Everything done through
+/// it is a single transaction: dropping it without a `commit_*` rolls the lot back, which is what
+/// a refused growth, a failed perk and a forgotten commit all come to.
+pub struct Growth {
+    tx: Transaction<'static, Postgres>,
+    dicks: Dicks,
+    uid: UserId,
+    chat: InternalChatId,
+    chat_kind: ChatIdKind,
+}
+
+impl Growth {
+    pub fn uid(&self) -> UserId {
+        self.uid
+    }
+
+    pub fn chat(&self) -> InternalChatId {
+        self.chat
+    }
+
+    pub fn chat_kind(&self) -> &ChatIdKind {
+        &self.chat_kind
+    }
+
+    /// Gives up the growth, releasing its locks at once instead of whenever the connection is next
+    /// used.
+    pub async fn rollback(self) -> anyhow::Result<()> {
+        self.tx.rollback()
+            .await
+            .context("couldn't roll the growth back")
+    }
+
+    /// A savepoint: what is written through it is kept by `commit` and undone by `rollback`.
+    pub async fn attempt(&mut self) -> anyhow::Result<Transaction<'_, Postgres>> {
+        self.tx.begin()
+            .await
+            .context("couldn't open a savepoint for an attempt")
+    }
+
+    /// Grows the dick, creating it on the first play. `None` when the day is already spent.
+    ///
+    /// **The once-a-day rule lives in this statement and nowhere else.** An attempt is spent only on
+    /// a growth that needs one — the day's first is free whatever the caller has bought.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = self.uid.value(), internal_chat_id = %self.chat, increment = %increment))]
+    pub async fn commit_growth(mut self, increment: LengthChange) -> anyhow::Result<Option<GrowthResult>> {
+        let (uid, chat) = (self.uid, self.chat);
+        let new_length = sqlx::query_scalar!(
+            "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
+                ON CONFLICT (uid, chat_id) DO UPDATE SET
+                    length = (dicks.length + $3),
+                    updated_at = current_timestamp,
+                    bonus_attempts = CASE WHEN date(dicks.updated_at) = current_date
+                                          THEN dicks.bonus_attempts - 1
+                                          ELSE dicks.bonus_attempts END
+                WHERE date(dicks.updated_at) <> current_date OR dicks.bonus_attempts > 0
+                RETURNING length",
+                uid as UserId, chat as InternalChatId, increment.value())
+            .fetch_optional(&mut *self.tx)
+            .await
+            .context(format!("couldn't upsert the dick of {uid} in {chat} with increment of {increment}"))?;
+        let Some(new_length) = new_length else {
+            self.rollback().await?;
+            return Ok(None)
+        };
+        self.tx.commit().await?;
+
+        let pos_in_top = self.dicks.get_position_in_top(chat, uid).await?;
+        Ok(Some(GrowthResult { new_length: Length::new(new_length), pos_in_top }))
+    }
+
+    /// Grows the winner of the day by `bonus`. A chat member without a dick can't win.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = self.uid.value(), internal_chat_id = %self.chat, bonus = %bonus))]
+    pub async fn commit_dod(mut self, bonus: LengthChange) -> anyhow::Result<DickOfDayResult> {
+        let (uid, chat) = (self.uid, self.chat);
+        let Some(new_length) = Dicks::grow_no_attempts_check_internal(&mut *self.tx, chat, uid, bonus).await? else {
+            self.rollback().await?;
+            return Ok(DickOfDayResult::NoDick)
+        };
+        self.tx.commit().await?;
+
+        let pos_in_top = self.dicks.get_position_in_top(chat, uid).await?;
+        Ok(DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }))
     }
 }
