@@ -7,7 +7,7 @@ use teloxide::types::{LinkPreviewOptions, Message};
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::{DickOfDayResult, GrowthResult};
-use crate::repo::DodStart;
+use crate::repo::DodClaim;
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::Incrementor;
@@ -63,8 +63,8 @@ pub(crate) async fn dick_of_day_impl(
     let (answer, group) = match winner {
         Some(winner) => {
             let (dod_result, increment) = match repos.dicks.begin_dod(chat_id, winner.uid).await? {
-                DodStart::AlreadyChosen(name) => (DickOfDayResult::AlreadyChosen(name), None),
-                DodStart::Started(mut growth) => {
+                DodClaim::AlreadyChosen(name) => (DickOfDayResult::AlreadyChosen(name), None),
+                DodClaim::Won(mut growth) => {
                     let increment = incr.dod_increment(&mut growth, lang_code).await;
                     let result = growth.commit_dod(increment.total).await?;
                     (result, Some(increment))

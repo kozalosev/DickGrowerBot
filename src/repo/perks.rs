@@ -82,12 +82,11 @@ repository!(PerkStates,
         chat_id: InternalChatId,
     ) -> anyhow::Result<PerkStatesSnapshot> {
         let row = sqlx::query!(
-                r#"SELECT current_date AS "today!", agg.states AS "states?"
-                    FROM (
-                        SELECT jsonb_object_agg(ps.perk_id::text, ps.state) AS states
-                          FROM Perk_States ps
-                         WHERE ps.uid = $1 AND ps.chat_id = $2
-                    ) agg"#,
+                r#"SELECT current_date AS "today!", agg.states AS "states?" FROM (
+                     SELECT jsonb_object_agg(ps.perk_id::text, ps.state) AS states
+                       FROM Perk_States ps
+                       WHERE ps.uid = $1 AND ps.chat_id = $2
+                ) agg"#,
                 uid as UserId, chat_id as InternalChatId)
             .fetch_one(conn)
             .await
@@ -98,25 +97,34 @@ repository!(PerkStates,
         })
     },
 
-    /// Stores what a perk remembers. It takes someone else's connection so that the state is
-    /// written together with the length it was computed for, or not at all.
+    /// Stores what the perks remember, all of them in one statement. It takes someone else's
+    /// connection so that the states are written together with the length they were computed for,
+    /// or not at all.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, uid = uid.value(), perk_id = perk_id.value()))]
-    pub async fn write_internal(
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, uid = uid.value(), perks = states.len()))]
+    pub async fn write_all_internal(
         conn: &mut PgConnection,
         chat_id: InternalChatId,
         uid: UserId,
-        perk_id: PerkId,
-        state: &JsonValue,
+        states: &[(PerkId, JsonValue)],
     ) -> anyhow::Result<()> {
-        let perk_id: i16 = perk_id.value().saturating_into();
+        if states.is_empty() {
+            return Ok(())
+        }
+        let (perk_ids, values): (Vec<i16>, Vec<JsonValue>) = states.iter()
+            .map(|(perk_id, state)| {
+                let perk_id: i16 = perk_id.value().saturating_into();
+                (perk_id, state.clone())
+            })
+            .unzip();
         sqlx::query!(
-                "INSERT INTO Perk_States (chat_id, uid, perk_id, state) VALUES ($1, $2, $3, $4)
+                "INSERT INTO Perk_States (chat_id, uid, perk_id, state)
+                    SELECT $1, $2, perk_id, state FROM unnest($3::int2[], $4::jsonb[]) AS _(perk_id, state)
                     ON CONFLICT (chat_id, uid, perk_id) DO UPDATE SET state = EXCLUDED.state",
-                chat_id as InternalChatId, uid as UserId, perk_id, state)
+                chat_id as InternalChatId, uid as UserId, &perk_ids, &values)
             .execute(conn)
             .await
-            .context(format!("couldn't write the perk state of {uid} in the chat with id = {chat_id}"))?;
+            .context(format!("couldn't write the perk states of {uid} in the chat with id = {chat_id}"))?;
         Ok(())
     }
 );

@@ -17,9 +17,9 @@ async fn grow_storing(
     state: JsonValue,
 ) -> anyhow::Result<Option<GrowthResult>> {
     let mut growth = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into()).await?;
-    let (chat, uid) = (growth.chat(), growth.uid());
+    let (chat_id, uid) = (growth.key().chat_id, growth.key().uid);
     let mut attempt = growth.attempt().await?;
-    repo::PerkStates::write_internal(&mut attempt, chat, uid, perk_id, &state).await?;
+    repo::PerkStates::write_all_internal(&mut attempt, chat_id, uid, &[(perk_id, state)]).await?;
     attempt.commit().await?;
     growth.commit_growth(LengthChange::signed(5)).await
 }

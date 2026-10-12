@@ -76,7 +76,7 @@ pub enum ChangeSource {
 /// attempt is, and undone together with the rest when the base is rolled again.
 pub struct PerkContext<'a> {
     pub dick_id: &'a DickId,
-    pub chat: InternalChatId,
+    pub chat_id: InternalChatId,
     pub intent: ChangeIntent,
     pub source: ChangeSource,
     pub state: Option<&'a JsonValue>,
@@ -242,7 +242,7 @@ impl Incrementor {
         lang_code: &LanguageCode,
         roll_base: impl Fn() -> BaseIncrement,
     ) -> Increment {
-        let dick = DickId(growth.uid(), growth.chat_kind().clone());
+        let dick = DickId(growth.key().uid, growth.key().chat_kind.clone());
         for _ in 0..MAX_REROLLS {
             match self.try_base(growth, &dick, roll_base(), source, lang_code).await {
                 Ok(Some(increment)) => return increment,
@@ -267,9 +267,9 @@ impl Incrementor {
         source: ChangeSource,
         lang_code: &LanguageCode,
     ) -> anyhow::Result<Option<Increment>> {
-        let chat = growth.chat();
+        let chat_id = growth.key().chat_id;
         let mut attempt = growth.attempt().await?;
-        let applied = self.add_additional_incr(&mut attempt, dick, chat, base, source, lang_code).await;
+        let applied = self.add_additional_incr(&mut attempt, dick, chat_id, base, source, lang_code).await;
         match applied {
             Ok(increment) if !increment.total.is_zero() => {
                 attempt.commit().await?;
@@ -290,13 +290,13 @@ impl Incrementor {
         &self,
         conn: &mut PgConnection,
         dick: &DickId,
-        chat: InternalChatId,
+        chat_id: InternalChatId,
         base_increment: BaseIncrement,
         source: ChangeSource,
         lang_code: &LanguageCode,
     ) -> anyhow::Result<Increment> {
-        let current_length = Dicks::fetch_length_internal(conn, dick.0, chat).await?;
-        let states = PerkStates::read_internal(conn, dick.0, chat).await?;
+        let current_length = Dicks::fetch_length_internal(conn, dick.0, chat_id).await?;
+        let states = PerkStates::read_internal(conn, dick.0, chat_id).await?;
         let base = LengthChange::from(base_increment);
         let change_intent = ChangeIntent {
             base_increment: base,
@@ -305,10 +305,11 @@ impl Incrementor {
 
         let mut additional_change = SignedLengthChange::new(0);
         let mut by_perks = HashMap::new();
+        let mut new_states = Vec::new();
         for RegisteredPerk { id, perk } in self.perks.iter() {
             let ctx = PerkContext {
                 dick_id: dick,
-                chat,
+                chat_id,
                 intent: change_intent,
                 source,
                 state: states.of(*id),
@@ -318,7 +319,7 @@ impl Incrementor {
             };
             let PerkOutcome { change: AdditionalChange(ac), state, note } = perk.apply(ctx).await?;
             if let Some(state) = state {
-                PerkStates::write_internal(conn, chat, dick.0, *id, &state).await?;
+                new_states.push((*id, state));
             }
             if !ac.is_zero() {
                 let change = SignedLengthChange::new(ac.value());
@@ -331,6 +332,7 @@ impl Incrementor {
 
         let total = (base + additional_change)
             .context("an overflow in the increment calculation")?;
+        PerkStates::write_all_internal(conn, chat_id, dick.0, &new_states).await?;
         Ok(Increment { base, by_perks, total })
     }
 }

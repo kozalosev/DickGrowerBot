@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT current_date AS \"today!\", agg.states AS \"states?\"\n                    FROM (\n                        SELECT jsonb_object_agg(ps.perk_id::text, ps.state) AS states\n                          FROM Perk_States ps\n                         WHERE ps.uid = $1 AND ps.chat_id = $2\n                    ) agg",
+  "query": "SELECT current_date AS \"today!\", agg.states AS \"states?\" FROM (\n                     SELECT jsonb_object_agg(ps.perk_id::text, ps.state) AS states\n                       FROM Perk_States ps\n                       WHERE ps.uid = $1 AND ps.chat_id = $2\n                ) agg",
   "describe": {
     "columns": [
       {
@@ -27,5 +27,5 @@
       null
     ]
   },
-  "hash": "9476f3b37f517237c095c9affa0da30b07b64915b0b367181a9c3521509b30b5"
+  "hash": "d3ae7beee80b78d6f7aa088a920a183e6d51361ef4ea9c55a4790f913ea3c823"
 }

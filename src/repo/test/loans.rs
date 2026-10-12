@@ -128,10 +128,10 @@ fn length_of(debt: Debt) -> i64 {
 async fn grow_paying(dicks: &repo::Dicks, payout: LoanPayout, keep: bool) -> Option<GrowthResult> {
     let mut growth = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
         .await.expect("couldn't begin a growth");
-    let (chat, uid) = (growth.chat(), growth.uid());
+    let (chat_id, uid) = (growth.key().chat_id, growth.key().uid);
     let mut attempt = growth.attempt()
         .await.expect("couldn't start an attempt");
-    repo::Loans::pay_internal(&mut attempt, chat, uid, payout)
+    repo::Loans::pay_internal(&mut attempt, chat_id, uid, payout)
         .await.expect("couldn't pay the loan");
     if keep {
         attempt.commit().await.expect("couldn't keep the attempt");
