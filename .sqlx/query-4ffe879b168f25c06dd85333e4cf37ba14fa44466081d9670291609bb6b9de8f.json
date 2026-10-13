@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id AS \"id: LoanId\", debt AS \"debt: Debt\", payout_ratio AS \"payout_ratio: PayoutRatio\" FROM loans\n                    WHERE uid = $1 AND chat_id = $2\n                    AND repaid_at IS NULL",
+  "query": "SELECT id AS \"id: LoanId\", debt AS \"debt: Debt\", payout_ratio AS \"payout_ratio: PayoutRatio\" FROM loans\n                    WHERE uid = $1 AND chat_id = $2\n                    AND repaid_at IS NULL FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -49,5 +49,5 @@
       false
     ]
   },
-  "hash": "6e9c8beaee228e163d44fb6ecb92c3e95b38f78a8761890b5cfd065f6fd3f54d"
+  "hash": "4ffe879b168f25c06dd85333e4cf37ba14fa44466081d9670291609bb6b9de8f"
 }

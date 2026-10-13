@@ -1,13 +1,28 @@
 use domain_types::literal;
 use sqlx::types::JsonValue;
-use crate::domain::objects::PerkStateUpdate;
-use crate::domain::primitives::{LengthChange, PerkName};
+use crate::domain::objects::{GrowthResult, PerkStateUpdate};
+use crate::domain::primitives::{LengthChange, PerkId, PerkName};
 use crate::repo;
 use crate::repo::test::dicks::create_user;
 use crate::repo::test::{CHAT_ID_KIND, fresh_db, USER_ID};
 
 fn state_of(value: i64) -> JsonValue {
     serde_json::json!({ "value": value })
+}
+
+/// A growth in which the perk stores `state`, the way the incrementor does it.
+async fn grow_storing(
+    dicks: &repo::Dicks,
+    perk_id: PerkId,
+    state: JsonValue,
+) -> anyhow::Result<Option<GrowthResult>> {
+    let mut growth_tx = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into()).await?;
+    let (chat_id, uid) = (growth_tx.key().chat_id, growth_tx.key().uid);
+    let mut attempt = growth_tx.attempt().await?;
+    let perk_states = &[PerkStateUpdate { perk_id, state }];
+    repo::PerkStates::write_all_internal(&mut attempt, chat_id, uid, perk_states).await?;
+    attempt.commit().await?;
+    growth_tx.commit_growth(LengthChange::signed(5)).await
 }
 
 async fn insert_perk(db: &sqlx::Pool<sqlx::Postgres>, name: &str) -> anyhow::Result<()> {
@@ -74,8 +89,7 @@ async fn a_state_is_written_by_the_growth_and_read_back() {
         .await.expect("couldn't read the states of a dick without any");
     assert!(empty.of(perk_id).is_none());
 
-    let update = PerkStateUpdate { perk_id, state: state_of(1) };
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[update])
+    grow_storing(&dicks, perk_id, state_of(1))
         .await.expect("couldn't grow the dick");
 
     let stored = perk_states.read(USER_ID, &CHAT_ID_KIND)
@@ -99,14 +113,12 @@ async fn a_refused_growth_stores_nothing() {
         .await.expect("couldn't register the perk");
     let perk_id = ids[&name];
 
-    let first = PerkStateUpdate { perk_id, state: state_of(1) };
-    dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[first])
+    grow_storing(&dicks, perk_id, state_of(1))
         .await
         .expect("couldn't grow the dick")
         .expect("the first growth of the day must be allowed");
 
-    let second = PerkStateUpdate { perk_id, state: state_of(2) };
-    let refused = dicks.create_or_grow(USER_ID, &CHAT_ID_KIND.into(), LengthChange::signed(5), &[second])
+    let refused = grow_storing(&dicks, perk_id, state_of(2))
         .await.expect("the second growth must be refused, not fail");
     assert!(refused.is_none(), "the second growth of the day must be refused");
 
