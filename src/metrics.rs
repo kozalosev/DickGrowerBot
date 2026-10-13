@@ -7,6 +7,7 @@ use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
 use crate::config::MessageGroup;
+use crate::domain::objects::OriginalBotKind;
 use crate::domain::primitives::SupportedLanguage;
 use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind};
 
@@ -42,8 +43,7 @@ pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
     Counter::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
-pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(||
-    ImportCommandCounters::new());
+pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(ImportCommandCounters::new);
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
@@ -443,22 +443,43 @@ impl ComplexCommandCounters {
 }
 
 impl ImportCommandCounters {
+
+    const STATES: [&'static str; 4] = ["invoked", "finished", "rejected", "failed"];
+
     fn new() -> Self {
-        let vec = CounterVec::new("command_import_usage_total", "count of /import invocations and successes by source bot", &["state", "bot"]);
-        for state in ["invoked", "finished"] {
-            for bot in ["pipisabot", "kraft28_bot", "none"] {
-                vec.counter(&[state, bot]);
+        let vec = CounterVec::new(
+            "command_import_usage_total",
+            "count of /import invocations and their outcomes by source bot",
+            &["state", "bot"],
+        );
+        for state in Self::STATES {
+            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+                vec.counter(&[state, &import_source_label(bot)]);
             }
         }
         Self(vec)
     }
 
-    pub fn invoked(&self, bot: &str) {
-        self.0.counter(&["invoked", bot]).inc()
+    pub fn invoked(&self, bot: Option<OriginalBotKind>) {
+        self.count("invoked", bot)
     }
 
-    pub fn finished(&self, bot: &str) {
-        self.0.counter(&["finished", bot]).inc()
+    pub fn finished(&self, bot: Option<OriginalBotKind>) {
+        self.count("finished", bot)
+    }
+
+    /// Answered with an explanation of what the user has to change.
+    pub fn rejected(&self, bot: Option<OriginalBotKind>) {
+        self.count("rejected", bot)
+    }
+
+    /// Ended with an error nobody was told about.
+    pub fn failed(&self, bot: Option<OriginalBotKind>) {
+        self.count("failed", bot)
+    }
+
+    fn count(&self, state: &str, bot: Option<OriginalBotKind>) {
+        self.0.counter(&[state, &import_source_label(bot)]).inc()
     }
 }
 
@@ -950,14 +971,19 @@ pub(crate) fn render_metrics() -> String {
         .expect("the metrics buffer is not valid UTF-8")
 }
 
+fn import_source_label(bot: Option<OriginalBotKind>) -> String {
+    bot.map_or_else(|| "none".to_owned(), |kind| kind.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use once_cell::sync::Lazy;
     use strum::IntoEnumIterator;
     use crate::config::MessageGroup;
+    use crate::domain::objects::OriginalBotKind;
     use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-                BROADCAST_LANGUAGE, CMD_IMPORT, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
+                BROADCAST_LANGUAGE, CMD_IMPORT, ImportCommandCounters, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
                 SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
@@ -974,13 +1000,15 @@ mod tests {
     }
 
     #[test]
-    fn import_counter_has_only_the_supported_source_labels() {
+    fn import_counter_exports_every_state_for_every_source() {
         Lazy::force(&CMD_IMPORT);
         let rendered = render_metrics();
-        for state in ["invoked", "finished"] {
-            for bot in ["pipisabot", "kraft28_bot", "none"] {
+        for state in ImportCommandCounters::STATES {
+            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+                let bot = import_source_label(bot);
                 let series = format!("command_import_usage_total{{bot=\"{bot}\",state=\"{state}\"}}");
-                assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+                assert!(rendered.contains(&series), "{series} is missing from:
+{rendered}");
             }
         }
     }

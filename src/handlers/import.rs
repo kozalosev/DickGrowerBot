@@ -11,7 +11,7 @@ use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Me, Message, UserId};
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::objects::ExternalUser;
+use crate::domain::objects::{ExternalUser, OriginalBotKind};
 use crate::domain::primitives::{Length, UserId as DomainUserId, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
@@ -28,44 +28,6 @@ static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
 pub enum ImportCommands {
     #[command(description = "import")]
     Import
-}
-
-#[cfg_attr(test, derive(PartialEq, Eq))]
-enum OriginalBotKind {
-    Pipisa,
-    Kraft28,
-}
-
-impl OriginalBotKind {
-    fn metric_label(&self) -> &'static str {
-        match self {
-            OriginalBotKind::Pipisa => "pipisabot",
-            OriginalBotKind::Kraft28 => "kraft28_bot",
-        }
-    }
-
-    fn convert_name(&self, name: &str) -> String {
-        match self {
-            OriginalBotKind::Pipisa => {
-                name.chars()
-                    .take(13)
-                    .collect()
-            },
-            OriginalBotKind::Kraft28 => name.to_owned()
-        }
-    }
-}
-
-impl TryFrom<&str> for OriginalBotKind {
-    type Error = String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.trim_start_matches('@') {
-            "pipisabot" => Ok(OriginalBotKind::Pipisa),
-            "kraft28_bot" => Ok(OriginalBotKind::Kraft28),
-            _ => Err("Unknown OriginalBotKind".to_owned())
-        }
-    }
 }
 
 struct ParseResult(OriginalBotKind, String);
@@ -142,7 +104,7 @@ pub async fn import_cmd_handler(
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let parsed = check_and_parse_message(&bot, bot_info.id, &msg, &repos).await;
-    let source = parsed.as_ref().map_or("none", |p| p.0.metric_label());
+    let source = parsed.as_ref().ok().map(|p| p.0);
     metrics::CMD_IMPORT.invoked(source);
     let answer = match parsed {
         Ok(parsed) => {
@@ -186,8 +148,10 @@ pub async fn import_cmd_handler(
                         .join("\n\n")
                 }
                 Err(e) => if e.is::<NothingFound>() {
+                    metrics::CMD_IMPORT.rejected(source);
                     t!("commands.import.errors.nothing_found", locale = &lang_code).to_string()
                 } else if let Some(InvalidLines(lines)) = e.downcast_ref() {
+                    metrics::CMD_IMPORT.rejected(source);
                     tracing::error!(lines = ?lines, "invalid lines in the imported message");
                     let invalid_lines = lines.iter()
                         .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
@@ -198,19 +162,28 @@ pub async fn import_cmd_handler(
                     t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
                         invalid_lines = invalid_lines).to_string()
                 } else {
+                    metrics::CMD_IMPORT.failed(source);
                     Err(e)?
                 }
             }
 
         },
-        Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
+        Err(BeforeImportCheckErrors::Other(e)) => {
+            metrics::CMD_IMPORT.failed(source);
+            Err(e)?
+        },
         Err(BeforeImportCheckErrors::NotReply) => {
+            metrics::CMD_IMPORT.rejected(source);
             let origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ");
             t!("commands.import.errors.not_reply", locale = &lang_code,
                 origin_bots = origin_bots).to_string()
         },
-        Err(BeforeImportCheckErrors::LegacyGroup) => t!("commands.import.errors.legacy_group", locale = &lang_code).to_string(),
+        Err(BeforeImportCheckErrors::LegacyGroup) => {
+            metrics::CMD_IMPORT.rejected(source);
+            t!("commands.import.errors.legacy_group", locale = &lang_code).to_string()
+        },
         Err(e) => {
+            metrics::CMD_IMPORT.rejected(source);
             let t_key = format!("commands.import.errors.{e}");
             t!(&t_key, locale = &lang_code).to_string()
         },
@@ -372,37 +345,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn original_bot_kind_convert_name_pipisa() {
-        let (p, short) = (OriginalBotKind::Pipisa, "SadBot #incel".to_owned());
-        assert_eq!(p.convert_name("SadBot #incel..."), short);
-        assert_eq!(p.convert_name("SadBot #incel>suicide"), short);
-    }
-
-    #[test]
-    fn original_bot_kind_try_from() {
-        let check = |variant: &str, kind| {
-            let second_variant = variant.strip_prefix('@').expect("no '@' prefix");
-            let valid_variants = [variant, second_variant];
-            assert!(valid_variants.into_iter()
-                .all(|v| OriginalBotKind::try_from(v)
-                    .is_ok_and(|k| k == kind)));
-
-            let invalid_variants = valid_variants.into_iter()
-                .map(|v| {
-                    v.strip_suffix("_bot")
-                        .or_else (|| v.strip_suffix("bot"))
-                        .expect("no 'bot' suffix")
-                });
-            assert!(invalid_variants.into_iter()
-                .all(|v| OriginalBotKind::try_from(v)
-                    .is_err()));
-        } ;
-
-        check("@pipisabot", OriginalBotKind::Pipisa);
-        check("@kraft28_bot", OriginalBotKind::Kraft28);
-    }
-
-    #[test]
     fn parse_top_lines_ignores_blank_lines_and_footer() {
         let text = "Топ 10 игроков 🔝\n\n1|Leonid SadBot🍆... — 3 см.\n\n\nраздача см в канале)";
 
@@ -425,6 +367,16 @@ mod tests {
         assert!(top[0].is_ok());
         assert_eq!(top[1].as_ref().unwrap_err(), "not a valid line");
         assert!(top[2].is_ok());
+    }
+
+    #[test]
+    fn the_username_list_names_every_original_bot() {
+        use strum::IntoEnumIterator;
+
+        let names: Vec<String> = OriginalBotKind::iter()
+            .map(|kind| kind.to_string())
+            .collect();
+        assert_eq!(names, ORIGINAL_BOT_USERNAMES);
     }
 
     #[test]

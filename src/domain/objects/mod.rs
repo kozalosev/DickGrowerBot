@@ -1,19 +1,13 @@
-mod announcement;
-mod user;
-mod dick;
-mod loan;
-mod tghack;
-mod stats;
-mod topics;
-mod cleanup;
-mod perk;
+use crate::pub_use_modules;
 
-pub use announcement::*;
-pub use user::*;
-pub use dick::*;
-pub use loan::*;
-pub use tghack::*;
-pub use stats::*;
-pub use topics::*;
-pub use cleanup::*;
-pub use perk::*;
+pub_use_modules!(
+    announcement,
+    user,
+    dick,
+    loan,
+    tghack,
+    stats,
+    topics,
+    cleanup,
+    perk,
+    import);
