@@ -1,7 +1,8 @@
 use domain_types::traits::SaturatingInto;
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
-use crate::domain::primitives::{Debt, LoanPayout, PayoutRatio};
+use crate::domain::objects::GrowthResult;
+use crate::domain::primitives::{Debt, LengthChange, LoanPayout, PayoutRatio};
 use crate::repo::BorrowResult;
 use crate::repo::test::dicks::{create_dick, create_user};
 use crate::repo::test::{fresh_db, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
@@ -121,4 +122,66 @@ async fn set_length(db: &Pool<Postgres>, uid: i64, chat_id: i64, length: i64) {
 /// A debt is a positive amount owed; the length it was borrowed against is its negation.
 fn length_of(debt: Debt) -> i64 {
     debt.saturating_into()
+}
+
+/// A growth in which a loan payout is made through a savepoint that is kept or rolled back.
+async fn grow_paying(dicks: &repo::Dicks, payout: LoanPayout, keep: bool) -> Option<GrowthResult> {
+    let mut growth_tx = dicks.begin_growth(USER_ID, &CHAT_ID_KIND.into())
+        .await.expect("couldn't begin a growth");
+    let (chat_id, uid) = (growth_tx.key().chat_id, growth_tx.key().uid);
+    let mut attempt = growth_tx.attempt()
+        .await.expect("couldn't start an attempt");
+    repo::Loans::pay_internal(&mut attempt, chat_id, uid, payout)
+        .await.expect("couldn't pay the loan");
+    if keep {
+        attempt.commit().await.expect("couldn't keep the attempt");
+    } else {
+        attempt.rollback().await.expect("couldn't roll the attempt back");
+    }
+    growth_tx.commit_growth(LengthChange::signed(5))
+        .await.expect("couldn't commit the growth")
+}
+
+async fn debt_of(loans: &repo::Loans) -> Debt {
+    loans.get_active_loan(USER_ID, &CHAT_ID_KIND)
+        .await.expect("couldn't fetch the loan")
+        .expect("the loan must be present")
+        .debt
+}
+
+#[tokio::test]
+async fn a_payout_is_taken_with_the_growth_and_only_with_it() {
+    let db = fresh_db().await;
+    create_user(&db).await;
+    create_dick(&db).await;
+
+    let loans = repo::Loans::new(db.clone(), &config::AppConfig {
+        loan_payout_ratio: literal!(PayoutRatio = 0.5),
+        ..Default::default()
+    });
+    set_length(&db, UID, CHAT_ID, -10).await;
+    let borrowed = loans.borrow(USER_ID, &CHAT_ID_KIND, Debt::new(10))
+        .await.expect("couldn't apply for a loan");
+    assert_eq!(borrowed, BorrowResult::Granted);
+
+    let dicks = repo::Dicks::new(db.clone(), Default::default());
+    let payout = LoanPayout::new(3);
+
+    let refused = grow_paying(&dicks, payout, true).await;
+    assert!(refused.is_none());
+    assert_eq!(debt_of(&loans).await, 10);
+
+    sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
+        .execute(&db)
+        .await.expect("couldn't move the last growth to yesterday");
+    let rerolled = grow_paying(&dicks, payout, false).await;
+    assert!(rerolled.is_some());
+    assert_eq!(debt_of(&loans).await, 10);
+
+    sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
+        .execute(&db)
+        .await.expect("couldn't move the last growth to yesterday again");
+    let grown = grow_paying(&dicks, payout, true).await;
+    assert!(grown.is_some());
+    assert_eq!(debt_of(&loans).await, 7);
 }

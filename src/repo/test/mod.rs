@@ -30,6 +30,8 @@ use crate::repo;
 use crate::repo::ChatIdKind;
 use crate::test_containers::{self, SharedContainer};
 
+pub use dicks::{create_user, create_dick};
+
 const POSTGRES_USER: &str = "test";
 const POSTGRES_PASSWORD: &str = "test_pw";
 const POSTGRES_DB: &str = "test_db";
@@ -125,6 +127,13 @@ pub async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64
 }
 
 /// A lease, or any other deadline, far enough out that nothing under test can outlive it.
+pub async fn bonus_attempts_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i32 {
+    sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2", uid, internal_chat_id)
+        .fetch_one(db)
+        .await
+        .expect("couldn't read bonus_attempts")
+}
+
 pub fn far_future() -> DateTime<Utc> {
     Utc::now() + Duration::from_mins(10)
 }

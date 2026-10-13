@@ -5,7 +5,7 @@ use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramCh
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
-use crate::repo::test::{fresh_db, repos, CHAT_ID, UID, USER_ID};
+use crate::repo::test::{bonus_attempts_of, fresh_db, repos, CHAT_ID, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
 
 #[tokio::test]
@@ -394,7 +394,7 @@ async fn migrate_chat_id() {
     let old_partiality = ChatIdPartiality::Specific(old.into());
     let internal_id = chats.upsert_chat(&old_partiality)
         .await.expect("couldn't create a chat");
-    dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5), &[])
+    dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5))
         .await.expect("couldn't create a dick");
 
     // this chat was never anchored, so its inline half — if it ever had one — is left behind
@@ -501,9 +501,9 @@ async fn merge_keeps_dicks_from_both_chats() {
 
     chat.add_dicks().await;
     // read back rather than assumed, so the assertion below is about the merge alone
-    let kept = chat.bonus_attempts(UID, chat.id_row).await;
-    let moved = chat.bonus_attempts(UID, chat.instance_row).await;
-    let moved_only = chat.bonus_attempts(UID + 1, chat.instance_row).await;
+    let kept = bonus_attempts_of(&chat.db, UID, chat.id_row).await;
+    let moved = bonus_attempts_of(&chat.db, UID, chat.instance_row).await;
+    let moved_only = bonus_attempts_of(&chat.db, UID + 1, chat.instance_row).await;
 
     chat.merge().await;
 
@@ -643,12 +643,6 @@ impl SplitChat {
             .collect()
     }
 
-    async fn bonus_attempts(&self, uid: i64, chat_row: i64) -> i32 {
-        sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2", uid, chat_row)
-            .fetch_one(&self.db)
-            .await.expect("the dick must exist")
-    }
-
     async fn dicks_left(&self) -> i64 {
         sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM Dicks WHERE chat_id = $1"#, self.instance_row)
             .fetch_one(&self.db)
@@ -702,7 +696,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
         .await.expect("couldn't create dicks");
 
     let chat_id = full.to_partiality(Default::default());
-    dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(0), &[])
+    dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(0))
         .await
         .expect("couldn't create a dick");
 
