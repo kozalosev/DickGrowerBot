@@ -10,14 +10,15 @@ pub enum OriginalBotKind {
 }
 
 impl OriginalBotKind {
-    pub fn convert_name(&self, name: &str) -> String {
+    /// Whether a leaderboard of this bot, which shows `shown_name`, may mean a user whose name is
+    /// `full_name`. Pipisa cuts the name short; Kraft28 shows the first name only.
+    pub fn matches_name(&self, full_name: &str, shown_name: &str) -> bool {
         match self {
-            OriginalBotKind::Pipisa => {
-                name.chars()
-                    .take(13)
-                    .collect()
-            },
-            OriginalBotKind::Kraft28 => name.to_owned()
+            OriginalBotKind::Pipisa => full_name.chars().take(13).eq(shown_name.chars()),
+            OriginalBotKind::Kraft28 => {
+                full_name == shown_name
+                    || full_name.strip_prefix(shown_name).is_some_and(|rest| rest.starts_with(' '))
+            }
         }
     }
 }
@@ -38,10 +39,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn original_bot_kind_convert_name_pipisa() {
-        let (p, short) = (OriginalBotKind::Pipisa, "SadBot #incel".to_owned());
-        assert_eq!(p.convert_name("SadBot #incel..."), short);
-        assert_eq!(p.convert_name("SadBot #incel>suicide"), short);
+    fn pipisa_shows_the_first_thirteen_characters() {
+        let p = OriginalBotKind::Pipisa;
+        assert!(p.matches_name("SadBot #incel>suicide", "SadBot #incel"));
+        assert!(p.matches_name("SadBot", "SadBot"));
+        assert!(!p.matches_name("SadBot #incel>suicide", "SadBot #inc"));
+    }
+
+    #[test]
+    fn kraft28_shows_the_first_name() {
+        let k = OriginalBotKind::Kraft28;
+        assert!(k.matches_name("Leonid SadBot Rust'a'man", "Leonid"));
+        assert!(k.matches_name("Leonid", "Leonid"));
+        assert!(k.matches_name("Mary Ann Smith", "Mary Ann"));
+        assert!(!k.matches_name("Leonidas", "Leonid"));
+        assert!(!k.matches_name("Leonid SadBot", "SadBot"));
     }
 
     #[test]

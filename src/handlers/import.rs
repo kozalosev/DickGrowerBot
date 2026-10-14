@@ -1,7 +1,7 @@
 use autometrics::autometrics;
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
+use std::collections::HashSet;
 use anyhow::{anyhow, bail};
+use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use rust_i18n::t;
@@ -71,26 +71,14 @@ struct ImportResult {
     not_found: Vec<Username>,
 }
 
-#[derive(Debug)]
-struct InvalidLines(Vec<String>);
-
-#[derive(Debug)]
-struct NothingFound;
-
-impl Display for NothingFound {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str("no leaderboard entries found")
-    }
-}
-
-impl std::error::Error for NothingFound {}
-
-// Required only to wrap the error by anyhow!()
-impl Display for InvalidLines {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let result = self.0.join(", ");
-        f.write_str(&format!("[{result}]"))
-    }
+#[derive(Debug, derive_more::Display, derive_more::Error)]
+enum ImportError {
+    #[display("no leaderboard entries found")]
+    NothingFound,
+    #[display("ambiguous names: {_0:?}")]
+    AmbiguousNames(#[error(not(source))] Vec<Username>),
+    #[display("invalid lines: {_0:?}")]
+    InvalidLines(#[error(not(source))] Vec<String>),
 }
 
 #[autometrics]
@@ -147,23 +135,35 @@ pub async fn import_cmd_handler(
                         .collect::<Vec<String>>()
                         .join("\n\n")
                 }
-                Err(e) => if e.is::<NothingFound>() {
-                    metrics::CMD_IMPORT.rejected(source);
-                    t!("commands.import.errors.nothing_found", locale = &lang_code).to_string()
-                } else if let Some(InvalidLines(lines)) = e.downcast_ref() {
-                    metrics::CMD_IMPORT.rejected(source);
-                    tracing::error!(lines = ?lines, "invalid lines in the imported message");
-                    let invalid_lines = lines.iter()
-                        .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
-                            line = line))
-                        .map(|cow_str| cow_str.to_string())
-                        .collect::<Vec<String>>()
-                        .join("\n");
-                    t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
-                        invalid_lines = invalid_lines).to_string()
-                } else {
-                    metrics::CMD_IMPORT.failed(source);
-                    Err(e)?
+                Err(e) => match e.downcast::<ImportError>() {
+                    Ok(ImportError::NothingFound) => {
+                        metrics::CMD_IMPORT.rejected(source);
+                        t!("commands.import.errors.nothing_found", locale = &lang_code).to_string()
+                    },
+                    Ok(ImportError::AmbiguousNames(names)) => {
+                        metrics::CMD_IMPORT.rejected(source);
+                        let names = names.into_iter()
+                            .map(|name| name.escaped())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        t!("commands.import.errors.ambiguous_names", locale = &lang_code, names = names).to_string()
+                    },
+                    Ok(ImportError::InvalidLines(lines)) => {
+                        metrics::CMD_IMPORT.rejected(source);
+                        tracing::error!(lines = ?lines, "invalid lines in the imported message");
+                        let invalid_lines = lines.iter()
+                            .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
+                                line = line))
+                            .map(|cow_str| cow_str.to_string())
+                            .collect::<Vec<String>>()
+                            .join("\n");
+                        t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
+                            invalid_lines = invalid_lines).to_string()
+                    },
+                    Err(e) => {
+                        metrics::CMD_IMPORT.failed(source);
+                        Err(e)?
+                    },
                 }
             }
 
@@ -254,34 +254,14 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
 async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseResult) -> anyhow::Result<ImportResult> {
     let top = parse_import_users(&parsed.1)?;
     let chat_id_kind = chat_id.into();
-    let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)
+    let members: Vec<ChatMember> = repos.users.get_chat_members(&chat_id_kind)
         .await?.into_iter()
-        .map(|m| {
-            let short_name = parsed.0.convert_name(m.name.value());
-            let member = ChatMember {
-                uid: m.uid.into(),
-                full_name: m.name.value().to_owned()
-            };
-            (short_name, member)
+        .map(|m| ChatMember {
+            uid: m.uid.into(),
+            full_name: m.name.value().to_owned()
         })
         .collect();
-    let member_names: HashSet<_> = HashSet::from_iter(members.keys());
-
-    let (existing, not_existing): (Vec<OriginalUser>, Vec<OriginalUser>) = top.into_iter()
-        .partition(|u| member_names.contains(u.name.as_ref()));
-    let existing: Vec<UserInfo> = existing.into_iter()
-        .map(|u| {
-            let member = &members[u.name.value()];
-            UserInfo {
-                uid: member.uid,
-                name: Username::new(member.full_name.clone()),
-                length: u.length
-            }
-        })
-        .collect();
-    let not_found = not_existing.into_iter()
-        .map(|u| u.name)
-        .collect();
+    let (existing, not_found) = resolve_users(&parsed.0, top, &members)?;
 
     let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
         .await?.into_iter()
@@ -303,6 +283,45 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
     })
 }
 
+/// Splits the leaderboard into the users found in the chat and the names that were not. A name that
+/// is shown more than once, or fits more than one member, cannot be attributed to anybody, so it
+/// fails the whole import.
+fn resolve_users(
+    kind: &OriginalBotKind,
+    top: Vec<OriginalUser>,
+    members: &[ChatMember],
+) -> Result<(Vec<UserInfo>, Vec<Username>), ImportError> {
+    let mut shown: HashSet<Username> = HashSet::new();
+    let mut ambiguous: Vec<Username> = Vec::new();
+    let mut found: Vec<UserInfo> = Vec::new();
+    let mut not_found: Vec<Username> = Vec::new();
+
+    for user in top {
+        let repeated = !shown.insert(user.name.clone());
+        let mut fitting = members.iter()
+            .filter(|m| kind.matches_name(&m.full_name, user.name.value()));
+        let member = fitting.next();
+        if repeated || fitting.next().is_some() {
+            ambiguous.push(user.name.clone());
+            continue
+        }
+        match member {
+            Some(member) => found.push(UserInfo {
+                uid: member.uid,
+                name: Username::new(member.full_name.clone()),
+                length: user.length,
+            }),
+            None => not_found.push(user.name),
+        }
+    }
+
+    if ambiguous.is_empty() {
+        Ok((found, not_found))
+    } else {
+        Err(ImportError::AmbiguousNames(ambiguous.into_iter().unique().collect()))
+    }
+}
+
 fn parse_import_users(text: &str) -> anyhow::Result<Vec<OriginalUser>> {
     let top = parse_top_lines(text);
     let invalid_lines: Vec<String> = top.iter()
@@ -310,7 +329,7 @@ fn parse_import_users(text: &str) -> anyhow::Result<Vec<OriginalUser>> {
         .map(|pos| pos.as_ref().unwrap_err().clone())
         .collect();
     if !invalid_lines.is_empty() {
-        bail!(InvalidLines(invalid_lines))
+        bail!(ImportError::InvalidLines(invalid_lines))
     }
 
     let top: Vec<OriginalUser> = top.into_iter()
@@ -318,7 +337,7 @@ fn parse_import_users(text: &str) -> anyhow::Result<Vec<OriginalUser>> {
         .filter_map(map_user)
         .collect();
     if top.is_empty() {
-        bail!(NothingFound)
+        bail!(ImportError::NothingFound)
     }
     Ok(top)
 }
@@ -379,6 +398,43 @@ mod tests {
         assert_eq!(names, ORIGINAL_BOT_USERNAMES);
     }
 
+    fn member(uid: u64, name: &str) -> ChatMember {
+        ChatMember { uid: UserId(uid), full_name: name.to_owned() }
+    }
+
+    fn user(name: &str) -> OriginalUser {
+        OriginalUser { name: Username::new(name.to_owned()), length: 1 }
+    }
+
+    #[test]
+    fn two_members_fitting_one_first_name_are_ambiguous() {
+        let members = [member(1, "Leonid Smith"), member(2, "Leonid Jones"), member(3, "Alice")];
+        let top = vec![user("Leonid"), user("Alice")];
+        let result = resolve_users(&OriginalBotKind::Kraft28, top, &members);
+        assert!(matches!(result, Err(ImportError::AmbiguousNames(names)) if names == [Username::from("Leonid")]));
+    }
+
+    #[test]
+    fn a_name_shown_twice_is_ambiguous_even_with_no_member() {
+        let members = [member(1, "Alice")];
+        let top = vec![user("Bob"), user("Bob"), user("Alice")];
+        let result = resolve_users(&OriginalBotKind::Kraft28, top, &members);
+        assert!(matches!(result, Err(ImportError::AmbiguousNames(names)) if names == [Username::from("Bob")]));
+    }
+
+    #[test]
+    fn distinct_names_are_split_into_found_and_not_found() {
+        let members = [member(1, "Leonid Smith"), member(2, "Alice")];
+        let top = vec![user("Leonid"), user("Alice"), user("Bob")];
+        let (found, not_found) = resolve_users(&OriginalBotKind::Kraft28, top, &members)
+            .expect("the names are distinct");
+        let found_uids: Vec<UserId> = found.iter().map(|u| u.uid).collect();
+        assert_eq!(found_uids, [UserId(1), UserId(2)]);
+        assert_eq!(found[0].name.value(), "Leonid Smith");
+        let not_found: Vec<&str> = not_found.iter().map(|n| n.value()).collect();
+        assert_eq!(not_found, ["Bob"]);
+    }
+
     #[test]
     fn parses_kraft28_lines_ending_at_centimetres() {
         let text = "Рейтинг гравців:\n\n1. Alice — 97 см\n2. Bob — 79 см\n3. Carol — 3 см";
@@ -393,6 +449,6 @@ mod tests {
     fn a_reply_without_leaderboard_entries_is_an_error() {
         let err = parse_import_users("Рейтинг гравців:\n\nNo entries yet")
             .err().expect("an empty import must be rejected");
-        assert!(err.is::<NothingFound>());
+        assert!(matches!(err.downcast_ref(), Some(ImportError::NothingFound)));
     }
 }
