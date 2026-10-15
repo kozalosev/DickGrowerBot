@@ -19,7 +19,7 @@ pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 const MAX_MEMBERS_FOR_IMPORT: usize = 10;
 
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?)(\.{3})? — (?<length>\d+) см\.?")
+    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?) — (?<length>\d+) см\.?")
         .expect("TOP_LINE_REGEXP is invalid")
 });
 
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(top.len(), 1);
         let user = map_user(top.into_iter().next().unwrap().expect("line should be valid"))
             .expect("captures should map to a user");
-        assert_eq!(user.name.value(), "Leonid SadBot🍆");
+        assert_eq!(user.name.value(), "Leonid SadBot🍆...");
         assert_eq!(user.length, 3);
     }
 
@@ -420,6 +420,25 @@ mod tests {
         let top = vec![user("Bob"), user("Bob"), user("Alice")];
         let result = resolve_users(&OriginalBotKind::Kraft28, top, &members);
         assert!(matches!(result, Err(ImportError::AmbiguousNames(names)) if names == [Username::from("Bob")]));
+    }
+
+    #[test]
+    fn pipisa_finds_cut_names_with_random_emoji() {
+        let members = [member(1, "Leonid SadBot Rust'a'man"), member(2, "Leonid Kozarin")];
+        let top = vec![user("Leonid SadBot🍆..."), user("Leonid Kozari🤥...")];
+        let (found, not_found) = resolve_users(&OriginalBotKind::Pipisa, top, &members)
+            .expect("the names are distinct");
+        let found_uids: Vec<UserId> = found.iter().map(|u| u.uid).collect();
+        assert_eq!(found_uids, [UserId(1), UserId(2)]);
+        assert!(not_found.is_empty());
+    }
+
+    #[test]
+    fn two_members_with_the_same_beginning_are_ambiguous_for_a_cut_name() {
+        let members = [member(1, "Leonid SadBot One"), member(2, "Leonid SadBot Two")];
+        let top = vec![user("Leonid SadBot🍆...")];
+        let result = resolve_users(&OriginalBotKind::Pipisa, top, &members);
+        assert!(matches!(result, Err(ImportError::AmbiguousNames(_))));
     }
 
     #[test]

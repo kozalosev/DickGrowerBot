@@ -1,5 +1,8 @@
 use strum::IntoEnumIterator;
 
+const PIPISA_NAME_LENGTH: usize = 13;
+const ELLIPSIS: &str = "...";
+
 /// The `Display` strings are the usernames of the bots, without the `@`.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, strum_macros::Display, strum_macros::EnumIter)]
 pub enum OriginalBotKind {
@@ -11,10 +14,21 @@ pub enum OriginalBotKind {
 
 impl OriginalBotKind {
     /// Whether a leaderboard of this bot, which shows `shown_name`, may mean a user whose name is
-    /// `full_name`. Pipisa cuts the name short; Kraft28 shows the first name only.
+    /// `full_name`.
+    ///
+    /// Pipisa shows a name of up to 13 characters whole. A longer one is cut to 13 characters, gets
+    /// a random emoji (one character) and the ellipsis. Kraft28 shows the first name only.
     pub fn matches_name(&self, full_name: &str, shown_name: &str) -> bool {
         match self {
-            OriginalBotKind::Pipisa => full_name.chars().take(13).eq(shown_name.chars()),
+            OriginalBotKind::Pipisa => {
+                full_name == shown_name || shown_name.strip_suffix(ELLIPSIS).is_some_and(|cut| {
+                    let mut without_emoji = cut.chars();
+                    let emoji = without_emoji.next_back();
+                    emoji.is_some_and(|c| !c.is_alphanumeric())
+                        && full_name.chars().count() > PIPISA_NAME_LENGTH
+                        && full_name.chars().take(PIPISA_NAME_LENGTH).eq(without_emoji)
+                })
+            },
             OriginalBotKind::Kraft28 => {
                 full_name == shown_name
                     || full_name.strip_prefix(shown_name).is_some_and(|rest| rest.starts_with(' '))
@@ -39,11 +53,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipisa_shows_the_first_thirteen_characters() {
+    fn pipisa_shows_a_short_name_whole() {
         let p = OriginalBotKind::Pipisa;
-        assert!(p.matches_name("SadBot #incel>suicide", "SadBot #incel"));
         assert!(p.matches_name("SadBot", "SadBot"));
-        assert!(!p.matches_name("SadBot #incel>suicide", "SadBot #inc"));
+        assert!(p.matches_name("Alice...", "Alice..."));
+        assert!(!p.matches_name("SadBot #incel", "SadBot"));
+        assert!(!p.matches_name("Alice", "Bob"));
+    }
+
+    #[test]
+    fn pipisa_cuts_a_long_name_to_thirteen_characters_and_adds_an_emoji() {
+        let p = OriginalBotKind::Pipisa;
+        assert!(p.matches_name("Leonid SadBot Rust'a'man", "Leonid SadBot🍆..."));
+        assert!(p.matches_name("Leonid Kozarin", "Leonid Kozari🤥..."));
+        assert!(p.matches_name("Hello, world!!", "Hello, world!🍆..."));
+    }
+
+    #[test]
+    fn pipisa_requires_the_cut_the_emoji_and_the_ellipsis() {
+        let p = OriginalBotKind::Pipisa;
+        assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozari..."), "no emoji");
+        assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozarix..."), "a letter instead of an emoji");
+        assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozari🤥"), "no ellipsis");
+        assert!(!p.matches_name("Leonid Kozarin", "Leonid Koza🤥..."), "cut at the wrong place");
+        assert!(!p.matches_name("Leonid Kozari", "Leonid Kozari🤥..."), "was short enough to be shown whole");
+        assert!(!p.matches_name("Alice", "Bob🍆..."));
+    }
+
+    #[test]
+    fn pipisa_counts_characters_whatever_is_inside_the_name() {
+        let p = OriginalBotKind::Pipisa;
+        assert!(p.matches_name("Le🍆o Kozarin Smith", "Le🍆o Kozarin 🤥..."));
+        assert!(p.matches_name(
+            "👨\u{200d}👩\u{200d}👧 Family Name",
+            "👨\u{200d}👩\u{200d}👧 Family 🤥...",
+        ));
     }
 
     #[test]
