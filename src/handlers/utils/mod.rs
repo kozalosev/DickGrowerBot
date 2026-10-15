@@ -10,8 +10,19 @@ pub use self_destruction::*;
 
 use teloxide::Bot;
 use teloxide::prelude::{Requester, UserId};
-use teloxide::types::{Chat, ChatKind, Message, PublicChatKind, User};
+use teloxide::types::{Chat, ChatKind, LinkPreviewOptions, Message, PublicChatKind, User};
 use crate::domain::primitives::{DaysCount, Username};
+
+pub fn disabled_link_preview() -> LinkPreviewOptions {
+    LinkPreviewOptions {
+        is_disabled: true,
+
+        url: None,
+        prefer_small_media: false,
+        prefer_large_media: false,
+        show_above_text: false,
+    }
+}
 
 /// Whether the chat is a forum, i.e. a supergroup with topics turned on.
 ///

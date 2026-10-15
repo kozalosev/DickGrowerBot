@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::types::{LinkPreviewOptions, Message};
+use teloxide::types::Message;
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::{DickOfDayResult, GrowthResult, User};
@@ -11,6 +11,7 @@ use crate::repo::DickOfDayIntentStatus;
 use crate::domain::primitives::{LanguageCode, Username};
 use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{Increment, Incrementor};
+use crate::handlers::utils::disabled_link_preview;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "snake_case")]
@@ -115,15 +116,4 @@ fn already_chosen_answer(name: &Username, lang_code: &LanguageCode) -> (String, 
 fn no_candidates_answer(lang_code: &LanguageCode) -> (String, MessageGroup) {
     let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
     (text, MessageGroup::Notice)
-}
-
-fn disabled_link_preview() -> LinkPreviewOptions {
-    LinkPreviewOptions {
-        is_disabled: true,
-
-        url: None,
-        prefer_small_media: false,
-        prefer_large_media: false,
-        show_above_text: false,
-    }
 }
