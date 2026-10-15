@@ -1,4 +1,5 @@
 use std::time::Duration;
+use chrono::{Datelike, NaiveDate};
 use crate::domain::primitives::{AttemptsCount, DaysCount, Limit, Ratio};
 use domain_types::literal;
 
@@ -9,6 +10,9 @@ pub struct DailyShrinkConfig {
     pub ratio: Ratio,
     pub inactivity_days: DaysCount,
     pub ramp_up_days: DaysCount,
+    /// How many days pass between two runs. Each run takes off what one daily run would, so a longer
+    /// period makes the game milder rather than the cuts deeper.
+    pub period_days: DaysCount,
     /// How many chats one shrinking statement takes on. It bounds both the rows the statement locks
     /// and the ones a failure costs, so a `/grow` sent at midnight waits behind one batch rather
     /// than behind every stale dick in the database.
@@ -64,6 +68,15 @@ impl DailyShrinkConfig {
     pub fn enabled(&self) -> bool {
         self.ratio > literal!(Ratio = 0.0) && !self.inactivity_days.is_zero()
     }
+
+    /// Whether the shrink runs on `date`. The days are counted from a fixed one, so the answer needs
+    /// no state: a restart can't shift the schedule, and a weekly shrink always falls on the same
+    /// weekday. A zero period is read as daily.
+    pub fn is_due(&self, date: NaiveDate) -> bool {
+        i64::from(date.num_days_from_ce())
+            .checked_rem_euclid(i64::from(self.period_days.value()))
+            .is_none_or(|rest| rest == 0)
+    }
 }
 
 impl Default for BroadcastConfig {
@@ -80,5 +93,54 @@ impl Default for BroadcastConfig {
             retention: Duration::from_hours(72),
             language_sample: Limit::new(100),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use chrono::{Datelike, NaiveDate};
+    use crate::domain::primitives::DaysCount;
+    use super::DailyShrinkConfig;
+
+    fn config(period: u32) -> DailyShrinkConfig {
+        DailyShrinkConfig { period_days: DaysCount::new(period), ..Default::default() }
+    }
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("invalid date")
+    }
+
+    #[test]
+    fn a_daily_period_is_due_every_day() {
+        let config = config(1);
+        assert!(config.is_due(date(2026, 10, 15)));
+        assert!(config.is_due(date(2026, 10, 16)));
+    }
+
+    #[test]
+    fn a_zero_period_is_read_as_daily() {
+        assert!(config(0).is_due(date(2026, 10, 15)));
+    }
+
+    #[test]
+    fn a_weekly_period_falls_on_one_weekday() {
+        let config = config(7);
+        let due: Vec<_> = (1..=28)
+            .map(|day| date(2026, 10, day))
+            .filter(|&d| config.is_due(d))
+            .collect();
+        assert_eq!(due.len(), 4);
+        let weekday = due[0].weekday();
+        assert!(due.iter().all(|d| d.weekday() == weekday));
+    }
+
+    #[test]
+    fn a_longer_period_skips_the_days_between() {
+        let config = config(30);
+        let due = (0..90)
+            .map(|offset| date(2026, 1, 1) + chrono::Days::new(offset))
+            .filter(|&d| config.is_due(d))
+            .count();
+        assert_eq!(due, 3);
     }
 }
