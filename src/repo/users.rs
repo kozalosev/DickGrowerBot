@@ -148,6 +148,33 @@ repository!(Users,
             .context("couldn't get the list of banned users")
     }
 ,
+    /// Whether the user may be mentioned in the shrink summaries of the chats they made no choice
+    /// for. Anyone who never said otherwise may.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value()))]
+    pub async fn get_shrink_mentions(&self, user_id: UserId) -> anyhow::Result<bool> {
+        sqlx::query_scalar!(
+                "SELECT (settings->>'shrink_mentions')::bool FROM Users WHERE uid = $1",
+                user_id as UserId)
+            .fetch_optional(&self.pool)
+            .await
+            .context(format!("couldn't get the mention setting of the user with id = {user_id}"))
+            .map(|value| value.flatten().unwrap_or(true))
+    }
+,
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), mentions))]
+    pub async fn set_shrink_mentions(&self, user_id: UserId, mentions: bool) -> anyhow::Result<()> {
+        sqlx::query!(
+                "UPDATE Users SET settings = jsonb_set(settings, '{shrink_mentions}', to_jsonb($2::bool))
+                    WHERE uid = $1",
+                user_id as UserId, mentions)
+            .execute(&self.pool)
+            .await
+            .context(format!("couldn't set the mention setting of the user with id = {user_id}"))?;
+        Ok(())
+    }
+,
     #[cfg(test)]
     pub async fn get_all_users(&self) -> anyhow::Result<Vec<User>> {
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users"#)

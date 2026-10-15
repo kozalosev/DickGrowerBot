@@ -7,7 +7,7 @@ use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
 use crate::config::CachedEnvToggles;
-use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
+use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, MentionsCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 
@@ -28,6 +28,7 @@ pub static COMMAND_NAMES: Lazy<HashSet<String>> = Lazy::new(|| {
         LanguageCommands::bot_commands(),
         TopicsCommands::bot_commands(),
         CleanupCommands::bot_commands(),
+        MentionsCommands::bot_commands(),
         DickCommands::bot_commands(),
         DickOfDayCommands::bot_commands(),
         BattleCommands::bot_commands(),
@@ -55,6 +56,9 @@ pub struct CommandToggles {
     /// Whether `/cleanup` is advertised — there is nothing for a chat to choose while the
     /// self-destruction is switched off altogether.
     pub cleanup_enabled: bool,
+    /// Whether `/mentions` is advertised — the only mentions it governs are those of the shrink
+    /// summaries.
+    pub mentions_enabled: bool,
 }
 
 pub async fn set_my_commands(
@@ -74,6 +78,7 @@ pub async fn set_my_commands(
         PrivacyCommands::bot_commands(),
         PromoCommands::bot_commands(),
         StatsCommands::bot_commands(),
+        if toggles.mentions_enabled { MentionsCommands::bot_commands() } else { Vec::new() },
         if toggles.personal_language_enabled { LanguageCommands::bot_commands() } else { Vec::new() },
         if toggles.support_enabled { SupportCommands::bot_commands() } else { Vec::new() },
     ];

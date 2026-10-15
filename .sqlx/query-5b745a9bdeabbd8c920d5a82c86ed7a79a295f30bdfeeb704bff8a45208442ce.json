@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Player_Settings (chat_id, uid, settings)\n                VALUES ($1, $3, '{\"shrink_mentions\": false, \"other\": 1}'), ($2, $3, '{\"shrink_mentions\": true}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b745a9bdeabbd8c920d5a82c86ed7a79a295f30bdfeeb704bff8a45208442ce"
+}

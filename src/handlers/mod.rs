@@ -17,6 +17,7 @@ pub mod stats;
 pub mod setup;
 pub mod topics;
 pub mod cleanup;
+pub mod mentions;
 pub mod rights;
 
 use derive_more::Constructor;
@@ -41,6 +42,7 @@ pub use language::LanguageCommands;
 pub use loan::LoanCommands;
 pub use topics::TopicsCommands;
 pub use cleanup::CleanupCommands;
+pub use mentions::MentionsCommands;
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;

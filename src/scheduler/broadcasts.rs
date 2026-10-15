@@ -171,7 +171,7 @@ async fn send(deps: BroadcastDeps<'_>, broadcast: &ScheduledBroadcast) -> (Outco
     };
     // A single day by definition, so day-navigation (`adjacent`) is always `None`.
     let keyboard = build_shrink_keyboard(ShrinkView::Broadcast, broadcast.shrink_date,
-                                         Page::first(), page.has_more_pages, None);
+                                         Page::first(), page.has_more_pages, None, &lang_code);
 
     // The throttled request wraps the payload, so the keyboard goes through the setter rather than
     // the field the plain `Bot` exposes.

@@ -11,6 +11,7 @@ mod announcements;
 mod deletions;
 mod broadcasts;
 mod perks;
+mod player_settings;
 
 #[cfg(test)]
 pub(crate) mod test;
@@ -31,6 +32,7 @@ pub use announcements::*;
 pub use deletions::*;
 pub use broadcasts::*;
 pub use perks::*;
+pub use player_settings::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 use crate::domain::primitives::chat::ChatIdKind;
@@ -55,6 +57,7 @@ pub struct Repositories {
     pub deletions: ScheduledDeletions,
     pub broadcasts: ScheduledBroadcasts,
     pub perk_states: PerkStates,
+    pub player_settings: PlayerSettings,
 }
 
 impl Repositories {
@@ -73,6 +76,7 @@ impl Repositories {
             deletions: ScheduledDeletions::new(db_conn.clone()),
             broadcasts: ScheduledBroadcasts::new(db_conn.clone()),
             perk_states: PerkStates::new(db_conn.clone()),
+            player_settings: PlayerSettings::new(db_conn.clone()),
         }
     }
 }

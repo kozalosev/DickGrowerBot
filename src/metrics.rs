@@ -60,6 +60,8 @@ pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
 pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_cleanup_usage_total", "count of /cleanup invocations and changes of the setting", ["invoked", "finished"]));
+pub static CMD_MENTIONS: Lazy<ComplexCommandCounters> = Lazy::new(||
+    ComplexCommandCounters::new("command_mentions_usage_total", "count of /mentions invocations and changes of the setting, the button under a shrink summary included", ["invoked", "finished"]));
 pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
 pub static PANICS_TOTAL: Lazy<CounterVec> = Lazy::new(||
@@ -203,6 +205,7 @@ fn force_registration() {
     Lazy::force(&CMD_TOPICS);
     Lazy::force(&CHAT_TOPICS);
     Lazy::force(&CMD_CLEANUP);
+    Lazy::force(&CMD_MENTIONS);
     Lazy::force(&CHAT_CLEANUP);
     Lazy::force(&CACHE_LOCAL_ENTRIES);
     Lazy::force(&CACHE_FALLBACK_ACTIVE);

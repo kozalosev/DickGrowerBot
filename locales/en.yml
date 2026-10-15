@@ -62,6 +62,14 @@ commands:
       no_rights_strict: "I'm not allowed to delete messages here, and I only remove an answer together with the command that asked for it — so nothing will disappear until I'm an administrator with the right to delete messages.\n\nSet this for <b>%{group}</b> anyway?"
     errors:
       admins_only: "Only chat administrators can choose which messages self-destruct."
+  mentions:
+    description: "Mentions in the shrink summaries"
+    enabled: "I <b>mention</b> you in the shrink summaries of every chat where you haven't chosen otherwise with the button under a summary."
+    disabled: "I <b>don't mention</b> you in the shrink summaries of the chats where you haven't chosen otherwise with the button under a summary."
+    buttons:
+      enable: "🔔 Mention me"
+      disable: "🔕 Don't mention me"
+    group_hint: "To stop me mentioning you in this chat, press 🔕 under a shrink summary. To choose for every chat at once, send me /mentions in a private chat."
   privacy:
     description: "Privacy Policy detailing what data we store"
   support:
@@ -88,11 +96,16 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>Time to trim the neglected!</b> These dicks haven't grown in %{days}+ days and shrank a bit:"
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm)"
+      line: "— <b>%{name}</b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm)"
     recent:
       header: "✂️ <b>Who's been shrinking lately:</b>"
       line: "— <b>%{name}</b> lost <b>%{lost}</b> cm"
     empty: "Silence… No one has shrunk lately. Guess everybody's keeping up the pace 💪"
+    mentions:
+      button: "🔕 Don't mention me here"
+      stopped: "Done! I won't mention you in the shrink summaries of this chat any more. Press again to undo."
+      resumed: "Done! I'll mention you in the shrink summaries of this chat again."
+      not_playing: "You don't play in this chat, so there's nobody to mention."
   dod:
     description: "Elect the Dick of a Day"
     result: "The Dick of the Day is <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."

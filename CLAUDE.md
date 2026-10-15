@@ -101,7 +101,8 @@ HELP_AUCTION_BOT=DickAuctionBot  # the bot auctioning promo codes; unset or empt
 The help is rendered once, at startup, from `help::Context`. A paragraph about something that may
 be absent sits inside `{{ if … }}`. `/support` and `/cleanup` follow `commands::CommandToggles`, the
 same switches that hide those commands from the menu; the auctions paragraph follows
-`HELP_AUCTION_BOT`; and the streak paragraph follows the perk, whose grades render as an empty
+`HELP_AUCTION_BOT`; the shrink paragraph follows `DailyShrinkConfig::enabled`, the same switch that
+hides `/mentions`; and the streak paragraph follows the perk, whose grades render as an empty
 string — which `{{ if }}` takes as false — when `STREAK_BONUS_GRADES` is empty or `DISABLE_STREAK`
 is set.
 
@@ -680,6 +681,25 @@ schedule. A run takes off what a daily one would; the ramp-up and the grace peri
 days of staleness, not in runs, so neither changes meaning. `DAILY_SHRINK_RUN_ON_STARTUP` ignores the
 period. The summaries of a run stay deliverable until the next one, since `expire_superseded` only
 runs when a run does.
+
+**A player may refuse to be mentioned, and stays on the list.** The summary links each name to the
+user, which is what pings them; a player who refused is printed as plain text instead. The choice is
+made at two levels, and the nearer one wins: `Player_Settings` (migration 51, a jsonb row per
+`(chat, uid)`, flipped by the 🔕 button under every summary) over `Users.settings` (the same key, set
+with `/mentions` in a private chat — a private chat has no `Chats` row to hold it), over the default
+of mentioning. The key is `shrink_mentions` in both.
+
+It costs the broadcast nothing worth counting: a summary renders one page, and the choice arrives
+in the same query — a column of the `Users` row already joined, and a `LEFT JOIN` on the primary
+key of `Player_Settings` for the few rows of the page. Nothing walks a chat's members. What the
+choice does *not* do is decide whether a summary is sent at all: that question would need every
+victim of the chat, at the moment the shrink queues it.
+
+The button is a toggle relative to what applies now, written in one statement
+(`PlayerSettings::toggle_shrink_mentions`) — the keyboard is shared by the whole chat, so it can't
+show anybody's own state, and the answer says what the press did. `Player_Settings` is carried
+through a chat merge like `Perk_States` (the surviving chat wins key by key) and cleared by
+`erase_user`, which also empties `Users.settings`.
 
 **Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
 `MAX(created_at)` in `Stale_Dick_Shrinks`, not any of the `daily_shrink_*` counters. A counter that

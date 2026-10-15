@@ -47,6 +47,9 @@ pub struct RecentShrink {
     pub owner_name: Username,
     pub lost_length: Length,
     pub length: Length,
+    /// Whether the owner agreed to be mentioned in this chat's summaries: their choice for the chat,
+    /// else the one for every chat, else yes.
+    pub mention: bool,
 }
 
 /// Named rather than a `(NaiveDate, NaiveDate)` pair: the two are trivially swappable, and the
@@ -181,11 +184,14 @@ repository!(Shrinks,
     ) -> anyhow::Result<Vec<RecentShrink>> {
         sqlx::query_as!(RecentShrink,
             r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
-                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length"
+                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length",
+                       COALESCE((ps.settings->>'shrink_mentions')::bool,
+                                (usr.settings->>'shrink_mentions')::bool, true) AS "mention!"
                 FROM Stale_Dick_Shrinks s
                 JOIN Users usr USING (uid)
                 JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
                 JOIN Chats c ON c.id = s.chat_id
+                LEFT JOIN Player_Settings ps ON ps.chat_id = s.chat_id AND ps.uid = s.uid
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                   AND s.created_at = $2
                 ORDER BY s.lost_length DESC
@@ -215,10 +221,13 @@ repository!(Shrinks,
     ) -> anyhow::Result<Vec<RecentShrink>> {
         sqlx::query_as!(RecentShrink,
             r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
-                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length"
+                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length",
+                       COALESCE((ps.settings->>'shrink_mentions')::bool,
+                                (usr.settings->>'shrink_mentions')::bool, true) AS "mention!"
                 FROM Stale_Dick_Shrinks s
                 JOIN Users usr USING (uid)
                 JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
+                LEFT JOIN Player_Settings ps ON ps.chat_id = s.chat_id AND ps.uid = s.uid
                 WHERE s.chat_id = $1 AND s.created_at = $2
                 ORDER BY s.lost_length DESC
                 OFFSET $3 LIMIT $4"#,

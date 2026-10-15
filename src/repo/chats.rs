@@ -633,11 +633,36 @@ repository!(Chats, with_feature_toggles,
         let dod = Self::move_dicks_of_the_day(tx, main_id, deleted_id).await?;
         let shrinks = Self::move_shrinks(tx, main_id, deleted_id).await?;
         let perk_states = Self::move_perk_states(tx, main_id, deleted_id).await?;
+        let player_settings = Self::move_player_settings(tx, main_id, deleted_id).await?;
         let migrations = Self::move_chat_migrations(tx, main_id, deleted_id).await?;
 
-        tracing::info!(loans, battle_stats, announcements, imports, dod, shrinks, perk_states, migrations,
-            "moved the rows of the deleted chat to the main one");
+        tracing::info!(loans, battle_stats, announcements, imports, dod, shrinks, perk_states, player_settings,
+            migrations, "moved the rows of the deleted chat to the main one");
         Ok(())
+    }
+,
+    /// The main chat's settings win, key by key, over the ones the deleted chat held.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
+    async fn move_player_settings(
+        tx: &mut Transaction<'_, Postgres>,
+        main_id: InternalChatId,
+        deleted_id: InternalChatId,
+    ) -> anyhow::Result<u64> {
+        let moved = sqlx::query!(
+            "INSERT INTO Player_Settings (chat_id, uid, settings)
+                    SELECT $1, uid, settings FROM Player_Settings WHERE chat_id = $2
+                    ON CONFLICT (chat_id, uid) DO UPDATE SET settings = EXCLUDED.settings || Player_Settings.settings",
+                main_id as InternalChatId, deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move the player settings from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Player_Settings WHERE chat_id = $1", deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete the player settings of the chat with id = {deleted_id}"))?;
+        Ok(moved)
     }
 ,
     /// A state means whatever its perk decided it means, so two of them can't be folded together
