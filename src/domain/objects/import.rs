@@ -2,6 +2,7 @@ use strum::IntoEnumIterator;
 
 const PIPISA_NAME_LENGTH: usize = 13;
 const ELLIPSIS: &str = "...";
+const PIPISA_MARKS: [&str; 2] = ["🍆", "🤥"];
 
 /// The `Display` strings are the usernames of the bots, without the `@`.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, strum_macros::Display, strum_macros::EnumIter)]
@@ -16,18 +17,19 @@ impl OriginalBotKind {
     /// Whether a leaderboard of this bot, which shows `shown_name`, may mean a user whose name is
     /// `full_name`.
     ///
-    /// Pipisa shows a name of up to 13 characters whole. A longer one is cut to 13 characters, gets
-    /// a random emoji (one character) and the ellipsis. Kraft28 shows the first name only.
+    /// Pipisa shows a name of up to 13 characters whole. A longer one is cut to 13 characters and
+    /// gets the ellipsis. The first place of a leaderboard is marked with 🍆 and the last one with 🤥,
+    /// whatever the length of the name; the mark goes before the ellipsis. Kraft28 shows the first
+    /// name only.
     pub fn matches_name(&self, full_name: &str, shown_name: &str) -> bool {
         match self {
             OriginalBotKind::Pipisa => {
-                full_name == shown_name || shown_name.strip_suffix(ELLIPSIS).is_some_and(|cut| {
-                    let mut without_emoji = cut.chars();
-                    let emoji = without_emoji.next_back();
-                    emoji.is_some_and(|c| !c.is_alphanumeric())
-                        && full_name.chars().count() > PIPISA_NAME_LENGTH
-                        && full_name.chars().take(PIPISA_NAME_LENGTH).eq(without_emoji)
-                })
+                full_name == shown_name
+                    || full_name == strip_mark(shown_name)
+                    || shown_name.strip_suffix(ELLIPSIS).is_some_and(|cut| {
+                        full_name.chars().count() > PIPISA_NAME_LENGTH
+                            && full_name.chars().take(PIPISA_NAME_LENGTH).eq(strip_mark(cut).chars())
+                    })
             },
             OriginalBotKind::Kraft28 => {
                 full_name == shown_name
@@ -35,6 +37,12 @@ impl OriginalBotKind {
             }
         }
     }
+}
+
+fn strip_mark(name: &str) -> &str {
+    PIPISA_MARKS.iter()
+        .find_map(|mark| name.strip_suffix(mark))
+        .unwrap_or(name)
 }
 
 impl TryFrom<&str> for OriginalBotKind {
@@ -62,18 +70,28 @@ mod tests {
     }
 
     #[test]
-    fn pipisa_cuts_a_long_name_to_thirteen_characters_and_adds_an_emoji() {
+    fn pipisa_cuts_a_long_name_to_thirteen_characters() {
         let p = OriginalBotKind::Pipisa;
         assert!(p.matches_name("Leonid SadBot Rust'a'man", "Leonid SadBot🍆..."));
         assert!(p.matches_name("Leonid Kozarin", "Leonid Kozari🤥..."));
+        assert!(p.matches_name("Leonid Kozarin", "Leonid Kozari..."));
         assert!(p.matches_name("Hello, world!!", "Hello, world!🍆..."));
     }
 
     #[test]
-    fn pipisa_requires_the_cut_the_emoji_and_the_ellipsis() {
+    fn pipisa_marks_a_short_name_of_the_first_and_the_last_place() {
         let p = OriginalBotKind::Pipisa;
-        assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozari..."), "no emoji");
-        assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozarix..."), "a letter instead of an emoji");
+        assert!(p.matches_name("Кошка", "Кошка🤥"));
+        assert!(p.matches_name("Кошка", "Кошка🍆"));
+        assert!(!p.matches_name("Кошка", "Кошка🐱"), "not one of the two marks");
+        assert!(!p.matches_name("Собака", "Кошка🤥"));
+    }
+
+    #[test]
+    fn pipisa_requires_the_cut_and_the_ellipsis() {
+        let p = OriginalBotKind::Pipisa;
+        assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozarix..."), "a letter instead of a mark");
+        assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozari"), "no ellipsis, a name of its own");
         assert!(!p.matches_name("Leonid Kozarin", "Leonid Kozari🤥"), "no ellipsis");
         assert!(!p.matches_name("Leonid Kozarin", "Leonid Koza🤥..."), "cut at the wrong place");
         assert!(!p.matches_name("Leonid Kozari", "Leonid Kozari🤥..."), "was short enough to be shown whole");
