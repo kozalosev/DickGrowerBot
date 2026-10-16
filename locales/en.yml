@@ -102,9 +102,9 @@ commands:
       line: "— <b>%{name}</b> lost <b>%{lost}</b> cm"
     empty: "Silence… No one has shrunk lately. Guess everybody's keeping up the pace 💪"
     mentions:
-      button: "🔕 Don't tag me here"
-      stopped: "I won't tag you here any more. Press again to undo."
-      resumed: "I'll tag you here again."
+      button: "🔔/🔕 mentions"
+      stopped: "I won't tag you in this chat any more. Press again to undo."
+      resumed: "I'll tag you in this chat again."
       not_playing: "You don't play in this chat, so I don't tag you here anyway."
   dod:
     description: "Elect the Dick of a Day"

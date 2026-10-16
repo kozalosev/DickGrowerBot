@@ -102,7 +102,7 @@ commands:
       line: "— <b>%{name}</b> 缩了 <b>%{lost}</b> 厘米"
     empty: "安静……最近没人缩水。看来大家都跟上节奏了 💪"
     mentions:
-      button: "🔕 在本群别提到我"
+      button: "🔔/🔕 提及"
       stopped: "以后不会在本群提到你了。再按一次即可撤销。"
       resumed: "以后在本群会重新提到你。"
       not_playing: "你没有在本群玩，本来就不会提到你。"

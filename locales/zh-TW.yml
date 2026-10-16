@@ -41,7 +41,7 @@ commands:
       line: "— <b>%{name}</b> 縮了 <b>%{lost}</b> 公分"
     empty: "安靜……最近沒人縮水。看來大家都跟上節奏了 💪"
     mentions:
-      button: "🔕 在本群別提到我"
+      button: "🔔/🔕 提及"
       stopped: "以後不會在本群提到你了。再按一次即可撤銷。"
       resumed: "以後在本群會重新提到你。"
       not_playing: "你沒有在本群玩，本來就不會提到你。"
