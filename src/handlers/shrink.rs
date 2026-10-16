@@ -95,7 +95,7 @@ pub(crate) fn render_shrinks_page(
         .take(usize::from(config.top_limit))
         .map(|s| {
             let name = s.owner_name.escaped();
-            let name = if view == ShrinkView::Broadcast && s.mention {
+            let name = if view == ShrinkView::Broadcast && s.shrink_mentions_enabled {
                 format!(r#"<a href="tg://user?id={}">{name}</a>"#, s.uid)
             } else {
                 name
@@ -163,8 +163,7 @@ fn render_page(
 
 /// `None` when no button would do anything, so callers never attach an empty or dead row.
 ///
-/// A broadcast always carries the button that stops mentioning whoever presses it, since the
-/// mentions are what makes a broadcast noisy.
+/// A broadcast always gets the mention toggle.
 pub(crate) fn build_shrink_keyboard(
     view: ShrinkView,
     date: NaiveDate,
@@ -229,44 +228,6 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
     ShrinkCallbackData::check_prefix(query)
 }
 
-#[cfg(test)]
-mod test {
-    use crate::config::AppConfig;
-    use crate::domain::primitives::{Length, LanguageCode, Limit, UserId, Username};
-    use crate::repo::RecentShrink;
-    use super::{render_shrinks_page, ShrinkView};
-
-    fn shrink(uid: u64, name: &str, mention: bool) -> RecentShrink {
-        RecentShrink {
-            uid: UserId::new(uid),
-            owner_name: Username::new(name.to_owned()),
-            lost_length: Length::new(3),
-            length: Length::new(30),
-            mention,
-        }
-    }
-
-    fn render(view: ShrinkView) -> String {
-        let config = AppConfig { top_limit: Limit::new(10), ..Default::default() };
-        let rows = [shrink(1, "Alice", true), shrink(2, "Bob", false)];
-        render_shrinks_page(&rows, &config, &LanguageCode::new("en".to_owned()), view, false).lines
-    }
-
-    #[test]
-    fn only_the_players_who_agreed_are_mentioned() {
-        let text = render(ShrinkView::Broadcast);
-        assert!(text.contains(r#"<b><a href="tg://user?id=1">"#));
-        assert!(!text.contains("tg://user?id=2"));
-        assert!(text.contains("Bob"));
-    }
-
-    #[test]
-    fn the_recent_view_mentions_nobody() {
-        let text = render(ShrinkView::Recent);
-        assert!(!text.contains("tg://user"));
-    }
-}
-
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn shrink_callback_handler(
@@ -294,4 +255,42 @@ pub async fn shrink_callback_handler(
 
     callbacks::answer_and_edit_page(&bot, &q, &edit_msg_req_params, page.lines, keyboard).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crate::config::AppConfig;
+    use crate::domain::primitives::{Length, LanguageCode, Limit, UserId, Username};
+    use crate::repo::RecentShrink;
+    use super::{render_shrinks_page, ShrinkView};
+
+    #[test]
+    fn only_the_players_who_agreed_are_mentioned() {
+        let text = render(ShrinkView::Broadcast);
+        assert!(text.contains(r#"<b><a href="tg://user?id=1">"#));
+        assert!(!text.contains("tg://user?id=2"));
+        assert!(text.contains("Bob"));
+    }
+
+    #[test]
+    fn the_recent_view_mentions_nobody() {
+        let text = render(ShrinkView::Recent);
+        assert!(!text.contains("tg://user"));
+    }
+
+    fn render(view: ShrinkView) -> String {
+        let config = AppConfig { top_limit: Limit::new(10), ..Default::default() };
+        let rows = [shrink(1, "Alice", true), shrink(2, "Bob", false)];
+        render_shrinks_page(&rows, &config, &LanguageCode::new("en".to_owned()), view, false).lines
+    }
+
+    fn shrink(uid: u64, name: &str, shrink_mentions_enabled: bool) -> RecentShrink {
+        RecentShrink {
+            uid: UserId::new(uid),
+            owner_name: Username::new(name.to_owned()),
+            lost_length: Length::new(3),
+            length: Length::new(30),
+            shrink_mentions_enabled,
+        }
+    }
 }

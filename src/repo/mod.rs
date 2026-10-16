@@ -1,41 +1,29 @@
-mod users;
-mod dicks;
-mod chats;
-mod import;
-mod promo;
-mod loans;
-mod pvpstats;
-mod stats;
-mod shrinks;
-mod announcements;
-mod deletions;
-mod broadcasts;
-mod perks;
-mod player_settings;
-
-#[cfg(test)]
-pub(crate) mod test;
-
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
 use sqlx::postgres::{PgConnectOptions, PgQueryResult};
-pub use users::*;
-pub use dicks::*;
-pub use chats::*;
-pub use import::*;
-pub use promo::*;
-pub use loans::*;
-pub use pvpstats::*;
-pub use stats::*;
-pub use shrinks::*;
-pub use announcements::*;
-pub use deletions::*;
-pub use broadcasts::*;
-pub use perks::*;
-pub use player_settings::*;
 use crate::config;
 use crate::config::DatabaseConfig;
 use crate::domain::primitives::chat::ChatIdKind;
+use crate::pub_use_modules;
+
+pub_use_modules!(
+    users,
+    dicks,
+    chats,
+    import,
+    promo,
+    loans,
+    pvpstats,
+    stats,
+    shrinks,
+    announcements,
+    deletions,
+    broadcasts,
+    perks,
+    player_settings);
+
+#[cfg(test)]
+pub(crate) mod test;
 
 /// Connections the pool holds on top of what queries may use. A listening connection can't serve
 /// queries, so it is held for as long as it listens; the pool is built that much larger, and

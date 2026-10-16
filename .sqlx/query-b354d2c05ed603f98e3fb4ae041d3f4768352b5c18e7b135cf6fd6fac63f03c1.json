@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT s.uid AS \"uid: UserId\", usr.name AS \"owner_name: Username\",\n                       s.lost_length AS \"lost_length!: Length\", d.length AS \"length!: Length\",\n                       COALESCE((ps.settings->>'shrink_mentions')::bool,\n                                (usr.settings->>'shrink_mentions')::bool, true) AS \"mention!\"\n                FROM Stale_Dick_Shrinks s\n                JOIN Users usr USING (uid)\n                JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id\n                LEFT JOIN Player_Settings ps ON ps.chat_id = s.chat_id AND ps.uid = s.uid\n                WHERE s.chat_id = $1 AND s.created_at = $2\n                ORDER BY s.lost_length DESC\n                OFFSET $3 LIMIT $4",
+  "query": "SELECT s.uid AS \"uid: UserId\", usr.name AS \"owner_name: Username\",\n                       s.lost_length AS \"lost_length!: Length\", d.length AS \"length!: Length\",\n                       COALESCE((ps.settings->>'shrink_mentions_enabled')::bool,\n                                (usr.settings->>'shrink_mentions_enabled')::bool, true) AS \"shrink_mentions_enabled!\"\n                FROM Stale_Dick_Shrinks s\n                JOIN Users usr USING (uid)\n                JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id\n                LEFT JOIN Player_Settings ps ON ps.chat_id = s.chat_id AND ps.uid = s.uid\n                WHERE s.chat_id = $1 AND s.created_at = $2\n                ORDER BY s.lost_length DESC\n                OFFSET $3 LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -49,7 +49,7 @@
       },
       {
         "ordinal": 4,
-        "name": "mention!",
+        "name": "shrink_mentions_enabled!",
         "type_info": "Bool",
         "origin": "Expression"
       }
@@ -70,5 +70,5 @@
       null
     ]
   },
-  "hash": "c55e3dd22df52671f9c6dc581cbbab855b2b8fdc0cddbbb13a6fd9d8a4830682"
+  "hash": "b354d2c05ed603f98e3fb4ae041d3f4768352b5c18e7b135cf6fd6fac63f03c1"
 }

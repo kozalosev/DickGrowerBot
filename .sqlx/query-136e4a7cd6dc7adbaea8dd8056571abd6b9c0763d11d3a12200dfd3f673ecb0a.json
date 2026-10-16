@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Users SET settings = '{\"shrink_mentions_enabled\": false}' WHERE uid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "136e4a7cd6dc7adbaea8dd8056571abd6b9c0763d11d3a12200dfd3f673ecb0a"
+}

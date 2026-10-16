@@ -148,13 +148,12 @@ repository!(Users,
             .context("couldn't get the list of banned users")
     }
 ,
-    /// Whether the user may be mentioned in the shrink summaries of the chats they made no choice
-    /// for. Anyone who never said otherwise may.
+    /// The user's mention setting for every chat; `true` when unset.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = user_id.value()))]
-    pub async fn get_shrink_mentions(&self, user_id: UserId) -> anyhow::Result<bool> {
+    pub async fn get_shrink_mentions_enabled(&self, user_id: UserId) -> anyhow::Result<bool> {
         sqlx::query_scalar!(
-                "SELECT (settings->>'shrink_mentions')::bool FROM Users WHERE uid = $1",
+                "SELECT (settings->>'shrink_mentions_enabled')::bool FROM Users WHERE uid = $1",
                 user_id as UserId)
             .fetch_optional(&self.pool)
             .await
@@ -163,12 +162,12 @@ repository!(Users,
     }
 ,
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = user_id.value(), mentions))]
-    pub async fn set_shrink_mentions(&self, user_id: UserId, mentions: bool) -> anyhow::Result<()> {
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), enabled))]
+    pub async fn set_shrink_mentions_enabled(&self, user_id: UserId, enabled: bool) -> anyhow::Result<()> {
         sqlx::query!(
-                "UPDATE Users SET settings = jsonb_set(settings, '{shrink_mentions}', to_jsonb($2::bool))
+                "UPDATE Users SET settings = jsonb_set(settings, '{shrink_mentions_enabled}', to_jsonb($2::bool))
                     WHERE uid = $1",
-                user_id as UserId, mentions)
+                user_id as UserId, enabled)
             .execute(&self.pool)
             .await
             .context(format!("couldn't set the mention setting of the user with id = {user_id}"))?;

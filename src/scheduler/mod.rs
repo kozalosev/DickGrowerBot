@@ -48,8 +48,8 @@ pub fn throttled(bot: Bot, config: ThrottleConfig) -> Throttle<Bot> {
     Throttle::spawn_with_settings(bot, settings)
 }
 
-/// Spawns a detached, best-effort task that runs the daily shrink at every UTC midnight that the
-/// period makes due. No-op when the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
+/// Spawns a detached, best-effort task that runs the daily shrink at UTC midnight, once every
+/// `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
 /// midnight; failures are logged and never abort the loop.
 ///
 /// What the run produces *is* persisted: the summaries it owes are rows, written by the same

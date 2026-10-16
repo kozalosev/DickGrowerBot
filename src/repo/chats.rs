@@ -641,56 +641,6 @@ repository!(Chats, with_feature_toggles,
         Ok(())
     }
 ,
-    /// The main chat's settings win, key by key, over the ones the deleted chat held.
-    #[autometrics]
-    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
-    async fn move_player_settings(
-        tx: &mut Transaction<'_, Postgres>,
-        main_id: InternalChatId,
-        deleted_id: InternalChatId,
-    ) -> anyhow::Result<u64> {
-        let moved = sqlx::query!(
-            "INSERT INTO Player_Settings (chat_id, uid, settings)
-                    SELECT $1, uid, settings FROM Player_Settings WHERE chat_id = $2
-                    ON CONFLICT (chat_id, uid) DO UPDATE SET settings = EXCLUDED.settings || Player_Settings.settings",
-                main_id as InternalChatId, deleted_id as InternalChatId)
-            .execute(&mut **tx)
-            .await
-            .context(format!("couldn't move the player settings from the chat with id = {deleted_id} to {main_id}"))?
-            .rows_affected();
-        sqlx::query!("DELETE FROM Player_Settings WHERE chat_id = $1", deleted_id as InternalChatId)
-            .execute(&mut **tx)
-            .await
-            .context(format!("couldn't delete the player settings of the chat with id = {deleted_id}"))?;
-        Ok(moved)
-    }
-,
-    /// A state means whatever its perk decided it means, so two of them can't be folded together
-    /// here. The main chat's state wins and the other is dropped, the same choice the dicks make
-    /// with their `updated_at`.
-    #[autometrics]
-    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
-    async fn move_perk_states(
-        tx: &mut Transaction<'_, Postgres>,
-        main_id: InternalChatId,
-        deleted_id: InternalChatId,
-    ) -> anyhow::Result<u64> {
-        let moved = sqlx::query!(
-            "INSERT INTO Perk_States (chat_id, uid, perk_id, state)
-                    SELECT $1, uid, perk_id, state FROM Perk_States WHERE chat_id = $2
-                    ON CONFLICT (chat_id, uid, perk_id) DO NOTHING",
-                main_id as InternalChatId, deleted_id as InternalChatId)
-            .execute(&mut **tx)
-            .await
-            .context(format!("couldn't move the perk states from the chat with id = {deleted_id} to {main_id}"))?
-            .rows_affected();
-        sqlx::query!("DELETE FROM Perk_States WHERE chat_id = $1", deleted_id as InternalChatId)
-            .execute(&mut **tx)
-            .await
-            .context(format!("couldn't delete the perk states of the chat with id = {deleted_id}"))?;
-        Ok(moved)
-    }
-,
     /// Nothing constrains `(uid, chat_id)` here, so the loans can just be repointed.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
@@ -814,35 +764,6 @@ repository!(Chats, with_feature_toggles,
         Ok(moved)
     }
 ,
-    /// Keyed by `internal_id`, so there is at most one record per row and the surviving chat's own
-    /// wins. In practice the row being merged away is the one known only by its instance, and a
-    /// migration is only ever journaled for a row known by its `chat_id` — but the journal points
-    /// at `Chats(id)` without an `ON DELETE`, so it has to be carried over rather than assumed
-    /// absent.
-    #[autometrics]
-    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
-    async fn move_chat_migrations(
-        tx: &mut Transaction<'_, Postgres>,
-        main_id: InternalChatId,
-        deleted_id: InternalChatId,
-    ) -> anyhow::Result<u64> {
-        let moved = sqlx::query!(
-            "INSERT INTO Chat_Migrations (internal_id, old_chat_id, old_chat_instance, new_chat_id, migrated_at)
-                    SELECT $1, old_chat_id, old_chat_instance, new_chat_id, migrated_at
-                        FROM Chat_Migrations WHERE internal_id = $2
-                    ON CONFLICT (internal_id) DO NOTHING",
-                main_id as InternalChatId, deleted_id as InternalChatId)
-            .execute(&mut **tx)
-            .await
-            .context(format!("couldn't move the migration journal from the chat with id = {deleted_id} to {main_id}"))?
-            .rows_affected();
-        sqlx::query!("DELETE FROM Chat_Migrations WHERE internal_id = $1", deleted_id as InternalChatId)
-            .execute(&mut **tx)
-            .await
-            .context(format!("couldn't delete the migration journal of the chat with id = {deleted_id}"))?;
-        Ok(moved)
-    }
-,
     /// An append-only history keyed by `(chat_id, uid, created_at)`. The same user really did
     /// shrink twice that day when both chats recorded it, so the lengths add up.
     ///
@@ -878,6 +799,85 @@ repository!(Chats, with_feature_toggles,
             .execute(&mut **tx)
             .await
             .context(format!("couldn't delete shrinks of the chat with id = {deleted_id}"))?;
+        Ok(moved)
+    }
+,
+    /// A state means whatever its perk decided it means, so two of them can't be folded together
+    /// here. The main chat's state wins and the other is dropped, the same choice the dicks make
+    /// with their `updated_at`.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
+    async fn move_perk_states(
+        tx: &mut Transaction<'_, Postgres>,
+        main_id: InternalChatId,
+        deleted_id: InternalChatId,
+    ) -> anyhow::Result<u64> {
+        let moved = sqlx::query!(
+            "INSERT INTO Perk_States (chat_id, uid, perk_id, state)
+                    SELECT $1, uid, perk_id, state FROM Perk_States WHERE chat_id = $2
+                    ON CONFLICT (chat_id, uid, perk_id) DO NOTHING",
+                main_id as InternalChatId, deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move the perk states from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Perk_States WHERE chat_id = $1", deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete the perk states of the chat with id = {deleted_id}"))?;
+        Ok(moved)
+    }
+,
+    /// The main chat's settings win, key by key, over the ones the deleted chat held.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
+    async fn move_player_settings(
+        tx: &mut Transaction<'_, Postgres>,
+        main_id: InternalChatId,
+        deleted_id: InternalChatId,
+    ) -> anyhow::Result<u64> {
+        let moved = sqlx::query!(
+            "INSERT INTO Player_Settings (chat_id, uid, settings)
+                    SELECT $1, uid, settings FROM Player_Settings WHERE chat_id = $2
+                    ON CONFLICT (chat_id, uid) DO UPDATE SET settings = EXCLUDED.settings || Player_Settings.settings",
+                main_id as InternalChatId, deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move the player settings from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Player_Settings WHERE chat_id = $1", deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete the player settings of the chat with id = {deleted_id}"))?;
+        Ok(moved)
+    }
+,
+    /// Keyed by `internal_id`, so there is at most one record per row and the surviving chat's own
+    /// wins. In practice the row being merged away is the one known only by its instance, and a
+    /// migration is only ever journaled for a row known by its `chat_id` — but the journal points
+    /// at `Chats(id)` without an `ON DELETE`, so it has to be carried over rather than assumed
+    /// absent.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(main_id = %main_id, deleted_id = %deleted_id))]
+    async fn move_chat_migrations(
+        tx: &mut Transaction<'_, Postgres>,
+        main_id: InternalChatId,
+        deleted_id: InternalChatId,
+    ) -> anyhow::Result<u64> {
+        let moved = sqlx::query!(
+            "INSERT INTO Chat_Migrations (internal_id, old_chat_id, old_chat_instance, new_chat_id, migrated_at)
+                    SELECT $1, old_chat_id, old_chat_instance, new_chat_id, migrated_at
+                        FROM Chat_Migrations WHERE internal_id = $2
+                    ON CONFLICT (internal_id) DO NOTHING",
+                main_id as InternalChatId, deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't move the migration journal from the chat with id = {deleted_id} to {main_id}"))?
+            .rows_affected();
+        sqlx::query!("DELETE FROM Chat_Migrations WHERE internal_id = $1", deleted_id as InternalChatId)
+            .execute(&mut **tx)
+            .await
+            .context(format!("couldn't delete the migration journal of the chat with id = {deleted_id}"))?;
         Ok(moved)
     }
 ,

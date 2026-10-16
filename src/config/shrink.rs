@@ -10,8 +10,7 @@ pub struct DailyShrinkConfig {
     pub ratio: Ratio,
     pub inactivity_days: DaysCount,
     pub ramp_up_days: DaysCount,
-    /// How many days pass between two runs. Each run takes off what one daily run would, so a longer
-    /// period makes the game milder rather than the cuts deeper.
+    /// Days between two runs.
     pub period_days: DaysCount,
     /// How many chats one shrinking statement takes on. It bounds both the rows the statement locks
     /// and the ones a failure costs, so a `/grow` sent at midnight waits behind one batch rather
@@ -69,9 +68,8 @@ impl DailyShrinkConfig {
         self.ratio > literal!(Ratio = 0.0) && !self.inactivity_days.is_zero()
     }
 
-    /// Whether the shrink runs on `date`. The days are counted from a fixed one, so the answer needs
-    /// no state: a restart can't shift the schedule, and a weekly shrink always falls on the same
-    /// weekday. A zero period is read as daily.
+    /// Whether the shrink runs on `date`: its day number since 0001-01-01 is a multiple of the period.
+    /// A zero period means daily.
     pub fn is_due(&self, date: NaiveDate) -> bool {
         i64::from(date.num_days_from_ce())
             .checked_rem_euclid(i64::from(self.period_days.value()))
@@ -101,14 +99,6 @@ mod test {
     use chrono::{Datelike, NaiveDate};
     use crate::domain::primitives::DaysCount;
     use super::DailyShrinkConfig;
-
-    fn config(period: u32) -> DailyShrinkConfig {
-        DailyShrinkConfig { period_days: DaysCount::new(period), ..Default::default() }
-    }
-
-    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(y, m, d).expect("invalid date")
-    }
 
     #[test]
     fn a_daily_period_is_due_every_day() {
@@ -142,5 +132,13 @@ mod test {
             .filter(|&d| config.is_due(d))
             .count();
         assert_eq!(due, 3);
+    }
+
+    fn config(period: u32) -> DailyShrinkConfig {
+        DailyShrinkConfig { period_days: DaysCount::new(period), ..Default::default() }
+    }
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("invalid date")
     }
 }

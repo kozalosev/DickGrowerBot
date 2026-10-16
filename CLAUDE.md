@@ -687,7 +687,7 @@ user, which is what pings them; a player who refused is printed as plain text in
 made at two levels, and the nearer one wins: `Player_Settings` (migration 51, a jsonb row per
 `(chat, uid)`, flipped by the 🔕 button under every summary) over `Users.settings` (the same key, set
 with `/mentions` in a private chat — a private chat has no `Chats` row to hold it), over the default
-of mentioning. The key is `shrink_mentions` in both.
+of mentioning. The key is `shrink_mentions_enabled` in both.
 
 It costs the broadcast nothing worth counting: a summary renders one page, and the choice arrives
 in the same query — a column of the `Users` row already joined, and a `LEFT JOIN` on the primary
@@ -696,7 +696,7 @@ choice does *not* do is decide whether a summary is sent at all: that question w
 victim of the chat, at the moment the shrink queues it.
 
 The button is a toggle relative to what applies now, written in one statement
-(`PlayerSettings::toggle_shrink_mentions`) — the keyboard is shared by the whole chat, so it can't
+(`PlayerSettings::toggle_shrink_mentions_enabled`) — the keyboard is shared by the whole chat, so it can't
 show anybody's own state, and the answer says what the press did. `Player_Settings` is carried
 through a chat merge like `Perk_States` (the surviving chat wins key by key) and cleared by
 `erase_user`, which also empties `Users.settings`.

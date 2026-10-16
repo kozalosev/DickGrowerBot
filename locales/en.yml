@@ -63,13 +63,13 @@ commands:
     errors:
       admins_only: "Only chat administrators can choose which messages self-destruct."
   mentions:
-    description: "Mentions in the shrink summaries"
-    enabled: "I <b>mention</b> you in the shrink summaries of every chat where you haven't chosen otherwise with the button under a summary."
-    disabled: "I <b>don't mention</b> you in the shrink summaries of the chats where you haven't chosen otherwise with the button under a summary."
+    description: "Tags in the shrink reminders"
+    enabled: "Right now I <b>tag</b> you in the shrink reminders. This applies to every chat; to change it for one chat, press 🔕 under a reminder."
+    disabled: "Right now I <b>don't tag</b> you in the shrink reminders. This applies to every chat; to change it for one chat, press 🔕 under a reminder."
     buttons:
-      enable: "🔔 Mention me"
-      disable: "🔕 Don't mention me"
-    group_hint: "To stop me mentioning you in this chat, press 🔕 under a shrink summary. To choose for every chat at once, send me /mentions in a private chat."
+      enable: "🔔 Tag me"
+      disable: "🔕 Don't tag me"
+    group_hint: "To stop me tagging you in this chat, press 🔕 under a shrink reminder. To change it for every chat, send me /mentions in a private chat."
   privacy:
     description: "Privacy Policy detailing what data we store"
   support:
@@ -102,10 +102,10 @@ commands:
       line: "— <b>%{name}</b> lost <b>%{lost}</b> cm"
     empty: "Silence… No one has shrunk lately. Guess everybody's keeping up the pace 💪"
     mentions:
-      button: "🔕 Don't mention me here"
-      stopped: "Done! I won't mention you in the shrink summaries of this chat any more. Press again to undo."
-      resumed: "Done! I'll mention you in the shrink summaries of this chat again."
-      not_playing: "You don't play in this chat, so there's nobody to mention."
+      button: "🔕 Don't tag me here"
+      stopped: "I won't tag you here any more. Press again to undo."
+      resumed: "I'll tag you here again."
+      not_playing: "You don't play in this chat, so I don't tag you here anyway."
   dod:
     description: "Elect the Dick of a Day"
     result: "The Dick of the Day is <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."

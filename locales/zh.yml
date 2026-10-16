@@ -63,13 +63,13 @@ commands:
     errors:
       admins_only: "只有群管理员才能选择哪些消息会自动消失。"
   mentions:
-    description: "缩水汇总中的提及"
-    enabled: "在你没有用汇总下方按钮另作选择的所有群里，我会在缩水汇总中<b>提到</b>你。"
-    disabled: "在你没有用汇总下方按钮另作选择的群里，我<b>不会</b>在缩水汇总中提到你。"
+    description: "缩水提醒中的提及"
+    enabled: "目前我会在缩水提醒里<b>提到</b>你。此设置适用于所有群；如需单独更改某个群，请按提醒下方的 🔕。"
+    disabled: "目前我<b>不会</b>在缩水提醒里提到你。此设置适用于所有群；如需单独更改某个群，请按提醒下方的 🔕。"
     buttons:
       enable: "🔔 提到我"
       disable: "🔕 别提到我"
-    group_hint: "要让我在本群不再提到你，请按缩水汇总下方的 🔕。要一次为所有群选择，请在私聊中给我发送 /mentions。"
+    group_hint: "要让我在本群不再提到你，请按缩水提醒下方的 🔕。要更改所有群的设置，请在私聊中给我发送 /mentions。"
   privacy:
     description: "存储数据说明详见隐私政策，"
   support:
@@ -102,10 +102,10 @@ commands:
       line: "— <b>%{name}</b> 缩了 <b>%{lost}</b> 厘米"
     empty: "安静……最近没人缩水。看来大家都跟上节奏了 💪"
     mentions:
-      button: "🔕 在这里别提到我"
-      stopped: "好了！以后在本群的缩水汇总里不会再提到你。再按一次即可撤销。"
-      resumed: "好了！以后在本群的缩水汇总里会再次提到你。"
-      not_playing: "你没有在本群玩，所以没有人可提到。"
+      button: "🔕 在本群别提到我"
+      stopped: "以后不会在本群提到你了。再按一次即可撤销。"
+      resumed: "以后在本群会重新提到你。"
+      not_playing: "你没有在本群玩，本来就不会提到你。"
   dod:
     description: "选举今日丁丁"
     result: "今日丁丁是<b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>！\n\n他的丁丁增长了<b>%{growth} 厘米</b>，现在长度为<b>%{length}</b> 厘米。"

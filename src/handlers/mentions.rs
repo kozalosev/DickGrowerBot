@@ -21,9 +21,8 @@ pub enum MentionsCommands {
     Mentions,
 }
 
-/// In a private chat, shows whether the user is mentioned in the shrink summaries of the chats they
-/// made no choice for, with a button to change it. A group gets a pointer to the button under the
-/// summary instead, which is where the choice for one chat is made.
+/// In a private chat, shows the user's mention setting for every chat with a button to flip it.
+/// In a group, answers with a hint.
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn mentions_cmd_handler(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
@@ -40,10 +39,12 @@ pub async fn mentions_cmd_handler(bot: Bot, msg: Message, deps: HandlerDeps) -> 
     let from = msg.from.as_ref()
         .ok_or(anyhow!("unexpected absence of a FROM field"))?;
     let uid = UserId::from(from);
+
     repos.users.create_or_update(uid, &get_full_name(from)).await?;
-    let mentions = repos.users.get_shrink_mentions(uid).await?;
-    reply_html!(bot, msg, render_state(mentions, &lang_code),
-        reply_markup = ReplyMarkup::InlineKeyboard(build_keyboard(mentions, &lang_code)));
+    let enabled = repos.users.get_shrink_mentions_enabled(uid).await?;
+
+    reply_html!(bot, msg, render_state(enabled, &lang_code),
+        reply_markup = ReplyMarkup::InlineKeyboard(build_keyboard(enabled, &lang_code)));
     Ok(())
 }
 
@@ -59,25 +60,27 @@ pub async fn mentions_callback_handler(bot: Bot, query: CallbackQuery, deps: Han
     let uid = UserId::from(&query.from);
 
     match MentionsCallbackData::parse(&query)? {
-        MentionsCallbackData::Set(mentions) => {
-            repos.users.set_shrink_mentions(uid, mentions).await?;
+        MentionsCallbackData::Set(enabled) => {
+            repos.users.set_shrink_mentions_enabled(uid, enabled).await?;
             metrics::CMD_MENTIONS.finished();
             let params = callbacks::get_params_for_message_edit(&query)?;
-            callbacks::answer_and_edit_page(&bot, &query, &params, render_state(mentions, &lang_code),
-                build_keyboard(mentions, &lang_code)).await?;
+            callbacks::answer_and_edit_page(&bot, &query, &params, render_state(enabled, &lang_code),
+                build_keyboard(enabled, &lang_code)).await?;
         },
         MentionsCallbackData::ToggleHere => {
             let message = query.message.as_ref()
                 .ok_or(anyhow!("a mentions callback without an attached message"))?;
             let chat_id = ChatIdKind::from(message.chat().id);
-            let key = match repos.player_settings.toggle_shrink_mentions(&chat_id, uid).await? {
+            let toggled = repos.player_settings.toggle_shrink_mentions_enabled(&chat_id, uid).await?;
+            let key = match toggled {
                 Some(true) => "commands.shrink.mentions.resumed",
                 Some(false) => "commands.shrink.mentions.stopped",
                 None => "commands.shrink.mentions.not_playing",
             };
+            let not_playing = toggled.is_none();
             metrics::CMD_MENTIONS.finished();
             bot.answer_callback_query(query.id)
-                .show_alert(true)
+                .show_alert(not_playing)
                 .text(t!(key, locale = &lang_code))
                 .await?;
         },
@@ -85,21 +88,20 @@ pub async fn mentions_callback_handler(bot: Bot, query: CallbackQuery, deps: Han
     Ok(())
 }
 
-fn render_state(mentions: bool, lang_code: &LanguageCode) -> String {
-    let key = if mentions { "commands.mentions.enabled" } else { "commands.mentions.disabled" };
+fn render_state(enabled: bool, lang_code: &LanguageCode) -> String {
+    let key = if enabled { "commands.mentions.enabled" } else { "commands.mentions.disabled" };
     t!(key, locale = lang_code).to_string()
 }
 
-fn build_keyboard(mentions: bool, lang_code: &LanguageCode) -> InlineKeyboardMarkup {
-    let key = if mentions { "commands.mentions.buttons.disable" } else { "commands.mentions.buttons.enable" };
+fn build_keyboard(enabled: bool, lang_code: &LanguageCode) -> InlineKeyboardMarkup {
+    let key = if enabled { "commands.mentions.buttons.disable" } else { "commands.mentions.buttons.enable" };
     InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
         t!(key, locale = lang_code),
-        MentionsCallbackData::Set(!mentions).to_data_string())]])
+        MentionsCallbackData::Set(!enabled).to_data_string())]])
 }
 
-/// Callback payload of the mention switches. The wire format is `mentions:on`/`mentions:off` for the
-/// choice made in a private chat, and `mentions:here` for the button under a shrink summary, which
-/// flips the choice of whoever pressed it for that chat alone.
+/// `mentions:on`/`mentions:off` set the user's setting for every chat; `mentions:here` flips it for
+/// the chat the message is in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, derive_more::Display)]
 pub(crate) enum MentionsCallbackData {
     #[display("{}", if *_0 { "on" } else { "off" })]

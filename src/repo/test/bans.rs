@@ -205,10 +205,10 @@ async fn fill_all_tables(db: &Pool<Postgres>) {
     sqlx::query!("INSERT INTO Perk_States (chat_id, uid, perk_id) VALUES ($1, $2, $3)",
             internal_chat_id, USER_ID as UserId, perk_id)
         .execute(db).await.expect("couldn't create the perk state");
-    sqlx::query!(r#"INSERT INTO Player_Settings (chat_id, uid, settings) VALUES ($1, $2, '{"shrink_mentions": false}')"#,
+    sqlx::query!(r#"INSERT INTO Player_Settings (chat_id, uid, settings) VALUES ($1, $2, '{"shrink_mentions_enabled": false}')"#,
             internal_chat_id, USER_ID as UserId)
         .execute(db).await.expect("couldn't create the player settings");
-    sqlx::query!(r#"UPDATE Users SET settings = '{"shrink_mentions": false}' WHERE uid = $1"#, USER_ID as UserId)
+    sqlx::query!(r#"UPDATE Users SET settings = '{"shrink_mentions_enabled": false}' WHERE uid = $1"#, USER_ID as UserId)
         .execute(db).await.expect("couldn't set the user settings");
 }
 

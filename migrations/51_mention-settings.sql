@@ -1,8 +1,7 @@
--- A user's own settings, the same jsonb shape as Chats.settings. A private chat has no Chats row,
--- so this is where whatever a user sets for every chat at once is kept.
+-- A user's global settings.
 ALTER TABLE Users ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;
 
--- What a user chose for one chat only. A key that is absent here falls back to Users.settings.
+-- A user's settings for one chat.
 CREATE TABLE IF NOT EXISTS Player_Settings (
     chat_id  bigint NOT NULL REFERENCES Chats(id),
     uid      bigint NOT NULL REFERENCES Users(uid) ON DELETE CASCADE,

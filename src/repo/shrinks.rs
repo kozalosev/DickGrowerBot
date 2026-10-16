@@ -47,9 +47,9 @@ pub struct RecentShrink {
     pub owner_name: Username,
     pub lost_length: Length,
     pub length: Length,
-    /// Whether the owner agreed to be mentioned in this chat's summaries: their choice for the chat,
-    /// else the one for every chat, else yes.
-    pub mention: bool,
+    /// Whether the owner is tagged. Taken from their setting for this chat; if there is none, from
+    /// their global setting; if there is none either, `true`.
+    pub shrink_mentions_enabled: bool,
 }
 
 /// Named rather than a `(NaiveDate, NaiveDate)` pair: the two are trivially swappable, and the
@@ -185,8 +185,8 @@ repository!(Shrinks,
         sqlx::query_as!(RecentShrink,
             r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
                        s.lost_length AS "lost_length!: Length", d.length AS "length!: Length",
-                       COALESCE((ps.settings->>'shrink_mentions')::bool,
-                                (usr.settings->>'shrink_mentions')::bool, true) AS "mention!"
+                       COALESCE((ps.settings->>'shrink_mentions_enabled')::bool,
+                                (usr.settings->>'shrink_mentions_enabled')::bool, true) AS "shrink_mentions_enabled!"
                 FROM Stale_Dick_Shrinks s
                 JOIN Users usr USING (uid)
                 JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
@@ -222,8 +222,8 @@ repository!(Shrinks,
         sqlx::query_as!(RecentShrink,
             r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
                        s.lost_length AS "lost_length!: Length", d.length AS "length!: Length",
-                       COALESCE((ps.settings->>'shrink_mentions')::bool,
-                                (usr.settings->>'shrink_mentions')::bool, true) AS "mention!"
+                       COALESCE((ps.settings->>'shrink_mentions_enabled')::bool,
+                                (usr.settings->>'shrink_mentions_enabled')::bool, true) AS "shrink_mentions_enabled!"
                 FROM Stale_Dick_Shrinks s
                 JOIN Users usr USING (uid)
                 JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id

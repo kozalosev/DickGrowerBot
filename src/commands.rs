@@ -56,8 +56,7 @@ pub struct CommandToggles {
     /// Whether `/cleanup` is advertised — there is nothing for a chat to choose while the
     /// self-destruction is switched off altogether.
     pub cleanup_enabled: bool,
-    /// Whether `/mentions` is advertised — the only mentions it governs are those of the shrink
-    /// summaries.
+    /// Whether `/mentions` is in the menu.
     pub mentions_enabled: bool,
 }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT (settings->>'shrink_mentions')::bool FROM Users WHERE uid = $1",
+  "query": "SELECT (settings->>'shrink_mentions_enabled')::bool FROM Users WHERE uid = $1",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "7c102ab10edd8bedc7fe098e98bcb1820973ec603bd88312841f4e8d7c337019"
+  "hash": "1ae40353eb76974354c7aba3bc1f51c1e941ca636b6a60a0ae19826c418fe49e"
 }

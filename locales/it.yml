@@ -63,13 +63,13 @@ commands:
     errors:
       admins_only: "Solo gli amministratori possono scegliere quali messaggi si autodistruggono."
   mentions:
-    description: "Menzioni nei riepiloghi degli accorciamenti"
-    enabled: "Ti <b>menziono</b> nei riepiloghi degli accorciamenti di tutte le chat in cui non hai scelto diversamente con il pulsante sotto un riepilogo."
-    disabled: "<b>Non ti menziono</b> nei riepiloghi degli accorciamenti delle chat in cui non hai scelto diversamente con il pulsante sotto un riepilogo."
+    description: "Tag nei promemoria sull'accorciamento"
+    enabled: "Ora ti <b>taggo</b> nei promemoria sull'accorciamento. Vale per tutte le chat; per cambiarlo in una sola chat, premi 🔕 sotto un promemoria."
+    disabled: "Ora <b>non ti taggo</b> nei promemoria sull'accorciamento. Vale per tutte le chat; per cambiarlo in una sola chat, premi 🔕 sotto un promemoria."
     buttons:
-      enable: "🔔 Menzionami"
-      disable: "🔕 Non menzionarmi"
-    group_hint: "Per non essere più menzionato in questa chat, premi 🔕 sotto un riepilogo degli accorciamenti. Per scegliere per tutte le chat insieme, mandami /mentions in privato."
+      enable: "🔔 Taggami"
+      disable: "🔕 Non taggarmi"
+    group_hint: "Per non essere più taggato in questa chat, premi 🔕 sotto un promemoria sull'accorciamento. Per cambiarlo in tutte le chat, mandami /mentions in privato."
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
   support:
@@ -102,10 +102,10 @@ commands:
       line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm"
     empty: "Silenzio… Nessuno si è accorciato ultimamente. Sembra che tutti tengano il passo 💪"
     mentions:
-      button: "🔕 Non menzionarmi qui"
-      stopped: "Fatto! Non ti menzionerò più nei riepiloghi degli accorciamenti di questa chat. Premi di nuovo per annullare."
-      resumed: "Fatto! Ti menzionerò di nuovo nei riepiloghi degli accorciamenti di questa chat."
-      not_playing: "Non giochi in questa chat, quindi non c'è nessuno da menzionare."
+      button: "🔕 Non taggarmi qui"
+      stopped: "Non ti taggo più qui. Premi di nuovo per annullare."
+      resumed: "Ti taggo di nuovo qui."
+      not_playing: "Non giochi in questa chat, quindi qui non ti taggo comunque."
   dod:
     description: "Eleggi il Pene del Giorno"
     result: "Il Pene del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pene è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."
