@@ -5,7 +5,7 @@ use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramCh
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
-use crate::repo::test::{fresh_db, repos, CHAT_ID, UID, USER_ID};
+use crate::repo::test::{bonus_attempts_of, fresh_db, repos, CHAT_ID, UID, USER_ID};
 use crate::repo::test::dicks::create_user;
 
 #[tokio::test]
@@ -394,7 +394,7 @@ async fn migrate_chat_id() {
     let old_partiality = ChatIdPartiality::Specific(old.into());
     let internal_id = chats.upsert_chat(&old_partiality)
         .await.expect("couldn't create a chat");
-    dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5), &[])
+    dicks.create_or_grow(USER_ID, &old_partiality, LengthChange::signed(5))
         .await.expect("couldn't create a dick");
 
     // this chat was never anchored, so its inline half — if it ever had one — is left behind
@@ -473,6 +473,7 @@ async fn merge_moves_dependent_rows() {
     chat.add_battle_stats().await;
     chat.add_dick_of_the_day().await;
     chat.add_shrinks().await;
+    chat.add_player_settings().await;
 
     chat.merge().await;
 
@@ -488,6 +489,10 @@ async fn merge_moves_dependent_rows() {
 
     // both chats shrank the same user on the same day, so the lost lengths add up
     assert_eq!(chat.lost_length().await, 8);
+
+    // the surviving chat's choice wins, and what only the other chat held comes along
+    assert_eq!(chat.player_settings().await, serde_json::json!({"shrink_mentions_enabled": true, "other": 1}));
+    assert_eq!(chat.player_settings_left().await, 0);
 }
 
 #[tokio::test]
@@ -501,9 +506,9 @@ async fn merge_keeps_dicks_from_both_chats() {
 
     chat.add_dicks().await;
     // read back rather than assumed, so the assertion below is about the merge alone
-    let kept = chat.bonus_attempts(UID, chat.id_row).await;
-    let moved = chat.bonus_attempts(UID, chat.instance_row).await;
-    let moved_only = chat.bonus_attempts(UID + 1, chat.instance_row).await;
+    let kept = bonus_attempts_of(&chat.db, UID, chat.id_row).await;
+    let moved = bonus_attempts_of(&chat.db, UID, chat.instance_row).await;
+    let moved_only = bonus_attempts_of(&chat.db, UID + 1, chat.instance_row).await;
 
     chat.merge().await;
 
@@ -584,6 +589,27 @@ impl SplitChat {
             .await.expect("couldn't create shrinks");
     }
 
+    /// The user chose in both chats; one key is set in the surviving chat only, the other in both.
+    async fn add_player_settings(&self) {
+        sqlx::query!(r#"INSERT INTO Player_Settings (chat_id, uid, settings)
+                VALUES ($1, $3, '{"shrink_mentions_enabled": false, "other": 1}'), ($2, $3, '{"shrink_mentions_enabled": true}')"#,
+                self.instance_row, self.id_row, UID)
+            .execute(&self.db)
+            .await.expect("couldn't create player settings");
+    }
+
+    async fn player_settings(&self) -> serde_json::Value {
+        sqlx::query_scalar!("SELECT settings FROM Player_Settings WHERE chat_id = $1 AND uid = $2", self.id_row, UID)
+            .fetch_one(&self.db)
+            .await.expect("the player settings must survive the merge")
+    }
+
+    async fn player_settings_left(&self) -> i64 {
+        sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM Player_Settings WHERE chat_id = $1"#, self.instance_row)
+            .fetch_one(&self.db)
+            .await.expect("couldn't count the leftover player settings")
+    }
+
     /// The first user played in both chats, the second one only in the chat that gets merged away.
     async fn add_dicks(&self) {
         sqlx::query!("INSERT INTO Dicks (uid, chat_id, length, bonus_attempts) VALUES ($1, $2, 1, 2), ($1, $3, 2, 3), ($4, $3, 7, 4)",
@@ -643,12 +669,6 @@ impl SplitChat {
             .collect()
     }
 
-    async fn bonus_attempts(&self, uid: i64, chat_row: i64) -> i32 {
-        sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2", uid, chat_row)
-            .fetch_one(&self.db)
-            .await.expect("the dick must exist")
-    }
-
     async fn dicks_left(&self) -> i64 {
         sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM Dicks WHERE chat_id = $1"#, self.instance_row)
             .fetch_one(&self.db)
@@ -702,7 +722,7 @@ async fn two_separate_chats(db: &Pool<Postgres>, chats: &repo::Chats, full: Chat
         .await.expect("couldn't create dicks");
 
     let chat_id = full.to_partiality(Default::default());
-    dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(0), &[])
+    dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(0))
         .await
         .expect("couldn't create a dick");
 

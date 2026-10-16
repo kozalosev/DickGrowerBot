@@ -32,6 +32,7 @@ pub fn build_context_for_help_messages(
         git_repo: get_env_mandatory_value("HELP_GIT_REPO")?,
         support_enabled: toggles.support_enabled,
         cleanup_enabled: toggles.cleanup_enabled,
+        shrink_enabled: toggles.mentions_enabled,
         auction_bot: get_optional_env_string("HELP_AUCTION_BOT").map(Username::new),
         help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
             .map(Percentage::from)

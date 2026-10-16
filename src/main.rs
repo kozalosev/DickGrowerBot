@@ -40,7 +40,7 @@ use dialogue::CachedDialogueStorage;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
-use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
+use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, MentionsCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::BattleLocks;
@@ -99,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(dptree::filter(checks::is_banned).endpoint(checks::handle_banned))
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::language_cmd_handler))
+        .branch(Update::filter_message().filter_command::<MentionsCommands>().endpoint(handlers::mentions::mentions_cmd_handler))
         .branch(checks::group_command::<DickCommands>().endpoint(handlers::dick_cmd_handler))
         .branch(checks::group_command::<DickOfDayCommands>().endpoint(handlers::dod_cmd_handler))
         .branch(checks::group_command::<BattleCommands>().endpoint(handlers::pvp::pvp_cmd_handler))
@@ -135,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::language_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::topics::callback_filter).endpoint(handlers::topics::topics_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::cleanup::callback_filter).endpoint(handlers::cleanup::cleanup_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::mentions::callback_filter).endpoint(handlers::mentions::mentions_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
     let bot = config::BotConfig::build_bot()?;
@@ -147,6 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         personal_language_enabled: language_service.user_service_enabled(),
         support_enabled: app_config.support_chat_id.is_some(),
         cleanup_enabled: app_config.self_destruction.configurable(),
+        mentions_enabled: app_config.daily_shrink.enabled(),
     };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
@@ -159,9 +162,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
     let me = bot.get_me().await?;
-    let perks = handlers::perks::all(&db_conn, &app_config);
+    let perks = handlers::perks::all(&app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
-                                                        &repos.dicks, &repos.perk_states, perks).await?;
+                                                        &repos.perk_states, perks).await?;
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES,
                                                                &command_toggles)?;
     let help_container = help::render_help_messages(help_context)?;

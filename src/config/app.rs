@@ -59,6 +59,7 @@ impl AppConfig {
             ratio: env_value!("DAILY_SHRINK_RATIO": Ratio),
             inactivity_days: env_value!("DAILY_SHRINK_INACTIVITY_DAYS": DaysCount, or = 7),
             ramp_up_days: env_value!("DAILY_SHRINK_RAMP_UP_DAYS": DaysCount, or = 7),
+            period_days: env_value!("DAILY_SHRINK_PERIOD_DAYS": DaysCount, or = 1, at_least = 1),
             batch_size: env_value!("DAILY_SHRINK_BATCH_SIZE": Limit, or = 100, at_least = 1),
             batch_delay: env_duration!("DAILY_SHRINK_BATCH_DELAY"),
             expiry_batch_size: env_value!("DAILY_SHRINK_EXPIRY_BATCH_SIZE": Limit, or = 5000, at_least = 1),
