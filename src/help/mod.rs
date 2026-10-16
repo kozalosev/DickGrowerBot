@@ -55,6 +55,7 @@ pub struct Context {
     pub git_repo: String,
     pub support_enabled: bool,
     pub cleanup_enabled: bool,
+    pub shrink_enabled: bool,
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub auction_bot: Option<Username>,
     pub help_pussies_percentage: Percentage,
@@ -96,6 +97,7 @@ mod test {
             git_repo: String::new(),
             support_enabled: true,
             cleanup_enabled: true,
+            shrink_enabled: true,
             auction_bot: Some(Username::from("DickAuctionBot")),
             help_pussies_percentage: literal!(Percentage = 0),
             streak_bonus_grades: "2, 4, 8, 16, 32".to_owned(),
@@ -123,6 +125,7 @@ mod test {
         let hidden = render_help_messages(Context {
             support_enabled: false,
             cleanup_enabled: false,
+            shrink_enabled: false,
             auction_bot: None,
             streak_bonus_grades: String::new(),
             ..context()
@@ -134,11 +137,13 @@ mod test {
             assert!(!without.contains("/support"), "{lang}: {without}");
             assert!(!without.contains("/promo"), "{lang}: {without}");
             assert!(!without.contains("/cleanup"), "{lang}: {without}");
+            assert!(!without.contains("/mentions"), "{lang}: {without}");
             assert!(!without.contains("<b></b>"), "{lang}: {without}");
 
             let with = shown.get_help_message(&lang_code);
             assert!(with.contains("/support"), "{lang}: {with}");
             assert!(with.contains("/cleanup"), "{lang}: {with}");
+            assert!(with.contains("/mentions"), "{lang}: {with}");
             assert!(with.contains("<b>2, 4, 8, 16, 32</b>"), "{lang}: {with}");
             assert!(with.contains("@DickAuctionBot"), "{lang}: {with}");
             assert!(with.contains("/promo"), "{lang}: {with}");

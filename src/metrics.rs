@@ -60,6 +60,8 @@ pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
 pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_cleanup_usage_total", "count of /cleanup invocations and changes of the setting", ["invoked", "finished"]));
+pub static CMD_MENTIONS: Lazy<ComplexCommandCounters> = Lazy::new(||
+    ComplexCommandCounters::new("command_mentions_usage_total", "count of /mentions invocations and changes of the setting, the button under a shrink summary included", ["invoked", "finished"]));
 pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
 pub static PANICS_TOTAL: Lazy<CounterVec> = Lazy::new(||
@@ -102,7 +104,9 @@ pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
 pub static DAILY_SHRINK_LAST_RUN_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
-    Gauge::new("daily_shrink_last_run_timestamp_seconds", "the UTC midnight the last logged shrink belongs to, as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes 26 hours"));
+    Gauge::new("daily_shrink_last_run_timestamp_seconds", "the UTC midnight the last logged shrink belongs to, as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes daily_shrink_period_seconds plus two hours"));
+pub static DAILY_SHRINK_PERIOD: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("daily_shrink_period_seconds", "the value of DAILY_SHRINK_PERIOD_DAYS in seconds, so that the alert on daily_shrink_last_run_timestamp_seconds can allow for the days without a run"));
 pub static DAILY_SHRINK_BROADCAST_PENDING: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_broadcast_pending", "number of shrink summaries the chats are still owed; a number that only grows means the worker stopped draining the queue"));
 pub static DAILY_SHRINK_BROADCAST_LAST_TICK_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
@@ -201,6 +205,7 @@ fn force_registration() {
     Lazy::force(&CMD_TOPICS);
     Lazy::force(&CHAT_TOPICS);
     Lazy::force(&CMD_CLEANUP);
+    Lazy::force(&CMD_MENTIONS);
     Lazy::force(&CHAT_CLEANUP);
     Lazy::force(&CACHE_LOCAL_ENTRIES);
     Lazy::force(&CACHE_FALLBACK_ACTIVE);

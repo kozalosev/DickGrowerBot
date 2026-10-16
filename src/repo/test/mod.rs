@@ -12,6 +12,7 @@ mod bans;
 mod broadcasts;
 mod deletions;
 mod perks;
+mod mentions;
 
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};

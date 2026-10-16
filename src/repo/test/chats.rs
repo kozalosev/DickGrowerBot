@@ -473,6 +473,7 @@ async fn merge_moves_dependent_rows() {
     chat.add_battle_stats().await;
     chat.add_dick_of_the_day().await;
     chat.add_shrinks().await;
+    chat.add_player_settings().await;
 
     chat.merge().await;
 
@@ -488,6 +489,10 @@ async fn merge_moves_dependent_rows() {
 
     // both chats shrank the same user on the same day, so the lost lengths add up
     assert_eq!(chat.lost_length().await, 8);
+
+    // the surviving chat's choice wins, and what only the other chat held comes along
+    assert_eq!(chat.player_settings().await, serde_json::json!({"shrink_mentions_enabled": true, "other": 1}));
+    assert_eq!(chat.player_settings_left().await, 0);
 }
 
 #[tokio::test]
@@ -582,6 +587,27 @@ impl SplitChat {
                 self.instance_row, self.id_row, UID)
             .execute(&self.db)
             .await.expect("couldn't create shrinks");
+    }
+
+    /// The user chose in both chats; one key is set in the surviving chat only, the other in both.
+    async fn add_player_settings(&self) {
+        sqlx::query!(r#"INSERT INTO Player_Settings (chat_id, uid, settings)
+                VALUES ($1, $3, '{"shrink_mentions_enabled": false, "other": 1}'), ($2, $3, '{"shrink_mentions_enabled": true}')"#,
+                self.instance_row, self.id_row, UID)
+            .execute(&self.db)
+            .await.expect("couldn't create player settings");
+    }
+
+    async fn player_settings(&self) -> serde_json::Value {
+        sqlx::query_scalar!("SELECT settings FROM Player_Settings WHERE chat_id = $1 AND uid = $2", self.id_row, UID)
+            .fetch_one(&self.db)
+            .await.expect("the player settings must survive the merge")
+    }
+
+    async fn player_settings_left(&self) -> i64 {
+        sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM Player_Settings WHERE chat_id = $1"#, self.instance_row)
+            .fetch_one(&self.db)
+            .await.expect("couldn't count the leftover player settings")
     }
 
     /// The first user played in both chats, the second one only in the chat that gets merged away.

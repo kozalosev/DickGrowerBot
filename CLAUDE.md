@@ -101,7 +101,8 @@ HELP_AUCTION_BOT=DickAuctionBot  # the bot auctioning promo codes; unset or empt
 The help is rendered once, at startup, from `help::Context`. A paragraph about something that may
 be absent sits inside `{{ if … }}`. `/support` and `/cleanup` follow `commands::CommandToggles`, the
 same switches that hide those commands from the menu; the auctions paragraph follows
-`HELP_AUCTION_BOT`; and the streak paragraph follows the perk, whose grades render as an empty
+`HELP_AUCTION_BOT`; the shrink paragraph follows `DailyShrinkConfig::enabled`, the same switch that
+hides `/mentions`; and the streak paragraph follows the perk, whose grades render as an empty
 string — which `{{ if }}` takes as false — when `STREAK_BONUS_GRADES` is empty or `DISABLE_STREAK`
 is set.
 
@@ -657,6 +658,7 @@ growing. Everything below follows from that.
 DAILY_SHRINK_RATIO=0.01                # unset or 0 => the whole feature is off, queue included
 DAILY_SHRINK_INACTIVITY_DAYS=7
 DAILY_SHRINK_RAMP_UP_DAYS=7
+DAILY_SHRINK_PERIOD_DAYS=1             # days between two runs; 7 => weekly, always on the same weekday
 DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
 DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
 DAILY_SHRINK_BATCH_DELAY=0s            # rest between two batches; 0 => back to back
@@ -672,11 +674,38 @@ DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
 DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY=3d       # 0 => finished rows are kept for ever
 ```
 
+**`DAILY_SHRINK_PERIOD_DAYS` makes the game milder, not the cuts deeper.** The scheduler still wakes
+at every midnight and runs only when `DailyShrinkConfig::is_due` says so — the day's number counted
+from a fixed date, modulo the period, so nothing has to be remembered and a restart can't shift the
+schedule. A run takes off what a daily one would; the ramp-up and the grace period are counted in
+days of staleness, not in runs, so neither changes meaning. `DAILY_SHRINK_RUN_ON_STARTUP` ignores the
+period. The summaries of a run stay deliverable until the next one, since `expire_superseded` only
+runs when a run does.
+
+**A player may refuse to be mentioned, and stays on the list.** The summary links each name to the
+user, which is what pings them; a player who refused is printed as plain text instead. The choice is
+made at two levels, and the nearer one wins: `Player_Settings` (migration 51, a jsonb row per
+`(chat, uid)`, flipped by the 🔕 button under every summary) over `Users.settings` (the same key, set
+with `/mentions` in a private chat — a private chat has no `Chats` row to hold it), over the default
+of mentioning. The key is `shrink_mentions_enabled` in both.
+
+It costs the broadcast nothing worth counting: a summary renders one page, and the choice arrives
+in the same query — a column of the `Users` row already joined, and a `LEFT JOIN` on the primary
+key of `Player_Settings` for the few rows of the page. Nothing walks a chat's members. What the
+choice does *not* do is decide whether a summary is sent at all: that question would need every
+victim of the chat, at the moment the shrink queues it.
+
+The button is a toggle relative to what applies now, written in one statement
+(`PlayerSettings::toggle_shrink_mentions_enabled`) — the keyboard is shared by the whole chat, so it can't
+show anybody's own state, and the answer says what the press did. `Player_Settings` is carried
+through a chat merge like `Perk_States` (the surviving chat wins key by key) and cleared by
+`erase_user`, which also empties `Users.settings`.
+
 **Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
 `MAX(created_at)` in `Stale_Dick_Shrinks`, not any of the `daily_shrink_*` counters. A counter that
 moves once a day reads zero both when nothing happened and when nobody scraped it before the process
 restarted, and nothing afterwards tells the two apart — which is how a fortnight of silence went
-unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > 26h`, and on
+unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > daily_shrink_period_seconds + 2h`, and on
 `daily_shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs
 repo's `vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
 

@@ -62,6 +62,14 @@ commands:
       no_rights_strict: "Non posso eliminare messaggi qui, e una risposta la rimuovo solo insieme al comando che l'ha richiesta — quindi non sparirà niente finché non sarò amministratore con il diritto di eliminare i messaggi.\n\nImpostarlo comunque per <b>%{group}</b>?"
     errors:
       admins_only: "Solo gli amministratori possono scegliere quali messaggi si autodistruggono."
+  mentions:
+    description: "Tag nei promemoria sull'accorciamento"
+    enabled: "Ora ti <b>taggo</b> nei promemoria sull'accorciamento. Vale per tutte le chat; per cambiarlo in una sola chat, premi 🔕 sotto un promemoria."
+    disabled: "Ora <b>non ti taggo</b> nei promemoria sull'accorciamento. Vale per tutte le chat; per cambiarlo in una sola chat, premi 🔕 sotto un promemoria."
+    buttons:
+      enable: "🔔 Taggami"
+      disable: "🔕 Non taggarmi"
+    group_hint: "Per non essere più taggato in questa chat, premi 🔕 sotto un promemoria sull'accorciamento. Per cambiarlo in tutte le chat, mandami /mentions in privato."
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
   support:
@@ -88,11 +96,16 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per %{days}+ giorni e si sono un po' accorciati:"
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm)"
+      line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm)"
     recent:
       header: "✂️ <b>Chi si è accorciato di recente:</b>"
       line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm"
     empty: "Silenzio… Nessuno si è accorciato ultimamente. Sembra che tutti tengano il passo 💪"
+    mentions:
+      button: "🔔/🔕 menzioni"
+      stopped: "Non ti taggo più in questa chat. Premi di nuovo per annullare."
+      resumed: "Ti taggo di nuovo in questa chat."
+      not_playing: "Non giochi in questa chat, quindi qui non ti taggo comunque."
   dod:
     description: "Eleggi il Pene del Giorno"
     result: "Il Pene del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pene è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."

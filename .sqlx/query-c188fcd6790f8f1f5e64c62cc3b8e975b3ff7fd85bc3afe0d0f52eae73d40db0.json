@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Users SET settings = jsonb_set(settings, '{shrink_mentions_enabled}', to_jsonb($2::bool))\n                    WHERE uid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c188fcd6790f8f1f5e64c62cc3b8e975b3ff7fd85bc3afe0d0f52eae73d40db0"
+}

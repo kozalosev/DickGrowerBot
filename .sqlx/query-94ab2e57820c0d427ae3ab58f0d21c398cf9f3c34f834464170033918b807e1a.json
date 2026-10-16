@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Player_Settings (chat_id, uid, settings)\n                SELECT c.id, u.uid, jsonb_build_object('shrink_mentions_enabled', NOT COALESCE(\n                    (ps.settings->>'shrink_mentions_enabled')::bool, (u.settings->>'shrink_mentions_enabled')::bool, true))\n                FROM Chats c\n                CROSS JOIN Users u\n                LEFT JOIN Player_Settings ps ON ps.chat_id = c.id AND ps.uid = u.uid\n                WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text) AND u.uid = $2\n                ON CONFLICT (chat_id, uid) DO UPDATE SET settings = Player_Settings.settings || EXCLUDED.settings\n                RETURNING (settings->>'shrink_mentions_enabled')::bool AS \"enabled!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "enabled!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "94ab2e57820c0d427ae3ab58f0d21c398cf9f3c34f834464170033918b807e1a"
+}
