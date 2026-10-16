@@ -117,6 +117,18 @@ SUPPORT_CHAT_ID=-1001234567890  # where /support relays messages; unset => comma
 BAN_LIST_REFRESH=15m       # the backstop behind the notification, see below
 ```
 
+A reply to one of the bot's 🆘 messages in the support chat is copied to the user it names —
+`copy_message`, so the user sees the bot rather than whoever in the chat wrote it. Any participant
+may answer, and every reply is delivered, so a discussion among the staff belongs outside a reply
+to the ticket. A failed copy (the user blocked the bot, or never opened a private chat with it) is
+reported back in the support chat as a reply to the answer.
+
+The recipient is read from the **entity**, never from the text: the link right after `🆘 ` (UTF-16
+offset 3) is one only the bot can have written, because the name and the request are HTML-escaped.
+The `<code>` line with the id is for humans — a name or a request can contain newlines and a
+plausible copy of it. The branch sits at the top of the dispatcher tree, with the relay itself:
+it writes nothing for anybody, and a banned user is exactly the one who may need an answer.
+
 `Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
 only from outside the bot, with the SQL functions of migration 35 (`erase_user`, `ban_user`,
 `unban_user`) — there is no self-service delete command, and there must not be one: a deletion

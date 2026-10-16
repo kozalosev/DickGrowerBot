@@ -75,7 +75,7 @@ commands:
   support:
     description: "Write to the bot's owner"
     request: "Write your message and I'll pass it to my owner. Send any command to cancel."
-    sent: "Your message is sent. The answer will come from my owner in a private chat."
+    sent: "Your message is sent. I'll bring you the answer in a private chat."
     cancelled: "The request is cancelled."
     too_often: "You've just sent a message. Please wait a minute before the next one."
   grow:
