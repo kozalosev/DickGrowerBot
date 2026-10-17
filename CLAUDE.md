@@ -203,6 +203,25 @@ It is the **first** branch of the dispatcher tree, above the setup message and `
 has to be stopped before it costs a query, and it may sit there because it writes nothing for the
 sender, which is the property the ban gate's ordering depends on.
 
+### How many guesses a promo code takes
+
+Promo codes have no limiter of their own yet, on purpose: the channel posts hints and readers guess,
+and a limit has to leave room for that. So the attempts are measured first (issue #180).
+`/promo <code>`, its dialogue step and the `/start` deeplink each count as one; the confirm button
+doesn't, since it only follows an attempt already counted.
+
+`promo_activation_attempts_total{outcome}` counts them all. `promo_attempt_users_total{reached}`
+counts a user once each time their count within an hour lands on one of its thresholds, so it is a
+survival curve: `reached="1"` is everyone who tried, the **median** is the highest threshold reached
+by at least half of them, the **max** is the highest threshold reached at all, and the **average**
+is all attempts over `reached="1"`.
+
+It is a `metrics::ThresholdCounter`, a kind of metric for any "how far does one subject get"
+question; the window and the thresholds are declared with the static, like a help text. The count
+per subject is a fixed window in the store, like the rate limiter's, and only the threshold a hit
+lands on becomes a label — never the subject. A store that can't be asked only costs the curve a
+sample.
+
 ### What each signal means
 
 | Signal | Meaning | Handled in |

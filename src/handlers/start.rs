@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::types::{Message, ReplyMarkup};
 use crate::handlers::{HandlerDeps, HandlerImplResult, HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, reply_html};
+use crate::cache::Cache;
 use crate::domain::primitives::{PromoCode, Username};
 use crate::help::HelpContainer;
 
@@ -22,6 +23,7 @@ pub async fn start_cmd_handler(
     msg: Message,
     cmd: StartCommands,
     help: HelpContainer,
+    cache: Cache,
     deps: HandlerDeps,
 ) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
@@ -37,7 +39,7 @@ pub async fn start_cmd_handler(
                 let encoded_promo_code = promo_code.strip_prefix(PROMO_START_PARAM_PREFIX)
                     .expect("promo start param prefix must be present here");
                 let promo_code = decode_promo_code(encoded_promo_code)?;
-                promo_activation_impl(repos.promo, user, &promo_code, lang_code).await?
+                promo_activation_impl(repos.promo, &cache, user, &promo_code, lang_code).await?
             }
             StartCommands::Start(_) => {
                 metrics::CMD_START_COUNTER.inc();
