@@ -246,6 +246,8 @@ errors:
   feature_disabled: "This feature is currently temporarily disabled."
   banned: "You can't play until %{date}. Write via /support if you think it's a mistake."
   banned_inline_title: "You are blocked"
+  rate_limited: "Too many requests! Take a break and try again in a minute."
+  rate_limited_inline_title: "Too many requests"
 self_destruction:
   warning: "🧹 <i>To keep the chat clean, this message will be deleted in <b>%{seconds}</b> seconds…</i>"
   placeholder: "🧹 <i>This message was cleaned up to keep the chat tidy.</i>"

@@ -22,6 +22,8 @@ mod topics;
 mod cleanup;
 mod cache;
 mod dialogue;
+mod rate_limit;
+mod telegram_backoff;
 
 #[cfg(test)]
 mod test_containers;
@@ -71,6 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ban_list = bans::BanList::load(repos.users.clone()).await;
     let topic_policy = topics::TopicPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_topics);
     let cleanup_policy = cleanup::CleanupPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_cleanup);
+    let rate_limiter = rate_limit::RateLimiter::new(&cache, app_config.rate_limit);
+    let telegram_backoff = telegram_backoff::TelegramBackoff::new(app_config.self_destruction.pause_threshold, app_config.self_destruction.pause_for);
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
@@ -78,6 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let lang_resolver = ls.defer(upd);
             HandlerDeps { repos, config, self_destruction, lang_resolver }
         })
+        // First of all: a flood must be stopped before it costs anything, and this writes nothing.
+        .branch(dptree::filter_map_async(checks::rate_limit_exceeded).endpoint(checks::handle_rate_limited))
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
         .branch(Update::filter_message().filter_map(handlers::support_reply_recipient).endpoint(handlers::support_reply_handler))
         // /topics goes above the gate it configures, or a chat could lock itself out of its own
@@ -144,7 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .endpoint(handlers::support_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
-    let bot = config::BotConfig::build_bot()?;
+    let bot = config::BotConfig::build_bot(telegram_backoff.clone())?;
     bot.delete_webhook().await?;
 
     // The personal /language relies on the user-service; when it's unavailable, hide /language from
@@ -194,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     scheduler::spawn_broadcast_worker(throttled_bot.clone(), repos.clone(), language_service.clone(),
                                       topic_policy.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_broadcast_cleaner(repos.clone(), app_config.clone());
-    scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone());
+    scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone(), telegram_backoff);
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
     scheduler::spawn_queue_reporter(repos.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
@@ -217,6 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ban_list,
         topic_policy,
         cleanup_policy,
+        rate_limiter,
         cache,
         promo_dialogues,
         support_dialogues

@@ -247,6 +247,8 @@ errors:
   feature_disabled: "این قابلیت فعلاً غیرفعاله."
   banned: "تا %{date} نمی‌توانی بازی کنی. اگر فکر می‌کنی اشتباه است، با /support پیام بده."
   banned_inline_title: "شما مسدود شده‌اید"
+  rate_limited: "درخواست‌ها خیلی زیاد است! کمی صبر کن و یک دقیقه دیگر دوباره امتحان کن."
+  rate_limited_inline_title: "درخواست‌های بیش از حد"
 self_destruction:
   warning: "🧹 <i>برای تمیز ماندن چت، این پیام تا <b>%{seconds}</b> ثانیه دیگر حذف می‌شود…</i>"
   placeholder: "🧹 <i>این پیام برای تمیز ماندن چت پاک شد.</i>"

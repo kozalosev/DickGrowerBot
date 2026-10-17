@@ -233,6 +233,8 @@ errors:
   feature_disabled: "此功能當前暫時禁用。"
   banned: "你在 %{date} 之前無法遊玩。如果你認為這是誤判，請用 /support 聯絡我們。"
   banned_inline_title: "你已被封鎖"
+  rate_limited: "請求過多！請稍作休息，一分鐘後再試。"
+  rate_limited_inline_title: "請求過多"
 self_destruction:
   warning: "🧹 <i>為保持群聊整潔，此訊息將在 <b>%{seconds}</b> 秒後刪除……</i>"
   placeholder: "🧹 <i>為保持群聊整潔，此訊息已清理。</i>"

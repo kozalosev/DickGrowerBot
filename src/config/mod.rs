@@ -10,6 +10,7 @@ pub_use_modules!(
     announcements,
     self_destruction,
     throttle,
+    rate_limit,
     incrementor,
     env,
     help,
