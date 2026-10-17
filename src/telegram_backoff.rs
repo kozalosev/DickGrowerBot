@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
-use crate::domain::primitives::RateLimit;
+use crate::domain::primitives::{Count, RateLimit};
 use crate::metrics;
 
 const WINDOW: Duration = Duration::from_mins(1);
@@ -19,9 +19,11 @@ struct State {
     threshold: RateLimit,
     pause_for: Duration,
     window_started: Instant,
-    refusals: u32,
+    refusals: Count<Refusal>,
     paused_until: Option<Instant>,
 }
+
+enum Refusal {}
 
 impl TelegramBackoff {
     pub fn new(threshold: RateLimit, pause_for: Duration) -> Self {
@@ -29,7 +31,7 @@ impl TelegramBackoff {
             threshold,
             pause_for,
             window_started: Instant::now(),
-            refusals: 0,
+            refusals: Count::default(),
             paused_until: None,
         })))
     }
@@ -44,10 +46,10 @@ impl TelegramBackoff {
         let now = Instant::now();
         if now.duration_since(state.window_started) >= WINDOW {
             state.window_started = now;
-            state.refusals = 0;
+            state.refusals = Count::default();
         }
-        state.refusals = state.refusals.saturating_add(1);
-        if state.refusals < state.threshold.value() {
+        state.refusals += Count::new(1);
+        if state.refusals < state.threshold {
             return
         }
 
@@ -55,7 +57,7 @@ impl TelegramBackoff {
         state.paused_until = Some(now + state.pause_for);
         if !was_paused {
             metrics::SELF_DESTRUCTION_PAUSED.set(1);
-            tracing::warn!(refusals = state.refusals, pause_for = ?state.pause_for,
+            tracing::warn!(refusals = *state.refusals, pause_for = ?state.pause_for,
                 "Telegram keeps refusing the requests, pausing the self-destruction of messages");
         }
     }

@@ -12,13 +12,12 @@ use crate::config::RateLimitConfig;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::{RateLimit, UserId};
 
-/// What becomes of a request, from the mildest to the harshest.
+/// What becomes of a request over the limit, from the mildest to the harshest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Verdict {
-    Allowed,
-    /// Over the limit, but still worth telling why nothing else happens.
+pub enum Exceeded {
+    /// Still worth telling why nothing else happens.
     Warn,
-    /// Over the limit and already told, so dropped without a word.
+    /// Already told, so dropped without a word.
     Ignore,
 }
 
@@ -39,34 +38,30 @@ impl RateLimiter {
         self.config.window
     }
 
-    /// Counts one request against each counter that applies and answers with the harsher verdict.
-    pub async fn hit(&self, uid: Option<UserId>, chat: Option<ChatIdKind>) -> Verdict {
-        let user = match uid {
-            Some(uid) => self.count(UserKey(uid), self.config.user).await,
-            None => Verdict::Allowed,
-        };
-        let chat = match chat {
-            Some(chat) => self.count(ChatKey(chat), self.config.chat).await,
-            None => Verdict::Allowed,
-        };
+    /// Counts one request against each counter that applies and answers with the harsher verdict,
+    /// or `None` while both are within their limits.
+    pub async fn hit(&self, uid: Option<UserId>, chat: Option<ChatIdKind>) -> Option<Exceeded> {
+        let (user, chat) = futures::join!(
+            self.count(uid.map(UserKey), self.config.user),
+            self.count(chat.map(ChatKey), self.config.chat),
+        );
         user.max(chat)
     }
 
-    async fn count(&self, key: impl CacheKey, limit: RateLimit) -> Verdict {
+    async fn count(&self, key: Option<impl CacheKey>, limit: RateLimit) -> Option<Exceeded> {
+        let key = key?;
         if limit.is_zero() {
-            return Verdict::Allowed
+            return None
         }
-        let Some(count) = self.cache.increment(key, self.config.window).await else {
-            return Verdict::Allowed
-        };
+        let count = self.cache.increment(key, self.config.window).await?;
         let limit = u64::from(limit.value());
         let warnings = u64::from(self.config.warnings.value());
         if count <= limit {
-            Verdict::Allowed
+            None
         } else if count <= limit.saturating_add(warnings) {
-            Verdict::Warn
+            Some(Exceeded::Warn)
         } else {
-            Verdict::Ignore
+            Some(Exceeded::Ignore)
         }
     }
 }
@@ -89,23 +84,8 @@ mod test {
     use teloxide::types::ChatId;
     use crate::cache::Cache;
     use crate::config::{CacheConfig, CacheMode, RateLimitConfig};
-    use crate::domain::primitives::{RateLimit, UserId};
-    use super::{RateLimiter, Verdict};
-
-    fn uid(n: u64) -> UserId {
-        UserId::new(n)
-    }
-
-    async fn limiter(user: u32, chat: u32, warnings: u32) -> RateLimiter {
-        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
-        let config = RateLimitConfig {
-            user: RateLimit::new(user),
-            chat: RateLimit::new(chat),
-            window: Duration::from_mins(1),
-            warnings: RateLimit::new(warnings),
-        };
-        RateLimiter::new(&cache, config)
-    }
+    use crate::domain::primitives::{Limit, RateLimit, UserId};
+    use super::{Exceeded, RateLimiter};
 
     #[tokio::test]
     async fn a_user_is_warned_and_then_ignored() {
@@ -116,8 +96,8 @@ mod test {
             verdicts.push(limiter.hit(Some(uid(1)), None).await);
         }
 
-        use Verdict::*;
-        assert_eq!(verdicts, [Allowed, Allowed, Warn, Warn, Warn, Ignore, Ignore]);
+        use Exceeded::*;
+        assert_eq!(verdicts, [None, None, Some(Warn), Some(Warn), Some(Warn), Some(Ignore), Some(Ignore)]);
     }
 
     /// Two users sharing a chat each stay within their own limit and still exhaust the chat's.
@@ -131,8 +111,8 @@ mod test {
             verdicts.push(limiter.hit(Some(uid(n % 2)), chat()).await);
         }
 
-        use Verdict::*;
-        assert_eq!(verdicts, [Allowed, Allowed, Allowed, Warn, Ignore, Ignore]);
+        use Exceeded::*;
+        assert_eq!(verdicts, [None, None, None, Some(Warn), Some(Ignore), Some(Ignore)]);
     }
 
     #[tokio::test]
@@ -141,7 +121,22 @@ mod test {
 
         for _ in 0..10 {
             let verdict = limiter.hit(Some(uid(1)), Some(ChatId(-100).into())).await;
-            assert_eq!(verdict, Verdict::Allowed);
+            assert_eq!(verdict, None);
         }
+    }
+
+    fn uid(n: u64) -> UserId {
+        UserId::new(n)
+    }
+
+    async fn limiter(user: u32, chat: u32, warnings: u16) -> RateLimiter {
+        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
+        let config = RateLimitConfig {
+            user: RateLimit::new(user),
+            chat: RateLimit::new(chat),
+            window: Duration::from_mins(1),
+            warnings: Limit::new(warnings),
+        };
+        RateLimiter::new(&cache, config)
     }
 }

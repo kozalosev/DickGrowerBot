@@ -269,7 +269,7 @@ pub mod checks {
     use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
     use crate::handlers::utils::is_forum;
     use crate::metrics;
-    use crate::rate_limit::{RateLimiter, Verdict};
+    use crate::rate_limit::{Exceeded, RateLimiter};
     use crate::topics::TopicPolicy;
     use domain_types::traits::SaturatingInto;
     use super::{reply_html, topics, HandlerResult, BAN_DATE_FORMAT};
@@ -460,7 +460,7 @@ pub mod checks {
     /// The verdict on a request that went over a limit, or `None` for one that may go on. Only
     /// what the bot would answer is counted: our commands, the buttons and the inline queries.
     /// Chatter in a group the bot reads in full, and the second step of a dialogue, are left alone.
-    pub async fn rate_limit_exceeded(upd: Update, me: Me, limiter: RateLimiter) -> Option<Verdict> {
+    pub async fn rate_limit_exceeded(upd: Update, me: Me, limiter: RateLimiter) -> Option<Exceeded> {
         let (uid, chat): (_, Option<ChatIdKind>) = match &upd.kind {
             UpdateKind::Message(msg) if is_our_command(msg, &me) => (msg.from.as_ref(), Some(msg.chat.id.into())),
             UpdateKind::CallbackQuery(query) => {
@@ -471,8 +471,7 @@ pub mod checks {
             UpdateKind::InlineQuery(query) => (Some(&query.from), None),
             _ => return None,
         };
-        let verdict = limiter.hit(uid.map(UserId::from), chat).await;
-        (verdict != Verdict::Allowed).then_some(verdict)
+        limiter.hit(uid.map(UserId::from), chat).await
     }
 
     #[autometrics]
@@ -480,12 +479,12 @@ pub mod checks {
     pub async fn handle_rate_limited(
         bot: Bot,
         upd: Update,
-        verdict: Verdict,
+        verdict: Exceeded,
         limiter: RateLimiter,
         deps: HandlerDeps,
     ) -> HandlerResult {
         metrics::RATE_LIMITED_UPDATES.inc();
-        if verdict != Verdict::Warn {
+        if verdict == Exceeded::Ignore {
             return Ok(())
         }
 
@@ -583,38 +582,40 @@ pub mod checks {
             .branch(require_anchored_group())
     }
 
+    pub mod inline {
+        use autometrics::autometrics;
+        use teloxide::Bot;
+        use teloxide::payloads::AnswerInlineQuerySetters;
+        use teloxide::prelude::{InlineQuery, Requester};
+        use teloxide::types::ChatType;
+        use super::HandlerResult;
+
+        pub fn is_group_chat(query: InlineQuery) -> bool {
+            query.chat_type
+                .map(|t| [ChatType::Group, ChatType::Supergroup].contains(&t))
+                .unwrap_or(false)
+        }
+
+        pub fn is_not_group_chat(query: InlineQuery) -> bool {
+            !is_group_chat(query)
+        }
+
+        #[autometrics]
+        #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
+        pub async fn handle_not_group_chat_inline(bot: Bot, query: InlineQuery) -> HandlerResult {
+            bot.answer_inline_query(query.id, vec![])
+                .is_personal(true)
+                .cache_time(1)
+                .await?;
+            Ok(())
+        }
+    }
+
     #[cfg(test)]
     mod test {
         use teloxide::types::{CallbackQuery, Me, Message};
         use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
         use super::{callback_topic, is_gated_by_topic, is_our_command};
-
-        /// A message of the given text, in a supergroup that either is a forum or isn't. Built
-        /// from JSON because a `Message` has far more fields than a test wants to name.
-        fn message(text: &str, is_forum: bool, thread_id: Option<i32>) -> Message {
-            let thread = thread_id
-                .map(|id| format!(r#""message_thread_id":{id},"is_topic_message":true,"#))
-                .unwrap_or_default();
-            let json = format!(r#"{{
-                "chat": {{"id":-1001847508954,"is_forum":{is_forum},"title":"chat","type":"supergroup"}},
-                "date": 1675229140,
-                "from": {{"first_name":"tester","id":1253681278,"is_bot":false}},
-                {thread}"message_id": 5,
-                "text": "{text}"
-            }}"#);
-            serde_json::from_str(&json).expect("couldn't build the message")
-        }
-
-        /// The bot the commands are addressed to in the tests below.
-        fn me() -> Me {
-            let json = r#"{
-                "id": 42, "is_bot": true, "first_name": "Dick Grower", "username": "DickGrowerBot",
-                "can_join_groups": true, "can_read_all_group_messages": false,
-                "supports_inline_queries": true, "can_connect_to_business_account": false,
-                "has_main_web_app": false
-            }"#;
-            serde_json::from_str(json).expect("couldn't build the bot's own user")
-        }
 
         #[test]
         fn test_our_command_in_a_forum_is_gated() {
@@ -674,20 +675,6 @@ pub mod checks {
             assert!(!is_our_command(&message("help me", false, None), &me()));
         }
 
-        fn callback(data: &str, message: Option<Message>) -> CallbackQuery {
-            let message = message
-                .map(|msg| serde_json::to_string(&msg).expect("couldn't serialize the message"))
-                .unwrap_or_else(|| "null".to_owned());
-            let json = format!(r#"{{
-                "id": "1",
-                "from": {{"first_name":"tester","id":1253681278,"is_bot":false}},
-                "chat_instance": "1",
-                "data": "{data}",
-                "message": {message}
-            }}"#);
-            serde_json::from_str(&json).expect("couldn't build the callback query")
-        }
-
         #[test]
         fn test_a_button_in_a_forum_is_judged_by_its_topic() {
             let query = callback("pvp:1:2", Some(message("/pvp", true, Some(42))));
@@ -721,34 +708,46 @@ pub mod checks {
             let query = callback("pvp:1:2", None);
             assert_eq!(callback_topic(&query), None);
         }
-    }
 
-    pub mod inline {
-        use autometrics::autometrics;
-        use teloxide::Bot;
-        use teloxide::payloads::AnswerInlineQuerySetters;
-        use teloxide::prelude::{InlineQuery, Requester};
-        use teloxide::types::ChatType;
-        use super::HandlerResult;
-
-        pub fn is_group_chat(query: InlineQuery) -> bool {
-            query.chat_type
-                .map(|t| [ChatType::Group, ChatType::Supergroup].contains(&t))
-                .unwrap_or(false)
+        /// A message of the given text, in a supergroup that either is a forum or isn't. Built
+        /// from JSON because a `Message` has far more fields than a test wants to name.
+        fn message(text: &str, is_forum: bool, thread_id: Option<i32>) -> Message {
+            let thread = thread_id
+                .map(|id| format!(r#""message_thread_id":{id},"is_topic_message":true,"#))
+                .unwrap_or_default();
+            let json = format!(r#"{{
+                "chat": {{"id":-1001847508954,"is_forum":{is_forum},"title":"chat","type":"supergroup"}},
+                "date": 1675229140,
+                "from": {{"first_name":"tester","id":1253681278,"is_bot":false}},
+                {thread}"message_id": 5,
+                "text": "{text}"
+            }}"#);
+            serde_json::from_str(&json).expect("couldn't build the message")
         }
 
-        pub fn is_not_group_chat(query: InlineQuery) -> bool {
-            !is_group_chat(query)
+        /// The bot the commands are addressed to in the tests below.
+        fn me() -> Me {
+            let json = r#"{
+                "id": 42, "is_bot": true, "first_name": "Dick Grower", "username": "DickGrowerBot",
+                "can_join_groups": true, "can_read_all_group_messages": false,
+                "supports_inline_queries": true, "can_connect_to_business_account": false,
+                "has_main_web_app": false
+            }"#;
+            serde_json::from_str(json).expect("couldn't build the bot's own user")
         }
 
-        #[autometrics]
-        #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
-        pub async fn handle_not_group_chat_inline(bot: Bot, query: InlineQuery) -> HandlerResult {
-            bot.answer_inline_query(query.id, vec![])
-                .is_personal(true)
-                .cache_time(1)
-                .await?;
-            Ok(())
+        fn callback(data: &str, message: Option<Message>) -> CallbackQuery {
+            let message = message
+                .map(|msg| serde_json::to_string(&msg).expect("couldn't serialize the message"))
+                .unwrap_or_else(|| "null".to_owned());
+            let json = format!(r#"{{
+                "id": "1",
+                "from": {{"first_name":"tester","id":1253681278,"is_bot":false}},
+                "chat_instance": "1",
+                "data": "{data}",
+                "message": {message}
+            }}"#);
+            serde_json::from_str(&json).expect("couldn't build the callback query")
         }
     }
 }

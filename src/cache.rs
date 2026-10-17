@@ -228,7 +228,7 @@ impl Cache {
     /// Adds one to the counter under this key and answers with the new count. The lifetime is set
     /// by the hit that creates the counter and left alone by the rest, so it is a fixed window.
     ///
-    /// `None` means the store couldn't be asked, which a caller counts as the first hit.
+    /// `None` means the store couldn't be asked.
     pub async fn increment(&self, key: impl CacheKey, ttl: Duration) -> Option<u64> {
         let key = full_key(key);
         match self.backend.route() {

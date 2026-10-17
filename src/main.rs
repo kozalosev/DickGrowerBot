@@ -74,8 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let topic_policy = topics::TopicPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_topics);
     let cleanup_policy = cleanup::CleanupPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_cleanup);
     let rate_limiter = rate_limit::RateLimiter::new(&cache, app_config.rate_limit);
-    let telegram_backoff = telegram_backoff::TelegramBackoff::new(
-        app_config.self_destruction.pause_threshold, app_config.self_destruction.pause_for);
+    let telegram_backoff = telegram_backoff::TelegramBackoff::new(app_config.self_destruction.pause_threshold, app_config.self_destruction.pause_for);
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
