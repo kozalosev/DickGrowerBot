@@ -1,3 +1,5 @@
+use std::fmt::Display;
+use std::time::Duration;
 use axum::routing::get;
 use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
@@ -6,7 +8,9 @@ use strum::IntoEnumIterator;
 use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
+use crate::cache::{Cache, CacheKey};
 use crate::config::MessageGroup;
+use crate::domain::objects::OriginalBotKind;
 use crate::domain::primitives::SupportedLanguage;
 use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind};
 
@@ -26,6 +30,8 @@ pub static CMD_SUPPORT_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_support_usage_total", "count of /support invocations"));
 pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
     Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
+pub static RATE_LIMITED_UPDATES: Lazy<Counter> = Lazy::new(||
+    Counter::new("rate_limited_updates_total", "count of updates dropped because their sender or their chat went over RATE_LIMIT_USER_REQUESTS or RATE_LIMIT_CHAT_REQUESTS; only the first RATE_LIMIT_WARNINGS of them in a window are answered"));
 pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_grow_usage_total", "count of /grow invocations"));
 pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
@@ -42,10 +48,14 @@ pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
     Counter::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
-pub static CMD_IMPORT: Lazy<ComplexCommandCounters> = Lazy::new(||
-    ComplexCommandCounters::new("command_import_usage_total", "count of /import invocations and successes", ["invoked", "finished"]));
+pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(ImportCommandCounters::new);
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
+pub static PROMO_ATTEMPTS: Lazy<CounterVec> = Lazy::new(||
+    CounterVec::new("promo_activation_attempts_total", "count of promo code activation attempts typed or followed by a user, by what became of them: success, confirmation (asked to confirm a code that shrinks), invalid_format, or the reason the code was refused", &["outcome"]));
+pub static PROMO_ATTEMPT_USERS: Lazy<ThresholdCounter> = Lazy::new(||
+    ThresholdCounter::new("promo_attempt_users_total", "count of users who reached this many promo code attempts within an hour. reached=\"1\" is everyone who tried; the share of it at a higher threshold is the share who needed that many attempts or more",
+        Duration::from_hours(1), &[1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 50, 100]));
 pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
     UserServiceCounters::new("user_service_get_total", "count of user-service get() resolutions, split by whether they were served from cache or sent over gRPC"));
 pub static CMD_LANGUAGE: Lazy<LanguageCommandCounters> = Lazy::new(||
@@ -60,6 +70,8 @@ pub static CHAT_TOPICS: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_topics_get_total", "count of allowed-topics lookups, split by whether they were served from cache or read from the database"));
 pub static CMD_CLEANUP: Lazy<ComplexCommandCounters> = Lazy::new(||
     ComplexCommandCounters::new("command_cleanup_usage_total", "count of /cleanup invocations and changes of the setting", ["invoked", "finished"]));
+pub static CMD_MENTIONS: Lazy<ComplexCommandCounters> = Lazy::new(||
+    ComplexCommandCounters::new("command_mentions_usage_total", "count of /mentions invocations and changes of the setting, the button under a shrink summary included", ["invoked", "finished"]));
 pub static CHAT_CLEANUP: Lazy<CacheSourceCounters> = Lazy::new(||
     CacheSourceCounters::new("chat_cleanup_get_total", "count of per-chat cleanup-setting lookups, split by whether they were served from cache or read from the database"));
 pub static PANICS_TOTAL: Lazy<CounterVec> = Lazy::new(||
@@ -94,6 +106,8 @@ pub static SELF_DESTRUCTION_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
         &[0.0, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0]));
 pub static SELF_DESTRUCTION_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_batch_limit", "the value of MSG_SELFDESTRUCT_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
+pub static SELF_DESTRUCTION_PAUSED: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("self_destruction_paused", "1 while the deletion worker rests because Telegram refused MSG_SELFDESTRUCT_PAUSE_THRESHOLD requests in a minute with a rate limit, 0 otherwise. The messages are still scheduled and are taken away once it is back to 0"));
 pub static SELF_DESTRUCTION_LAST_TICK_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
     Gauge::new("self_destruction_last_tick_timestamp_seconds", "when the worker's loop last came back around to ticker.tick(), as a Unix timestamp. Set at the very top of every iteration, before a message is claimed or acted on, so a tick stuck inside one request (or inside claim_due) is visible within a poll interval or two. self_destruction_pending cannot stand in for it: that gauge is published by the queue reporter, a task of its own, so it keeps updating while this worker is dead. Alert when time() minus this passes a few times MSG_SELFDESTRUCT_POLL"));
 pub static ANNOUNCEMENT_SHOWN: Lazy<AnnouncementCounter> = Lazy::new(||
@@ -102,7 +116,9 @@ pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
 pub static DAILY_SHRINK_LAST_RUN_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
-    Gauge::new("daily_shrink_last_run_timestamp_seconds", "the UTC midnight the last logged shrink belongs to, as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes 26 hours"));
+    Gauge::new("daily_shrink_last_run_timestamp_seconds", "the UTC midnight the last logged shrink belongs to, as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes daily_shrink_period_seconds plus two hours"));
+pub static DAILY_SHRINK_PERIOD: Lazy<Gauge> = Lazy::new(||
+    Gauge::new("daily_shrink_period_seconds", "the value of DAILY_SHRINK_PERIOD_DAYS in seconds, so that the alert on daily_shrink_last_run_timestamp_seconds can allow for the days without a run"));
 pub static DAILY_SHRINK_BROADCAST_PENDING: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_broadcast_pending", "number of shrink summaries the chats are still owed; a number that only grows means the worker stopped draining the queue"));
 pub static DAILY_SHRINK_BROADCAST_LAST_TICK_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
@@ -185,6 +201,7 @@ fn force_registration() {
     Lazy::force(&CMD_PRIVACY_COUNTER);
     Lazy::force(&CMD_SUPPORT_COUNTER);
     Lazy::force(&BANNED_UPDATES_BLOCKED);
+    Lazy::force(&RATE_LIMITED_UPDATES);
     Lazy::force(&CMD_GROW_COUNTER);
     Lazy::force(&CMD_TOP_COUNTER);
     Lazy::force(&CMD_LOAN_COUNTER);
@@ -195,12 +212,15 @@ fn force_registration() {
     Lazy::force(&CMD_SHRINKS);
     Lazy::force(&CMD_IMPORT);
     Lazy::force(&CMD_PROMO);
+    Lazy::force(&PROMO_ATTEMPTS);
+    Lazy::force(&PROMO_ATTEMPT_USERS);
     Lazy::force(&USER_SERVICE);
     Lazy::force(&CMD_LANGUAGE);
     Lazy::force(&CHAT_LANGUAGE);
     Lazy::force(&CMD_TOPICS);
     Lazy::force(&CHAT_TOPICS);
     Lazy::force(&CMD_CLEANUP);
+    Lazy::force(&CMD_MENTIONS);
     Lazy::force(&CHAT_CLEANUP);
     Lazy::force(&CACHE_LOCAL_ENTRIES);
     Lazy::force(&CACHE_FALLBACK_ACTIVE);
@@ -208,6 +228,7 @@ fn force_registration() {
     Lazy::force(&BROADCAST_LANGUAGE);
     Lazy::force(&USER_SERVICE_LANGUAGES_BATCH_SIZE);
     Lazy::force(&TOPIC_RESTRICTED);
+    Lazy::force(&SELF_DESTRUCTION_PAUSED);
     Lazy::force(&USED_LANGUAGE);
     Lazy::force(&UPDATE_KIND);
     Lazy::force(&SELF_DESTRUCTION);
@@ -291,6 +312,7 @@ pub struct ComplexCommandCounters {
     invoked: Counter,
     finished: Counter,
 }
+pub struct ImportCommandCounters(CounterVec);
 pub struct BothModesCounters {
     pub chat: Counter,
     pub inline: Counter,
@@ -438,6 +460,47 @@ impl ComplexCommandCounters {
 
     pub fn finished(&self) {
         self.finished.inc()
+    }
+}
+
+impl ImportCommandCounters {
+
+    const STATES: [&'static str; 4] = ["invoked", "finished", "rejected", "failed"];
+
+    fn new() -> Self {
+        let vec = CounterVec::new(
+            "command_import_usage_total",
+            "count of /import invocations and their outcomes by source bot",
+            &["state", "bot"],
+        );
+        for state in Self::STATES {
+            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+                vec.counter(&[state, &import_source_label(bot)]);
+            }
+        }
+        Self(vec)
+    }
+
+    pub fn invoked(&self, bot: Option<OriginalBotKind>) {
+        self.count("invoked", bot)
+    }
+
+    pub fn finished(&self, bot: Option<OriginalBotKind>) {
+        self.count("finished", bot)
+    }
+
+    /// Answered with an explanation of what the user has to change.
+    pub fn rejected(&self, bot: Option<OriginalBotKind>) {
+        self.count("rejected", bot)
+    }
+
+    /// Ended with an error nobody was told about.
+    pub fn failed(&self, bot: Option<OriginalBotKind>) {
+        self.count("failed", bot)
+    }
+
+    fn count(&self, state: &str, bot: Option<OriginalBotKind>) {
+        self.0.counter(&[state, &import_source_label(bot)]).inc()
     }
 }
 
@@ -777,12 +840,56 @@ impl ChatMigrationCounter {
 /// Whether the scheduler is alive is answered by `daily_shrink_last_run_timestamp_seconds` rather than by
 /// any of these: a counter that moves once a day reads zero both when nothing happened and when
 /// nobody scraped it before the process restarted, and nothing afterwards tells the two apart.
+/// How far each subject gets within a fixed window, counted as the thresholds it reaches.
+///
+/// A count per subject can't be a label, so it is kept in the store, and only the threshold a hit
+/// lands on — one of a short, fixed list — is counted. The series form a survival curve: the first
+/// is everyone, and each later one is how many got that far.
+pub struct ThresholdCounter {
+    vec: CounterVec,
+    name: &'static str,
+    window: Duration,
+    thresholds: &'static [u64],
+}
+
 pub struct DailyShrinkCounters {
     runs: CounterVec,
     victims: CounterVec,
     broadcasts: CounterVec,
     retries: Counter,
 }
+
+impl ThresholdCounter {
+    fn new(name: &'static str, help: &str, window: Duration, thresholds: &'static [u64]) -> Self {
+        let vec = CounterVec::new(name, help, &["reached"]);
+        for threshold in thresholds {
+            vec.counter(&[&threshold.to_string()]);
+        }
+        Self { vec, name, window, thresholds }
+    }
+
+    /// Counts one hit for the subject. A store that can't be asked only costs the curve a sample.
+    pub async fn hit(&self, cache: &Cache, subject: impl Display) {
+        if let Some(reached) = self.reached(cache, subject).await {
+            self.vec.counter(&[&reached.to_string()]).inc()
+        }
+    }
+
+    async fn reached(&self, cache: &Cache, subject: impl Display) -> Option<u64> {
+        let key = ThresholdKey { name: self.name, subject: subject.to_string() };
+        let count = cache.or_local().increment(key, self.window).await?;
+        self.thresholds.contains(&count).then_some(count)
+    }
+}
+
+#[derive(derive_more::Display)]
+#[display("thresholds:{name}:{subject}")]
+struct ThresholdKey {
+    name: &'static str,
+    subject: String,
+}
+
+impl CacheKey for ThresholdKey {}
 
 impl DailyShrinkCounters {
     fn new() -> Self {
@@ -929,15 +1036,24 @@ pub(crate) fn render_metrics() -> String {
         .expect("the metrics buffer is not valid UTF-8")
 }
 
+fn import_source_label(bot: Option<OriginalBotKind>) -> String {
+    bot.map_or_else(|| "none".to_owned(), |kind| kind.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use once_cell::sync::Lazy;
     use strum::IntoEnumIterator;
     use crate::config::MessageGroup;
+    use crate::domain::objects::OriginalBotKind;
     use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-                BROADCAST_LANGUAGE, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
-                SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics};
+                BROADCAST_LANGUAGE, CMD_IMPORT, ImportCommandCounters, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
+                SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics,
+                PROMO_ATTEMPT_USERS, ThresholdCounter};
+    use std::time::Duration;
+    use crate::cache::Cache;
+    use crate::config::{CacheConfig, CacheMode};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.
@@ -949,6 +1065,20 @@ mod tests {
         for outcome in ChatMigrationOutcome::iter() {
             let series = format!("chat_migration_total{{outcome=\"{outcome}\"}}");
             assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
+    }
+
+    #[test]
+    fn import_counter_exports_every_state_for_every_source() {
+        Lazy::force(&CMD_IMPORT);
+        let rendered = render_metrics();
+        for state in ImportCommandCounters::STATES {
+            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+                let bot = import_source_label(bot);
+                let series = format!("command_import_usage_total{{bot=\"{bot}\",state=\"{state}\"}}");
+                assert!(rendered.contains(&series), "{series} is missing from:
+{rendered}");
+            }
         }
     }
 
@@ -1089,5 +1219,47 @@ mod tests {
         assert_eq!(language_label(Some("x")), "unknown");
         assert_eq!(language_label(Some("123")), "unknown");
         assert_eq!(language_label(None), "unknown");
+    }
+
+    /// Each subject is counted apart, and only the counts on the list are reported.
+    #[tokio::test]
+    async fn each_subject_reports_the_thresholds_it_reaches() {
+        let cache = local_cache().await;
+        let counter = ThresholdCounter::new("test_thresholds_per_subject_total", "test",
+            Duration::from_hours(1), &[1, 2, 3, 5]);
+
+        let mut reached = Vec::new();
+        for _ in 0..5 {
+            reached.push(counter.reached(&cache, 1).await);
+        }
+        reached.push(counter.reached(&cache, 2).await);
+
+        assert_eq!(reached, [Some(1), Some(2), Some(3), None, Some(5), Some(1)]);
+    }
+
+    #[tokio::test]
+    async fn two_counters_keep_apart_counts_for_the_same_subject() {
+        let cache = local_cache().await;
+        let first = ThresholdCounter::new("test_thresholds_first_total", "test", Duration::from_hours(1), &[1, 2]);
+        let second = ThresholdCounter::new("test_thresholds_second_total", "test", Duration::from_hours(1), &[1, 2]);
+
+        first.reached(&cache, 1).await;
+        let reached = second.reached(&cache, 1).await;
+
+        assert_eq!(reached, Some(1));
+    }
+
+    #[test]
+    fn every_threshold_is_exported_at_zero() {
+        Lazy::force(&PROMO_ATTEMPT_USERS);
+        let rendered = render_metrics();
+        for threshold in PROMO_ATTEMPT_USERS.thresholds {
+            let series = format!("promo_attempt_users_total{{reached=\"{threshold}\"}}");
+            assert!(rendered.contains(&series), "{series} is not exported");
+        }
+    }
+
+    async fn local_cache() -> Cache {
+        Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await
     }
 }

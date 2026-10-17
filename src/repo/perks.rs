@@ -4,7 +4,7 @@ use autometrics::autometrics;
 use chrono::NaiveDate;
 use domain_types::traits::SaturatingInto;
 use sqlx::types::JsonValue;
-use sqlx::{Postgres, Transaction};
+use sqlx::PgConnection;
 use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::domain::primitives::{PerkId, PerkName, UserId};
@@ -74,13 +74,37 @@ repository!(PerkStates,
         })
     },
 
-    /// Stores what the perks made of a change. It takes someone else's transaction because that is
-    /// the whole point: the states and the length they were computed for are written together, so
-    /// a growth refused by the once-a-day rule leaves no perk believing it happened.
+    /// What the perks of a dick know as the transaction sees it.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), internal_chat_id = %chat_id))]
+    pub async fn read_internal(
+        conn: &mut PgConnection,
+        uid: UserId,
+        chat_id: InternalChatId,
+    ) -> anyhow::Result<PerkStatesSnapshot> {
+        let row = sqlx::query!(
+                r#"SELECT current_date AS "today!", agg.states AS "states?" FROM (
+                     SELECT jsonb_object_agg(ps.perk_id::text, ps.state) AS states
+                       FROM Perk_States ps
+                       WHERE ps.uid = $1 AND ps.chat_id = $2
+                ) agg"#,
+                uid as UserId, chat_id as InternalChatId)
+            .fetch_one(conn)
+            .await
+            .context(format!("couldn't read the perk states of {uid} in the chat with id = {chat_id}"))?;
+        Ok(PerkStatesSnapshot {
+            today: row.today,
+            states: row.states.map(parse_states).unwrap_or_default(),
+        })
+    },
+
+    /// Stores what the perks remember, all of them in one statement. It takes someone else's
+    /// connection so that the states are written together with the length they were computed for,
+    /// or not at all.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id, uid = uid.value(), perks = states.len()))]
-    pub async fn write_all(
-        tx: &mut Transaction<'_, Postgres>,
+    pub async fn write_all_internal(
+        conn: &mut PgConnection,
         chat_id: InternalChatId,
         uid: UserId,
         states: &[PerkStateUpdate],
@@ -99,7 +123,7 @@ repository!(PerkStates,
                     SELECT $1, $2, perk_id, state FROM unnest($3::int2[], $4::jsonb[]) AS _(perk_id, state)
                     ON CONFLICT (chat_id, uid, perk_id) DO UPDATE SET state = EXCLUDED.state",
                 chat_id as InternalChatId, uid as UserId, &perk_ids, &values)
-            .execute(&mut **tx)
+            .execute(conn)
             .await
             .context(format!("couldn't write the perk states of {uid} in the chat with id = {chat_id}"))?;
         Ok(())

@@ -7,7 +7,8 @@ use crate::config::announcements::*;
 use crate::config::self_destruction::*;
 use crate::config::shrink::{BroadcastConfig, DailyShrinkConfig};
 use crate::config::incrementor::IncrementorConfig;
-use crate::domain::primitives::{AttemptsCount, Bet, DaysCount, Limit, PayoutRatio, Ratio};
+use crate::config::rate_limit::RateLimitConfig;
+use crate::domain::primitives::{AttemptsCount, Bet, DaysCount, Limit, PayoutRatio, RateLimit, Ratio};
 use crate::domain::primitives::chat::TelegramChatId;
 
 #[derive(Clone)]
@@ -26,6 +27,7 @@ pub struct AppConfig {
     pub command_toggles: CachedEnvToggles,
     pub support_chat_id: Option<TelegramChatId>,
     pub caches: CachesConfig,
+    pub rate_limit: RateLimitConfig,
 }
 
 #[derive(Clone)]
@@ -59,6 +61,7 @@ impl AppConfig {
             ratio: env_value!("DAILY_SHRINK_RATIO": Ratio),
             inactivity_days: env_value!("DAILY_SHRINK_INACTIVITY_DAYS": DaysCount, or = 7),
             ramp_up_days: env_value!("DAILY_SHRINK_RAMP_UP_DAYS": DaysCount, or = 7),
+            period_days: env_value!("DAILY_SHRINK_PERIOD_DAYS": DaysCount, or = 1, at_least = 1),
             batch_size: env_value!("DAILY_SHRINK_BATCH_SIZE": Limit, or = 100, at_least = 1),
             batch_delay: env_duration!("DAILY_SHRINK_BATCH_DELAY"),
             expiry_batch_size: env_value!("DAILY_SHRINK_EXPIRY_BATCH_SIZE": Limit, or = 5000, at_least = 1),
@@ -95,6 +98,8 @@ impl AppConfig {
             max_retry_delay: env_duration!("MSG_SELFDESTRUCT_MAX_RETRY_DELAY", or = hours(1), at_least = secs(1)),
             max_attempts: env_value!("MSG_SELFDESTRUCT_MAX_ATTEMPTS": AttemptsCount, or = 3, at_least = 1),
             retention: env_duration!("MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY", or = days(1)),
+            pause_threshold: env_value!("MSG_SELFDESTRUCT_PAUSE_THRESHOLD": RateLimit, or = 30),
+            pause_for: env_duration!("MSG_SELFDESTRUCT_PAUSE_FOR", or = mins(10), at_least = secs(1)),
         };
         let support_chat_id = get_optional_chat_id("SUPPORT_CHAT_ID");
         Self {
@@ -123,6 +128,7 @@ impl AppConfig {
             command_toggles: Default::default(),
             support_chat_id,
             caches: CachesConfig::from_env(),
+            rate_limit: RateLimitConfig::from_env(),
         }
     }
 }

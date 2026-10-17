@@ -62,14 +62,23 @@ commands:
       no_rights_strict: "Non posso eliminare messaggi qui, e una risposta la rimuovo solo insieme al comando che l'ha richiesta — quindi non sparirà niente finché non sarò amministratore con il diritto di eliminare i messaggi.\n\nImpostarlo comunque per <b>%{group}</b>?"
     errors:
       admins_only: "Solo gli amministratori possono scegliere quali messaggi si autodistruggono."
+  mentions:
+    description: "Tag nei promemoria sull'accorciamento"
+    enabled: "Ora ti <b>taggo</b> nei promemoria sull'accorciamento. Vale per tutte le chat; per cambiarlo in una sola chat, premi 🔕 sotto un promemoria."
+    disabled: "Ora <b>non ti taggo</b> nei promemoria sull'accorciamento. Vale per tutte le chat; per cambiarlo in una sola chat, premi 🔕 sotto un promemoria."
+    buttons:
+      enable: "🔔 Taggami"
+      disable: "🔕 Non taggarmi"
+    group_hint: "Per non essere più taggato in questa chat, premi 🔕 sotto un promemoria sull'accorciamento. Per cambiarlo in tutte le chat, mandami /mentions in privato."
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
   support:
     description: "Scrivi al proprietario del bot"
     request: "Scrivi il tuo messaggio e lo passerò al mio proprietario. Per annullare, invia un comando qualsiasi."
-    sent: "Messaggio inviato. La risposta arriverà dal proprietario in chat privata."
+    sent: "Messaggio inviato. Ti porterò la risposta in chat privata."
     cancelled: "Richiesta annullata."
     too_often: "Hai appena inviato un messaggio. Aspetta un minuto prima del prossimo."
+    reply_button: "↩️ Rispondi"
   grow:
     description: "Fai crescere il tuo pene!"
     result: "Il tuo pene è %{event} di <b>%{incr} cm</b> e ora è lungo <b>%{length} cm</b>."
@@ -88,11 +97,16 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per %{days}+ giorni e si sono un po' accorciati:"
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm)"
+      line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm)"
     recent:
       header: "✂️ <b>Chi si è accorciato di recente:</b>"
       line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm"
     empty: "Silenzio… Nessuno si è accorciato ultimamente. Sembra che tutti tengano il passo 💪"
+    mentions:
+      button: "🔔/🔕 menzioni"
+      stopped: "Non ti taggo più in questa chat. Premi di nuovo per annullare."
+      resumed: "Ti taggo di nuovo in questa chat."
+      not_playing: "Non giochi in questa chat, quindi qui non ti taggo comunque."
   dod:
     description: "Eleggi il Pene del Giorno"
     result: "Il Pene del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pene è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."
@@ -155,6 +169,8 @@ commands:
       not_admin: "Questo comando può essere utilizzato solo dagli admin!"
       bot_not_admin: "Per importare i dati da altri bot, ho bisogno anch'io dei diritti di amministratore in questa chat — altrimenti non potrò leggere i loro messaggi. Concedimi i diritti di amministratore e riprova."
       not_reply: "Devi rispondere a un messaggio inviato da uno di %{origin_bots}"
+      nothing_found: "Non ho trovato voci della classifica in questo messaggio."
+      ambiguous_names: "Importazione impossibile: i giocatori non si distinguono per nome. Quel bot mostra in classifica solo il nome, quindi i nomi devono essere unici.\n\nNomi ambigui: %{names}"
       legacy_group: "L'importazione non funziona in questa chat — è una limitazione di Telegram: nei gruppi base (non super) un bot non può leggere i messaggi di altri bot, nemmeno da amministratore. Converti il gruppo in un supergruppo (ad esempio impostando un link pubblico nelle impostazioni del gruppo) e ripeti l'importazione.\n\nImportante: dopo la conversione, non rispondere a messaggi vecchi inviati prima della conversione — Telegram non consegna al bot questo tipo di risposte. Chiedi che la classifica venga pubblicata di nuovo e rispondi al nuovo messaggio."
       too_many_members: "L'importazione è consentita solo nei gruppi con 10 o meno membri: le classifiche dei bot concorrenti mostrano solo i primi 10, quindi importare qui sarebbe ingiusto nei confronti degli altri."
       invalid_lines:
@@ -181,6 +197,12 @@ commands:
       no_dicks: "Non hai ancora alcun pene. 🤔 Devi aggiungermi ad un gruppo ed eseguire il comando <code>/grow</code>!"
     inline:
       switch_button: "Attiva il codice promozionale '%{code}'…"
+    confirmation:
+      text: "⚠️ Attenzione! Questo codice promozionale non fa crescere il tuo pene — lo <b>accorcia</b> di <b>%{length}</b> cm in ogni gruppo in cui giochi (<b>%{chats}</b>). Vuoi attivarlo lo stesso?"
+      buttons:
+        confirm: "Sì, accorcialo"
+        cancel: "No, grazie"
+      cancelled: "Va bene, il codice promozionale non è stato attivato 😌"
 inline:
   results:
     text: "Clicca il tasto qui sotto per avere il risultato!"
@@ -230,6 +252,8 @@ errors:
   feature_disabled: "Questa funzione non è al momento disponibile."
   banned: "Non puoi giocare fino al %{date}. Se pensi sia un errore, scrivi con /support."
   banned_inline_title: "Sei bloccato"
+  rate_limited: "Troppe richieste! Fai una pausa e riprova tra un minuto."
+  rate_limited_inline_title: "Troppe richieste"
 self_destruction:
   warning: "🧹 <i>Per mantenere pulita la chat, questo messaggio verrà eliminato tra <b>%{seconds}</b> secondi…</i>"
   placeholder: "🧹 <i>Questo messaggio è stato rimosso per mantenere pulita la chat.</i>"

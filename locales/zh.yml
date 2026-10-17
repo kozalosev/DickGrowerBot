@@ -62,14 +62,23 @@ commands:
       no_rights_strict: "我在本群没有删除消息的权限，而回复我只会连同触发它的命令一起删——所以在我成为可以删除消息的管理员之前，什么都不会消失。\n\n仍然为<b>%{group}</b>设置吗？"
     errors:
       admins_only: "只有群管理员才能选择哪些消息会自动消失。"
+  mentions:
+    description: "缩水提醒中的提及"
+    enabled: "目前我会在缩水提醒里<b>提到</b>你。此设置适用于所有群；如需单独更改某个群，请按提醒下方的 🔕。"
+    disabled: "目前我<b>不会</b>在缩水提醒里提到你。此设置适用于所有群；如需单独更改某个群，请按提醒下方的 🔕。"
+    buttons:
+      enable: "🔔 提到我"
+      disable: "🔕 别提到我"
+    group_hint: "要让我在本群不再提到你，请按缩水提醒下方的 🔕。要更改所有群的设置，请在私聊中给我发送 /mentions。"
   privacy:
     description: "存储数据说明详见隐私政策，"
   support:
     description: "联系机器人主人"
     request: "请写下你的留言，我会转交给我的主人。发送任意命令即可取消。"
-    sent: "留言已发送。主人会在私聊中回复你。"
+    sent: "留言已发送。我会在私聊中把回复转给你。"
     cancelled: "请求已取消。"
     too_often: "你刚刚已经发过留言了，请等一分钟再发。"
+    reply_button: "↩️ 回复"
   grow:
     description: "让你的丁丁变大！"
     result: "你的丁丁已经<b>%{incr} 厘米</b> %{event}，现在长度为<b>%{length} 厘米</b>。"
@@ -88,11 +97,16 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>该修剪被忽视的了！</b> 这些屌 %{days}+ 天没长还缩水了一点："
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> 缩了 <b>%{lost}</b> 厘米（现在 <b>%{length}</b> 厘米）"
+      line: "— <b>%{name}</b> 缩了 <b>%{lost}</b> 厘米（现在 <b>%{length}</b> 厘米）"
     recent:
       header: "✂️ <b>最近都是谁缩水了：</b>"
       line: "— <b>%{name}</b> 缩了 <b>%{lost}</b> 厘米"
     empty: "安静……最近没人缩水。看来大家都跟上节奏了 💪"
+    mentions:
+      button: "🔔/🔕 提及"
+      stopped: "以后不会在本群提到你了。再按一次即可撤销。"
+      resumed: "以后在本群会重新提到你。"
+      not_playing: "你没有在本群玩，本来就不会提到你。"
   dod:
     description: "选举今日丁丁"
     result: "今日丁丁是<b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>！\n\n他的丁丁增长了<b>%{growth} 厘米</b>，现在长度为<b>%{length}</b> 厘米。"
@@ -155,6 +169,8 @@ commands:
       not_admin: "此命令仅供管理员使用！"
       bot_not_admin: "要导入其他机器人的数据，我也需要在这个聊天中拥有管理员权限——否则我将无法读取它们的消息。请给我管理员权限后重试。"
       not_reply: "你必须回复由 %{origin_bots} 发送的非转发消息"
+      nothing_found: "这条消息中没有找到排行榜条目。"
+      ambiguous_names: "无法导入：无法仅凭名字区分这些玩家。那个机器人在排行榜中只显示名字，因此名字必须是唯一的。\n\n有歧义的名字：%{names}"
       legacy_group: "此聊天无法导入——这是 Telegram 的限制：在普通群组（非超级群组）中，机器人即使是管理员也无法读取其他机器人发送的消息。请将群组转换为超级群组（例如在群组设置中设置公开链接），然后重新导入。\n\n重要提示：转换之后，请不要回复转换之前发送的旧消息——Telegram 根本不会把这类回复发送给机器人。请让排行榜重新发一次，然后回复新消息。"
       too_many_members: "仅允许在成员不超过 10 人的聊天中导入：竞品机器人的排行榜只显示前 10 名，在此导入对其他人不公平。"
       invalid_lines:
@@ -181,6 +197,12 @@ commands:
       no_dicks: "看起来你还没有任何丁丁。🤔 现在是时候把我加入一个聊天并执行 <code>/grow</code> 命令了！"
     inline:
       switch_button: "激活神秘代码 '%{code}'…"
+    confirmation:
+      text: "⚠️ 小心！这个神秘代码不会让你的丁丁变长——它会在你参与的每个聊天中（<b>%{chats}</b> 个）让它<b>缩短</b> <b>%{length}</b> 厘米。仍然要激活吗？"
+      buttons:
+        confirm: "是的，缩短吧"
+        cancel: "不了，谢谢"
+      cancelled: "好的，神秘代码没有激活 😌"
 inline:
   results:
     text: "由于我无法通过内联查询确定聊天，你应该点击下面的按钮以获取结果。"
@@ -230,6 +252,8 @@ errors:
   feature_disabled: "此功能当前暂时禁用。"
   banned: "你在 %{date} 之前无法游玩。如果你认为这是误判，请用 /support 联系我们。"
   banned_inline_title: "你已被封禁"
+  rate_limited: "请求过多！请稍作休息，一分钟后再试。"
+  rate_limited_inline_title: "请求过多"
 self_destruction:
   warning: "🧹 <i>为保持群聊整洁，此消息将在 <b>%{seconds}</b> 秒后删除……</i>"
   placeholder: "🧹 <i>为保持群聊整洁，此消息已清理。</i>"

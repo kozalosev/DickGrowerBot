@@ -12,6 +12,13 @@ pub struct ActivationResult {
     pub bonus_length: LengthChange,
 }
 
+/// What an activation would do, read without spending anything.
+#[derive(FromRow)]
+pub struct ActivationPreview {
+    pub bonus_length: PromoBonus,
+    pub chats: AffectedRows,
+}
+
 #[derive(Debug, strum_macros::Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum ActivationError {
@@ -98,6 +105,25 @@ repository!(Promo,
 
         tx.commit().await?;
         Ok(ActivationResult{ chats_affected, bonus_length: bonus })
+    }
+,
+    /// `None` for a code that `activate` would refuse: unknown, outside its window, exhausted or
+    /// already activated by the user. Takes no lock and spends no capacity.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), code = %code))]
+    pub async fn preview(&self, user_id: UserId, code: &PromoCode) -> anyhow::Result<Option<ActivationPreview>> {
+        sqlx::query_as!(ActivationPreview,
+            r#"SELECT pc.bonus_length as "bonus_length: PromoBonus",
+                      (SELECT count(*) FROM Dicks WHERE uid = $1) as "chats!: AffectedRows"
+            FROM Promo_Codes pc
+            WHERE lower(pc.code) = lower($2)
+              AND current_date BETWEEN pc.since AND coalesce(pc.until, current_date)
+              AND pc.capacity > 0
+              AND NOT EXISTS (SELECT 1 FROM Promo_Code_Activations a WHERE a.uid = $1 AND a.code = pc.code)"#,
+                user_id as UserId, code as &PromoCode)
+            .fetch_optional(&self.pool)
+            .await
+            .context(format!("couldn't preview the activation of {code} for {user_id}"))
     }
 ,
     /// `None` means no code by this name has ever existed. A code that has, but falls outside its
