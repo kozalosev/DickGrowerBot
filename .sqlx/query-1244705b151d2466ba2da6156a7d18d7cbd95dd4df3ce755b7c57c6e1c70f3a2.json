@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM Player_Settings WHERE chat_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1244705b151d2466ba2da6156a7d18d7cbd95dd4df3ce755b7c57c6e1c70f3a2"
+}

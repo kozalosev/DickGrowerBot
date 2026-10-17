@@ -12,6 +12,7 @@ use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerDeps, HandlerResult};
 use crate::handlers::utils::{callbacks, days_word_ru};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
+use crate::handlers::mentions::MentionsCallbackData;
 use crate::repo::{AdjacentDates, RecentShrink, Repositories};
 
 pub(crate) struct ShrinksPage {
@@ -94,7 +95,12 @@ pub(crate) fn render_shrinks_page(
         .take(usize::from(config.top_limit))
         .map(|s| {
             let name = s.owner_name.escaped();
-            t!(&line_key, locale = lang_code, uid = s.uid, name = name, lost = s.lost_length, length = s.length)
+            let name = if view == ShrinkView::Broadcast && s.shrink_mentions_enabled {
+                format!(r#"<a href="tg://user?id={}">{name}</a>"#, s.uid)
+            } else {
+                name
+            };
+            t!(&line_key, locale = lang_code, name = name, lost = s.lost_length, length = s.length)
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -156,12 +162,15 @@ fn render_page(
 }
 
 /// `None` when no button would do anything, so callers never attach an empty or dead row.
+///
+/// A broadcast always gets the mention toggle.
 pub(crate) fn build_shrink_keyboard(
     view: ShrinkView,
     date: NaiveDate,
     page: Page,
     has_more_pages: bool,
     adjacent: Option<AdjacentDates>,
+    lang_code: &LanguageCode,
 ) -> Option<InlineKeyboardMarkup> {
     let callback = |date: NaiveDate, page: Page| ShrinkCallbackData { view, date, page }.to_data_string();
 
@@ -184,7 +193,14 @@ pub(crate) fn build_shrink_keyboard(
         row
     }).unwrap_or_default();
 
-    let rows: Vec<_> = [user_row, day_row].into_iter().filter(|row| !row.is_empty()).collect();
+    let mentions_row = match view {
+        ShrinkView::Broadcast => vec![InlineKeyboardButton::callback(
+            t!("commands.shrink.mentions.button", locale = lang_code),
+            MentionsCallbackData::ToggleHere.to_data_string())],
+        ShrinkView::Recent => Vec::new(),
+    };
+
+    let rows: Vec<_> = [user_row, day_row, mentions_row].into_iter().filter(|row| !row.is_empty()).collect();
     (!rows.is_empty()).then(|| InlineKeyboardMarkup::new(rows))
 }
 
@@ -203,7 +219,8 @@ pub(crate) async fn recent_shrinks_impl(
 
     let page = shrinks_page_impl(repos, config, &chat_id, lang_code, ShrinkView::Recent, date, Page::first()).await?;
     let adjacent = repos.shrinks.get_adjacent_shrink_dates(&chat_id, date).await?;
-    let keyboard = build_shrink_keyboard(ShrinkView::Recent, date, Page::first(), page.has_more_pages, Some(adjacent));
+    let keyboard = build_shrink_keyboard(ShrinkView::Recent, date, Page::first(), page.has_more_pages,
+                                         Some(adjacent), lang_code);
     Ok((page, keyboard))
 }
 
@@ -233,9 +250,47 @@ pub async fn shrink_callback_handler(
         ShrinkView::Recent => Some(repos.shrinks.get_adjacent_shrink_dates(&chat_id, data.date).await?),
         ShrinkView::Broadcast => None,
     };
-    let keyboard = build_shrink_keyboard(data.view, data.date, data.page, page.has_more_pages, adjacent)
+    let keyboard = build_shrink_keyboard(data.view, data.date, data.page, page.has_more_pages, adjacent, &lang_code)
         .unwrap_or_default(); // an explicit empty markup clears any now-dead buttons already on the message
 
     callbacks::answer_and_edit_page(&bot, &q, &edit_msg_req_params, page.lines, keyboard).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crate::config::AppConfig;
+    use crate::domain::primitives::{Length, LanguageCode, Limit, UserId, Username};
+    use crate::repo::RecentShrink;
+    use super::{render_shrinks_page, ShrinkView};
+
+    #[test]
+    fn only_the_players_who_agreed_are_mentioned() {
+        let text = render(ShrinkView::Broadcast);
+        assert!(text.contains(r#"<b><a href="tg://user?id=1">"#));
+        assert!(!text.contains("tg://user?id=2"));
+        assert!(text.contains("Bob"));
+    }
+
+    #[test]
+    fn the_recent_view_mentions_nobody() {
+        let text = render(ShrinkView::Recent);
+        assert!(!text.contains("tg://user"));
+    }
+
+    fn render(view: ShrinkView) -> String {
+        let config = AppConfig { top_limit: Limit::new(10), ..Default::default() };
+        let rows = [shrink(1, "Alice", true), shrink(2, "Bob", false)];
+        render_shrinks_page(&rows, &config, &LanguageCode::new("en".to_owned()), view, false).lines
+    }
+
+    fn shrink(uid: u64, name: &str, shrink_mentions_enabled: bool) -> RecentShrink {
+        RecentShrink {
+            uid: UserId::new(uid),
+            owner_name: Username::new(name.to_owned()),
+            lost_length: Length::new(3),
+            length: Length::new(30),
+            shrink_mentions_enabled,
+        }
+    }
 }

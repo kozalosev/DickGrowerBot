@@ -42,7 +42,7 @@ use dialogue::CachedDialogueStorage;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
-use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
+use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, MentionsCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::BattleLocks;
@@ -86,6 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // First of all: a flood must be stopped before it costs anything, and this writes nothing.
         .branch(dptree::filter_map_async(checks::rate_limit_exceeded).endpoint(checks::handle_rate_limited))
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
+        .branch(Update::filter_message().filter_map(handlers::support_reply_recipient).endpoint(handlers::support_reply_handler))
         // /topics goes above the gate it configures, or a chat could lock itself out of its own
         // setting. Being a branch of its own, it needs no exemption inside the gate: this one
         // matches first, and only what falls through reaches the gate below.
@@ -97,14 +98,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
         .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
+        .branch(Update::filter_message().filter_map(handlers::support_answered_ticket).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
+            .endpoint(handlers::support_follow_up_handler))
         .branch(Update::filter_message().enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
-            .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler)))
+            .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler))
+            .branch(dptree::case![SupportCommandState::Replying(ticket)].endpoint(handlers::support_follow_up_handler)))
         // Everything above the ban gate must not write a single row for the sender: a banned user
         // may still read the policy and reach the owner, but must not come back into the database.
         // /start writes too — it activates a promo code from a deeplink — so it goes below.
         .branch(dptree::filter(checks::is_banned).endpoint(checks::handle_banned))
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::language_cmd_handler))
+        .branch(Update::filter_message().filter_command::<MentionsCommands>().endpoint(handlers::mentions::mentions_cmd_handler))
         .branch(checks::group_command::<DickCommands>().endpoint(handlers::dick_cmd_handler))
         .branch(checks::group_command::<DickOfDayCommands>().endpoint(handlers::dod_cmd_handler))
         .branch(checks::group_command::<BattleCommands>().endpoint(handlers::pvp::pvp_cmd_handler))
@@ -141,6 +146,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::language_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::topics::callback_filter).endpoint(handlers::topics::topics_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::cleanup::callback_filter).endpoint(handlers::cleanup::cleanup_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::mentions::callback_filter).endpoint(handlers::mentions::mentions_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::support_callback_filter).enter_dialogue::<CallbackQuery, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
+            .endpoint(handlers::support_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
     let bot = config::BotConfig::build_bot(telegram_backoff.clone())?;
@@ -153,6 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         personal_language_enabled: language_service.user_service_enabled(),
         support_enabled: app_config.support_chat_id.is_some(),
         cleanup_enabled: app_config.self_destruction.configurable(),
+        mentions_enabled: app_config.daily_shrink.enabled(),
     };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
@@ -165,9 +174,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
     let me = bot.get_me().await?;
-    let perks = handlers::perks::all(&db_conn, &app_config);
+    let perks = handlers::perks::all(&app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
-                                                        &repos.dicks, &repos.perk_states, perks).await?;
+                                                        &repos.perk_states, perks).await?;
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES,
                                                                &command_toggles)?;
     let help_container = help::render_help_messages(help_context)?;

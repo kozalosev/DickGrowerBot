@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Loans SET debt = debt - $3\n                        WHERE uid = $1 AND chat_id = $2 AND repaid_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bea792ba9541010d1e0ce1af35db75bdbaa0209bc080b74cc332539f785f1a7d"
+}

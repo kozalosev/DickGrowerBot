@@ -16,9 +16,10 @@ commands:
   support:
     description: "聯絡機器人主人"
     request: "請寫下你的留言，我會轉交給我的主人。發送任意指令即可取消。"
-    sent: "留言已發送。主人會在私聊中回覆你。"
+    sent: "留言已發送。我會在私聊中把回覆轉給你。"
     cancelled: "請求已取消。"
     too_often: "你剛剛已經發過留言了，請等一分鐘再發。"
+    reply_button: "↩️ 回覆"
   grow:
     result: "你的老二已經<b>%{incr} 公分</b> %{event}，現在長度為<b>%{length} 公分</b>。"
     direction:
@@ -35,11 +36,16 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>該修剪被忽視的了！</b> 這些屌 %{days}+ 天沒長還縮水了一點："
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> 縮了 <b>%{lost}</b> 公分（現在 <b>%{length}</b> 公分）"
+      line: "— <b>%{name}</b> 縮了 <b>%{lost}</b> 公分（現在 <b>%{length}</b> 公分）"
     recent:
       header: "✂️ <b>最近都是誰縮水了：</b>"
       line: "— <b>%{name}</b> 縮了 <b>%{lost}</b> 公分"
     empty: "安靜……最近沒人縮水。看來大家都跟上節奏了 💪"
+    mentions:
+      button: "🔔/🔕 提及"
+      stopped: "以後不會在本群提到你了。再按一次即可撤銷。"
+      resumed: "以後在本群會重新提到你。"
+      not_playing: "你沒有在本群玩，本來就不會提到你。"
   dod:
     result: "今日老二是<b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>！\n\n他的老二增長了<b>%{growth} 公分</b>，現在長度為<b>%{length}</b> 公分。"
     position: "他在排行榜上的位置是<b>%{pos}</b>。"
@@ -97,6 +103,8 @@ commands:
       not_admin: "此命令僅供管理員使用！"
       bot_not_admin: "要匯入其他機器人的資料，我也需要在這個聊天中擁有管理員權限——否則我將無法讀取它們的訊息。請給我管理員權限後重試。"
       not_reply: "你必須回覆由 %{origin_bots} 發送的非轉發訊息"
+      nothing_found: "在這則訊息中找不到排行榜項目。"
+      ambiguous_names: "無法匯入：無法僅憑名字區分這些玩家。那個機器人在排行榜中只顯示名字，因此名字必須是唯一的。\n\n有歧義的名字：%{names}"
       legacy_group: "此聊天無法匯入——這是 Telegram 的限制：在普通群組（非超級群組）中，機器人即使是管理員也無法讀取其他機器人發送的訊息。請將群組轉換為超級群組（例如在群組設定中設定公開連結），然後重新匯入。\n\n重要提示：轉換之後，請不要回覆轉換之前發送的舊訊息——Telegram 根本不會把這類回覆傳給機器人。請讓排行榜重新發一次，然後回覆新訊息。"
       too_many_members: "僅允許在成員不超過 10 人的聊天中導入：競品機器人的排行榜只顯示前 10 名，在此導入對其他人不公平。"
       invalid_lines:
@@ -169,6 +177,13 @@ commands:
       no_rights_strict: "我在本群沒有刪除訊息的權限，而回覆我只會連同觸發它的指令一起刪——所以在我成為可以刪除訊息的管理員之前，什麼都不會消失。\n\n仍然為<b>%{group}</b>設定嗎？"
     errors:
       admins_only: "只有群組管理員才能選擇哪些訊息會自動消失。"
+  mentions:
+    enabled: "目前我會在縮水提醒裡<b>提到</b>你。此設定適用於所有群組；如需單獨更改某個群組，請按提醒下方的 🔕。"
+    disabled: "目前我<b>不會</b>在縮水提醒裡提到你。此設定適用於所有群組；如需單獨更改某個群組，請按提醒下方的 🔕。"
+    buttons:
+      enable: "🔔 提到我"
+      disable: "🔕 別提到我"
+    group_hint: "要讓我在本群不再提到你，請按縮水提醒下方的 🔕。要更改所有群組的設定，請在私聊中傳送 /mentions 給我。"
 inline:
   results:
     text: "由於我無法透過內聯查詢確定聊天，你應該點擊下面的按鈕以取得結果。"

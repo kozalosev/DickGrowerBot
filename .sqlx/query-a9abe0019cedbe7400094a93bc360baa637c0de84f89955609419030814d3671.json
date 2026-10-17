@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT length FROM Dicks WHERE chat_id = $1 AND uid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "dicks",
+            "name": "length"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a9abe0019cedbe7400094a93bc360baa637c0de84f89955609419030814d3671"
+}

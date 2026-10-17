@@ -101,7 +101,8 @@ HELP_AUCTION_BOT=DickAuctionBot  # the bot auctioning promo codes; unset or empt
 The help is rendered once, at startup, from `help::Context`. A paragraph about something that may
 be absent sits inside `{{ if … }}`. `/support` and `/cleanup` follow `commands::CommandToggles`, the
 same switches that hide those commands from the menu; the auctions paragraph follows
-`HELP_AUCTION_BOT`; and the streak paragraph follows the perk, whose grades render as an empty
+`HELP_AUCTION_BOT`; the shrink paragraph follows `DailyShrinkConfig::enabled`, the same switch that
+hides `/mentions`; and the streak paragraph follows the perk, whose grades render as an empty
 string — which `{{ if }}` takes as false — when `STREAK_BONUS_GRADES` is empty or `DISABLE_STREAK`
 is set.
 
@@ -115,6 +116,33 @@ into a `serde_json::Value` before any formatter sees it. So a `Username` that mu
 SUPPORT_CHAT_ID=-1001234567890  # where /support relays messages; unset => command hidden and disabled
 BAN_LIST_REFRESH=15m       # the backstop behind the notification, see below
 ```
+
+A reply to one of the bot's 🆘 messages in the support chat is copied to the user it names —
+`copy_message`, so the user sees the bot rather than whoever in the chat wrote it. Any participant
+may answer, and every reply is delivered, so a discussion among the staff belongs outside a reply
+to the ticket. A failed copy (the user blocked the bot, or never opened a private chat with it) is
+reported back in the support chat as a reply to the answer.
+
+The recipient is read from the **entity**, never from the text: the link right after `🆘 ` (UTF-16
+offset 3) is one only the bot can have written, because the name and the request are HTML-escaped.
+The `<code>` line with the id is for humans — a name or a request can contain newlines and a
+plausible copy of it. The branch sits at the top of the dispatcher tree, with the relay itself:
+it writes nothing for anybody, and a banned user is exactly the one who may need an answer. The
+language of the `↩️` button below is read the same way, from the text right after that `<code>`,
+falling back to English.
+
+**The user may answer back, and the thread lives in Telegram, not here.** The copy carries a button
+whose callback data is the id of the 🆘 message it answers (`support:<message id>`). Pressing it puts
+the user's dialogue into `SupportCommandState::Replying(ticket)`; replying to the copy natively works
+too, because a replied-to message comes with its keyboard, and the ticket is read off the button
+(`support_answered_ticket`). Either way the user's text is relayed as an ordinary 🆘 message, sent as
+a reply to the ticket — with `allow_sending_without_reply`, so a deleted ticket only loses the
+threading — and a reply to *that* reaches the user like the first one did. So there is no table of
+conversations: the one piece of state is a dialogue that already existed, and `erase_user` has
+nothing new to clear. A ticket never expires; the rate limit is what bounds a talkative user. The
+native reply sits above the ban gate with the rest of `/support`; the button sits with the other
+callbacks below it, so a banned user who presses it gets the ban notice and still has the native
+reply and `/support` itself.
 
 `Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
 only from outside the bot, with the SQL functions of migration 35 (`erase_user`, `ban_user`,
@@ -711,6 +739,7 @@ growing. Everything below follows from that.
 DAILY_SHRINK_RATIO=0.01                # unset or 0 => the whole feature is off, queue included
 DAILY_SHRINK_INACTIVITY_DAYS=7
 DAILY_SHRINK_RAMP_UP_DAYS=7
+DAILY_SHRINK_PERIOD_DAYS=1             # days between two runs; 7 => weekly, always on the same weekday
 DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
 DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
 DAILY_SHRINK_BATCH_DELAY=0s            # rest between two batches; 0 => back to back
@@ -726,11 +755,38 @@ DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
 DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY=3d       # 0 => finished rows are kept for ever
 ```
 
+**`DAILY_SHRINK_PERIOD_DAYS` makes the game milder, not the cuts deeper.** The scheduler still wakes
+at every midnight and runs only when `DailyShrinkConfig::is_due` says so — the day's number counted
+from a fixed date, modulo the period, so nothing has to be remembered and a restart can't shift the
+schedule. A run takes off what a daily one would; the ramp-up and the grace period are counted in
+days of staleness, not in runs, so neither changes meaning. `DAILY_SHRINK_RUN_ON_STARTUP` ignores the
+period. The summaries of a run stay deliverable until the next one, since `expire_superseded` only
+runs when a run does.
+
+**A player may refuse to be mentioned, and stays on the list.** The summary links each name to the
+user, which is what pings them; a player who refused is printed as plain text instead. The choice is
+made at two levels, and the nearer one wins: `Player_Settings` (migration 51, a jsonb row per
+`(chat, uid)`, flipped by the 🔕 button under every summary) over `Users.settings` (the same key, set
+with `/mentions` in a private chat — a private chat has no `Chats` row to hold it), over the default
+of mentioning. The key is `shrink_mentions_enabled` in both.
+
+It costs the broadcast nothing worth counting: a summary renders one page, and the choice arrives
+in the same query — a column of the `Users` row already joined, and a `LEFT JOIN` on the primary
+key of `Player_Settings` for the few rows of the page. Nothing walks a chat's members. What the
+choice does *not* do is decide whether a summary is sent at all: that question would need every
+victim of the chat, at the moment the shrink queues it.
+
+The button is a toggle relative to what applies now, written in one statement
+(`PlayerSettings::toggle_shrink_mentions_enabled`) — the keyboard is shared by the whole chat, so it can't
+show anybody's own state, and the answer says what the press did. `Player_Settings` is carried
+through a chat merge like `Perk_States` (the surviving chat wins key by key) and cleared by
+`erase_user`, which also empties `Users.settings`.
+
 **Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
 `MAX(created_at)` in `Stale_Dick_Shrinks`, not any of the `daily_shrink_*` counters. A counter that
 moves once a day reads zero both when nothing happened and when nobody scraped it before the process
 restarted, and nothing afterwards tells the two apart — which is how a fortnight of silence went
-unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > 26h`, and on
+unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > daily_shrink_period_seconds + 2h`, and on
 `daily_shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs
 repo's `vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
 
@@ -1262,7 +1318,7 @@ SQL. When adding a feature, follow this pairing rather than mixing DB access int
 
 ### What counts as a growth
 
-> `Dicks::create_or_grow` is the growth, and the only one. It is subject to the once-a-day rule and
+> `GrowthTx::commit_growth` is the growth, and the only one. It is subject to the once-a-day rule and
 > it spends a bonus attempt. Every other write to `Dicks` is not a growth: it leaves `updated_at`
 > alone and `bonus_attempts` is not its to move.
 
@@ -1270,12 +1326,12 @@ SQL. When adding a feature, follow this pairing rather than mixing DB access int
 `ON CONFLICT DO UPDATE`: the row is rewritten only when the stored `updated_at` is of an earlier day
 or a bought attempt can pay for it, and the same statement spends the attempt — **only when one was
 needed**, so the day's first growth is free whatever the player has in store. A refusal is
-therefore not an error but an empty answer — `create_or_grow` returns `Option`, like `set_dod_winner`
+therefore not an error but an empty answer — `commit_growth` returns `Option`, like `commit_dod`
 beside it, and `handlers::dick` turns `None` into the "come back tomorrow" notice.
 
 That is a change of kind, not only of place. `trg_check_and_update_dicks_timestamp` applied the rule
 to **any** statement that set `updated_at`, so the rule held whoever wrote the row; now it holds
-only for whoever goes through `create_or_grow`. A growth written by hand somewhere else would not be
+only for whoever goes through `commit_growth`. A growth written by hand somewhere else would not be
 refused, and nothing in the schema would say so. What guards it instead is
 `src/repo/test/dicks.rs` — the once-a-day refusal, a bonus attempt paying for a second growth, a
 non-growth write spending none and not reopening the day — and this paragraph.
@@ -1293,10 +1349,10 @@ evaluated, so two `/grow`s racing for the same dick serialise exactly as they di
 ### One Dick of the Day per chat per day
 
 The same shape, one table over: `PRIMARY KEY (chat_id, created_at)` on `Dick_of_Day` **is** the
-rule, and `set_dod_winner` claims that key before it grows anybody. A conflict means the day is
-already won, so the growth never happens and the winner's name is read back for the answer;
-`Dicks::set_dod_winner` returns `DickOfDayResult` — `Chosen`, `AlreadyChosen(name)` or `NoDick` —
-rather than an `Option` beside an exception.
+rule, and `Dicks::begin_dod` claims that key before it grows anybody. A conflict means the day is
+already won, so the growth never happens and the winner's name is read back for the answer:
+`begin_dod` returns `DickOfDayIntentStatus` — `Vacant(growth_tx)` or `AlreadyChosen(name)` — and only a vacant day
+reaches `GrowthTx::commit_dod`, which returns `DickOfDayResult`, `Chosen` or `NoDick`.
 
 Claiming first is what makes two `/dod`s in one chat serialise: the second waits on the index and
 is told it lost. `trg_check_dod_timestamp` could not do that. Its `SELECT` for an existing winner
@@ -1327,13 +1383,29 @@ needs no migration, only a row in `Perks`, and that name-to-id dictionary is rea
 `Incrementor::new` at startup, in a single statement for all of them. Nothing looks a perk up by
 name afterwards.
 
-**A perk does not write.** `apply` returns its new state next to its change, and
-`Dicks::create_or_grow` writes the length and every blob in one transaction. That ordering is the
-whole point: the once-a-day rule is applied by that statement, *after* the perks have run, and a
-refused growth must leave no perk believing it happened — which is why the empty answer returns
-before `PerkStates::write_all` and before the commit. `LoanPayoutPerk` predates this and
-still pays inside `apply`, which is why a refused growth can still spend a payment; moving it here
-is its own issue.
+**A growth is one transaction, and the perks write through it.** `Dicks::begin_growth` (or
+`begin_dod`) opens a `GrowthTx`, which owns the transaction; `Incrementor::growth_increment` takes it
+by `&mut`, hands the perks its connection as `PerkContext::conn`, and the caller ends it with
+`GrowthTx::commit_growth` / `commit_dod`. Dropping a `GrowthTx` rolls everything back — which is what a
+refused growth is: the once-a-day rule is the upsert in `commit_growth`, *after* the perks have
+run, and a perk that wrote something (a loan payout, its state) leaves no trace when it says no.
+The Telegram answer is sent after the commit, never inside the transaction.
+
+**Every attempt is a savepoint.** When the perks cancel a roll out to zero,
+`Incrementor::nonzero_increment` rolls its savepoint back — the perks' writes with it — and rolls
+the base again, up to `MAX_REROLLS` times; if they still cancel it, the bare base is used and the
+perks are skipped. A perk's state is written by the incrementor from `PerkOutcome::state`, inside
+the attempt; anything else a perk needs to write goes through `ctx.conn` itself, as
+`LoanPayoutPerk` does.
+
+**A perk's error ends the attempt, and the perks with it.** `apply` returns a `Result` because a
+failed statement poisons a Postgres transaction (`25P02`): nothing after it would work, so the
+attempt is rolled back and the bare base is used — as it is for an `i64` overflow of the sum.
+
+**The dick's row is locked first, the loan's second**, the same order `Loans::borrow` takes them
+in (`begin_growth` locks the dick, `LoanPayoutPerk` locks the loan with `FOR UPDATE`). The payout
+is therefore computed against the debt it will be taken from. Keep that order for any perk that
+locks something of its own.
 
 Two things a perk is handed rather than fetching itself: `ChangeSource`, because a Dick of the Day
 award is not a growth and `dod_increment` shares the perk pipeline with `growth_increment`; and

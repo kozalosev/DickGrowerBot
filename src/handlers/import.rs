@@ -1,7 +1,7 @@
 use autometrics::autometrics;
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
+use std::collections::HashSet;
 use anyhow::{anyhow, bail};
+use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use rust_i18n::t;
@@ -11,7 +11,7 @@ use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Me, Message, UserId};
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
-use crate::domain::objects::ExternalUser;
+use crate::domain::objects::{ExternalUser, OriginalBotKind};
 use crate::domain::primitives::{Length, UserId as DomainUserId, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
@@ -19,7 +19,7 @@ pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 const MAX_MEMBERS_FOR_IMPORT: usize = 10;
 
 static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?)(\.{3})? — (?<length>\d+) см.")
+    Regex::new(r"\d{1,3}((\. )|\|)(?<name>.+?) — (?<length>\d+) см\.?")
         .expect("TOP_LINE_REGEXP is invalid")
 });
 
@@ -28,37 +28,6 @@ static TOP_LINE_REGEXP: Lazy<Regex> = Lazy::new(|| {
 pub enum ImportCommands {
     #[command(description = "import")]
     Import
-}
-
-#[cfg_attr(test, derive(PartialEq, Eq))]
-enum OriginalBotKind {
-    Pipisa,
-    Kraft28,
-}
-
-impl OriginalBotKind {
-    fn convert_name(&self, name: &str) -> String {
-        match self {
-            OriginalBotKind::Pipisa => {
-                name.chars()
-                    .take(13)
-                    .collect()
-            },
-            OriginalBotKind::Kraft28 => name.to_owned()
-        }
-    }
-}
-
-impl TryFrom<&str> for OriginalBotKind {
-    type Error = String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.trim_start_matches('@') {
-            "pipisabot" => Ok(OriginalBotKind::Pipisa),
-            "kraft28_bot" => Ok(OriginalBotKind::Kraft28),
-            _ => Err("Unknown OriginalBotKind".to_owned())
-        }
-    }
 }
 
 struct ParseResult(OriginalBotKind, String);
@@ -102,15 +71,14 @@ struct ImportResult {
     not_found: Vec<Username>,
 }
 
-#[derive(Debug)]
-struct InvalidLines(Vec<String>);
-
-// Required only to wrap the error by anyhow!()
-impl Display for InvalidLines {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let result = self.0.join(", ");
-        f.write_str(&format!("[{result}]"))
-    }
+#[derive(Debug, derive_more::Display, derive_more::Error)]
+enum ImportError {
+    #[display("no leaderboard entries found")]
+    NothingFound,
+    #[display("ambiguous names: {_0:?}")]
+    AmbiguousNames(#[error(not(source))] Vec<Username>),
+    #[display("invalid lines: {_0:?}")]
+    InvalidLines(#[error(not(source))] Vec<String>),
 }
 
 #[autometrics]
@@ -123,12 +91,14 @@ pub async fn import_cmd_handler(
 ) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
-    metrics::CMD_IMPORT.invoked();
-    let answer = match check_and_parse_message(&bot, bot_info.id, &msg, &repos).await {
+    let parsed = check_and_parse_message(&bot, bot_info.id, &msg, &repos).await;
+    let source = parsed.as_ref().ok().map(|p| p.0);
+    metrics::CMD_IMPORT.invoked(source);
+    let answer = match parsed {
         Ok(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {
                 Ok(r) => {
-                    metrics::CMD_IMPORT.finished();
+                    metrics::CMD_IMPORT.finished(source);
                     let imported = r.imported.into_iter()
                         .map(|u| t!("commands.import.result.line.imported", locale = &lang_code,
                             name = u.name.escaped(),
@@ -165,30 +135,55 @@ pub async fn import_cmd_handler(
                         .collect::<Vec<String>>()
                         .join("\n\n")
                 }
-                Err(e) => if let Some(InvalidLines(lines)) = e.downcast_ref() {
-                    tracing::error!(lines = ?lines, "invalid lines in the imported message");
-                    let invalid_lines = lines.iter()
-                        .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
-                            line = line))
-                        .map(|cow_str| cow_str.to_string())
-                        .collect::<Vec<String>>()
-                        .join("\n");
-                    t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
-                        invalid_lines = invalid_lines).to_string()
-                } else {
-                    Err(e)?
+                Err(e) => match e.downcast::<ImportError>() {
+                    Ok(ImportError::NothingFound) => {
+                        metrics::CMD_IMPORT.rejected(source);
+                        t!("commands.import.errors.nothing_found", locale = &lang_code).to_string()
+                    },
+                    Ok(ImportError::AmbiguousNames(names)) => {
+                        metrics::CMD_IMPORT.rejected(source);
+                        let names = names.into_iter()
+                            .map(|name| name.escaped())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        t!("commands.import.errors.ambiguous_names", locale = &lang_code, names = names).to_string()
+                    },
+                    Ok(ImportError::InvalidLines(lines)) => {
+                        metrics::CMD_IMPORT.rejected(source);
+                        tracing::error!(lines = ?lines, "invalid lines in the imported message");
+                        let invalid_lines = lines.iter()
+                            .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
+                                line = line))
+                            .map(|cow_str| cow_str.to_string())
+                            .collect::<Vec<String>>()
+                            .join("\n");
+                        t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
+                            invalid_lines = invalid_lines).to_string()
+                    },
+                    Err(e) => {
+                        metrics::CMD_IMPORT.failed(source);
+                        Err(e)?
+                    },
                 }
             }
 
         },
-        Err(BeforeImportCheckErrors::Other(e)) => Err(e)?,
+        Err(BeforeImportCheckErrors::Other(e)) => {
+            metrics::CMD_IMPORT.failed(source);
+            Err(e)?
+        },
         Err(BeforeImportCheckErrors::NotReply) => {
+            metrics::CMD_IMPORT.rejected(source);
             let origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ");
             t!("commands.import.errors.not_reply", locale = &lang_code,
                 origin_bots = origin_bots).to_string()
         },
-        Err(BeforeImportCheckErrors::LegacyGroup) => t!("commands.import.errors.legacy_group", locale = &lang_code).to_string(),
+        Err(BeforeImportCheckErrors::LegacyGroup) => {
+            metrics::CMD_IMPORT.rejected(source);
+            t!("commands.import.errors.legacy_group", locale = &lang_code).to_string()
+        },
         Err(e) => {
+            metrics::CMD_IMPORT.rejected(source);
             let t_key = format!("commands.import.errors.{e}");
             t!(&t_key, locale = &lang_code).to_string()
         },
@@ -257,48 +252,16 @@ fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = chat_id.0))]
 async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseResult) -> anyhow::Result<ImportResult> {
+    let top = parse_import_users(&parsed.1)?;
     let chat_id_kind = chat_id.into();
-    let members: HashMap<String, ChatMember> = repos.users.get_chat_members(&chat_id_kind)
+    let members: Vec<ChatMember> = repos.users.get_chat_members(&chat_id_kind)
         .await?.into_iter()
-        .map(|m| {
-            let short_name = parsed.0.convert_name(m.name.value());
-            let member = ChatMember {
-                uid: m.uid.into(),
-                full_name: m.name.value().to_owned()
-            };
-            (short_name, member)
+        .map(|m| ChatMember {
+            uid: m.uid.into(),
+            full_name: m.name.value().to_owned()
         })
         .collect();
-    let member_names: HashSet<_> = HashSet::from_iter(members.keys());
-
-    let top = parse_top_lines(&parsed.1);
-    let invalid_lines: Vec<String> = top.iter()
-        .filter(|pos| pos.is_err())
-        .map(|pos| pos.as_ref().unwrap_err().clone())
-        .collect();
-    if !invalid_lines.is_empty() {
-        bail!(InvalidLines(invalid_lines))
-    }
-
-    let top: Vec<OriginalUser> = top.into_iter()
-        .flatten()
-        .filter_map(map_user)
-        .collect();
-    let (existing, not_existing): (Vec<OriginalUser>, Vec<OriginalUser>) = top.into_iter()
-        .partition(|u| member_names.contains(u.name.as_ref()));
-    let existing: Vec<UserInfo> = existing.into_iter()
-        .map(|u| {
-            let member = &members[u.name.value()];
-            UserInfo {
-                uid: member.uid,
-                name: Username::new(member.full_name.clone()),
-                length: u.length
-            }
-        })
-        .collect();
-    let not_found = not_existing.into_iter()
-        .map(|u| u.name)
-        .collect();
+    let (existing, not_found) = resolve_users(&parsed.0, top, &members)?;
 
     let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
         .await?.into_iter()
@@ -318,6 +281,65 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         already_present,
         not_found
     })
+}
+
+/// Splits the leaderboard into the users found in the chat and the names that were not. A name that
+/// is shown more than once, or fits more than one member, cannot be attributed to anybody, so it
+/// fails the whole import.
+fn resolve_users(
+    kind: &OriginalBotKind,
+    top: Vec<OriginalUser>,
+    members: &[ChatMember],
+) -> Result<(Vec<UserInfo>, Vec<Username>), ImportError> {
+    let mut shown: HashSet<Username> = HashSet::new();
+    let mut ambiguous: Vec<Username> = Vec::new();
+    let mut found: Vec<UserInfo> = Vec::new();
+    let mut not_found: Vec<Username> = Vec::new();
+
+    for user in top {
+        let repeated = !shown.insert(user.name.clone());
+        let mut fitting = members.iter()
+            .filter(|m| kind.matches_name(&m.full_name, user.name.value()));
+        let member = fitting.next();
+        if repeated || fitting.next().is_some() {
+            ambiguous.push(user.name.clone());
+            continue
+        }
+        match member {
+            Some(member) => found.push(UserInfo {
+                uid: member.uid,
+                name: Username::new(member.full_name.clone()),
+                length: user.length,
+            }),
+            None => not_found.push(user.name),
+        }
+    }
+
+    if ambiguous.is_empty() {
+        Ok((found, not_found))
+    } else {
+        Err(ImportError::AmbiguousNames(ambiguous.into_iter().unique().collect()))
+    }
+}
+
+fn parse_import_users(text: &str) -> anyhow::Result<Vec<OriginalUser>> {
+    let top = parse_top_lines(text);
+    let invalid_lines: Vec<String> = top.iter()
+        .filter(|pos| pos.is_err())
+        .map(|pos| pos.as_ref().unwrap_err().clone())
+        .collect();
+    if !invalid_lines.is_empty() {
+        bail!(ImportError::InvalidLines(invalid_lines))
+    }
+
+    let top: Vec<OriginalUser> = top.into_iter()
+        .flatten()
+        .filter_map(map_user)
+        .collect();
+    if top.is_empty() {
+        bail!(ImportError::NothingFound)
+    }
+    Ok(top)
 }
 
 fn parse_top_lines(text: &str) -> Vec<Result<Captures<'_>, String>> {
@@ -342,37 +364,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn original_bot_kind_convert_name_pipisa() {
-        let (p, short) = (OriginalBotKind::Pipisa, "SadBot #incel".to_owned());
-        assert_eq!(p.convert_name("SadBot #incel..."), short);
-        assert_eq!(p.convert_name("SadBot #incel>suicide"), short);
-    }
-
-    #[test]
-    fn original_bot_kind_try_from() {
-        let check = |variant: &str, kind| {
-            let second_variant = variant.strip_prefix('@').expect("no '@' prefix");
-            let valid_variants = [variant, second_variant];
-            assert!(valid_variants.into_iter()
-                .all(|v| OriginalBotKind::try_from(v)
-                    .is_ok_and(|k| k == kind)));
-
-            let invalid_variants = valid_variants.into_iter()
-                .map(|v| {
-                    v.strip_suffix("_bot")
-                        .or_else (|| v.strip_suffix("bot"))
-                        .expect("no 'bot' suffix")
-                });
-            assert!(invalid_variants.into_iter()
-                .all(|v| OriginalBotKind::try_from(v)
-                    .is_err()));
-        } ;
-
-        check("@pipisabot", OriginalBotKind::Pipisa);
-        check("@kraft28_bot", OriginalBotKind::Kraft28);
-    }
-
-    #[test]
     fn parse_top_lines_ignores_blank_lines_and_footer() {
         let text = "Топ 10 игроков 🔝\n\n1|Leonid SadBot🍆... — 3 см.\n\n\nраздача см в канале)";
 
@@ -381,7 +372,7 @@ mod tests {
         assert_eq!(top.len(), 1);
         let user = map_user(top.into_iter().next().unwrap().expect("line should be valid"))
             .expect("captures should map to a user");
-        assert_eq!(user.name.value(), "Leonid SadBot🍆");
+        assert_eq!(user.name.value(), "Leonid SadBot🍆...");
         assert_eq!(user.length, 3);
     }
 
@@ -395,5 +386,88 @@ mod tests {
         assert!(top[0].is_ok());
         assert_eq!(top[1].as_ref().unwrap_err(), "not a valid line");
         assert!(top[2].is_ok());
+    }
+
+    #[test]
+    fn the_username_list_names_every_original_bot() {
+        use strum::IntoEnumIterator;
+
+        let names: Vec<String> = OriginalBotKind::iter()
+            .map(|kind| kind.to_string())
+            .collect();
+        assert_eq!(names, ORIGINAL_BOT_USERNAMES);
+    }
+
+    fn member(uid: u64, name: &str) -> ChatMember {
+        ChatMember { uid: UserId(uid), full_name: name.to_owned() }
+    }
+
+    fn user(name: &str) -> OriginalUser {
+        OriginalUser { name: Username::new(name.to_owned()), length: 1 }
+    }
+
+    #[test]
+    fn two_members_fitting_one_first_name_are_ambiguous() {
+        let members = [member(1, "Leonid Smith"), member(2, "Leonid Jones"), member(3, "Alice")];
+        let top = vec![user("Leonid"), user("Alice")];
+        let result = resolve_users(&OriginalBotKind::Kraft28, top, &members);
+        assert!(matches!(result, Err(ImportError::AmbiguousNames(names)) if names == [Username::from("Leonid")]));
+    }
+
+    #[test]
+    fn a_name_shown_twice_is_ambiguous_even_with_no_member() {
+        let members = [member(1, "Alice")];
+        let top = vec![user("Bob"), user("Bob"), user("Alice")];
+        let result = resolve_users(&OriginalBotKind::Kraft28, top, &members);
+        assert!(matches!(result, Err(ImportError::AmbiguousNames(names)) if names == [Username::from("Bob")]));
+    }
+
+    #[test]
+    fn pipisa_finds_cut_names_with_random_emoji() {
+        let members = [member(1, "Leonid SadBot Rust'a'man"), member(2, "Leonid Kozarin")];
+        let top = vec![user("Leonid SadBot🍆..."), user("Leonid Kozari🤥...")];
+        let (found, not_found) = resolve_users(&OriginalBotKind::Pipisa, top, &members)
+            .expect("the names are distinct");
+        let found_uids: Vec<UserId> = found.iter().map(|u| u.uid).collect();
+        assert_eq!(found_uids, [UserId(1), UserId(2)]);
+        assert!(not_found.is_empty());
+    }
+
+    #[test]
+    fn two_members_with_the_same_beginning_are_ambiguous_for_a_cut_name() {
+        let members = [member(1, "Leonid SadBot One"), member(2, "Leonid SadBot Two")];
+        let top = vec![user("Leonid SadBot🍆...")];
+        let result = resolve_users(&OriginalBotKind::Pipisa, top, &members);
+        assert!(matches!(result, Err(ImportError::AmbiguousNames(_))));
+    }
+
+    #[test]
+    fn distinct_names_are_split_into_found_and_not_found() {
+        let members = [member(1, "Leonid Smith"), member(2, "Alice")];
+        let top = vec![user("Leonid"), user("Alice"), user("Bob")];
+        let (found, not_found) = resolve_users(&OriginalBotKind::Kraft28, top, &members)
+            .expect("the names are distinct");
+        let found_uids: Vec<UserId> = found.iter().map(|u| u.uid).collect();
+        assert_eq!(found_uids, [UserId(1), UserId(2)]);
+        assert_eq!(found[0].name.value(), "Leonid Smith");
+        let not_found: Vec<&str> = not_found.iter().map(|n| n.value()).collect();
+        assert_eq!(not_found, ["Bob"]);
+    }
+
+    #[test]
+    fn parses_kraft28_lines_ending_at_centimetres() {
+        let text = "Рейтинг гравців:\n\n1. Alice — 97 см\n2. Bob — 79 см\n3. Carol — 3 см";
+        let users = parse_import_users(text).expect("the leaderboard should be recognised");
+        assert_eq!(users.len(), 3);
+        assert_eq!(users[0].name.value(), "Alice");
+        assert_eq!(users[0].length, 97);
+        assert_eq!(users[2].length, 3);
+    }
+
+    #[test]
+    fn a_reply_without_leaderboard_entries_is_an_error() {
+        let err = parse_import_users("Рейтинг гравців:\n\nNo entries yet")
+            .err().expect("an empty import must be rejected");
+        assert!(matches!(err.downcast_ref(), Some(ImportError::NothingFound)));
     }
 }

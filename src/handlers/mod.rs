@@ -17,12 +17,13 @@ pub mod stats;
 pub mod setup;
 pub mod topics;
 pub mod cleanup;
+pub mod mentions;
 pub mod rights;
 
 use derive_more::Constructor;
 use rust_i18n::t;
 use teloxide::Bot;
-use teloxide::payloads::{AnswerCallbackQuerySetters, SendMessage, SendMessageSetters};
+use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextInlineSetters, EditMessageTextSetters, SendMessage, SendMessageSetters};
 use teloxide::requests::{JsonRequest, Requester};
 use teloxide::sugar::request::RequestLinkPreviewExt;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters};
@@ -41,9 +42,11 @@ pub use language::LanguageCommands;
 pub use loan::LoanCommands;
 pub use topics::TopicsCommands;
 pub use cleanup::CleanupCommands;
+pub use mentions::MentionsCommands;
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::primitives::LanguageCode;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
+use crate::handlers::utils::disabled_link_preview;
 use crate::handlers::utils::SelfDestructionService;
 use crate::repo::Repositories;
 use crate::users::LanguageResolver;
@@ -92,27 +95,23 @@ impl CallbackResult {
         match self {
             CallbackResult::EditMessage(text, keyboard) => {
                 if let Some(message) = callback_query.message {
-                    let mut edit_req = bot.edit_message_text(message.chat().id, message.id(), text);
-                    edit_req.parse_mode.replace(Html);
+                    let mut edit_req = bot.edit_message_text(message.chat().id, message.id(), text)
+                        .parse_mode(Html)
+                        .link_preview_options(disabled_link_preview());
                     edit_req.reply_markup = keyboard;
 
-                    let edit_req_resp = edit_req.await;
-                    if let Err(err) = edit_req_resp {
-                        tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = %err,
-                            "couldn't edit the message");
-                        Err(err)?;
-                    }
+                    edit_req.await
+                        .inspect_err(|err| tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = %err,
+                            "couldn't edit the message"))?;
                 } else if let Some(inline_message_id) = callback_query.inline_message_id {
-                    let mut edit_req = bot.edit_message_text_inline(&inline_message_id, text);
-                    edit_req.parse_mode.replace(Html);
+                    let mut edit_req = bot.edit_message_text_inline(&inline_message_id, text)
+                        .parse_mode(Html)
+                        .disable_web_page_preview(true);
                     edit_req.reply_markup = keyboard;
 
-                    let edit_req_resp = edit_req.await;
-                    if let Err(err) = edit_req_resp {
-                        tracing::error!(inline_message_id = %inline_message_id, error = %err,
-                            "couldn't edit the inline message");
-                        Err(err)?;
-                    }
+                    edit_req.await
+                        .inspect_err(|err| tracing::error!(inline_message_id = %inline_message_id, error = %err,
+                            "couldn't edit the inline message"))?;
                 };
                 answer_req.await?;
             },
@@ -176,7 +175,7 @@ pub fn reply_html<T: Into<String>>(bot: &Bot, msg: &Message, answer: T) -> JsonR
 #[macro_export]
 macro_rules! reply_html {
     // `$bot` is an expr (not an ident) so call sites may pass whatever they hold. It is used
-    // exactly once below, and only by reference, so it stays theirs afterwards.
+    // exactly once below, and only by reference, so it stays theirs afterward.
     //
     // Trailing `field = value` pairs set the optional parts of the request. Each goes through
     // `Into`, and every one of those fields is an `Option`, so both `reply_markup = markup` (an

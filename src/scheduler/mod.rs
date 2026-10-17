@@ -30,6 +30,8 @@ use broadcasts::{clean_finished_broadcasts, run_pending_broadcasts, BroadcastDep
 /// hundred thousand rows doing that every five seconds costs more than the work being measured.
 const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_mins(1);
 
+const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
+
 /// A bot that keeps the schedulers inside Telegram's rate limits.
 ///
 /// Both schedulers send to many chats at once, so they need this. They must also share one, because
@@ -47,8 +49,8 @@ pub fn throttled(bot: Bot, config: ThrottleConfig) -> Throttle<Bot> {
     Throttle::spawn_with_settings(bot, settings)
 }
 
-/// Spawns a detached, best-effort task that runs the daily shrink at every UTC midnight. No-op when
-/// the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
+/// Spawns a detached, best-effort task that runs the daily shrink at UTC midnight, once every
+/// `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
 /// midnight; failures are logged and never abort the loop.
 ///
 /// What the run produces *is* persisted: the summaries it owes are rows, written by the same
@@ -58,8 +60,11 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
         tracing::info!("the daily shrink is disabled (set DAILY_SHRINK_RATIO and DAILY_SHRINK_INACTIVITY_DAYS to enable it)");
         return;
     }
+    let period_days = config.daily_shrink.period_days;
+    metrics::DAILY_SHRINK_PERIOD.set(i64::from(period_days.value()) * SECONDS_PER_DAY);
     tracing::info!(batch_size = %config.daily_shrink.batch_size, ratio = %config.daily_shrink.ratio,
-        inactivity_days = %config.daily_shrink.inactivity_days, "the daily shrink scheduler has started");
+        inactivity_days = %config.daily_shrink.inactivity_days, %period_days,
+        "the daily shrink scheduler has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK.instrument(async move {
         // A failed run is logged and forgotten: the next midnight tries again, and one bad day
         // must not stop the scheduler for good.
@@ -83,6 +88,10 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
             tracing::debug!(sleeping_for = ?till_next_day, "waiting for the next UTC midnight");
             tokio::time::sleep(till_next_day).await;
 
+            if !config.daily_shrink.is_due(chrono::Utc::now().date_naive()) {
+                tracing::debug!("not a shrink day");
+                continue
+            }
             resilient(run()).await;
         }
     }));

@@ -4,14 +4,16 @@ use anyhow::Context;
 use derive_more::{Display, Error};
 use futures::future::join;
 use futures::TryFutureExt;
+use ParseMode::Html;
 use rust_i18n::t;
 use teloxide::Bot;
-use teloxide::payloads::AnswerCallbackQuery;
+use teloxide::payloads::{AnswerCallbackQuery, EditMessageTextInlineSetters, EditMessageTextSetters};
 use teloxide::prelude::ChatId;
 use teloxide::requests::{JsonRequest, Requester};
 use teloxide::types::{CallbackQuery, InlineKeyboardMarkup, MessageId, ParseMode, UserId};
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::LanguageCode;
+use super::disabled_link_preview;
 
 #[derive(Debug, Display, Error)]
 pub enum InvalidCallbackData {
@@ -89,7 +91,11 @@ pub trait CallbackDataWithPrefix<E = InvalidCallbackData>: TryFrom<String, Error
     
     fn parse(query: &CallbackQuery) -> Result<Self, InvalidCallbackData> {
         let data = query.data.as_ref().ok_or(InvalidCallbackData::NoData)?;
-        let err = InvalidCallbackDataBuilder(data);
+        Self::from_data_string(data)
+    }
+
+    fn from_data_string(data: &str) -> Result<Self, InvalidCallbackData> {
+        let err = InvalidCallbackDataBuilder(&data);
         let value = match data.split_once(':') {
             Some((prefix, rest)) if prefix == Self::prefix() => Ok(rest.to_owned()),
             Some((prefix, _)) => Err(err.wrong_prefix(prefix)),
@@ -97,7 +103,7 @@ pub trait CallbackDataWithPrefix<E = InvalidCallbackData>: TryFrom<String, Error
         }?;
         Self::try_from(value).map_err(|e| err.parsing_err(e))
     }
-    
+
     fn to_data_string(&self) -> String {
         format!("{}:{}", Self::prefix(), self)
     }
@@ -139,10 +145,14 @@ pub async fn edit_message_text(
     let text = text.into();
     match params {
         EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-            bot.edit_message_text(chat_id, message_id, text).await?;
+            bot.edit_message_text(chat_id, message_id, text)
+                .link_preview_options(disabled_link_preview())
+                .await?;
         }
         EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-            bot.edit_message_text_inline(inline_message_id, text).await?;
+            bot.edit_message_text_inline(inline_message_id, text)
+                .disable_web_page_preview(true)
+                .await?;
         }
     }
     Ok(())
@@ -159,14 +169,16 @@ pub async fn edit_message_text_with_keyboard(
     let text = text.into();
     match params {
         EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-            let mut req = bot.edit_message_text(chat_id, message_id, text);
-            req.parse_mode.replace(ParseMode::Html);
+            let mut req = bot.edit_message_text(chat_id, message_id, text)
+                .parse_mode(Html)
+                .link_preview_options(disabled_link_preview());
             req.reply_markup = keyboard;
             req.await?;
         }
         EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-            let mut req = bot.edit_message_text_inline(inline_message_id, text);
-            req.parse_mode.replace(ParseMode::Html);
+            let mut req = bot.edit_message_text_inline(inline_message_id, text)
+                .parse_mode(Html)
+                .disable_web_page_preview(true);
             req.reply_markup = keyboard;
             req.await?;
         }
@@ -183,18 +195,20 @@ pub async fn answer_and_edit_page(
 ) -> anyhow::Result<()> {
     let (answered, edited) = match params {
         EditMessageReqParamsKind::Chat(chat_id, message_id) => {
-            let mut req = bot.edit_message_text(*chat_id, *message_id, text);
-            req.parse_mode.replace(ParseMode::Html);
-            req.reply_markup.replace(keyboard);
+            let req = bot.edit_message_text(*chat_id, *message_id, text)
+                .parse_mode(Html)
+                .link_preview_options(disabled_link_preview())
+                .reply_markup(keyboard);
             join(
                 bot.answer_callback_query(q.id.clone()).into_future(),
                 req.into_future().map_ok(|_| ()),
             ).await
         },
         EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-            let mut req = bot.edit_message_text_inline(inline_message_id, text);
-            req.parse_mode.replace(ParseMode::Html);
-            req.reply_markup.replace(keyboard);
+            let req = bot.edit_message_text_inline(inline_message_id, text)
+                .parse_mode(Html)
+                .disable_web_page_preview(true)
+                .reply_markup(keyboard);
             join(
                 bot.answer_callback_query(q.id.clone()).into_future(),
                 req.into_future().map_ok(|_| ()),

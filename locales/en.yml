@@ -62,14 +62,23 @@ commands:
       no_rights_strict: "I'm not allowed to delete messages here, and I only remove an answer together with the command that asked for it — so nothing will disappear until I'm an administrator with the right to delete messages.\n\nSet this for <b>%{group}</b> anyway?"
     errors:
       admins_only: "Only chat administrators can choose which messages self-destruct."
+  mentions:
+    description: "Tags in the shrink reminders"
+    enabled: "Right now I <b>tag</b> you in the shrink reminders. This applies to every chat; to change it for one chat, press 🔕 under a reminder."
+    disabled: "Right now I <b>don't tag</b> you in the shrink reminders. This applies to every chat; to change it for one chat, press 🔕 under a reminder."
+    buttons:
+      enable: "🔔 Tag me"
+      disable: "🔕 Don't tag me"
+    group_hint: "To stop me tagging you in this chat, press 🔕 under a shrink reminder. To change it for every chat, send me /mentions in a private chat."
   privacy:
     description: "Privacy Policy detailing what data we store"
   support:
     description: "Write to the bot's owner"
     request: "Write your message and I'll pass it to my owner. Send any command to cancel."
-    sent: "Your message is sent. The answer will come from my owner in a private chat."
+    sent: "Your message is sent. I'll bring you the answer in a private chat."
     cancelled: "The request is cancelled."
     too_often: "You've just sent a message. Please wait a minute before the next one."
+    reply_button: "↩️ Reply"
   grow:
     description: "Grow your dick!"
     result: "Your dick has %{event} by <b>%{incr} cm</b> and now it is <b>%{length} cm</b> long."
@@ -88,11 +97,16 @@ commands:
   shrink:
     notification:
       header: "✂️ <b>Time to trim the neglected!</b> These dicks haven't grown in %{days}+ days and shrank a bit:"
-      line: "— <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm)"
+      line: "— <b>%{name}</b> lost <b>%{lost}</b> cm (now <b>%{length}</b> cm)"
     recent:
       header: "✂️ <b>Who's been shrinking lately:</b>"
       line: "— <b>%{name}</b> lost <b>%{lost}</b> cm"
     empty: "Silence… No one has shrunk lately. Guess everybody's keeping up the pace 💪"
+    mentions:
+      button: "🔔/🔕 mentions"
+      stopped: "I won't tag you in this chat any more. Press again to undo."
+      resumed: "I'll tag you in this chat again."
+      not_playing: "You don't play in this chat, so I don't tag you here anyway."
   dod:
     description: "Elect the Dick of a Day"
     result: "The Dick of the Day is <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nHis dick has become longer for <b>%{growth} cm</b> and is <b>%{length}</b> cm long now."
@@ -155,6 +169,8 @@ commands:
       not_admin: "This command is supposed to be used by admins only!"
       bot_not_admin: "To import data from other bots, I also need admin rights in this chat — otherwise I won't be able to read their messages. Grant me admin rights and try again."
       not_reply: "You must reply to a non-forwarded message sent by any of %{origin_bots}"
+      nothing_found: "Couldn't find any leaderboard entries in that message."
+      ambiguous_names: "Can't import: players can't be told apart by name. That bot shows only a name in its leaderboard, so names have to be unique.\n\nAmbiguous names: %{names}"
       legacy_group: "Import doesn't work in this chat — it's a Telegram limitation: in basic (non-super) groups a bot can't read messages from other bots, even as an admin. Convert the group to a supergroup (e.g. by setting a public link in the group settings) and run the import again.\n\nImportant: after converting, don't reply to old messages sent before the conversion — Telegram won't deliver such replies to the bot at all. Ask for the leaderboard to be posted again and reply to the new message."
       too_many_members: "Import is only allowed in chats with 10 or fewer members: competitor bots' leaderboards show just the top 10, so importing here would be unfair to everyone else."
       invalid_lines:

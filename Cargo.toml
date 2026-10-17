@@ -14,6 +14,8 @@ cast_possible_truncation = "deny"  # u64 -> u32, f64 -> f32
 cast_sign_loss = "deny"            # i64 -> u64
 cast_precision_loss = "deny"       # u64 -> f64, digits past 2^53
 cast_lossless = "deny"             # u16 -> i64, exact: use From
+# `derive_more::Constructor` expands to `Self { field: field }`, which clippy reports at the field.
+redundant_field_names = "allow"
 
 [package]
 name = "dick-grower-bot"
