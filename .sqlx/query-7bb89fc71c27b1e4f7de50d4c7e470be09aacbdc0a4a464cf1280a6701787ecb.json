@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pc.bonus_length as \"bonus_length: PromoBonus\",\n                      (SELECT count(*) FROM Dicks WHERE uid = $1) as \"chats!: AffectedRows\"\n            FROM Promo_Codes pc\n            WHERE lower(pc.code) = lower($2)\n              AND current_date BETWEEN pc.since AND coalesce(pc.until, current_date)\n              AND pc.capacity > 0\n              AND NOT EXISTS (SELECT 1 FROM Promo_Code_Activations a WHERE a.uid = $1 AND a.code = pc.code)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bonus_length: PromoBonus",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "promo_codes",
+            "name": "bonus_length"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chats!: AffectedRows",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "7bb89fc71c27b1e4f7de50d4c7e470be09aacbdc0a4a464cf1280a6701787ecb"
+}

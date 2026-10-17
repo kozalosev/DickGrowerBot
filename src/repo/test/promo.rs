@@ -174,6 +174,44 @@ async fn a_window_cannot_end_before_it_starts() {
     assert_eq!(constraint, Some("promo_code_window"));
 }
 
+/// A preview says what an activation would do, spends nothing, and is empty wherever the
+/// activation would be refused.
+#[tokio::test]
+async fn preview() {
+    let db = fresh_db().await;
+
+    let promo = repo::Promo::new(db.clone());
+    promo.create_promo_code(PromoCodeParams{
+        code: literal!(PromoCode = PENALTY_PROMO_CODE),
+        bonus_length: PromoBonus::new(PENALTY_PROMO_BONUS),
+        capacity: PromoCapacity::new(1),
+    }).await.expect("couldn't create a promo code");
+
+    let unknown = promo.preview(USER_ID, &literal!(PromoCode = "unknown"))
+        .await.expect("couldn't preview an unknown code");
+    assert!(unknown.is_none());
+
+    create_user(&db).await;
+    create_dick(&db).await;
+    let preview = promo.preview(USER_ID, &literal!(PromoCode = "PENALTY30"))
+        .await.expect("couldn't preview the promo code")
+        .expect("an active code must have a preview");
+    assert_eq!(preview.bonus_length, PromoBonus::new(PENALTY_PROMO_BONUS));
+    assert!(preview.chats.single());
+
+    promo.activate(USER_ID, &literal!(PromoCode = PENALTY_PROMO_CODE))
+        .await.expect("the preview must have spent no capacity");
+    let activated = promo.preview(USER_ID, &literal!(PromoCode = PENALTY_PROMO_CODE))
+        .await.expect("couldn't preview an activated code");
+    assert!(activated.is_none());
+
+    let chat_id = ChatIdPartiality::from(CHAT_ID_KIND);
+    create_user_and_dick_2(&db, &chat_id, "another").await;
+    let exhausted = promo.preview(user_id(UID + 1), &literal!(PromoCode = PENALTY_PROMO_CODE))
+        .await.expect("couldn't preview an exhausted code");
+    assert!(exhausted.is_none());
+}
+
 async fn check_capacity(db: &Pool<Postgres>, expected: i32) {
     let row = sqlx::query!("SELECT capacity FROM Promo_Codes WHERE code = $1", PROMO_CODE)
         .fetch_one(db)

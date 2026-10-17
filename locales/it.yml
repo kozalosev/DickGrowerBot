@@ -197,6 +197,12 @@ commands:
       no_dicks: "Non hai ancora alcun pene. 🤔 Devi aggiungermi ad un gruppo ed eseguire il comando <code>/grow</code>!"
     inline:
       switch_button: "Attiva il codice promozionale '%{code}'…"
+    confirmation:
+      text: "⚠️ Attenzione! Questo codice promozionale non fa crescere il tuo pene — lo <b>accorcia</b> di <b>%{length}</b> cm in ogni gruppo in cui giochi (<b>%{chats}</b>). Vuoi attivarlo lo stesso?"
+      buttons:
+        confirm: "Sì, accorcialo"
+        cancel: "No, grazie"
+      cancelled: "Va bene, il codice promozionale non è stato attivato 😌"
 inline:
   results:
     text: "Clicca il tasto qui sotto per avere il risultato!"

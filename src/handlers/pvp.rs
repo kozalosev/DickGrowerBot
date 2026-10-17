@@ -11,7 +11,8 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
-use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackResult, HandlerDeps, HandlerResult};
+use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackButton, CallbackResult, HandlerDeps,
+    HandlerImplResult, HandlerResult};
 use crate::{metrics, reply_html, reply_html_ephemeral, repo};
 use crate::config::{BattlesFeatureToggles, MessageGroup};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
@@ -113,10 +114,10 @@ pub async fn pvp_cmd_handler(
         lang_code: lang_code.clone(),
     };
     let bet = Bet::new(cmd.bet().into());
-    let (text, keyboard) = pvp_impl_start(params, user, bet).await?;
+    let answer = pvp_impl_start(params, user, bet).await?;
 
-    reply_html_ephemeral!(bot, msg, text, self_destruction, MessageGroup::Application, lang_code,
-        reply_markup = keyboard.map(ReplyMarkup::InlineKeyboard));
+    reply_html_ephemeral!(bot, msg, answer.text(), self_destruction, MessageGroup::Application, lang_code,
+        reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
     Ok(())
 }
 
@@ -308,20 +309,17 @@ pub(crate) async fn pvp_impl_start(
     p: BattleParams,
     initiator: UserInfo,
     bet: Bet,
-) -> anyhow::Result<(String, Option<InlineKeyboardMarkup>)> {
+) -> anyhow::Result<HandlerImplResult<BattleCallbackData>> {
     let enough = p.repos.dicks.check_dick(&p.chat_id.kind(), initiator.uid, bet).await?;
     tracing::debug!(uid = %initiator.uid, chat_id = %p.chat_id, bet = %bet, enough, "starting a PvP");
 
     let data = if enough {
         let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).to_string();
-        let btn_label = t!("commands.pvp.button", locale = &p.lang_code);
-        let btn_data = BattleCallbackData::new(initiator.uid, bet).to_data_string();
-        let keyboard = InlineKeyboardMarkup::new(vec![vec![
-            InlineKeyboardButton::callback(btn_label, btn_data)
-        ]]);
-        (text, Some(keyboard))
+        let btn_label = t!("commands.pvp.button", locale = &p.lang_code).to_string();
+        let btn_data = BattleCallbackData::new(initiator.uid, bet);
+        HandlerImplResult::WithKeyboard { text, buttons: vec![CallbackButton::new(btn_label, btn_data)] }
     } else {
-        (t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string(), None)
+        HandlerImplResult::OnlyText(t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string())
     };
     Ok(data)
 }

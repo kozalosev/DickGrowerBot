@@ -197,6 +197,12 @@ commands:
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
     inline:
       switch_button: "Activate promo code '%{code}'…"
+    confirmation:
+      text: "⚠️ Careful! This promo code doesn't grow your dick — it <b>shrinks</b> it by <b>%{length}</b> cm in every chat you play in (<b>%{chats}</b>). Activate it anyway?"
+      buttons:
+        confirm: "Yes, shrink it"
+        cancel: "No, thanks"
+      cancelled: "Fine, the promo code wasn't activated 😌"
 inline:
   results:
     text: "Since I cannot determine the chat by an inline query, you should click on the button below to get the result."

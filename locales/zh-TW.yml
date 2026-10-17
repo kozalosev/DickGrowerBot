@@ -130,6 +130,12 @@ commands:
       no_dicks: "看起來你還沒有任何老二。🤔 現在是時候把我加入一個聊天並執行 <code>/grow</code> 命令了！"
     inline:
       switch_button: "啟用神秘代碼 '%{code}'…"
+    confirmation:
+      text: "⚠️ 小心！這個神秘代碼不會讓你的老二變長——它會在你參與的每個聊天中（<b>%{chats}</b> 個）讓它<b>縮短</b> <b>%{length}</b> 公分。仍然要啟用嗎？"
+      buttons:
+        confirm: "是的，縮短吧"
+        cancel: "不了，謝謝"
+      cancelled: "好的，神秘代碼沒有啟用 😌"
   topics:
     description: "選擇我在哪些主題裡幹活"
     state:

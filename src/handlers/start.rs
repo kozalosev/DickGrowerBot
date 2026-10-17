@@ -3,8 +3,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::types::Message;
-use crate::handlers::{HandlerDeps, HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
+use teloxide::types::{Message, ReplyMarkup};
+use crate::handlers::{HandlerDeps, HandlerImplResult, HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, reply_html};
 use crate::domain::primitives::{PromoCode, Username};
 use crate::help::HelpContainer;
@@ -28,7 +28,7 @@ pub async fn start_cmd_handler(
     let lang_code = lang_resolver.execute().await;
     let answer = if msg.from.as_ref().is_none() {
         tracing::warn!(message = ?msg, "the /start command was invoked without a FROM field");
-        help.get_help_message(&lang_code).to_owned()
+        HandlerImplResult::OnlyText(help.get_help_message(&lang_code).to_owned())
     } else {
         match cmd {
             StartCommands::Start(promo_code) if promo_code.starts_with(PROMO_START_PARAM_PREFIX) => {
@@ -42,11 +42,11 @@ pub async fn start_cmd_handler(
             StartCommands::Start(_) => {
                 metrics::CMD_START_COUNTER.inc();
                 let username = Username::new(msg.from.as_ref().unwrap().first_name.clone());
-                help.get_start_message(username, lang_code)
+                HandlerImplResult::OnlyText(help.get_start_message(username, lang_code))
             }
         }
     };
-    reply_html!(bot, msg, answer);
+    reply_html!(bot, msg, answer.text(), reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
     Ok(())
 }
 

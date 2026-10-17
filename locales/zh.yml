@@ -197,6 +197,12 @@ commands:
       no_dicks: "看起来你还没有任何丁丁。🤔 现在是时候把我加入一个聊天并执行 <code>/grow</code> 命令了！"
     inline:
       switch_button: "激活神秘代码 '%{code}'…"
+    confirmation:
+      text: "⚠️ 小心！这个神秘代码不会让你的丁丁变长——它会在你参与的每个聊天中（<b>%{chats}</b> 个）让它<b>缩短</b> <b>%{length}</b> 厘米。仍然要激活吗？"
+      buttons:
+        confirm: "是的，缩短吧"
+        cancel: "不了，谢谢"
+      cancelled: "好的，神秘代码没有激活 😌"
 inline:
   results:
     text: "由于我无法通过内联查询确定聊天，你应该点击下面的按钮以获取结果。"

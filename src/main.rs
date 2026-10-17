@@ -146,6 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::topics::callback_filter).endpoint(handlers::topics::topics_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::cleanup::callback_filter).endpoint(handlers::cleanup::cleanup_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::mentions::callback_filter).endpoint(handlers::mentions::mentions_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::promo_callback_filter).endpoint(handlers::promo_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::support_callback_filter).enter_dialogue::<CallbackQuery, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .endpoint(handlers::support_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
