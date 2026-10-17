@@ -78,6 +78,7 @@ commands:
     sent: "留言已发送。我会在私聊中把回复转给你。"
     cancelled: "请求已取消。"
     too_often: "你刚刚已经发过留言了，请等一分钟再发。"
+    reply_button: "↩️ 回复"
   grow:
     description: "让你的丁丁变大！"
     result: "你的丁丁已经<b>%{incr} 厘米</b> %{event}，现在长度为<b>%{length} 厘米</b>。"

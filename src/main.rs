@@ -91,8 +91,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
         .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
+        .branch(Update::filter_message().filter_map(handlers::support_answered_ticket).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
+            .endpoint(handlers::support_follow_up_handler))
         .branch(Update::filter_message().enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
-            .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler)))
+            .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler))
+            .branch(dptree::case![SupportCommandState::Replying(ticket)].endpoint(handlers::support_follow_up_handler)))
         // Everything above the ban gate must not write a single row for the sender: a banned user
         // may still read the policy and reach the owner, but must not come back into the database.
         // /start writes too — it activates a promo code from a deeplink — so it goes below.
@@ -137,6 +140,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::topics::callback_filter).endpoint(handlers::topics::topics_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::cleanup::callback_filter).endpoint(handlers::cleanup::cleanup_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::mentions::callback_filter).endpoint(handlers::mentions::mentions_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::support_callback_filter).enter_dialogue::<CallbackQuery, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
+            .endpoint(handlers::support_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
     let bot = config::BotConfig::build_bot()?;

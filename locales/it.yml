@@ -78,6 +78,7 @@ commands:
     sent: "Messaggio inviato. Ti porterò la risposta in chat privata."
     cancelled: "Richiesta annullata."
     too_often: "Hai appena inviato un messaggio. Aspetta un minuto prima del prossimo."
+    reply_button: "↩️ Rispondi"
   grow:
     description: "Fai crescere il tuo pene!"
     result: "Il tuo pene è %{event} di <b>%{incr} cm</b> e ora è lungo <b>%{length} cm</b>."

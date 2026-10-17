@@ -127,7 +127,22 @@ The recipient is read from the **entity**, never from the text: the link right a
 offset 3) is one only the bot can have written, because the name and the request are HTML-escaped.
 The `<code>` line with the id is for humans — a name or a request can contain newlines and a
 plausible copy of it. The branch sits at the top of the dispatcher tree, with the relay itself:
-it writes nothing for anybody, and a banned user is exactly the one who may need an answer.
+it writes nothing for anybody, and a banned user is exactly the one who may need an answer. The
+language of the `↩️` button below is read the same way, from the text right after that `<code>`,
+falling back to English.
+
+**The user may answer back, and the thread lives in Telegram, not here.** The copy carries a button
+whose callback data is the id of the 🆘 message it answers (`support:<message id>`). Pressing it puts
+the user's dialogue into `SupportCommandState::Replying(ticket)`; replying to the copy natively works
+too, because a replied-to message comes with its keyboard, and the ticket is read off the button
+(`support_answered_ticket`). Either way the user's text is relayed as an ordinary 🆘 message, sent as
+a reply to the ticket — with `allow_sending_without_reply`, so a deleted ticket only loses the
+threading — and a reply to *that* reaches the user like the first one did. So there is no table of
+conversations: the one piece of state is a dialogue that already existed, and `erase_user` has
+nothing new to clear. A ticket never expires; the rate limit is what bounds a talkative user. The
+native reply sits above the ban gate with the rest of `/support`; the button sits with the other
+callbacks below it, so a banned user who presses it gets the ban notice and still has the native
+reply and `/support` itself.
 
 `Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
 only from outside the bot, with the SQL functions of migration 35 (`erase_user`, `ban_user`,
