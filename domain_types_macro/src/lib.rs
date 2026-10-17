@@ -11,6 +11,7 @@ mod kw {
     syn::custom_keyword!(error_message);
     syn::custom_keyword!(features);
     syn::custom_keyword!(no_auto_display);
+    syn::custom_keyword!(no_auto_default);
     syn::custom_keyword!(division_result);
 }
 
@@ -67,10 +68,17 @@ struct TypeInfo<'a> {
 
 struct DomainTypeAttr {
     number: bool,
-    no_auto_display: bool,
+    features: Features,
     validator: Option<syn::Expr>,
     error_msg: Option<syn::LitStr>,
     division_result: Option<syn::Path>,
+}
+
+/// The derives a type opts out of with `features(...)`, to write its own impl instead.
+#[derive(Default)]
+struct Features {
+    no_auto_display: bool,
+    no_auto_default: bool,
 }
 
 impl Parse for DomainTypeAttr {
@@ -78,7 +86,7 @@ impl Parse for DomainTypeAttr {
         let mut number = false;
         let mut validator = None;
         let mut error_msg = None;
-        let mut no_auto_display = false;
+        let mut features = Features::default();
         let mut division_result = None;
 
         while !input.is_empty() {
@@ -101,7 +109,7 @@ impl Parse for DomainTypeAttr {
             }
             else if lookahead.peek(kw::features) {
                 input.parse::<kw::features>()?;
-                no_auto_display = parse_features(input)?;
+                features = parse_features(input)?;
             }
             else {
                 return Err(lookahead.error());
@@ -115,7 +123,7 @@ impl Parse for DomainTypeAttr {
 
         Ok(Self {
             number,
-            no_auto_display,
+            features,
             validator,
             error_msg,
             division_result,
@@ -141,16 +149,19 @@ fn parse_validated(input: ParseStream) -> syn::Result<(syn::Expr, syn::LitStr)> 
 }
 
 /// Parses the comma-separated flag list inside `features(...)`.
-fn parse_features(input: ParseStream) -> syn::Result<bool> {
+fn parse_features(input: ParseStream) -> syn::Result<Features> {
     let content;
     syn::parenthesized!(content in input);
 
-    let mut no_auto_display = false;
+    let mut features = Features::default();
     while !content.is_empty() {
         let feature_lookahead = content.lookahead1();
         if feature_lookahead.peek(kw::no_auto_display) {
             content.parse::<kw::no_auto_display>()?;
-            no_auto_display = true;
+            features.no_auto_display = true;
+        } else if feature_lookahead.peek(kw::no_auto_default) {
+            content.parse::<kw::no_auto_default>()?;
+            features.no_auto_default = true;
         } else {
             return Err(feature_lookahead.error());
         }
@@ -158,7 +169,7 @@ fn parse_features(input: ParseStream) -> syn::Result<bool> {
             content.parse::<syn::Token![,]>()?;
         }
     }
-    Ok(no_auto_display)
+    Ok(features)
 }
 
 /// The signed integer type an unsigned one is stored as, for [`SqlxMode::Signed`].
@@ -406,7 +417,6 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
         quote! { Clone },
         quote! { Debug },
         quote! { ::serde::Serialize },
-        quote! { Default },
         quote! { PartialEq },
         quote! { PartialOrd },
     ];
@@ -449,8 +459,11 @@ fn generate_derives(info: &TypeInfo) -> Vec<TokenStream> {
     if matches!(info.sqlx_mode, SqlxMode::Transparent) {
         derives.push(quote! { ::sqlx::Type })
     }
-    if !info.args.no_auto_display {
+    if !info.args.features.no_auto_display {
         derives.push(quote! { ::derive_more::Display })
+    }
+    if !info.args.features.no_auto_default {
+        derives.push(quote! { Default });
     }
 
     derives

@@ -75,9 +75,10 @@ commands:
   support:
     description: "Scrivi al proprietario del bot"
     request: "Scrivi il tuo messaggio e lo passerò al mio proprietario. Per annullare, invia un comando qualsiasi."
-    sent: "Messaggio inviato. La risposta arriverà dal proprietario in chat privata."
+    sent: "Messaggio inviato. Ti porterò la risposta in chat privata."
     cancelled: "Richiesta annullata."
     too_often: "Hai appena inviato un messaggio. Aspetta un minuto prima del prossimo."
+    reply_button: "↩️ Rispondi"
   grow:
     description: "Fai crescere il tuo pene!"
     result: "Il tuo pene è %{event} di <b>%{incr} cm</b> e ora è lungo <b>%{length} cm</b>."

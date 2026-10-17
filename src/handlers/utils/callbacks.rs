@@ -91,7 +91,11 @@ pub trait CallbackDataWithPrefix<E = InvalidCallbackData>: TryFrom<String, Error
     
     fn parse(query: &CallbackQuery) -> Result<Self, InvalidCallbackData> {
         let data = query.data.as_ref().ok_or(InvalidCallbackData::NoData)?;
-        let err = InvalidCallbackDataBuilder(data);
+        Self::from_data_string(data)
+    }
+
+    fn from_data_string(data: &str) -> Result<Self, InvalidCallbackData> {
+        let err = InvalidCallbackDataBuilder(&data);
         let value = match data.split_once(':') {
             Some((prefix, rest)) if prefix == Self::prefix() => Ok(rest.to_owned()),
             Some((prefix, _)) => Err(err.wrong_prefix(prefix)),
@@ -99,7 +103,7 @@ pub trait CallbackDataWithPrefix<E = InvalidCallbackData>: TryFrom<String, Error
         }?;
         Self::try_from(value).map_err(|e| err.parsing_err(e))
     }
-    
+
     fn to_data_string(&self) -> String {
         format!("{}:{}", Self::prefix(), self)
     }

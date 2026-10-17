@@ -16,9 +16,10 @@ commands:
   support:
     description: "聯絡機器人主人"
     request: "請寫下你的留言，我會轉交給我的主人。發送任意指令即可取消。"
-    sent: "留言已發送。主人會在私聊中回覆你。"
+    sent: "留言已發送。我會在私聊中把回覆轉給你。"
     cancelled: "請求已取消。"
     too_often: "你剛剛已經發過留言了，請等一分鐘再發。"
+    reply_button: "↩️ 回覆"
   grow:
     result: "你的老二已經<b>%{incr} 公分</b> %{event}，現在長度為<b>%{length} 公分</b>。"
     direction:

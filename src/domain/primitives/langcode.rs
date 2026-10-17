@@ -18,7 +18,7 @@ static LOCALE_TO_LANGUAGE: [(&str, SupportedLanguage); 11] = [
     ("zh", SupportedLanguage::ZH),
 ];
 
-#[domain_type]
+#[domain_type(features(no_auto_default))]
 struct LanguageCode(String);
 
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, strum_macros::EnumString, sqlx::Type,
@@ -119,6 +119,12 @@ impl From<&User> for LanguageCode {
 impl From<Option<&User>> for LanguageCode {
     fn from(value: Option<&User>) -> Self {
         Self::from_maybe_user(value)
+    }
+}
+
+impl Default for LanguageCode {
+    fn default() -> Self {
+        DEFAULT.clone()
     }
 }
 
