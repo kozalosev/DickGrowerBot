@@ -186,19 +186,19 @@ pub(crate) async fn promo_activation_impl(
     cache: &Cache,
     user: &User,
     promo_code: &PromoCode,
-    lang_code: LanguageCode,
+    lang_code: &LanguageCode,
 ) -> anyhow::Result<HandlerImplResult<PromoCallbackData>> {
     let preview = promo_repo.preview(UserId::from(user), promo_code)
         .await?
         .filter(|p| p.bonus_length < CONFIRMATION_THRESHOLD && !p.chats.zero());
     let (answer, outcome) = match preview {
         Some(preview) => (HandlerImplResult::WithKeyboard {
-            text: t!("commands.promo.confirmation.text", locale = &lang_code,
+            text: t!("commands.promo.confirmation.text", locale = lang_code,
                 length = preview.bonus_length.value().unsigned_abs(), chats = preview.chats).to_string(),
-            buttons: confirmation_buttons(promo_code, &lang_code),
+            buttons: confirmation_buttons(promo_code, lang_code),
         }, ActivationOutcome::Confirmation),
         None => {
-            let PromoCodeActivationResult { answer, outcome } = activate(promo_repo, user, promo_code, &lang_code).await?;
+            let PromoCodeActivationResult { answer, outcome } = activate(promo_repo, user, promo_code, lang_code).await?;
             (HandlerImplResult::OnlyText(answer), outcome)
         },
     };
@@ -248,7 +248,7 @@ async fn activate_or_refuse(
     lang_code: LanguageCode,
 ) -> anyhow::Result<HandlerImplResult<PromoCallbackData>> {
     match PromoCode::new(code) {
-        Ok(code) => promo_activation_impl(promo_repo, cache, user, &code, lang_code).await,
+        Ok(code) => promo_activation_impl(promo_repo, cache, user, &code, &lang_code).await,
         Err(e) => {
             tracing::info!(error = %e, "the promo code doesn't fit the format");
             record_attempt(cache, UserId::from(user), ActivationOutcome::InvalidFormat).await;
