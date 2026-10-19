@@ -32,6 +32,12 @@ pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
     Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
 pub static RATE_LIMITED_UPDATES: Lazy<Counter> = Lazy::new(||
     Counter::new("rate_limited_updates_total", "count of updates dropped because their sender or their chat went over RATE_LIMIT_USER_REQUESTS or RATE_LIMIT_CHAT_REQUESTS; only the first RATE_LIMIT_WARNINGS of them in a window are answered"));
+pub static RATE_LIMIT_USER_WINDOWS: Lazy<ThresholdCurve> = Lazy::new(||
+    ThresholdCurve::new("rate_limit_user_windows_total", "count of windows in which a user's counted requests reached this many. reached=\"1\" is every window with a request in it; the share of it at a higher threshold is the share of active windows that busy. Nothing is counted while RATE_LIMIT_USER_REQUESTS is 0",
+        &[1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 50, 100, 200]));
+pub static RATE_LIMIT_CHAT_WINDOWS: Lazy<ThresholdCurve> = Lazy::new(||
+    ThresholdCurve::new("rate_limit_chat_windows_total", "count of windows in which a chat's counted requests reached this many. reached=\"1\" is every window with a request in it; the share of it at a higher threshold is the share of active windows that busy. Nothing is counted while RATE_LIMIT_CHAT_REQUESTS is 0",
+        &[1, 2, 5, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200, 500]));
 pub static CMD_GROW_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_grow_usage_total", "count of /grow invocations"));
 pub static CMD_TOP_COUNTER: Lazy<BothModesCounters> = Lazy::new(||
@@ -202,6 +208,8 @@ fn force_registration() {
     Lazy::force(&CMD_SUPPORT_COUNTER);
     Lazy::force(&BANNED_UPDATES_BLOCKED);
     Lazy::force(&RATE_LIMITED_UPDATES);
+    Lazy::force(&RATE_LIMIT_USER_WINDOWS);
+    Lazy::force(&RATE_LIMIT_CHAT_WINDOWS);
     Lazy::force(&CMD_GROW_COUNTER);
     Lazy::force(&CMD_TOP_COUNTER);
     Lazy::force(&CMD_LOAN_COUNTER);
@@ -834,24 +842,30 @@ impl ChatMigrationCounter {
     }
 }
 
-/// Counters of the daily shrink job: the runs, the shrunk dicks, and the summaries the chats are
-/// owed. Without them the job is visible in the logs only.
-///
-/// Whether the scheduler is alive is answered by `daily_shrink_last_run_timestamp_seconds` rather than by
-/// any of these: a counter that moves once a day reads zero both when nothing happened and when
-/// nobody scraped it before the process restarted, and nothing afterwards tells the two apart.
 /// How far each subject gets within a fixed window, counted as the thresholds it reaches.
 ///
 /// A count per subject can't be a label, so it is kept in the store, and only the threshold a hit
 /// lands on — one of a short, fixed list — is counted. The series form a survival curve: the first
 /// is everyone, and each later one is how many got that far.
 pub struct ThresholdCounter {
-    vec: CounterVec,
+    curve: ThresholdCurve,
     name: &'static str,
     window: Duration,
+}
+
+/// The series of such a curve, for a count that is already known: whoever holds it reports each
+/// new value, and only the ones on the list are counted.
+pub struct ThresholdCurve {
+    vec: CounterVec,
     thresholds: &'static [u64],
 }
 
+/// Counters of the daily shrink job: the runs, the shrunk dicks, and the summaries the chats are
+/// owed. Without them the job is visible in the logs only.
+///
+/// Whether the scheduler is alive is answered by `daily_shrink_last_run_timestamp_seconds` rather than by
+/// any of these: a counter that moves once a day reads zero both when nothing happened and when
+/// nobody scraped it before the process restarted, and nothing afterward tells the two apart.
 pub struct DailyShrinkCounters {
     runs: CounterVec,
     victims: CounterVec,
@@ -861,23 +875,44 @@ pub struct DailyShrinkCounters {
 
 impl ThresholdCounter {
     fn new(name: &'static str, help: &str, window: Duration, thresholds: &'static [u64]) -> Self {
-        let vec = CounterVec::new(name, help, &["reached"]);
-        for threshold in thresholds {
-            vec.counter(&[&threshold.to_string()]);
-        }
-        Self { vec, name, window, thresholds }
+        Self { curve: ThresholdCurve::new(name, help, thresholds), name, window }
     }
 
     /// Counts one hit for the subject. A store that can't be asked only costs the curve a sample.
     pub async fn hit(&self, cache: &Cache, subject: impl Display) {
         if let Some(reached) = self.reached(cache, subject).await {
-            self.vec.counter(&[&reached.to_string()]).inc()
+            self.curve.record(reached)
         }
     }
 
     async fn reached(&self, cache: &Cache, subject: impl Display) -> Option<u64> {
         let key = ThresholdKey { name: self.name, subject: subject.to_string() };
         let count = cache.or_local().increment(key, self.window).await?;
+        self.curve.on_list(count)
+    }
+}
+
+impl ThresholdCurve {
+    fn new(name: &str, help: &str, thresholds: &'static [u64]) -> Self {
+        let vec = CounterVec::new(name, help, &["reached"]);
+        for threshold in thresholds {
+            vec.counter(&[&threshold.to_string()]);
+        }
+        Self { vec, thresholds }
+    }
+
+    /// Reports that a subject's count has just become `count`.
+    pub fn observe(&self, count: u64) {
+        if let Some(reached) = self.on_list(count) {
+            self.record(reached)
+        }
+    }
+
+    fn record(&self, reached: u64) {
+        self.vec.counter(&[&reached.to_string()]).inc()
+    }
+
+    fn on_list(&self, count: u64) -> Option<u64> {
         self.thresholds.contains(&count).then_some(count)
     }
 }
@@ -1050,7 +1085,8 @@ mod tests {
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
                 BROADCAST_LANGUAGE, CMD_IMPORT, ImportCommandCounters, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
                 SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics,
-                PROMO_ATTEMPT_USERS, ThresholdCounter};
+                PROMO_ATTEMPT_USERS, RATE_LIMIT_CHAT_WINDOWS, RATE_LIMIT_USER_WINDOWS, ThresholdCounter,
+                ThresholdCurve};
     use std::time::Duration;
     use crate::cache::Cache;
     use crate::config::{CacheConfig, CacheMode};
@@ -1249,13 +1285,34 @@ mod tests {
         assert_eq!(reached, Some(1));
     }
 
+    /// A subject's count that is already known is reported straight to the curve, and the counts
+    /// between two thresholds are not counted.
+    #[test]
+    fn a_curve_counts_the_thresholds_a_count_passes_through() {
+        let curve = ThresholdCurve::new("test_curve_observed_total", "test", &[1, 3]);
+
+        for count in 1..=4 {
+            curve.observe(count);
+        }
+
+        let rendered = render_metrics();
+        assert!(rendered.contains("test_curve_observed_total{reached=\"1\"} 1"));
+        assert!(rendered.contains("test_curve_observed_total{reached=\"3\"} 1"));
+    }
+
     #[test]
     fn every_threshold_is_exported_at_zero() {
-        Lazy::force(&PROMO_ATTEMPT_USERS);
+        let curves = [
+            ("promo_attempt_users_total", &PROMO_ATTEMPT_USERS.curve),
+            ("rate_limit_user_windows_total", &*RATE_LIMIT_USER_WINDOWS),
+            ("rate_limit_chat_windows_total", &*RATE_LIMIT_CHAT_WINDOWS),
+        ];
         let rendered = render_metrics();
-        for threshold in PROMO_ATTEMPT_USERS.thresholds {
-            let series = format!("promo_attempt_users_total{{reached=\"{threshold}\"}}");
-            assert!(rendered.contains(&series), "{series} is not exported");
+        for (name, curve) in curves {
+            for threshold in curve.thresholds {
+                let series = format!("{name}{{reached=\"{threshold}\"}}");
+                assert!(rendered.contains(&series), "{series} is not exported");
+            }
         }
     }
 

@@ -199,6 +199,19 @@ limit exists to protect. The rest are dropped without a reply and counted in
 **It fails open.** A store that can't be asked lets the request through. It uses
 `Cache::or_local()`, as the locks do, so `CACHE_MODE=DISABLED` doesn't switch the protection off.
 
+**The limits are read off a curve of what users do.** Each counter reports the count it has just
+reached to a `metrics::ThresholdCurve`, `rate_limit_user_windows_total{reached}` and
+`rate_limit_chat_windows_total{reached}`, so it costs no round trip beyond the one the limit already
+makes. The series are a survival curve of **windows**: `reached="1"` is every window of a user (or a
+chat) that had a counted request in it, and `reached="N"` is how many of them got to N or more. A
+limit is right when the share at its threshold is tiny. The counters keep counting past the limit,
+so what is reported above it shows how far a flood goes.
+
+It counts windows, not users: someone flooding for ten minutes is ten windows, and how many
+distinct people that is belongs to the logs. A limit of 0 switches its counter off and its curve
+with it, so to measure before choosing, set the limit far above the last threshold rather than
+to 0.
+
 It is the **first** branch of the dispatcher tree, above the setup message and `/topics`. A flood
 has to be stopped before it costs a query, and it may sit there because it writes nothing for the
 sender, which is the property the ban gate's ordering depends on.
@@ -217,7 +230,8 @@ by at least half of them, the **max** is the highest threshold reached at all, a
 is all attempts over `reached="1"`.
 
 It is a `metrics::ThresholdCounter`, a kind of metric for any "how far does one subject get"
-question; the window and the thresholds are declared with the static, like a help text. The count
+question; the window and the thresholds are declared with the static, like a help text. Its series
+are a `ThresholdCurve`, which can also be fed a count the caller already holds. The count
 per subject is a fixed window in the store, like the rate limiter's, and only the threshold a hit
 lands on becomes a label — never the subject. A store that can't be asked only costs the curve a
 sample.

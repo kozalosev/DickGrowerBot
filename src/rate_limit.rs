@@ -11,6 +11,7 @@ use crate::cache::{Cache, CacheKey};
 use crate::config::RateLimitConfig;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::{RateLimit, UserId};
+use crate::metrics::{self, ThresholdCurve};
 
 /// What becomes of a request over the limit, from the mildest to the harshest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,18 +43,19 @@ impl RateLimiter {
     /// or `None` while both are within their limits.
     pub async fn hit(&self, uid: Option<UserId>, chat: Option<ChatIdKind>) -> Option<Exceeded> {
         let (user, chat) = futures::join!(
-            self.count(uid.map(UserKey), self.config.user),
-            self.count(chat.map(ChatKey), self.config.chat),
+            self.count(uid.map(UserKey), self.config.user, &metrics::RATE_LIMIT_USER_WINDOWS),
+            self.count(chat.map(ChatKey), self.config.chat, &metrics::RATE_LIMIT_CHAT_WINDOWS),
         );
         user.max(chat)
     }
 
-    async fn count(&self, key: Option<impl CacheKey>, limit: RateLimit) -> Option<Exceeded> {
+    async fn count(&self, key: Option<impl CacheKey>, limit: RateLimit, curve: &ThresholdCurve) -> Option<Exceeded> {
         let key = key?;
         if limit.is_zero() {
             return None
         }
         let count = self.cache.increment(key, self.config.window).await?;
+        curve.observe(count);
         let limit = u64::from(limit.value());
         let warnings = u64::from(self.config.warnings.value());
         if count <= limit {
@@ -85,6 +87,7 @@ mod test {
     use crate::cache::Cache;
     use crate::config::{CacheConfig, CacheMode, RateLimitConfig};
     use crate::domain::primitives::{Limit, RateLimit, UserId};
+    use crate::metrics::render_metrics;
     use super::{Exceeded, RateLimiter};
 
     #[tokio::test]
@@ -125,8 +128,43 @@ mod test {
         }
     }
 
+    /// The counters are shared by every test of the binary and only grow, so what a hit must have
+    /// done is to leave at least one in the series.
+    #[tokio::test]
+    async fn every_counted_request_is_reported_to_the_curves() {
+        let limiter = limiter(2, 2, 0).await;
+
+        limiter.hit(Some(uid(1)), Some(ChatId(-100).into())).await;
+
+        assert!(reached("rate_limit_user_windows_total", 1) >= 1);
+        assert!(reached("rate_limit_chat_windows_total", 1) >= 1);
+    }
+
+    /// A limit that is off counts nothing, so nothing may be reported for it. The threshold is one
+    /// no other test gets to, since the series are shared.
+    #[tokio::test]
+    async fn a_limit_that_is_off_reports_nothing() {
+        let limiter = limiter(0, 0, 0).await;
+        let before = reached("rate_limit_chat_windows_total", 500);
+
+        for _ in 0..501 {
+            limiter.hit(None, Some(ChatId(-7).into())).await;
+        }
+
+        assert_eq!(reached("rate_limit_chat_windows_total", 500), before);
+    }
+
     fn uid(n: u64) -> UserId {
         UserId::new(n)
+    }
+
+    fn reached(name: &str, threshold: u64) -> u64 {
+        let series = format!("{name}{{reached=\"{threshold}\"}} ");
+        render_metrics()
+            .lines()
+            .find_map(|line| line.strip_prefix(&series))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("{series} is not exported"))
     }
 
     async fn limiter(user: u32, chat: u32, warnings: u16) -> RateLimiter {
