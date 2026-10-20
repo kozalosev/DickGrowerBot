@@ -95,7 +95,7 @@ reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read
 ### Optional: how `WEIGHTS` picks the Dick of the Day
 
 ```
-DOD_POOREST_BONUS_PERCENT=100  # α: the shortest gets 1 + α of the longest one's weight
+DOD_POOREST_BONUS_PERCENT=100  # α: the shortest is 1 + α times as likely to win as the longest; 0 => alike
 DOD_RECENT_WINS_DAYS=5         # N: each win of the last N days divides the weight by one more; 0 => off
 ```
 
