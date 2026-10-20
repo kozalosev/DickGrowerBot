@@ -92,6 +92,27 @@ Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are 
 reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read only by the stock
 `Bot::from_env()` client (i.e. when both timeouts are unset).
 
+### Optional: how `WEIGHTS` picks the Dick of the Day
+
+```
+DOD_POOREST_BONUS_PERCENT=100  # α: the shortest gets 1 + α of the longest one's weight
+DOD_RECENT_WINS_DAYS=5         # N: each win of the last N days divides the weight by one more; 0 => off
+```
+
+`DOD_SELECTION_MODE=WEIGHTS` draws among the active members with the weight
+`(1 + α · (1 − percent_rank by length)) / (1 + wins in the last N days)`. The two halves pull in
+opposite directions: α concentrates the wins on the short, N spreads them out again.
+
+**The bonus is by rank, not by length**, so the ratio between the shortest and the longest is
+exactly `1 + α` in every chat. A sigmoid over the length's z-score was used before, and a z-score
+is scale-free: 948 against 1586 cm was as decisive as 522 against 5357, and the favourite took
+1.4–1.5 times the uniform share in chats of every size. The bonus a win pays (a few dozen cm) can't
+close a gap of hundreds, so nothing corrected it, and the same member won for weeks.
+
+Raise α when the short don't catch up; lower it if the wins pile up on them. Raise N if the same
+winner still repeats; lower it if the draw starts to feel like a queue — in a chat of two, a large N
+is close to plain alternation.
+
 ### Optional: what the help mentions
 
 ```

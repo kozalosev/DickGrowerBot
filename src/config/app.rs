@@ -8,7 +8,7 @@ use crate::config::self_destruction::*;
 use crate::config::shrink::{BroadcastConfig, DailyShrinkConfig};
 use crate::config::incrementor::IncrementorConfig;
 use crate::config::rate_limit::RateLimitConfig;
-use crate::domain::primitives::{AttemptsCount, Bet, DaysCount, Limit, PayoutRatio, RateLimit, Ratio};
+use crate::domain::primitives::{AttemptsCount, Bet, BonusPercent, DaysCount, Limit, PayoutRatio, RateLimit, Ratio};
 use crate::domain::primitives::chat::TelegramChatId;
 
 #[derive(Clone)]
@@ -19,6 +19,8 @@ pub struct AppConfig {
     pub inactivity_days: DaysCount,
     pub loan_payout_ratio: PayoutRatio,
     pub dod_rich_exclusion_ratio: Option<Ratio>,
+    pub dod_poorest_bonus: BonusPercent,
+    pub dod_recent_wins_days: DaysCount,
     pub pvp_default_bet: Bet,
     pub incrementor: IncrementorConfig,
     pub daily_shrink: DailyShrinkConfig,
@@ -48,6 +50,8 @@ impl AppConfig {
         let loan_payout_ratio = env_value!("LOAN_PAYOUT_COEF": PayoutRatio);
         let dod_selection_mode = get_optional_env_value("DOD_SELECTION_MODE");
         let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
+        let dod_poorest_bonus = env_value!("DOD_POOREST_BONUS_PERCENT": BonusPercent, or = 100);
+        let dod_recent_wins_days = env_value!("DOD_RECENT_WINS_DAYS": DaysCount, or = 5);
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
         let multiple_loans = get_env_value_or_default("MULTIPLE_LOANS_ENABLED", false);
@@ -120,6 +124,8 @@ impl AppConfig {
             inactivity_days,
             loan_payout_ratio,
             dod_rich_exclusion_ratio,
+            dod_poorest_bonus,
+            dod_recent_wins_days,
             pvp_default_bet,
             incrementor: IncrementorConfig::from_env(),
             daily_shrink,

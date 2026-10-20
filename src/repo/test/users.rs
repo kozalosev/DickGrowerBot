@@ -1,12 +1,14 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::objects::User;
-use crate::domain::primitives::{DaysCount, LengthChange, Ratio, UserId};
+use crate::domain::primitives::{BonusPercent, DaysCount, LengthChange, Ratio, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
 use crate::repo;
 use crate::repo::test::{fresh_db, repos, user_id, CHAT_ID, NAME, UID, USER_ID};
 use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dick_2};
 
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
+const POOREST_BONUS: BonusPercent = BonusPercent::new(100);
+const RECENT_WINS_DAYS: DaysCount = DaysCount::new(5);
 
 #[tokio::test]
 async fn create_or_update() {
@@ -117,11 +119,8 @@ async fn get_random_active_poor_member() {
 #[tokio::test]
 async fn get_random_active_member_with_poor_in_priority() {
     let db = fresh_db().await;
-    base_checks!(db, get_random_active_member_with_poor_in_priority, INACTIVITY_DAYS);
+    base_checks!(db, get_random_active_member_with_poor_in_priority, INACTIVITY_DAYS, POOREST_BONUS, RECENT_WINS_DAYS);
 
-    // Create members with well-separated lengths (a negative one included) and check that the
-    // poorer a member is, the more often they are chosen — without ever collapsing the selection
-    // onto the very poorest 2-3 members, which was the bug reported in #60.
     // Together with the base member (UID, length 0) the lengths are -20, 0, 20, 40.
     let users = repo::Users::new(db.clone());
     let chat_id: ChatIdPartiality = TelegramChatId::new(CHAT_ID).into();
@@ -129,15 +128,7 @@ async fn get_random_active_member_with_poor_in_priority() {
     create_another_user_and_dick(&db, &chat_id, 3, "User-B", 20).await;  // UID+2
     create_another_user_and_dick(&db, &chat_id, 4, "User-C", 40).await;  // UID+3, the richest
 
-    const ATTEMPTS: usize = 1000;
-    let mut results = Vec::with_capacity(ATTEMPTS);
-    for attempt in 1..=ATTEMPTS {
-        let user = users.get_random_active_member_with_poor_in_priority(&chat_id.kind(), INACTIVITY_DAYS)
-            .await
-            .unwrap_or_else(|_| panic!("couldn't fetch poor active user on attempt {attempt}"))
-            .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));
-        results.push(user.uid);
-    }
+    let results = draw_winners(&users, &chat_id.kind(), POOREST_BONUS, RECENT_WINS_DAYS).await;
     let poorest_wins = count(&results, UID+1);  // length -20
     let base_wins = count(&results, UID);       // length   0
     let middle_wins = count(&results, UID+2);   // length  20
@@ -152,7 +143,53 @@ async fn get_random_active_member_with_poor_in_priority() {
     assert!(poorest_wins > base_wins, "the poorest member must win more often than the base one");
     assert!(base_wins > middle_wins, "the base member must win more often than the middle one");
     assert!(middle_wins > richest_wins, "the middle member must win more often than the richest one");
-    assert!(richest_wins > 0, "even the richest member must be chosen occasionally");
+    assert!(poorest_wins < richest_wins * 3, "the poorest member's chance must stay within the bonus");
+}
+
+#[tokio::test]
+async fn get_random_active_member_with_poor_in_priority_penalizes_recent_winners() {
+    let db = fresh_db().await;
+    let users = repo::Users::new(db.clone());
+    let chat_id: ChatIdPartiality = TelegramChatId::new(CHAT_ID).into();
+    create_member(&db).await;
+    create_another_user_and_dick(&db, &chat_id, 2, "User-A", 0).await;
+
+    sqlx::query!(
+        "INSERT INTO Dick_of_Day (chat_id, winner_uid, created_at)
+            SELECT id, $2, current_date - days_ago FROM Chats, unnest(ARRAY[1, 2, 10]) AS days_ago
+            WHERE chat_id = $1",
+            CHAT_ID, UID)
+        .execute(&db)
+        .await.expect("couldn't insert the past wins");
+
+    let results = draw_winners(&users, &chat_id.kind(), POOREST_BONUS, RECENT_WINS_DAYS).await;
+    let recent_winner_wins = count(&results, UID);
+    let other_wins = count(&results, UID+1);
+    assert!(recent_winner_wins > 0, "a recent winner must still be chosen occasionally");
+    assert!(recent_winner_wins < other_wins / 2, "two recent wins must cut the chance to a third");
+
+    let results = draw_winners(&users, &chat_id.kind(), POOREST_BONUS, DaysCount::new(0)).await;
+    let recent_winner_wins = count(&results, UID);
+    let other_wins = count(&results, UID+1);
+    assert!(recent_winner_wins > other_wins / 2, "past wins must not count when the window is empty");
+}
+
+async fn draw_winners(
+    users: &repo::Users,
+    chat_id: &ChatIdKind,
+    poorest_bonus: BonusPercent,
+    recent_wins_days: DaysCount,
+) -> Vec<UserId> {
+    const ATTEMPTS: usize = 1000;
+    let mut results = Vec::with_capacity(ATTEMPTS);
+    for attempt in 1..=ATTEMPTS {
+        let user = users.get_random_active_member_with_poor_in_priority(chat_id, INACTIVITY_DAYS, poorest_bonus, recent_wins_days)
+            .await
+            .unwrap_or_else(|_| panic!("couldn't fetch a weighted active member on attempt {attempt}"))
+            .unwrap_or_else(| | panic!("nobody has been found on attempt {attempt}"));
+        results.push(user.uid);
+    }
+    results
 }
 
 async fn prepare_for_additional_tests(db: &Pool<Postgres>) -> (repo::Users, ChatIdPartiality) {

@@ -1,7 +1,7 @@
 use autometrics::autometrics;
 use anyhow::Context;
 use crate::domain::objects::{BannedUser, User};
-use crate::domain::primitives::{DaysCount, Ratio, UserId, Username};
+use crate::domain::primitives::{BonusPercent, DaysCount, Ratio, UserId, Username};
 use crate::repo::ChatIdKind;
 use crate::repository;
 use domain_types::literal;
@@ -82,30 +82,37 @@ repository!(Users,
             .context(format!("couldn't get a random active poor user of the chat with id = {chat_id}"))
     }
 ,
-    // Weighted-random selection where a member's weight is a sigmoid over the z-score of their
-    // length: the weight adapts to the actual spread of lengths in the chat instead of a fixed
-    // scale, so a poorer member is favored while everyone keeps a realistic chance (see #60).
-    // When every length is equal (STDDEV_POP = 0), the z-score is coalesced to 0, which yields
-    // an equal weight of 0.5 for all the members.
+    /// A weighted draw among the active members. The weight grows linearly down the ranking by
+    /// length, from 1 for the longest to `1 + poorest_bonus` for the shortest, and is divided by
+    /// one plus the member's wins of the last `recent_wins_days` days.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
     pub async fn get_random_active_member_with_poor_in_priority(
         &self,
         chat_id: &ChatIdKind,
         inactivity_days: DaysCount,
+        poorest_bonus: BonusPercent,
+        recent_wins_days: DaysCount,
     ) -> anyhow::Result<Option<User>> {
         sqlx::query_as!(User,
-            r#"WITH user_weights AS (
-                SELECT u.uid, u.name, u.created_at, d.length,
-                       1.0 / (1.0 + EXP(COALESCE(
-                           (d.length - AVG(d.length) OVER ()) / NULLIF(STDDEV_POP(d.length) OVER (), 0),
-                           0))) AS weight
+            r#"WITH members AS (
+                SELECT u.uid, u.name, u.created_at, d.chat_id,
+                       1.0 + $3::smallint / 100.0 * (1.0 - PERCENT_RANK() OVER (ORDER BY d.length)) AS rank_weight
                 FROM Users u
                   JOIN Dicks d USING (uid)
                   JOIN Chats c ON d.chat_id = c.id
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                   AND d.updated_at > current_timestamp - make_interval(days => $2::bigint::int)
             ),
+                 user_weights AS (
+                     SELECT m.uid, m.name, m.created_at,
+                            m.rank_weight / (1 + (
+                                SELECT COUNT(*) FROM Dick_of_Day dod
+                                WHERE dod.chat_id = m.chat_id AND dod.winner_uid = m.uid
+                                  AND dod.created_at >= current_date - $4::int
+                            )) AS weight
+                     FROM members m
+                 ),
                  cumulative_weights AS (
                      SELECT uid, name, created_at, weight,
                             SUM(weight) OVER (ORDER BY uid) AS cumulative_weight, -- Cumulative weight
@@ -120,7 +127,8 @@ repository!(Users,
             WHERE cumulative_weight >= random_value.rand_value
             ORDER BY cumulative_weight
             LIMIT 1;  -- Select the first user whose cumulative weight exceeds the random value"#,
-                chat_id.value() as String, inactivity_days as DaysCount)
+                chat_id.value() as String, inactivity_days as DaysCount,
+                poorest_bonus as BonusPercent, recent_wins_days as DaysCount)
             .fetch_optional(&self.pool)
             .await
             .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))

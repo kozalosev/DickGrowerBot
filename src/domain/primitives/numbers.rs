@@ -16,6 +16,10 @@ struct BattlesCount(u32);
 #[domain_type(number)]
 struct WinStreak(u16);
 
+/// How much more weight the top of a ranking gets than its bottom, in percent of the bottom's.
+#[domain_type(number)]
+struct BonusPercent(u16);
+
 #[domain_type(number)]
 struct Position(u64);
 
