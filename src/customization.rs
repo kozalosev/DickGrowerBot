@@ -32,6 +32,33 @@ pub enum CustomizationName {
     Monospace,
 }
 
+#[derive(Clone, Default)]
+pub struct Decorations {
+    by_user: HashMap<UserId, CustomizationName>,
+}
+
+impl Decorations {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn apply(&self, uid: UserId, escaped_text: String) -> String {
+        match self.by_user.get(&uid).copied() {
+            Some(name) => {
+                let customization = Customization::from(name);
+                [customization.prefix, &escaped_text, customization.suffix].concat()
+            }
+            None => escaped_text,
+        }
+    }
+}
+
+impl FromIterator<(UserId, CustomizationName)> for Decorations {
+    fn from_iter<I: IntoIterator<Item = (UserId, CustomizationName)>>(entries: I) -> Self {
+        Self { by_user: entries.into_iter().collect() }
+    }
+}
+
 #[derive(Clone, Copy, derive_more::Constructor)]
 #[allow(clippy::redundant_field_names, reason = "derive_more::Constructor spells the fields out")]
 struct Customization {
@@ -65,33 +92,6 @@ impl From<CustomizationName> for Customization {
             CustomizationName::Bold => Customization::new("<b>", "</b>"),
             CustomizationName::Monospace => Customization::new("<code>", "</code>"),
         }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct Decorations {
-    by_user: HashMap<UserId, CustomizationName>,
-}
-
-impl Decorations {
-    pub fn empty() -> Self {
-        Self::default()
-    }
-
-    pub fn apply(&self, uid: UserId, escaped_text: String) -> String {
-        match self.by_user.get(&uid).copied() {
-            Some(name) => {
-                let customization = Customization::from(name);
-                [customization.prefix, &escaped_text, customization.suffix].concat()
-            }
-            None => escaped_text,
-        }
-    }
-}
-
-impl FromIterator<(UserId, CustomizationName)> for Decorations {
-    fn from_iter<I: IntoIterator<Item = (UserId, CustomizationName)>>(entries: I) -> Self {
-        Self { by_user: entries.into_iter().collect() }
     }
 }
 
@@ -129,11 +129,9 @@ mod tests {
         ] {
             assert_eq!(<&str>::from(name), stored);
             assert_eq!(name.to_string(), stored);
-            assert_eq!(
-                stored.parse::<CustomizationName>()
-                    .expect("the name must parse"),
-                name
-            );
+            let parsed = stored.parse::<CustomizationName>()
+                .expect("the name must parse");
+            assert_eq!(parsed, name);
         }
     }
 
@@ -168,30 +166,28 @@ mod tests {
             (CustomizationName::Bold, "<b>name</b>"),
             (CustomizationName::Monospace, "<code>name</code>"),
         ] {
-            assert_eq!(decorations(name).apply(UID, "name".to_owned()), expected);
+            let decorated = decorations(name).apply(UID, "name".to_owned());
+            assert_eq!(decorated, expected);
         }
     }
 
     #[test]
     fn no_decoration_returns_the_original_text() {
-        assert_eq!(Decorations::empty().apply(UID, "name".to_owned()), "name");
+        let text = Decorations::empty().apply(UID, "name".to_owned());
+        assert_eq!(text, "name");
     }
 
     #[test]
     fn an_empty_string_is_safe() {
-        assert_eq!(
-            decorations(CustomizationName::Fire).apply(UID, String::new()),
-            "🔥  🔥"
-        );
+        let decorated = decorations(CustomizationName::Fire).apply(UID, String::new());
+        assert_eq!(decorated, "🔥  🔥");
     }
 
     #[test]
     fn existing_html_is_preserved_without_a_second_escape() {
         let escaped = "<u>Tom &amp; Jerry</u>".to_owned();
-        assert_eq!(
-            decorations(CustomizationName::Crown).apply(UID, escaped),
-            "👑 <u>Tom &amp; Jerry</u>"
-        );
+        let decorated = decorations(CustomizationName::Crown).apply(UID, escaped);
+        assert_eq!(decorated, "👑 <u>Tom &amp; Jerry</u>");
     }
 
     #[test]

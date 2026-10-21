@@ -1,4 +1,5 @@
 use crate::customization::CustomizationName;
+use crate::domain::primitives::UserId;
 use crate::repo;
 use crate::repo::test::{NAME, UID, USER_ID, fresh_db, user_id};
 
@@ -9,37 +10,29 @@ async fn active_customization_can_be_set_replaced_and_cleared() {
     users.create_or_update(USER_ID, NAME)
         .await.expect("couldn't create the user");
 
-    assert_eq!(
-        customizations.get_active(USER_ID)
-            .await.expect("couldn't read"),
-        None
-    );
+    let name = customizations.get_active(USER_ID)
+        .await.expect("couldn't read the customization");
+    assert_eq!(name, None);
 
     customizations.set_active(USER_ID, CustomizationName::Crown)
         .await.expect("couldn't set the customization");
-    assert_eq!(
-        customizations.get_active(USER_ID)
-            .await.expect("couldn't read"),
-        Some(CustomizationName::Crown),
-    );
+    let name = customizations.get_active(USER_ID)
+        .await.expect("couldn't read the customization");
+    assert_eq!(name, Some(CustomizationName::Crown));
 
     customizations.set_active(USER_ID, CustomizationName::Fire)
         .await.expect("couldn't replace the customization");
-    assert_eq!(
-        customizations.get_active(USER_ID)
-            .await.expect("couldn't read"),
-        Some(CustomizationName::Fire),
-    );
+    let name = customizations.get_active(USER_ID)
+        .await.expect("couldn't read the customization");
+    assert_eq!(name, Some(CustomizationName::Fire));
 
     customizations.clear_active(USER_ID)
         .await.expect("couldn't clear the customization");
     customizations.clear_active(USER_ID)
         .await.expect("clearing an absent customization must be safe");
-    assert_eq!(
-        customizations.get_active(USER_ID)
-            .await.expect("couldn't read"),
-        None
-    );
+    let name = customizations.get_active(USER_ID)
+        .await.expect("couldn't read the customization");
+    assert_eq!(name, None);
 }
 
 #[tokio::test]
@@ -60,21 +53,22 @@ async fn decorations_are_loaded_for_a_batch_and_unknown_names_are_ignored() {
         .await.expect("couldn't set the customization");
     sqlx::query!(
         "INSERT INTO User_Customizations (uid, customization_name) VALUES ($1, 'future-name')",
-        unknown_uid as crate::domain::primitives::UserId,
+        unknown_uid as UserId,
     )
     .execute(&db)
     .await.expect("couldn't insert an unknown future name");
 
     let decorations = customizations.decorations_for(&[USER_ID, unknown_uid, plain_uid])
         .await.expect("couldn't load the decorations");
-    assert_eq!(decorations.apply(USER_ID, "known".to_owned()), "🐍 known");
-    assert_eq!(decorations.apply(unknown_uid, "unknown".to_owned()), "unknown");
-    assert_eq!(decorations.apply(plain_uid, "plain".to_owned()), "plain");
-    assert_eq!(
-        customizations.get_active(unknown_uid)
-            .await.expect("couldn't read"),
-        None
-    );
+    let known = decorations.apply(USER_ID, "known".to_owned());
+    let unknown = decorations.apply(unknown_uid, "unknown".to_owned());
+    let plain = decorations.apply(plain_uid, "plain".to_owned());
+    assert_eq!(known, "🐍 known");
+    assert_eq!(unknown, "unknown");
+    assert_eq!(plain, "plain");
+    let name = customizations.get_active(unknown_uid)
+        .await.expect("couldn't read the customization");
+    assert_eq!(name, None);
 }
 
 #[tokio::test]
@@ -85,7 +79,8 @@ async fn an_empty_batch_needs_no_rows() {
 
     let decorations = customizations.decorations_for(&[])
         .await.expect("an empty batch must not acquire a connection");
-    assert_eq!(decorations.apply(USER_ID, "plain".to_owned()), "plain");
+    let plain = decorations.apply(USER_ID, "plain".to_owned());
+    assert_eq!(plain, "plain");
 }
 
 #[tokio::test]
@@ -97,13 +92,11 @@ async fn deleting_the_user_cascades_to_the_customization() {
     customizations.set_active(USER_ID, CustomizationName::Crown)
         .await.expect("couldn't set the customization");
 
-    sqlx::query!("DELETE FROM Users WHERE uid = $1", USER_ID as crate::domain::primitives::UserId)
+    sqlx::query!("DELETE FROM Users WHERE uid = $1", USER_ID as UserId)
         .execute(&db)
         .await.expect("couldn't delete the user");
 
-    assert_eq!(
-        customizations.get_active(USER_ID)
-            .await.expect("couldn't read"),
-        None
-    );
+    let name = customizations.get_active(USER_ID)
+        .await.expect("couldn't read the customization");
+    assert_eq!(name, None);
 }

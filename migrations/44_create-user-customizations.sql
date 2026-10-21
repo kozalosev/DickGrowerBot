@@ -1,5 +1,3 @@
--- Only the active visual customization is stored here. Ownership, acquisition and payment belong
--- to their own future component and must decide whether to call the repository's set method.
 CREATE TABLE IF NOT EXISTS User_Customizations (
     uid                bigint      PRIMARY KEY REFERENCES Users(uid) ON DELETE CASCADE,
     customization_name varchar(64) NOT NULL,

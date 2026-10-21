@@ -1030,6 +1030,25 @@ change to server-configs.
 `/stats` gets its line through `Perk::stats_line`, a hook with a default of `None`: the states are
 read once and handed round, so a perk with nothing to say costs nothing.
 
+### Name customizations
+
+The top and the inline top may decorate a player's name with a built-in prefix and suffix
+(`CustomizationName` in `src/customization.rs`). The decoration is applied to the already-escaped
+name, so the markup it adds (`<b>`, `<code>`) is the only markup that gets through.
+
+`User_Customizations` (migration 44) holds one row per user: the **active** name and nothing else.
+Whether a user may have it is not decided here — whatever grants customizations later is the one that
+calls `Customizations::set_active`. The row cascades with the user and is listed in `erase_user`.
+
+The names are stored as text, and a stored name this build doesn't know is skipped with a warning
+rather than failing the read, so a rollback to an older build leaves the top working. The top asks
+for the whole page in one query (`decorations_for`), and a failed lookup renders the top without
+decorations: cosmetics must not take the leaderboard down.
+
+```
+CUSTOMIZATIONS_ENABLED=true   # false => the top is rendered undecorated and the lookup is skipped
+```
+
 ### Dependency injection
 
 Repositories are grouped in a `Repositories` struct and injected into handlers via the `deps!` macro. Handlers do not construct repos directly.

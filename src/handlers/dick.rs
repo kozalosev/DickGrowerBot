@@ -293,10 +293,12 @@ mod tests {
             .await.expect("couldn't set the customization");
         let decorated = top(&db, &config).await;
         assert!(decorated.contains("👑 <u>"), "the prepared name must be decorated");
-        assert_eq!(decorated.replacen("👑 ", "", 1), baseline, "position, length, markup and hints must stay unchanged");
+        let undecorated = decorated.replacen("👑 ", "", 1);
+        assert_eq!(undecorated, baseline, "position, length, markup and hints must stay unchanged");
 
         config.features.customizations = false;
-        assert_eq!(top(&db, &config).await, baseline, "the disabled feature must preserve the previous top text");
+        let disabled = top(&db, &config).await;
+        assert_eq!(disabled, baseline, "the disabled feature must preserve the previous top text");
     }
 
     #[tokio::test]
@@ -310,7 +312,8 @@ mod tests {
             .execute(&db)
             .await.expect("couldn't remove the optional table for the failure test");
 
-        assert_eq!(top(&db, &config).await, baseline, "optional cosmetics must fail open");
+        let after_failure = top(&db, &config).await;
+        assert_eq!(after_failure, baseline, "optional cosmetics must fail open");
     }
 
     fn config() -> AppConfig {
