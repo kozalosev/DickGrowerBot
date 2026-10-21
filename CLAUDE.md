@@ -1482,7 +1482,7 @@ read once and handed round, so a perk with nothing to say costs nothing.
 
 The top and the inline top may decorate a player's name with a built-in prefix and suffix
 (`CustomizationName` in `src/customization.rs`). The decoration is applied to the already-escaped
-name, so the markup it adds (`<b>`, `<code>`) is the only markup that gets through.
+name and is plain text, so it adds no markup of its own.
 
 `User_Customizations` (migration 44) holds one row per user: the **active** name and nothing else.
 Whether a user may have it is not decided here — whatever grants customizations later is the one that

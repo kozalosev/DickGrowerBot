@@ -28,8 +28,6 @@ pub enum CustomizationName {
     Frame,
     Brackets,
     Grower,
-    Bold,
-    Monospace,
 }
 
 #[derive(Clone, Default)]
@@ -89,8 +87,6 @@ impl From<CustomizationName> for Customization {
             CustomizationName::Frame => Customization::new("꧁༺ ", " ༻꧂"),
             CustomizationName::Brackets => Customization::new("『", "』"),
             CustomizationName::Grower => Customization::new("╰⋃╯ ", ""),
-            CustomizationName::Bold => Customization::new("<b>", "</b>"),
-            CustomizationName::Monospace => Customization::new("<code>", "</code>"),
         }
     }
 }
@@ -124,8 +120,6 @@ mod tests {
             (CustomizationName::Frame, "frame"),
             (CustomizationName::Brackets, "brackets"),
             (CustomizationName::Grower, "grower"),
-            (CustomizationName::Bold, "bold"),
-            (CustomizationName::Monospace, "monospace"),
         ] {
             assert_eq!(<&str>::from(name), stored);
             assert_eq!(name.to_string(), stored);
@@ -163,8 +157,6 @@ mod tests {
             (CustomizationName::Frame, "꧁༺ name ༻꧂"),
             (CustomizationName::Brackets, "『name』"),
             (CustomizationName::Grower, "╰⋃╯ name"),
-            (CustomizationName::Bold, "<b>name</b>"),
-            (CustomizationName::Monospace, "<code>name</code>"),
         ] {
             let decorated = decorations(name).apply(UID, "name".to_owned());
             assert_eq!(decorated, expected);
