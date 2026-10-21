@@ -75,9 +75,6 @@ macro_rules! base_checks {
         assert_eq!(user.name.value(), NAME);
 
         // check inactive member is not found
-        sqlx::query!("DROP TRIGGER IF EXISTS trg_check_and_update_dicks_timestamp ON Dicks")
-            .execute(&$db)
-            .await.expect("couldn't drop the trigger");
         sqlx::query!("UPDATE Dicks SET updated_at = '1997-01-01' WHERE chat_id = (SELECT id FROM Chats WHERE chat_id = $1) AND uid = $2", CHAT_ID, UID)
             .execute(&$db)
             .await.expect("couldn't reset the updated_at column");
@@ -192,6 +189,6 @@ async fn create_member(db: &Pool<Postgres>) {
 
     users.create_or_update(uid, NAME)
         .await.expect("couldn't create a user");
-    dicks.create_or_grow(uid, &chat_id.into(), LengthChange::signed(0), &[])
+    dicks.create_or_grow(uid, &chat_id.into(), LengthChange::signed(0))
         .await.expect("couldn't create a dick");
 }

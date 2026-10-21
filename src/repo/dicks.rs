@@ -2,12 +2,12 @@ use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use futures::TryFutureExt;
 use domain_types::traits::SaturatingInto;
-use sqlx::{Executor, Pool, Postgres, Transaction};
+use sqlx::{Acquire, Executor, PgConnection, Pool, Postgres, Transaction};
 use crate::config::FeatureToggles;
-use crate::domain::objects::{Dick, GrowthResult, PerkStateUpdate};
-use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length};
+use crate::domain::objects::{Dick, DickOfDayResult, GrowthResult};
+use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
-use super::{Chats, PerkStates};
+use super::Chats;
 
 /// The database projection of a [`Dick`]. `position` is a `ROW_NUMBER()` (a plain `int8`),
 /// so it's decoded as `i64` here and converted to the `Position` domain type at this boundary
@@ -40,6 +40,19 @@ pub struct Dicks {
     features: FeatureToggles,
 }
 
+/// What claiming the day for the Dick of the Day election came to.
+pub enum DickOfDayIntentStatus {
+    Vacant(GrowthTx),
+    AlreadyChosen(Username),
+}
+
+/// Which dick a growth belongs to: the row it locked and the chat as the caller named it.
+pub struct DickKey {
+    pub uid: UserId,
+    pub chat_id: InternalChatId,
+    pub chat_kind: ChatIdKind,
+}
+
 impl Dicks {
     pub fn new(pool: Pool<Postgres>, features: FeatureToggles) -> Self {
         Self {
@@ -49,31 +62,51 @@ impl Dicks {
         }
     }
 
+    /// Starts a growth: a transaction that holds the dick's row until it is committed or dropped.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id, increment = %increment))]
+    #[tracing::instrument(skip_all, fields(uid = uid.value(), chat_id = %chat_id))]
+    pub async fn begin_growth(&self, uid: UserId, chat_id: &ChatIdPartiality) -> anyhow::Result<GrowthTx> {
+        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::lock_dick(&mut tx, internal_chat_id, uid).await?;
+        Ok(GrowthTx {
+            tx,
+            top_unlimited: self.features.top_unlimited,
+            key: DickKey {
+                uid,
+                chat_id: internal_chat_id,
+                chat_kind: chat_id.kind(),
+            },
+        })
+    }
+
+    /// Grows a dick without any perks, creating it on the first play. `None` when the day is
+    /// already spent: the caller grew today and has no bought attempt to pay for another.
+    #[cfg(test)]
     pub async fn create_or_grow(
         &self,
         uid: UserId,
         chat_id: &ChatIdPartiality,
         increment: LengthChange,
-        perk_states: &[PerkStateUpdate],
-    ) -> anyhow::Result<GrowthResult> {
-        let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
-
-        let mut tx = self.pool.begin().await?;
-        let new_length = sqlx::query_scalar!(
-            "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
-                ON CONFLICT (uid, chat_id) DO UPDATE SET length = (dicks.length + $3), updated_at = current_timestamp
-                RETURNING length",
-                uid as UserId, internal_chat_id as InternalChatId, increment.value())
-            .fetch_one(&mut *tx)
+    ) -> anyhow::Result<Option<GrowthResult>> {
+        self.begin_growth(uid, chat_id)
+            .await?
+            .commit_growth(increment)
             .await
-            .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
-        PerkStates::write_all(&mut tx, internal_chat_id, uid, perk_states).await?;
-        tx.commit().await?;
+    }
 
-        let pos_in_top = self.get_position_in_top(internal_chat_id, uid).await?;
-        Ok(GrowthResult { new_length: Length::new(new_length), pos_in_top })
+    /// The length as the transaction sees it, zero for a dick that doesn't exist yet.
+    pub async fn fetch_length_internal(
+        conn: &mut PgConnection,
+        uid: UserId,
+        chat_id: InternalChatId,
+    ) -> anyhow::Result<Length> {
+        sqlx::query_scalar!("SELECT length FROM Dicks WHERE chat_id = $1 AND uid = $2",
+                chat_id as InternalChatId, uid as UserId)
+            .fetch_optional(conn)
+            .await
+            .map(|maybe_length| maybe_length.map(Length::new).unwrap_or_default())
+            .context(format!("couldn't fetch the length of {uid} in {chat_id}"))
     }
 
     #[autometrics]
@@ -109,18 +142,22 @@ impl Dicks {
             .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
     }
 
-    /// Returns the uids of everyone who has a dick in the chat (i.e. its players).
+    /// The uids of up to `limit` of the chat's players, longest dick first.
+    ///
+    /// A sample rather than the roll: the one caller tallies the languages of whoever it gets, and
+    /// a tally does not become truer for having every last member in it — while a chat of thousands
+    /// would otherwise hand the user-service thousands of ids to look up, per chat, per night.
+    /// `length DESC` is not a judgement about who counts, only the order the index is already in.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
-    pub async fn get_player_uids(&self, chat_id: &ChatIdKind) -> anyhow::Result<Vec<UserId>> {
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, limit = %limit))]
+    pub async fn get_player_uids_sample(&self, chat_id: InternalChatId, limit: Limit) -> anyhow::Result<Vec<UserId>> {
         sqlx::query_scalar!(
             r#"SELECT d.uid AS "uid: UserId" FROM Dicks d
-                JOIN Chats c ON c.id = d.chat_id
-                WHERE c.chat_id = $1::bigint OR c.chat_instance = $1::text"#,
-                chat_id.value() as String)
+                WHERE d.chat_id = $1 ORDER BY d.length DESC LIMIT $2"#,
+                chat_id as InternalChatId, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't fetch player uids for {chat_id}"))
+            .context(format!("couldn't fetch a sample of player uids for {chat_id}"))
     }
 
     #[autometrics]
@@ -150,28 +187,34 @@ impl Dicks {
             .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
     }
 
+    /// Starts the election of the Dick of the Day.
+    ///
+    /// **One winner a day per chat is the primary key of `Dick_of_Day`**, and the election starts
+    /// by claiming that key: a chat that already has today's winner conflicts, and only then is
+    /// the name of that winner read. Claiming it first also serializes two elections racing in one
+    /// chat, since the second waits on the index rather than reading past it.
     #[autometrics]
-    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id, bonus = %bonus))]
-    pub async fn set_dod_winner(
-        &self,
-        chat_id: &ChatIdPartiality,
-        user_id: UserId,
-        bonus: LengthChange,
-        perk_states: &[PerkStateUpdate],
-    ) -> anyhow::Result<Option<GrowthResult>> {
+    #[tracing::instrument(skip_all, fields(uid = user_id.value(), chat_id = %chat_id))]
+    pub async fn begin_dod(&self, chat_id: &ChatIdPartiality, user_id: UserId) -> anyhow::Result<DickOfDayIntentStatus> {
         let internal_chat_id = self.chats.upsert_chat(chat_id).await?;
 
         let mut tx = self.pool.begin().await?;
-        let new_length = match Self::grow_no_attempts_check_internal(&mut *tx, internal_chat_id, user_id, bonus).await? {
-            Some(length) => length,
-            None => return Ok(None)
-        };
-        Self::insert_to_dod_table(&mut tx, internal_chat_id, user_id).await?;
-        PerkStates::write_all(&mut tx, internal_chat_id, user_id, perk_states).await?;
-        tx.commit().await?;
-
-        let pos_in_top = self.get_position_in_top(internal_chat_id, user_id).await?;
-        Ok(Some(GrowthResult { new_length, pos_in_top }))
+        if !Self::claim_the_day(&mut tx, internal_chat_id, user_id).await? {
+            tx.rollback().await?;
+            return self.get_dod_winner_name(internal_chat_id)
+                .map_ok(DickOfDayIntentStatus::AlreadyChosen)
+                .await
+        }
+        Self::lock_dick(&mut tx, internal_chat_id, user_id).await?;
+        Ok(DickOfDayIntentStatus::Vacant(GrowthTx {
+            tx,
+            top_unlimited: self.features.top_unlimited,
+            key: DickKey {
+                uid: user_id,
+                chat_id: internal_chat_id,
+                chat_kind: chat_id.kind(),
+            },
+        }))
     }
 
     #[autometrics]
@@ -227,7 +270,7 @@ impl Dicks {
         user_id: UserId,
         change: LengthChange,
     ) -> anyhow::Result<Length> {
-        sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3), bonus_attempts = (bonus_attempts + 1) WHERE chat_id = $1 AND uid = $2 RETURNING length",
+        sqlx::query_scalar!("UPDATE Dicks SET length = (length + $3) WHERE chat_id = $1 AND uid = $2 RETURNING length",
                     chat_id_internal as InternalChatId, user_id as UserId, change.value())
             .fetch_one(&mut **tx)
             .await
@@ -242,7 +285,20 @@ impl Dicks {
         chat_id_internal: InternalChatId,
         uid: UserId,
     ) -> anyhow::Result<Option<Position>> {
-        if !self.features.top_unlimited {
+        Self::get_position_in_top_internal(&self.pool, self.features.top_unlimited, chat_id_internal, uid).await
+    }
+
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = uid.value()))]
+    async fn get_position_in_top_internal<'c, E>(
+        executor: E,
+        enabled: bool,
+        chat_id_internal: InternalChatId,
+        uid: UserId,
+    ) -> anyhow::Result<Option<Position>>
+    where E: Executor<'c, Database = Postgres>,
+    {
+        if !enabled {
             return Ok(None)
         }
         sqlx::query_scalar!(
@@ -254,7 +310,7 @@ impl Dicks {
                 ) AS _
                 WHERE uid = $2"#,
                 chat_id_internal as InternalChatId, uid as UserId)
-            .fetch_one(&self.pool)
+            .fetch_one(executor)
             .await
             .map(|pos| Some(Position::new(pos.saturating_into())))
             .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
@@ -288,7 +344,7 @@ impl Dicks {
     where E: Executor<'c, Database = Postgres>,
     {
         sqlx::query_scalar!(
-            "UPDATE Dicks SET bonus_attempts = (bonus_attempts + 1), length = (length + $3)
+            "UPDATE Dicks SET length = (length + $3)
                 WHERE chat_id = $1 AND uid = $2
                 RETURNING length",
                 chat_id_internal as InternalChatId, user_id as UserId, bonus.value())
@@ -298,18 +354,129 @@ impl Dicks {
             .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
     }
 
+    /// Locks the dick's row, if there is one. Taken first in every transaction that also locks the
+    /// dick's loan, so that two of them can't wait for each other.
+    async fn lock_dick(
+        conn: &mut PgConnection,
+        chat_id: InternalChatId,
+        uid: UserId,
+    ) -> anyhow::Result<()> {
+        sqlx::query!("SELECT uid FROM Dicks WHERE chat_id = $1 AND uid = $2 FOR UPDATE",
+                chat_id as InternalChatId, uid as UserId)
+            .fetch_optional(conn)
+            .await
+            .map(|_| ())
+            .context(format!("couldn't lock the dick of {uid} in {chat_id}"))
+    }
+
+    /// Crowns `user_id`, unless the chat already has a winner today — which is what `false` means.
     #[autometrics]
     #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal, uid = user_id.value()))]
-    async fn insert_to_dod_table(
+    async fn claim_the_day(
         tx: &mut Transaction<'_, Postgres>,
         chat_id_internal: InternalChatId,
         user_id: UserId,
-    ) -> anyhow::Result<()> {
-        sqlx::query!("INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)",
+    ) -> anyhow::Result<bool> {
+        sqlx::query!(
+            "INSERT INTO Dick_of_Day (chat_id, winner_uid) VALUES ($1, $2)
+                ON CONFLICT (chat_id, created_at) DO NOTHING",
                 chat_id_internal as InternalChatId, user_id as UserId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))?;
-        Ok(())
+            .map(|result| result.rows_affected() > 0)
+            .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))
+    }
+
+    /// The name of the chat's winner of today, read after an election has lost the day to them.
+    ///
+    /// A statement of its own rather than a branch of the insert above: a data-modifying CTE and
+    /// the query beside it share one snapshot, so a row the winning election committed after ours
+    /// began would be invisible to a `SELECT` in the same statement.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(internal_chat_id = %chat_id_internal))]
+    async fn get_dod_winner_name(&self, chat_id_internal: InternalChatId) -> anyhow::Result<Username> {
+        sqlx::query_scalar!(
+            r#"SELECT u.name AS "name: Username" FROM Dick_of_Day dod
+                JOIN Users u ON u.uid = dod.winner_uid
+                WHERE dod.chat_id = $1 AND dod.created_at = current_date"#,
+                chat_id_internal as InternalChatId)
+            .fetch_one(&self.pool)
+            .await
+            .context(format!("couldn't fetch the dick of the day of {chat_id_internal}"))
+    }
+}
+
+/// One growth of one dick, from the first read of the perks to the commit. Everything done through
+/// it is a single transaction: dropping it without a `commit_*` rolls the lot back, which is what
+/// a refused growth, a failed perk and a forgotten commit all come to.
+pub struct GrowthTx {
+    tx: Transaction<'static, Postgres>,
+    top_unlimited: bool,
+    key: DickKey,
+}
+
+impl GrowthTx {
+    pub fn key(&self) -> &DickKey {
+        &self.key
+    }
+
+    /// Gives up the growth, releasing its locks at once instead of whenever the connection is next
+    /// used.
+    pub async fn rollback(self) -> anyhow::Result<()> {
+        self.tx.rollback()
+            .await
+            .context("couldn't roll the growth back")
+    }
+
+    /// A savepoint: what is written through it is kept by `commit` and undone by `rollback`.
+    pub async fn attempt(&mut self) -> anyhow::Result<Transaction<'_, Postgres>> {
+        self.tx.begin()
+            .await
+            .context("couldn't open a savepoint for an attempt")
+    }
+
+    /// Grows the dick, creating it on the first play. `None` when the day is already spent.
+    ///
+    /// **The once-a-day rule lives in this statement and nowhere else.** An attempt is spent only on
+    /// a growth that needs one — the day's first is free whatever the caller has bought.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = self.key.uid.value(), internal_chat_id = %self.key.chat_id, increment = %increment))]
+    pub async fn commit_growth(mut self, increment: LengthChange) -> anyhow::Result<Option<GrowthResult>> {
+        let DickKey { uid, chat_id, .. } = self.key;
+        let new_length = sqlx::query_scalar!(
+            "INSERT INTO dicks(uid, chat_id, length, updated_at) VALUES ($1, $2, $3, current_timestamp)
+                ON CONFLICT (uid, chat_id) DO UPDATE SET
+                    length = (dicks.length + $3),
+                    updated_at = current_timestamp,
+                    bonus_attempts = CASE WHEN date(dicks.updated_at) = current_date
+                                          THEN dicks.bonus_attempts - 1
+                                          ELSE dicks.bonus_attempts END
+                WHERE date(dicks.updated_at) <> current_date OR dicks.bonus_attempts > 0
+                RETURNING length",
+                uid as UserId, chat_id as InternalChatId, increment.value())
+            .fetch_optional(&mut *self.tx)
+            .await
+            .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
+        let Some(new_length) = new_length else {
+            self.rollback().await?;
+            return Ok(None)
+        };
+        let pos_in_top = Dicks::get_position_in_top_internal(&mut *self.tx, self.top_unlimited, chat_id, uid).await?;
+        self.tx.commit().await?;
+        Ok(Some(GrowthResult { new_length: Length::new(new_length), pos_in_top }))
+    }
+
+    /// Grows the winner of the day by `bonus`. A chat member without a dick can't win.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(uid = self.key.uid.value(), internal_chat_id = %self.key.chat_id, bonus = %bonus))]
+    pub async fn commit_dod(mut self, bonus: LengthChange) -> anyhow::Result<DickOfDayResult> {
+        let DickKey { uid, chat_id, .. } = self.key;
+        let Some(new_length) = Dicks::grow_no_attempts_check_internal(&mut *self.tx, chat_id, uid, bonus).await? else {
+            self.rollback().await?;
+            return Ok(DickOfDayResult::NoDick)
+        };
+        let pos_in_top = Dicks::get_position_in_top_internal(&mut *self.tx, self.top_unlimited, chat_id, uid).await?;
+        self.tx.commit().await?;
+        Ok(DickOfDayResult::Chosen(GrowthResult { new_length, pos_in_top }))
     }
 }

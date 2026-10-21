@@ -1,7 +1,9 @@
+use std::time::Duration;
 use autometrics::autometrics;
 use crate::config::AppConfig;
+use crate::domain::primitives::Limit;
 use crate::metrics;
-use crate::repo::{Repositories, ShrinkBatchOutcome};
+use crate::repo::{BroadcastState, Repositories, ShrinkBatchOutcome};
 
 /// Runs the daily shrink: applies the decay to every stale dick and queues one summary per chat the
 /// bot can post to. Nothing is sent from here — the queue's worker does that, at its own pace.
@@ -17,6 +19,8 @@ use crate::repo::{Repositories, ShrinkBatchOutcome};
 #[tracing::instrument(skip_all)]
 pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow::Result<()> {
     let shrink_config = &config.daily_shrink;
+    expire_superseded(&repos, shrink_config.expiry_batch_size, shrink_config.batch_delay).await;
+
     let mut total = ShrinkBatchOutcome::default();
     let mut chats = 0usize;
     let mut failed_batches = 0u32;
@@ -44,6 +48,14 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
             },
             Ok(outcome) => total += outcome,
         }
+
+        // The run has the whole day ahead of it and nobody waiting on it, while the chats it shares
+        // the database with are being answered right now. Resting between batches trades a run that
+        // takes longer for handlers that keep their connections — which is the better trade at
+        // midnight, when a `/grow` queues behind whatever this is doing.
+        if !shrink_config.batch_delay.is_zero() {
+            tokio::time::sleep(shrink_config.batch_delay).await;
+        }
     }
 
     metrics::DAILY_SHRINK.victims_to_broadcast(total.to_broadcast.value());
@@ -56,7 +68,7 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
     // this only counts the day.
     if failed_batches > 0 {
         metrics::DAILY_SHRINK.run_failed();
-    } else if total.victims.value() == 0 {
+    } else if total.victims.is_zero() {
         metrics::DAILY_SHRINK.run_empty();
         tracing::info!(chats, "nothing to shrink today");
         return Ok(())
@@ -67,4 +79,29 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
         queued = total.chats_queued.value(), skipped = total.chats_skipped.value(),
         "the daily shrink is done");
     Ok(())
+}
+
+/// Finishes every summary left over from an earlier day, in batches, before this run queues its own.
+///
+/// Once today's list is ready, yesterday's is not owed: both would arrive together. A failure gives
+/// up only the shortcut — the rows stay pending and the next run tries again.
+async fn expire_superseded(repos: &Repositories, batch_size: Limit, batch_delay: Duration) {
+    loop {
+        let Ok(expired) = repos.broadcasts.expire_stale(batch_size).await else {
+            tracing::warn!("couldn't expire the superseded shrink summaries");
+            return
+        };
+        if expired.count.is_zero() {
+            return
+        }
+
+        metrics::DAILY_SHRINK.broadcasts_finished(BroadcastState::Expired, expired.count.value());
+        tracing::warn!(count = expired.count.value(), oldest = ?expired.oldest,
+            "shrink summaries were superseded by a newer run");
+
+        // The same rest the walk below takes, and for the same reason.
+        if !batch_delay.is_zero() {
+            tokio::time::sleep(batch_delay).await;
+        }
+    }
 }

@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id AS \"id: LoanId\", debt AS \"debt: Debt\", payout_ratio AS \"payout_ratio: PayoutRatio\" FROM loans\n                    WHERE uid = $1 AND chat_id = $2\n                    AND repaid_at IS NULL FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: LoanId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "loans",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "debt: Debt",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "loans",
+            "name": "debt"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "payout_ratio: PayoutRatio",
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "loans",
+            "name": "payout_ratio"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4ffe879b168f25c06dd85333e4cf37ba14fa44466081d9670291609bb6b9de8f"
+}

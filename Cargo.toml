@@ -14,6 +14,8 @@ cast_possible_truncation = "deny"  # u64 -> u32, f64 -> f32
 cast_sign_loss = "deny"            # i64 -> u64
 cast_precision_loss = "deny"       # u64 -> f64, digits past 2^53
 cast_lossless = "deny"             # u16 -> i64, exact: use From
+# `derive_more::Constructor` expands to `Self { field: field }`, which clippy reports at the field.
+redundant_field_names = "allow"
 
 [package]
 name = "dick-grower-bot"
@@ -43,7 +45,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "jso
 tracing-opentelemetry = "0.33.0"
 opentelemetry = "0.32.0"
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic"] }
+opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic", "gzip-tonic"] }
 opentelemetry-appender-tracing = { version = "0.32.0", features = ["experimental_span_attributes"] }
 tonic-tracing-opentelemetry = "0.38.0"
 tower = "0.5.3"
@@ -62,6 +64,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["rustls", 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 serde-saphyr = "1.0.0-rc.1"
+serde_with = "3.21.0"
 # HTML and templates
 tinytemplate = "1.2.1"
 # Derive macros

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO Player_Settings (chat_id, uid, settings)\n                    SELECT $1, uid, settings FROM Player_Settings WHERE chat_id = $2\n                    ON CONFLICT (chat_id, uid) DO UPDATE SET settings = EXCLUDED.settings || Player_Settings.settings",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d3cd0413dafc0151bf277eca7c04171c0c0c6fe7a4088169ddfd8e8a55dcffa4"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Dicks SET bonus_attempts = $3 WHERE uid = $1 AND chat_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2f9642934e909cc3569e2589e50479cf8fc1d48e246bac59b15ef808cc38aa32"
+}

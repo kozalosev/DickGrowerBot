@@ -19,6 +19,11 @@ pub struct CachesConfig {
     pub chat_topics: Duration,
     /// Which of the bot's messages a chat has it clean up, on the same terms.
     pub chat_cleanup: Duration,
+    /// The language a shrink summary is sent in to a chat that has chosen none, tallied from its
+    /// players. Far longer than the rest, because it is the only one whose miss costs a query *and*
+    /// a call to the user-service, and because what it caches — which language a group speaks —
+    /// changes on the scale of months, not of an afternoon.
+    pub broadcast_language: Duration,
     /// How often the ban list is re-read. Never zero: it is an interval as much as a lifetime,
     /// and a zero one is a busy loop.
     pub ban_list_refresh: Duration,
@@ -44,6 +49,7 @@ impl CachesConfig {
             chat_language: env_duration!("CHAT_LANGUAGE_CACHE_TIME", or = hours(1)),
             chat_topics: env_duration!("CHAT_TOPICS_CACHE_TIME", or = hours(1)),
             chat_cleanup: env_duration!("CHAT_CLEANUP_CACHE_TIME", or = hours(1)),
+            broadcast_language: env_duration!("BROADCAST_LANGUAGE_CACHE_TIME", or = days(7)),
             ban_list_refresh: env_duration!("BAN_LIST_REFRESH", or = mins(15), at_least = secs(1)),
             bot_admin: env_duration!("BOT_ADMIN_CACHE_TIME", or = hours(1), at_least = secs(1)),
             dialogue: env_duration!("DIALOGUE_STATE_TIME", or = hours(1), at_least = secs(1)),

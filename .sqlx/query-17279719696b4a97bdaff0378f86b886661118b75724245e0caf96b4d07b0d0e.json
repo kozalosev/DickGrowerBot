@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Shrink_Broadcasts\n                    SET attempts = attempts + 1, fire_after = $2, lang_code = COALESCE($3, lang_code)\n                    WHERE id = $1 RETURNING attempts AS \"attempts!: AttemptsCount\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempts!: AttemptsCount",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "scheduled_shrink_broadcasts",
+            "name": "attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        {
+          "Custom": {
+            "name": "language_code",
+            "kind": {
+              "Enum": [
+                "en",
+                "ru",
+                "it",
+                "fa",
+                "zh"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "17279719696b4a97bdaff0378f86b886661118b75724245e0caf96b4d07b0d0e"
+}

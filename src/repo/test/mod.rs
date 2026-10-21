@@ -12,6 +12,7 @@ mod bans;
 mod broadcasts;
 mod deletions;
 mod perks;
+mod mentions;
 mod customizations;
 
 use std::str::FromStr;
@@ -30,6 +31,8 @@ use crate::domain::primitives::chat::TelegramChatId;
 use crate::repo;
 use crate::repo::ChatIdKind;
 use crate::test_containers::{self, SharedContainer};
+
+pub use dicks::{create_user, create_dick};
 
 const POSTGRES_USER: &str = "test";
 const POSTGRES_PASSWORD: &str = "test_pw";
@@ -126,8 +129,8 @@ pub async fn create_chat(db: &Pool<Postgres>, telegram_id: i64) -> i64 {
 
 /// A dick inserted directly, with a length and an age of the test's choosing.
 ///
-/// A direct `INSERT` is the only way: the `Dicks` BEFORE UPDATE trigger forbids touching a row that
-/// was grown today, which a freshly created dick always is.
+/// A direct `INSERT` is the only way to give one an age: every write in the repositories stamps
+/// `updated_at` with the current time or leaves it where it is.
 pub async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64, length: i64, days_ago: i32) {
     sqlx::query!(
         "INSERT INTO Dicks (uid, chat_id, length, updated_at) \
@@ -139,6 +142,13 @@ pub async fn seed_aged_dick(db: &Pool<Postgres>, internal_chat_id: i64, uid: i64
 }
 
 /// A lease, or any other deadline, far enough out that nothing under test can outlive it.
+pub async fn bonus_attempts_of(db: &Pool<Postgres>, uid: i64, internal_chat_id: i64) -> i32 {
+    sqlx::query_scalar!("SELECT bonus_attempts FROM Dicks WHERE uid = $1 AND chat_id = $2", uid, internal_chat_id)
+        .fetch_one(db)
+        .await
+        .expect("couldn't read bonus_attempts")
+}
+
 pub fn far_future() -> DateTime<Utc> {
     Utc::now() + Duration::from_mins(10)
 }

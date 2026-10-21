@@ -14,12 +14,23 @@ use crate::config::{get_env_value_or_default, AppConfig, ThrottleConfig};
 use crate::domain::primitives::AttemptsCount;
 use crate::handlers::utils::date::duration_till_next_day;
 use crate::metrics;
+use crate::telegram_backoff::TelegramBackoff;
 use crate::repo::Repositories;
 use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
 use shrink::run_daily_shrink;
 use deletions::{clean_finished_deletions, run_pending_deletions};
 use broadcasts::{clean_finished_broadcasts, run_pending_broadcasts, BroadcastDeps};
+
+/// How often the depth of the queues is published.
+///
+/// A constant rather than a variable, on the same grounds as the cache's sweep interval: it decides
+/// only how fresh a gauge is, not whether anything works. It is deliberately far longer than either
+/// worker's poll interval — counting a queue is a scan of its whole pending index, and at a few
+/// hundred thousand rows doing that every five seconds costs more than the work being measured.
+const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_mins(1);
+
+const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
 
 /// A bot that keeps the schedulers inside Telegram's rate limits.
 ///
@@ -38,8 +49,8 @@ pub fn throttled(bot: Bot, config: ThrottleConfig) -> Throttle<Bot> {
     Throttle::spawn_with_settings(bot, settings)
 }
 
-/// Spawns a detached, best-effort task that runs the daily shrink at every UTC midnight. No-op when
-/// the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
+/// Spawns a detached, best-effort task that runs the daily shrink at UTC midnight, once every
+/// `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
 /// midnight; failures are logged and never abort the loop.
 ///
 /// What the run produces *is* persisted: the summaries it owes are rows, written by the same
@@ -49,8 +60,11 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
         tracing::info!("the daily shrink is disabled (set DAILY_SHRINK_RATIO and DAILY_SHRINK_INACTIVITY_DAYS to enable it)");
         return;
     }
+    let period_days = config.daily_shrink.period_days;
+    metrics::DAILY_SHRINK_PERIOD.set(i64::from(period_days.value()) * SECONDS_PER_DAY);
     tracing::info!(batch_size = %config.daily_shrink.batch_size, ratio = %config.daily_shrink.ratio,
-        inactivity_days = %config.daily_shrink.inactivity_days, "the daily shrink scheduler has started");
+        inactivity_days = %config.daily_shrink.inactivity_days, %period_days,
+        "the daily shrink scheduler has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK.instrument(async move {
         // A failed run is logged and forgotten: the next midnight tries again, and one bad day
         // must not stop the scheduler for good.
@@ -74,6 +88,10 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
             tracing::debug!(sleeping_for = ?till_next_day, "waiting for the next UTC midnight");
             tokio::time::sleep(till_next_day).await;
 
+            if !config.daily_shrink.is_due(chrono::Utc::now().date_naive()) {
+                tracing::debug!("not a shrink day");
+                continue
+            }
             resilient(run()).await;
         }
     }));
@@ -90,6 +108,7 @@ pub fn spawn_broadcast_worker(
     repos: Repositories,
     language_service: LanguageService,
     topics: TopicPolicy,
+    cache: Cache,
     config: AppConfig,
 ) {
     if !config.daily_shrink.enabled() {
@@ -103,7 +122,7 @@ pub fn spawn_broadcast_worker(
         concurrency = %config.daily_shrink.broadcast.concurrency,
         "the shrink broadcast worker has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK_BROADCAST.instrument(async move {
-        let mut ticker = tokio::time::interval(config.daily_shrink.broadcast.poll_interval);
+        let mut ticker = paced(config.daily_shrink.broadcast.poll_interval);
         loop {
             ticker.tick().await;
             // Set before any work of the tick, not after: a tick stuck inside claim_due or a send
@@ -115,13 +134,11 @@ pub fn spawn_broadcast_worker(
             resilient(async {
                 let deps = BroadcastDeps {
                     bot: &bot, repos: &repos, language_service: &language_service,
-                    topics: &topics, config: &config,
+                    topics: &topics, cache: &cache, config: &config,
                 };
                 if let Err(e) = run_pending_broadcasts(deps).await {
                     tracing::error!(error = format!("{e:#}"), "a shrink broadcast run failed");
-                    return;
                 }
-                report_shrink_queue(&repos).await;
             }).await;
         }
     }));
@@ -144,7 +161,7 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
     tokio::spawn(metrics::TASK_DAILY_SHRINK_BROADCAST_CLEANING.instrument(async move {
         // Runs as often as it keeps, so a row lives between one and two retention periods. There's
         // nothing to gain from looking more often: nothing becomes stale in between.
-        let mut ticker = tokio::time::interval(retention);
+        let mut ticker = paced(retention);
         loop {
             ticker.tick().await;
 
@@ -159,7 +176,13 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
 /// Spawns the task that removes the messages whose self-destruction has come due. No-op when every
 /// group is permanent. Unlike the two schedulers above, this one survives a restart: the messages
 /// it acts on are rows, and the tick after the restart finds every one that fell due meanwhile.
-pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cache, config: AppConfig) {
+pub fn spawn_deletion_worker(
+    bot: Throttle<Bot>,
+    repos: Repositories,
+    cache: Cache,
+    config: AppConfig,
+    telegram_backoff: TelegramBackoff,
+) {
     let self_destruction = config.self_destruction;
     let bot_admin_ttl = config.caches.bot_admin;
     if !self_destruction.enabled() {
@@ -173,18 +196,27 @@ pub fn spawn_deletion_worker(bot: Throttle<Bot>, repos: Repositories, cache: Cac
         concurrency = %self_destruction.concurrency, mode = %self_destruction.mode,
         "the self-destruction worker has started");
     tokio::spawn(metrics::TASK_SELF_DESTRUCTION.instrument(async move {
-        let mut ticker = tokio::time::interval(self_destruction.poll_interval);
+        // Only a stalled worker can let a message outlive Telegram's limit, and a restart ends that.
+        // Done before the first claim, which would otherwise hand out the dead rows first.
+        deletions::expire_stale(&repos, &self_destruction).await;
+
+        let mut ticker = paced(self_destruction.poll_interval);
         loop {
             ticker.tick().await;
+            // Set before any work of the tick: one stuck inside claim_due or a request must stop
+            // moving this forward.
+            metrics::SELF_DESTRUCTION_LAST_TICK_TIMESTAMP.set(chrono::Utc::now().timestamp());
+            // The due rows wait for the first tick after the pause.
+            if telegram_backoff.is_backing_off() {
+                continue
+            }
 
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.
             resilient(async {
                 if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction, bot_admin_ttl).await {
                     tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
-                    return;
                 }
-                report_queue(&repos).await;
             }).await;
         }
     }));
@@ -207,17 +239,52 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
     tokio::spawn(metrics::TASK_SELF_DESTRUCTION_CLEANING.instrument(async move {
         // Runs as often as it keeps, so a row lives between one and two retention periods. There's
         // nothing to gain from looking more often: nothing becomes stale in between.
-        let mut ticker = tokio::time::interval(retention);
+        let mut ticker = paced(retention);
         loop {
             ticker.tick().await;
 
             resilient(async {
                 clean_finished_deletions(&repos, retention).await
                     .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished self-destructions failed"));
-                report_queue(&repos).await;
             }).await;
         }
     }));
+}
+
+/// Spawns the task that publishes how deep the two queues are.
+///
+/// A task of its own rather than a line at the end of each worker's tick: what the workers do and
+/// how often a gauge is worth refreshing are different questions, and answering them together tied
+/// three table scans to a five-second poll interval — day and night, whether or not either queue had
+/// anything in it.
+///
+/// It runs whatever the features say. Both gauges read tables that exist regardless, a disabled
+/// feature simply reports zero, and a gauge that stops being published is indistinguishable from a
+/// worker that died — which is what the alerts are watching for.
+pub fn spawn_queue_reporter(repos: Repositories) {
+    tokio::spawn(async move {
+        let mut ticker = paced(QUEUE_GAUGE_INTERVAL);
+        loop {
+            ticker.tick().await;
+
+            resilient(report_queues(&repos)).await;
+        }
+    });
+}
+
+/// A ticker that puts `period` *between* the runs rather than between their start times.
+///
+/// `tokio`'s default is `Burst`: a tick that overran its period is followed immediately by as many
+/// more as were missed, with no pause at all. That is the wrong answer for every loop here — they
+/// overrun precisely when the database or Telegram is already struggling, and catching up is the one
+/// thing that makes it worse. `Delay` lets a slow run simply push the next one back.
+///
+/// Nothing is lost by it. None of these loops counts its ticks; each one asks what is due now, so a
+/// tick that never happens is a tick with nothing left to do.
+fn paced(period: Duration) -> tokio::time::Interval {
+    let mut ticker = tokio::time::interval(period);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker
 }
 
 /// Runs one tick of a scheduler loop without letting a panic inside it kill the whole task.
@@ -247,21 +314,20 @@ fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
     base.saturating_mul(factor).min(max)
 }
 
-/// Publishes how much the broadcast queue still owes and when the last shrink was.
+/// Publishes what the alerts read: the depth of both queues, and when the last shrink was.
 ///
-/// Only these two, and only from the worker's tick: they are what the alerts read, and vmalert
-/// can't ask the database itself. Everything a human looks at — which chats failed and why, the
-/// states over time — is a panel over `Scheduled_Shrink_Broadcasts` instead, which costs nothing
-/// when nobody is looking at it.
+/// Only these, and only because vmalert reads Prometheus and cannot ask the database itself.
+/// Everything a human looks at — which chats failed and why, the states over time — is a panel over
+/// the queue tables instead, which costs nothing when nobody is looking at it.
 ///
 /// The day of the last shrink is a gauge rather than a counter because it has to survive a restart:
 /// a counter incremented once a day reads zero both when nothing happened and when nobody scraped
 /// it in time, and there is no telling those apart afterwards.
 ///
-/// A failure here loses one sample of a gauge and nothing else — the queue, the rows and the worker
-/// are untouched, and the next tick publishes again — so it is a `warn`. It also runs every few
-/// seconds, and a database that is down has already been reported by the run that failed.
-async fn report_shrink_queue(repos: &Repositories) {
+/// A failure here loses one sample of a gauge and nothing else — the queues, the rows and the
+/// workers are untouched, and the next tick publishes again — so it is a `warn`. A database that is
+/// down has already been reported by the run that failed.
+async fn report_queues(repos: &Repositories) {
     match repos.broadcasts.count_pending().await {
         Ok(pending) => metrics::DAILY_SHRINK_BROADCAST_PENDING.set(pending.saturating_into()),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending shrink summaries"),
@@ -271,18 +337,9 @@ async fn report_shrink_queue(repos: &Repositories) {
         Ok(None) => {},
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the time of the last shrink"),
     }
-}
-
-/// Publishes the depth of the queue and of its backlog of finished rows. Both are read from the
-/// same database the run just used, so a failure here is only logged.
-async fn report_queue(repos: &Repositories) {
     match repos.deletions.count_pending().await {
         Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending.saturating_into()),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending self-destructions"),
-    }
-    match repos.deletions.count_finished().await {
-        Ok(finished) => metrics::SELF_DESTRUCTION_FINISHED.set_all(&finished),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the finished self-destructions"),
     }
 }
 

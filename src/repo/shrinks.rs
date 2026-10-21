@@ -47,6 +47,9 @@ pub struct RecentShrink {
     pub owner_name: Username,
     pub lost_length: Length,
     pub length: Length,
+    /// Whether the owner is tagged. Taken from their setting for this chat; if there is none, from
+    /// their global setting; if there is none either, `true`.
+    pub shrink_mentions_enabled: bool,
 }
 
 /// Named rather than a `(NaiveDate, NaiveDate)` pair: the two are trivially swappable, and the
@@ -121,7 +124,7 @@ repository!(Shrinks,
                       AND d.updated_at <= current_timestamp - make_interval(days => $2::bigint::int)
                 ),
                 updated AS (
-                    UPDATE Dicks d SET length = d.length - v.loss, bonus_attempts = d.bonus_attempts + 1
+                    UPDATE Dicks d SET length = d.length - v.loss
                     FROM victims v WHERE d.uid = v.uid AND d.chat_id = v.chat_id
                     RETURNING d.uid, d.chat_id, v.loss AS loss
                 ),
@@ -181,11 +184,14 @@ repository!(Shrinks,
     ) -> anyhow::Result<Vec<RecentShrink>> {
         sqlx::query_as!(RecentShrink,
             r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
-                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length"
+                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length",
+                       COALESCE((ps.settings->>'shrink_mentions_enabled')::bool,
+                                (usr.settings->>'shrink_mentions_enabled')::bool, true) AS "shrink_mentions_enabled!"
                 FROM Stale_Dick_Shrinks s
                 JOIN Users usr USING (uid)
                 JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
                 JOIN Chats c ON c.id = s.chat_id
+                LEFT JOIN Player_Settings ps ON ps.chat_id = s.chat_id AND ps.uid = s.uid
                 WHERE (c.chat_id = $1::bigint OR c.chat_instance = $1::text)
                   AND s.created_at = $2
                 ORDER BY s.lost_length DESC
@@ -194,6 +200,41 @@ repository!(Shrinks,
             .fetch_all(&self.pool)
             .await
             .context(format!("couldn't fetch shrinks of {chat_id} for {date}"))
+    },
+
+    /// The same page as [`Self::get_shrinks_for_date`], for a caller that already holds the chat's
+    /// own key.
+    ///
+    /// That is the whole difference, and it is worth a method: without the join the predicate is a
+    /// plain equality on `Stale_Dick_Shrinks.chat_id`, which lands directly on
+    /// `stale_dick_shrinks_idx_chat_created_at`. The broadcast worker is the caller — it reads the
+    /// key out of the row it just claimed, where the other one would have had it look the chat up
+    /// by the Telegram id it had just been given in exchange for that very key.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id, date = %date, offset = %offset, limit = %limit))]
+    pub async fn get_shrinks_for_internal_chat(
+        &self,
+        chat_id: InternalChatId,
+        date: NaiveDate,
+        offset: Offset,
+        limit: Limit,
+    ) -> anyhow::Result<Vec<RecentShrink>> {
+        sqlx::query_as!(RecentShrink,
+            r#"SELECT s.uid AS "uid: UserId", usr.name AS "owner_name: Username",
+                       s.lost_length AS "lost_length!: Length", d.length AS "length!: Length",
+                       COALESCE((ps.settings->>'shrink_mentions_enabled')::bool,
+                                (usr.settings->>'shrink_mentions_enabled')::bool, true) AS "shrink_mentions_enabled!"
+                FROM Stale_Dick_Shrinks s
+                JOIN Users usr USING (uid)
+                JOIN Dicks d ON d.uid = s.uid AND d.chat_id = s.chat_id
+                LEFT JOIN Player_Settings ps ON ps.chat_id = s.chat_id AND ps.uid = s.uid
+                WHERE s.chat_id = $1 AND s.created_at = $2
+                ORDER BY s.lost_length DESC
+                OFFSET $3 LIMIT $4"#,
+                chat_id as InternalChatId, date, offset as Offset, limit as Limit)
+            .fetch_all(&self.pool)
+            .await
+            .context(format!("couldn't fetch shrinks of the chat with id = {chat_id} for {date}"))
     },
 
     #[autometrics]

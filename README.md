@@ -117,6 +117,8 @@ cannot be reached. Two more variables send the data to that stack, each optional
   included). The exported records carry the trace and span ids of the span they were written in, put
   there by the SDK, so a log line and a trace can be matched.
 
+How many spans are produced and kept is tunable too; the settings are described in `.env.example`.
+
 `docker-compose.yml` bundles an **optional** observability stack, gated behind the `tracing` Compose
 profile: [Jaeger](https://www.jaegertracing.io/) all-in-one for the spans and
 [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) for the records. The
@@ -194,10 +196,7 @@ cargo sqlx prepare -- --tests
 
 It's most probably you want to change the value of the `GROW_SHRINK_RATIO` environment variable to make the players upset and disappointed more or less often.
 
-The reward for playing every day is `STREAK_BONUS_RATIO_PER_DAY` (0.05 by default): each consecutive
-day multiplies the rolled value by that much more, counting up to `STREAK_BONUS_MAX_DAYS` (20) days,
-so three weeks of playing doubles it. A negative roll is multiplied just the same. Setting either
-variable to 0 turns the perk off, as does `DISABLE_STREAK`.
+The reward for playing on days in a row is tunable too; the settings are described in `.env.example`.
 
 ### How to disable a command?
 

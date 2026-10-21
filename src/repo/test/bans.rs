@@ -13,6 +13,7 @@ const TABLES_WITH_USER_ROWS: [(&str, &str); 9] = [
     ("imports", "uid"),
     ("loans", "uid"),
     ("perk_states", "uid"),
+    ("player_settings", "uid"),
     ("promo_code_activations", "uid"),
     ("stale_dick_shrinks", "uid"),
     ("user_customizations", "uid"),
@@ -38,10 +39,11 @@ async fn erase_user_deletes_everything_and_bans() {
     let users_left = count_rows(&db, "users", "uid").await;
     assert_eq!(users_left, 1, "the Users row itself must survive an erasure");
 
-    let user = sqlx::query!(r#"SELECT name, banned_until, created_at FROM Users WHERE uid = $1"#, USER_ID as UserId)
+    let user = sqlx::query!(r#"SELECT name, settings, banned_until, created_at FROM Users WHERE uid = $1"#, USER_ID as UserId)
         .fetch_one(&db)
         .await.expect("the Users row must survive an erasure");
     assert_eq!(user.name, "", "the name must be cleared");
+    assert_eq!(user.settings, serde_json::json!({}), "the settings must be cleared");
     let banned_until = user.banned_until.expect("the user must be banned");
     assert!(banned_until > user.created_at, "the ban must end in the future");
 }
@@ -206,6 +208,11 @@ async fn fill_all_tables(db: &Pool<Postgres>) {
     sqlx::query!("INSERT INTO Perk_States (chat_id, uid, perk_id) VALUES ($1, $2, $3)",
             internal_chat_id, USER_ID as UserId, perk_id)
         .execute(db).await.expect("couldn't create the perk state");
+    sqlx::query!(r#"INSERT INTO Player_Settings (chat_id, uid, settings) VALUES ($1, $2, '{"shrink_mentions_enabled": false}')"#,
+            internal_chat_id, USER_ID as UserId)
+        .execute(db).await.expect("couldn't create the player settings");
+    sqlx::query!(r#"UPDATE Users SET settings = '{"shrink_mentions_enabled": false}' WHERE uid = $1"#, USER_ID as UserId)
+        .execute(db).await.expect("couldn't set the user settings");
 }
 
 /// The one query in this file that can't be a `query_scalar!`: the macro needs a string literal,

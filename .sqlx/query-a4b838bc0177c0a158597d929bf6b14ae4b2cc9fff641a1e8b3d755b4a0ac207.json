@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH matched AS (\n                SELECT code, bonus_length, capacity,\n                    CASE\n                        WHEN current_date < since THEN 'not_started'\n                        WHEN current_date > until THEN 'ended'\n                        ELSE 'active'\n                    END AS state\n                FROM Promo_Codes\n                WHERE lower(code) = lower($1)\n                FOR NO KEY UPDATE\n            ), decremented AS (\n                UPDATE Promo_Codes SET capacity = capacity - 1\n                WHERE code IN (SELECT code FROM matched WHERE state = 'active' AND capacity > 0)\n            )\n            SELECT code as \"found_code: PromoCode\", bonus_length as \"bonus_length: PromoBonus\",\n                   state as \"state!: PromoCodeActiveState\", capacity as \"capacity: PromoCapacity\"\n            FROM matched",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "found_code: PromoCode",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "promo_codes",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "bonus_length: PromoBonus",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "promo_codes",
+            "name": "bonus_length"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "state!: PromoCodeActiveState",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "capacity: PromoCapacity",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "promo_codes",
+            "name": "capacity"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "a4b838bc0177c0a158597d929bf6b14ae4b2cc9fff641a1e8b3d755b4a0ac207"
+}

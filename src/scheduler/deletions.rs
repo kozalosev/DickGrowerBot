@@ -75,6 +75,34 @@ pub async fn run_pending_deletions(
     Ok(())
 }
 
+/// Finishes every chat message older than [`MAX_AGE`] as expired, in batches, without claiming any.
+///
+/// Run once, before the worker's first tick: only a worker that isn't running can let a message
+/// reach that age, and a restart is what ends that. Before the claim, because `claim_due` orders by
+/// `fire_after` and would hand out the dead rows ahead of every live one. The per-message check in
+/// [`act`] stays behind it for the row that crosses the line while the worker is up.
+pub(super) async fn expire_stale(repos: &Repositories, config: &SelfDestructionConfig) {
+    loop {
+        let Ok(expired) = repos.deletions.expire_stale(Utc::now() - MAX_AGE, config.expiry_batch_size).await else {
+            tracing::warn!("couldn't expire the stale self-destructions");
+            return
+        };
+        if expired.is_empty() {
+            return
+        }
+        for batch in expired {
+            metrics::SELF_DESTRUCTION.record_many(batch.group, batch.kind, DeletionState::Expired, batch.count.value());
+            tracing::warn!(group = %batch.group, kind = %batch.kind, count = batch.count.value(), oldest = %batch.oldest,
+                "messages got too old to be deleted while they waited");
+        }
+
+        // Nothing waits on this: the rest costs a later first tick and nothing else.
+        if !config.poll_interval.is_zero() {
+            tokio::time::sleep(config.poll_interval).await;
+        }
+    }
+}
+
 /// Acts on one message and writes down what became of it.
 async fn act_and_record(
     bot: &Throttle<Bot>,
@@ -154,14 +182,14 @@ async fn act(
     bot_admin_ttl: Duration,
     deletion: ScheduledDeletion,
 ) -> Outcome {
-    // Telegram refuses to delete a message older than 48 hours. Delays are capped below that, so a
-    // message can only get here if the queue itself fell behind — retries, a long outage — and the
-    // row is kept as `expired` rather than spent on a request that is certain to be refused. An
-    // inline message is edited, not deleted, and no age limit applies to that.
+    // Telegram refuses to delete a message older than 48 hours, so the row is kept as `expired`
+    // rather than spent on a request that is certain to be refused. `expire_stale` finishes nearly
+    // all of them before the claim; only a row that crossed the line since, or one it failed to
+    // reach, gets here. An inline message is edited, not deleted, and no age limit applies to that.
     let is_chat_message = matches!(deletion.target, DeletionTarget::ChatMessage { .. });
     let age = (Utc::now() - deletion.created_at).to_std().unwrap_or(Duration::ZERO);
     if is_chat_message && age > MAX_AGE {
-        tracing::warn!(kind = %deletion.kind, created_at = %deletion.created_at,
+        tracing::debug!(kind = %deletion.kind, created_at = %deletion.created_at,
             "the message got too old to be deleted while it waited");
         return Outcome::Expired
     }

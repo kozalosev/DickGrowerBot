@@ -13,3 +13,10 @@ pub struct GrowthResult {
     pub new_length: Length,
     pub pos_in_top: Option<Position>,
 }
+
+/// What came of an election that was won. `NoDick` means the winner's dick no longer existed when
+/// the bonus was to be credited, which is not the same as an election with no candidates.
+pub enum DickOfDayResult {
+    Chosen(GrowthResult),
+    NoDick,
+}

@@ -79,6 +79,32 @@ async fn test_no_announcements() {
     assert!(announcement.is_none());
 }
 
+/// A code we don't localize falls back to English, so every query must speak about the same row.
+#[tokio::test]
+async fn test_unsupported_language_falls_back_to_english() {
+    let db = fresh_db().await;
+    seed_chat_with_player(&db).await;
+
+    let announcements_config = config::AnnouncementsConfig {
+        max_shows: Counter::new(2),
+        announcements: get_announcements_as_map(1)
+    };
+    let ann_repo = repo::Announcements::new(db.clone(), announcements_config);
+    let pt_br = LanguageCode::new("pt-br".to_owned());
+
+    let announcement = ann_repo.get_new(&CHAT_ID_KIND, &pt_br)
+        .await.expect("couldn't create the announcement");
+    assert_eq!(announcement, Some("test 1".to_owned()));
+
+    let announcement = ann_repo.get_new(&CHAT_ID_KIND, &pt_br)
+        .await.expect("couldn't increment the shown times");
+    assert_eq!(announcement, Some("test 1".to_owned()));
+
+    let announcement = ann_repo.get_new(&CHAT_ID_KIND, &pt_br)
+        .await.expect("couldn't get the announcement the third time");
+    assert_eq!(announcement, None, "the announcement must stop after max_shows");
+}
+
 #[tokio::test]
 async fn test_reload() {
     let db = fresh_db().await;

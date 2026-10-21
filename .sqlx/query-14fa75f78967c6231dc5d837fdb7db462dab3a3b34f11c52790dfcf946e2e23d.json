@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.name AS \"name: Username\" FROM Dick_of_Day dod\n                JOIN Users u ON u.uid = dod.winner_uid\n                WHERE dod.chat_id = $1 AND dod.created_at = current_date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name: Username",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "14fa75f78967c6231dc5d837fdb7db462dab3a3b34f11c52790dfcf946e2e23d"
+}

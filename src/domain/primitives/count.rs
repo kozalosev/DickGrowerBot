@@ -2,8 +2,9 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use derive_where::derive_where;
 use domain_types::traits::{ApproxInto, SaturatingInto};
+use crate::domain::primitives::{Limit, RateLimit};
 
-/// How many rows of `T` there are — the type says what was counted, which a bare number never could.
+/// How many of `T` there are — the type says what was counted, which a bare number never could.
 ///
 /// `T` is a marker and never a value, which is why the standard traits come from `derive_where`:
 /// the plain derives would each demand the same trait of `T`, so a count of something unclonable
@@ -29,6 +30,10 @@ impl <T> Count<T> {
     #[allow(dead_code)]
     pub const fn value(&self) -> u64 {
         self.value
+    }
+
+    pub const fn is_zero(&self) -> bool {
+        self.value == 0
     }
 }
 
@@ -109,6 +114,25 @@ impl <T> PartialOrd<u64> for Count<T> {
     }
 }
 
+/// A count reads against the limits it is held to, whatever it counts.
+macro_rules! compared_with_limit {
+    ($($limit:ty),+) => {$(
+        impl <T> PartialEq<$limit> for Count<T> {
+            fn eq(&self, other: &$limit) -> bool {
+                self.value == u64::from(other.value())
+            }
+        }
+
+        impl <T> PartialOrd<$limit> for Count<T> {
+            fn partial_cmp(&self, other: &$limit) -> Option<std::cmp::Ordering> {
+                self.value.partial_cmp(&u64::from(other.value()))
+            }
+        }
+    )+};
+}
+
+compared_with_limit!(Limit, RateLimit);
+
 impl <T> Default for Count<T> {
     fn default() -> Self {
         Self::new(0)
@@ -151,6 +175,14 @@ mod tests {
     fn a_count_is_the_number_it_was_built_from() {
         assert_eq!(Count::<Anything>::new(3), 3);
         assert_eq!(Count::<Anything>::new(3), 3);
+    }
+
+    #[test]
+    fn a_count_reads_against_a_limit() {
+        let count = Count::<Anything>::new(3);
+        assert!(count < RateLimit::new(4));
+        assert!(count == Limit::new(3));
+        assert!(count > Limit::new(2));
     }
 
     #[test]

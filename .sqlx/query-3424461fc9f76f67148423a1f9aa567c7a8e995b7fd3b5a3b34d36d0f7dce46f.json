@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS (\n                    UPDATE Scheduled_Message_Deletions SET state = 'expired', finished_at = current_timestamp\n                    WHERE id IN (\n                        SELECT id FROM Scheduled_Message_Deletions\n                        WHERE finished_at IS NULL AND inline_message_id IS NULL AND created_at < $1\n                        LIMIT $2\n                        FOR UPDATE SKIP LOCKED\n                    )\n                    RETURNING message_group, message_kind, created_at\n                )\n                SELECT message_group AS \"group!: MessageGroup\", message_kind AS \"kind!: MessageKind\",\n                       count(*) AS \"count!: Count<ScheduledDeletion>\", min(created_at) AS \"oldest!\"\n                FROM expired GROUP BY message_group, message_kind",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "group!: MessageGroup",
+        "type_info": {
+          "Custom": {
+            "name": "message_group",
+            "kind": {
+              "Enum": [
+                "notice",
+                "report",
+                "event",
+                "application"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "message_group"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind!: MessageKind",
+        "type_info": {
+          "Custom": {
+            "name": "message_kind",
+            "kind": {
+              "Enum": [
+                "reply",
+                "command",
+                "inline"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "message_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "count!: Count<ScheduledDeletion>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "oldest!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "3424461fc9f76f67148423a1f9aa567c7a8e995b7fd3b5a3b34d36d0f7dce46f"
+}

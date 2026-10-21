@@ -28,7 +28,7 @@ repository!(Import,
                         SELECT $1, * FROM UNNEST($2::bigint[], $3::bigint[])
                         RETURNING chat_id, uid, original_length
                     )
-                    UPDATE Dicks d SET length = (d.length + i.original_length), bonus_attempts = (d.bonus_attempts + 1)
+                    UPDATE Dicks d SET length = (d.length + i.original_length)
                     FROM inserted i JOIN Chats c ON c.chat_id = i.chat_id
                     WHERE d.chat_id = c.id AND d.uid = i.uid",
                 chat_id.0, &uids as &[UserId], &lengths as &[Length])

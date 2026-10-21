@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS (\n                    UPDATE Scheduled_Shrink_Broadcasts SET state = 'expired', finished_at = current_timestamp\n                    WHERE id IN (\n                        SELECT id FROM Scheduled_Shrink_Broadcasts\n                        WHERE finished_at IS NULL AND shrink_date < current_date\n                        LIMIT $1\n                        FOR UPDATE SKIP LOCKED\n                    )\n                    RETURNING shrink_date\n                )\n                SELECT count(*) AS \"count!: Count<ScheduledBroadcast>\", min(shrink_date) AS oldest FROM expired",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!: Count<ScheduledBroadcast>",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "oldest",
+        "type_info": "Date",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "42a651fbf207c2207840077f9b5b31918572398bed4f54545a8c04b0f1a94de1"
+}

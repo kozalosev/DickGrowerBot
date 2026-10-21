@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Announcements SET times_shown = times_shown + 1 WHERE chat_id = $1 AND language = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        {
+          "Custom": {
+            "name": "language_code",
+            "kind": {
+              "Enum": [
+                "en",
+                "ru",
+                "it",
+                "fa",
+                "zh"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a6a29b19b134812db34a54ee41655174cbed8e85d7400236701568001efafa4"
+}

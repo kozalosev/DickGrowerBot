@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Message_Deletions SET created_at = current_timestamp - interval '49 hours'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "19429ac8a18cd54977b528b642debb7849d81b0124c18694da1c33af3386b842"
+}

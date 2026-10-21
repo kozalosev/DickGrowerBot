@@ -358,7 +358,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     /// Read-through cache over [`Chats::get_chat_language`]. A chat with no language of its own is
     /// cached as such: that is an answer, and the commonest one.
     #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
-    async fn chat_language(&self, chat_id: &ChatIdKind) -> Option<SupportedLanguage> {
+    pub async fn chat_language(&self, chat_id: &ChatIdKind) -> Option<SupportedLanguage> {
         let key = ChatLanguageKey(chat_id.clone());
         self.cache.read_through(key, self.chat_ttl, &metrics::CHAT_LANGUAGE, || async {
             self.chats.get_chat_language(chat_id).await

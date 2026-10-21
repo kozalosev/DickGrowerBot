@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Promo_Codes SET until = since - 1 WHERE code = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "85e5d0f90f9319a464227d9941686030cb4f9c9fe29ae3de361c0d64c74bae3c"
+}

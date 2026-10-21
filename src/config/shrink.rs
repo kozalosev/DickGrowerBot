@@ -1,4 +1,5 @@
 use std::time::Duration;
+use chrono::{Datelike, NaiveDate};
 use crate::domain::primitives::{AttemptsCount, DaysCount, Limit, Ratio};
 use domain_types::literal;
 
@@ -9,10 +10,20 @@ pub struct DailyShrinkConfig {
     pub ratio: Ratio,
     pub inactivity_days: DaysCount,
     pub ramp_up_days: DaysCount,
+    /// Days between two runs.
+    pub period_days: DaysCount,
     /// How many chats one shrinking statement takes on. It bounds both the rows the statement locks
     /// and the ones a failure costs, so a `/grow` sent at midnight waits behind one batch rather
     /// than behind every stale dick in the database.
     pub batch_size: Limit,
+    /// How long the run rests between two batches. Zero runs them back to back, which is what it did
+    /// before there was a knob for it. Nothing waits on this job, so the rest costs only a longer
+    /// run — and buys back the connections the chats being answered at midnight are queueing for.
+    pub batch_delay: Duration,
+    /// How many leftover summaries one statement of the nightly cleanup finishes as expired. It
+    /// bounds the rows that statement locks and the time it may spend inside `statement_timeout`,
+    /// not how much gets cleared: the cleanup repeats until the queue is empty.
+    pub expiry_batch_size: Limit,
     pub broadcast: BroadcastConfig,
 }
 
@@ -41,19 +52,28 @@ pub struct BroadcastConfig {
     pub max_retry_delay: Duration,
     /// How many attempts a summary gets before the row is marked `failed` and left alone.
     pub max_attempts: AttemptsCount,
-    /// How old a summary may get before it stops being worth sending. Yesterday's list of shrinks
-    /// is still news in a chat that reads once a day; last week's is noise.
-    pub max_age: Duration,
     /// How long a finished row is kept before the cleaning process removes it. Zero keeps them for
     /// ever, which is what makes the queue's own history readable.
     pub retention: Duration,
+    /// How many of a chat's players the language tally looks at, when the chat has chosen no
+    /// language of its own. A tally does not become truer for having every last member in it, and
+    /// the whole roll of a large chat is a list the user-service then has to look up in one go.
+    pub language_sample: Limit,
 }
 
 impl DailyShrinkConfig {
     /// The daily shrink runs only when both knobs are meaningfully set: a positive ratio to lose
     /// and a positive grace period. Either being zero disables the feature — there's no separate flag.
     pub fn enabled(&self) -> bool {
-        self.ratio > literal!(Ratio = 0.0) && self.inactivity_days.value() > 0
+        self.ratio > literal!(Ratio = 0.0) && !self.inactivity_days.is_zero()
+    }
+
+    /// Whether the shrink runs on `date`: its day number since 0001-01-01 is a multiple of the period.
+    /// A zero period means daily.
+    pub fn is_due(&self, date: NaiveDate) -> bool {
+        i64::from(date.num_days_from_ce())
+            .checked_rem_euclid(i64::from(self.period_days.value()))
+            .is_none_or(|rest| rest == 0)
     }
 }
 
@@ -68,8 +88,57 @@ impl Default for BroadcastConfig {
             retry_delay: Duration::from_mins(1),
             max_retry_delay: Duration::from_hours(1),
             max_attempts: AttemptsCount::new(3),
-            max_age: Duration::from_hours(48),
             retention: Duration::from_hours(72),
+            language_sample: Limit::new(100),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use chrono::{Datelike, NaiveDate};
+    use crate::domain::primitives::DaysCount;
+    use super::DailyShrinkConfig;
+
+    #[test]
+    fn a_daily_period_is_due_every_day() {
+        let config = config(1);
+        assert!(config.is_due(date(2026, 10, 15)));
+        assert!(config.is_due(date(2026, 10, 16)));
+    }
+
+    #[test]
+    fn a_zero_period_is_read_as_daily() {
+        assert!(config(0).is_due(date(2026, 10, 15)));
+    }
+
+    #[test]
+    fn a_weekly_period_falls_on_one_weekday() {
+        let config = config(7);
+        let due: Vec<_> = (1..=28)
+            .map(|day| date(2026, 10, day))
+            .filter(|&d| config.is_due(d))
+            .collect();
+        assert_eq!(due.len(), 4);
+        let weekday = due[0].weekday();
+        assert!(due.iter().all(|d| d.weekday() == weekday));
+    }
+
+    #[test]
+    fn a_longer_period_skips_the_days_between() {
+        let config = config(30);
+        let due = (0..90)
+            .map(|offset| date(2026, 1, 1) + chrono::Days::new(offset))
+            .filter(|&d| config.is_due(d))
+            .count();
+        assert_eq!(due, 3);
+    }
+
+    fn config(period: u32) -> DailyShrinkConfig {
+        DailyShrinkConfig { period_days: DaysCount::new(period), ..Default::default() }
+    }
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("invalid date")
     }
 }

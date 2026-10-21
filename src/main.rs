@@ -17,11 +17,14 @@ mod observability;
 mod telegram_observer;
 mod scheduler;
 mod reload;
+mod shutdown;
 mod bans;
 mod topics;
 mod cleanup;
 mod cache;
 mod dialogue;
+mod rate_limit;
+mod telegram_backoff;
 
 #[cfg(test)]
 mod test_containers;
@@ -40,7 +43,7 @@ use dialogue::CachedDialogueStorage;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
-use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, PromoCommands, TopicsCommands};
+use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, MentionsCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::BattleLocks;
@@ -71,6 +74,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ban_list = bans::BanList::load(repos.users.clone()).await;
     let topic_policy = topics::TopicPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_topics);
     let cleanup_policy = cleanup::CleanupPolicy::new(repos.chats.clone(), cache.clone(), app_config.caches.chat_cleanup);
+    let rate_limiter = rate_limit::RateLimiter::new(&cache, app_config.rate_limit);
+    let telegram_backoff = telegram_backoff::TelegramBackoff::new(app_config.self_destruction.pause_threshold, app_config.self_destruction.pause_for);
 
     let handler = dptree::map_with_description(
         DpHandlerDescription::entry(),
@@ -78,7 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let lang_resolver = ls.defer(upd);
             HandlerDeps { repos, config, self_destruction, lang_resolver }
         })
+        // First of all: a flood must be stopped before it costs anything, and this writes nothing.
+        .branch(dptree::filter_map_async(checks::rate_limit_exceeded).endpoint(checks::handle_rate_limited))
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
+        .branch(Update::filter_message().filter_map(handlers::support_reply_recipient).endpoint(handlers::support_reply_handler))
         // /topics goes above the gate it configures, or a chat could lock itself out of its own
         // setting. Being a branch of its own, it needs no exemption inside the gate: this one
         // matches first, and only what falls through reaches the gate below.
@@ -90,14 +98,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
         .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
+        .branch(Update::filter_message().filter_map(handlers::support_answered_ticket).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
+            .endpoint(handlers::support_follow_up_handler))
         .branch(Update::filter_message().enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
-            .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler)))
+            .branch(dptree::case![SupportCommandState::Requested].endpoint(handlers::support_requested_handler))
+            .branch(dptree::case![SupportCommandState::Replying(ticket)].endpoint(handlers::support_follow_up_handler)))
         // Everything above the ban gate must not write a single row for the sender: a banned user
         // may still read the policy and reach the owner, but must not come back into the database.
         // /start writes too — it activates a promo code from a deeplink — so it goes below.
         .branch(dptree::filter(checks::is_banned).endpoint(checks::handle_banned))
         .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
         .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::language_cmd_handler))
+        .branch(Update::filter_message().filter_command::<MentionsCommands>().endpoint(handlers::mentions::mentions_cmd_handler))
         .branch(checks::group_command::<DickCommands>().endpoint(handlers::dick_cmd_handler))
         .branch(checks::group_command::<DickOfDayCommands>().endpoint(handlers::dod_cmd_handler))
         .branch(checks::group_command::<BattleCommands>().endpoint(handlers::pvp::pvp_cmd_handler))
@@ -134,9 +146,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::language::callback_filter).endpoint(handlers::language::language_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::topics::callback_filter).endpoint(handlers::topics::topics_callback_handler))
         .branch(Update::filter_callback_query().filter(handlers::cleanup::callback_filter).endpoint(handlers::cleanup::cleanup_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::mentions::callback_filter).endpoint(handlers::mentions::mentions_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::promo_callback_filter).endpoint(handlers::promo_callback_handler))
+        .branch(Update::filter_callback_query().filter(handlers::support_callback_filter).enter_dialogue::<CallbackQuery, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
+            .endpoint(handlers::support_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
-    let bot = config::BotConfig::build_bot()?;
+    let bot = config::BotConfig::build_bot(telegram_backoff.clone())?;
     bot.delete_webhook().await?;
 
     // The personal /language relies on the user-service; when it's unavailable, hide /language from
@@ -146,6 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         personal_language_enabled: language_service.user_service_enabled(),
         support_enabled: app_config.support_chat_id.is_some(),
         cleanup_enabled: app_config.self_destruction.configurable(),
+        mentions_enabled: app_config.daily_shrink.enabled(),
     };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
@@ -158,10 +175,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
     let me = bot.get_me().await?;
-    let perks = handlers::perks::all(&db_conn, &app_config);
+    let perks = handlers::perks::all(&app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
-                                                        &repos.dicks, &repos.perk_states, perks).await?;
-    let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES)?;
+                                                        &repos.perk_states, perks).await?;
+    let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES,
+                                                               &command_toggles)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = BattleLocks::new(&cache, app_config.caches.pvp_lock);
     let self_destruction = SelfDestructionService::new(app_config.self_destruction.clone(),
@@ -182,10 +200,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let throttled_bot = scheduler::throttled(bot.clone(), config::ThrottleConfig::from_env());
     scheduler::spawn_daily_shrink(repos.clone(), app_config.clone());
     scheduler::spawn_broadcast_worker(throttled_bot.clone(), repos.clone(), language_service.clone(),
-                                      topic_policy.clone(), app_config.clone());
+                                      topic_policy.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_broadcast_cleaner(repos.clone(), app_config.clone());
-    scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone());
+    scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone(), telegram_backoff);
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
+    scheduler::spawn_queue_reporter(repos.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
     ban_list.spawn_listen_task(db_conn.clone());
     ban_list.spawn_refresh_task(app_config.caches.ban_list_refresh);
@@ -206,6 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ban_list,
         topic_policy,
         cleanup_policy,
+        rate_limiter,
         cache,
         promo_dialogues,
         support_dialogues
@@ -224,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
                 .dependencies(deps)
                 .build();
+            shutdown::spawn_stop_on_signal(dispatcher.shutdown_token());
             let bot_fut = dispatcher.dispatch_with_listener(listener, error_handler);
 
             let srv = tokio::spawn(metrics::TASK_WEBHOOK_SERVER.instrument(async move {
@@ -245,26 +266,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => {
             tracing::info!("the polling dispatcher is activating");
 
+            let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
+                .default_handler(ignore_unknown_updates)
+                .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
+                .dependencies(deps)
+                .build();
+            shutdown::spawn_stop_on_signal(dispatcher.shutdown_token());
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
-                let listener = polling_default(bot.clone()).await;
+                let listener = polling_default(bot).await;
                 let listener_error_handler = ContextLoggingErrorHandler::new("An error from the update listener");
-                Dispatcher::builder(bot, handler)
-                    .default_handler(ignore_unknown_updates)
-                    .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
-                    .dependencies(deps)
-                    .enable_ctrlc_handler()
-                    .build()
-                    .dispatch_with_listener(listener, listener_error_handler)
-                    .await
+                dispatcher.dispatch_with_listener(listener, listener_error_handler).await
             }));
 
             let srv = tokio::spawn(metrics::TASK_METRICS_SERVER.instrument(async move {
                 let tcp_listener = tokio::net::TcpListener::bind(addr).await?;
                 axum::serve(tcp_listener, metrics_router.layer(prometheus_layer))
+                    // The webhook branch drains this server through the listener's stop flag; here
+                    // there is no such flag, so it listens for the signal itself.
                     .with_graceful_shutdown(async {
-                        tokio::signal::ctrl_c()
-                            .await
-                            .expect("failed to install CTRL+C signal handler");
+                        shutdown::stop_signal().await;
                         tracing::info!("shutting the metrics server down")
                     })
                     .await

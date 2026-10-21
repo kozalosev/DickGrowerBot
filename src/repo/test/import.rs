@@ -54,7 +54,7 @@ mod import_semantics {
         create_user_and_dick_2(&db, &CHAT_ID_KIND.into(), "second").await;
         // The same user in another chat, so a wrong join shows up as this dick growing too.
         let other_chat = ChatIdKind::ID(TelegramChatId::new(OTHER_CHAT_ID));
-        dicks.create_or_grow(USER_ID, &other_chat.into(), LengthChange::signed(3), &[])
+        dicks.create_or_grow(USER_ID, &other_chat.into(), LengthChange::signed(3))
             .await.expect("couldn't create a dick in the other chat");
 
         let before1 = read_dick(&db, USER_ID, CHAT_ID).await;
@@ -73,9 +73,7 @@ mod import_semantics {
         assert_eq!(after1.length, before1.length + 5);
         assert_eq!(after2.length, before2.length + 11, "the second user must not get the first one's length");
 
-        // The query adds 1 to bonus_attempts, but the BEFORE UPDATE trigger takes it back (migration
-        // 8). The addition is there to get past the "already grown today" check, not to hand out an
-        // attempt, so the stored value comes out unchanged.
+        // An import is not a growth, so the attempts are left exactly as they were.
         assert_eq!(after1.bonus_attempts, before1.bonus_attempts);
         assert_eq!(after2.bonus_attempts, before2.bonus_attempts);
 

@@ -1,18 +1,17 @@
 use autometrics::autometrics;
-use std::borrow::Cow;
 use anyhow::anyhow;
 use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::types::{LinkPreviewOptions, Message};
+use teloxide::types::Message;
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
-use crate::domain::objects::GrowthResult;
+use crate::domain::objects::{DickOfDayResult, GrowthResult, User};
+use crate::repo::DickOfDayIntentStatus;
 use crate::domain::primitives::{LanguageCode, Username};
 use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
-use crate::handlers::utils::Incrementor;
-
-const DOD_ALREADY_CHOSEN_SQL_CODE: &str = "GD0E2";
+use crate::handlers::utils::{Increment, Incrementor};
+use crate::handlers::utils::disabled_link_preview;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "snake_case")]
@@ -64,44 +63,24 @@ pub(crate) async fn dick_of_day_impl(
     };
     let (answer, group) = match winner {
         Some(winner) => {
-            let increment = incr.dod_increment(winner.uid, chat_id.kind(), lang_code).await;
-            let dod_result = repos.dicks.set_dod_winner(chat_id, winner.uid, increment.total,
-                                                        &increment.perk_states).await;
-            let (main_part, group) = match dod_result {
-                Ok(Some(GrowthResult { new_length, pos_in_top })) => {
-                    let answer = t!("commands.dod.result", locale = lang_code,
-                        uid = winner.uid, name = winner.name.escaped(), growth = increment.total, length = new_length);
-                    let perks_part = increment.perks_part_of_answer(lang_code);
-                    let text = if let Some(pos) = pos_in_top {
-                        let position = t!("commands.dod.position", locale = lang_code, pos = pos);
-                        format!("{answer}\n{position}{perks_part}")
-                    } else {
-                        format!("{answer}{perks_part}")
-                    };
-                    (text, MessageGroup::Event)
-                },
-                Ok(None) => {
-                    tracing::error!(uid = %winner.uid, chat_id = %chat_id,
-                        "there was an attempt to set a non-existent dick as a winner");
-                    let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
-                    (text, MessageGroup::Notice)
-                }
-                Err(e) => {
-                    match e.downcast::<sqlx::Error>()? {
-                        sqlx::Error::Database(e)
-                        if e.code() == Some(Cow::Borrowed(DOD_ALREADY_CHOSEN_SQL_CODE)) => {
-                            let name = Username::new(e.message().to_owned()).escaped();
-                            let text = t!("commands.dod.already_chosen", locale = lang_code, name = name).to_string();
-                            (text, MessageGroup::Notice)
-                        }
-                        e => Err(e)?
+            let (main_part, group) = match repos.dicks.begin_dod(chat_id, winner.uid).await? {
+                DickOfDayIntentStatus::AlreadyChosen(name) => already_chosen_answer(&name, lang_code),
+                DickOfDayIntentStatus::Vacant(mut growth_tx) => {
+                    let increment = incr.dod_increment(&mut growth_tx, lang_code).await;
+                    match growth_tx.commit_dod(increment.total).await? {
+                        DickOfDayResult::Chosen(result) => chosen_answer(&winner, result, &increment, lang_code),
+                        DickOfDayResult::NoDick => {
+                            tracing::error!(uid = %winner.uid, chat_id = %chat_id,
+                                "there was an attempt to set a non-existent dick as a winner");
+                            no_candidates_answer(lang_code)
+                        },
                     }
                 }
             };
             let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
             (format!("{main_part}{time_left_part}"), group)
         },
-        None => (t!("commands.dod.no_candidates", locale = lang_code).to_string(), MessageGroup::Notice)
+        None => no_candidates_answer(lang_code),
     };
     let announcement = repos.announcements.get_new(&chat_id.kind(), lang_code).await?
         .inspect(|_| metrics::ANNOUNCEMENT_SHOWN.record(lang_code.to_supported_language()))
@@ -110,13 +89,31 @@ pub(crate) async fn dick_of_day_impl(
     Ok(TaggedReply { text: format!("{answer}{announcement}"), group })
 }
 
-fn disabled_link_preview() -> LinkPreviewOptions {
-    LinkPreviewOptions {
-        is_disabled: true,
+fn chosen_answer(
+    winner: &User,
+    result: GrowthResult,
+    increment: &Increment,
+    lang_code: &LanguageCode,
+) -> (String, MessageGroup) {
+    let GrowthResult { new_length, pos_in_top } = result;
+    let answer = t!("commands.dod.result", locale = lang_code,
+        uid = winner.uid, name = winner.name.escaped(), growth = increment.total, length = new_length);
+    let perks_part = increment.perks_part_of_answer(lang_code);
+    let text = if let Some(pos) = pos_in_top {
+        let position = t!("commands.dod.position", locale = lang_code, pos = pos);
+        format!("{answer}\n{position}{perks_part}")
+    } else {
+        format!("{answer}{perks_part}")
+    };
+    (text, MessageGroup::Event)
+}
 
-        url: None,
-        prefer_small_media: false,
-        prefer_large_media: false,
-        show_above_text: false,
-    }
+fn already_chosen_answer(name: &Username, lang_code: &LanguageCode) -> (String, MessageGroup) {
+    let text = t!("commands.dod.already_chosen", locale = lang_code, name = name.escaped()).to_string();
+    (text, MessageGroup::Notice)
+}
+
+fn no_candidates_answer(lang_code: &LanguageCode) -> (String, MessageGroup) {
+    let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
+    (text, MessageGroup::Notice)
 }
