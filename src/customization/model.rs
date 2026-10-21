@@ -1,11 +1,13 @@
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::str::FromStr;
 
 use crate::domain::primitives::UserId;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum CustomizationId {
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq,
+    strum_macros::Display, strum_macros::EnumString, strum_macros::IntoStaticStr,
+)]
+#[strum(serialize_all = "lowercase")]
+pub enum CustomizationName {
     Crown,
     Fire,
     Snake,
@@ -30,115 +32,45 @@ pub enum CustomizationId {
     Monospace,
 }
 
-impl CustomizationId {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Crown => "crown",
-            Self::Fire => "fire",
-            Self::Snake => "snake",
-            Self::Eggplant => "eggplant",
-            Self::Banana => "banana",
-            Self::Rooster => "rooster",
-            Self::Cactus => "cactus",
-            Self::Mushroom => "mushroom",
-            Self::Ruler => "ruler",
-            Self::Growth => "growth",
-            Self::Muscle => "muscle",
-            Self::Trophy => "trophy",
-            Self::Splash => "splash",
-            Self::Rocket => "rocket",
-            Self::Classic => "classic",
-            Self::Long => "long",
-            Self::Xxl => "xxl",
-            Self::Frame => "frame",
-            Self::Brackets => "brackets",
-            Self::Grower => "grower",
-            Self::Bold => "bold",
-            Self::Monospace => "monospace",
-        }
-    }
-
-    pub(super) const fn customization(self) -> Customization {
-        match self {
-            Self::Crown => Customization::new("👑 ", ""),
-            Self::Fire => Customization::new("🔥 ", " 🔥"),
-            Self::Snake => Customization::new("🐍 ", ""),
-            Self::Eggplant => Customization::new("🍆 ", ""),
-            Self::Banana => Customization::new("🍌 ", ""),
-            Self::Rooster => Customization::new("🐓 ", ""),
-            Self::Cactus => Customization::new("🌵 ", ""),
-            Self::Mushroom => Customization::new("🍄 ", ""),
-            Self::Ruler => Customization::new("📏 ", " 📏"),
-            Self::Growth => Customization::new("📈 ", " 📈"),
-            Self::Muscle => Customization::new("💪 ", " 💪"),
-            Self::Trophy => Customization::new("🏆 ", " 🏆"),
-            Self::Splash => Customization::new("💦 ", " 💦"),
-            Self::Rocket => Customization::new("🚀 ", " 🚀"),
-            Self::Classic => Customization::new("8===D ", ""),
-            Self::Long => Customization::new("8════════D ", ""),
-            Self::Xxl => Customization::new("[XXL] ", ""),
-            Self::Frame => Customization::new("꧁༺ ", " ༻꧂"),
-            Self::Brackets => Customization::new("『", "』"),
-            Self::Grower => Customization::new("╰⋃╯ ", ""),
-            Self::Bold => Customization::new("<b>", "</b>"),
-            Self::Monospace => Customization::new("<code>", "</code>"),
-        }
-    }
-}
-
-impl Display for CustomizationId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for CustomizationId {
-    type Err = strum::ParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "crown" => Ok(Self::Crown),
-            "fire" => Ok(Self::Fire),
-            "snake" => Ok(Self::Snake),
-            "eggplant" => Ok(Self::Eggplant),
-            "banana" => Ok(Self::Banana),
-            "rooster" => Ok(Self::Rooster),
-            "cactus" => Ok(Self::Cactus),
-            "mushroom" => Ok(Self::Mushroom),
-            "ruler" => Ok(Self::Ruler),
-            "growth" => Ok(Self::Growth),
-            "muscle" => Ok(Self::Muscle),
-            "trophy" => Ok(Self::Trophy),
-            "splash" => Ok(Self::Splash),
-            "rocket" => Ok(Self::Rocket),
-            "classic" => Ok(Self::Classic),
-            "long" => Ok(Self::Long),
-            "xxl" => Ok(Self::Xxl),
-            "frame" => Ok(Self::Frame),
-            "brackets" => Ok(Self::Brackets),
-            "grower" => Ok(Self::Grower),
-            "bold" => Ok(Self::Bold),
-            "monospace" => Ok(Self::Monospace),
-            _ => Err(strum::ParseError::VariantNotFound),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, derive_more::Constructor)]
+#[allow(clippy::redundant_field_names, reason = "derive_more::Constructor spells the fields out")]
 pub(super) struct Customization {
     pub prefix: &'static str,
     pub suffix: &'static str,
 }
 
-impl Customization {
-    const fn new(prefix: &'static str, suffix: &'static str) -> Self {
-        Self { prefix, suffix }
+impl From<CustomizationName> for Customization {
+    fn from(value: CustomizationName) -> Self {
+        match value {
+            CustomizationName::Crown => Customization::new("👑 ", ""),
+            CustomizationName::Fire => Customization::new("🔥 ", " 🔥"),
+            CustomizationName::Snake => Customization::new("🐍 ", ""),
+            CustomizationName::Eggplant => Customization::new("🍆 ", ""),
+            CustomizationName::Banana => Customization::new("🍌 ", ""),
+            CustomizationName::Rooster => Customization::new("🐓 ", ""),
+            CustomizationName::Cactus => Customization::new("🌵 ", ""),
+            CustomizationName::Mushroom => Customization::new("🍄 ", ""),
+            CustomizationName::Ruler => Customization::new("📏 ", " 📏"),
+            CustomizationName::Growth => Customization::new("📈 ", " 📈"),
+            CustomizationName::Muscle => Customization::new("💪 ", " 💪"),
+            CustomizationName::Trophy => Customization::new("🏆 ", " 🏆"),
+            CustomizationName::Splash => Customization::new("💦 ", " 💦"),
+            CustomizationName::Rocket => Customization::new("🚀 ", " 🚀"),
+            CustomizationName::Classic => Customization::new("8===D ", ""),
+            CustomizationName::Long => Customization::new("8════════D ", ""),
+            CustomizationName::Xxl => Customization::new("[XXL] ", ""),
+            CustomizationName::Frame => Customization::new("꧁༺ ", " ༻꧂"),
+            CustomizationName::Brackets => Customization::new("『", "』"),
+            CustomizationName::Grower => Customization::new("╰⋃╯ ", ""),
+            CustomizationName::Bold => Customization::new("<b>", "</b>"),
+            CustomizationName::Monospace => Customization::new("<code>", "</code>"),
+        }
     }
 }
 
 #[derive(Clone, Default)]
 pub struct Decorations {
-    by_user: HashMap<UserId, CustomizationId>,
+    by_user: HashMap<UserId, CustomizationName>,
 }
 
 impl Decorations {
@@ -146,19 +78,17 @@ impl Decorations {
         Self::default()
     }
 
-    pub(crate) fn from_entries(
-        entries: impl IntoIterator<Item = (UserId, CustomizationId)>,
-    ) -> Self {
-        Self {
-            by_user: entries.into_iter().collect(),
-        }
-    }
-
     pub fn apply(&self, uid: UserId, escaped_text: String) -> String {
         match self.by_user.get(&uid).copied() {
-            Some(id) => super::renderer::apply(id, escaped_text),
+            Some(name) => super::renderer::apply(name, escaped_text),
             None => escaped_text,
         }
+    }
+}
+
+impl FromIterator<(UserId, CustomizationName)> for Decorations {
+    fn from_iter<I: IntoIterator<Item = (UserId, CustomizationName)>>(entries: I) -> Self {
+        Self { by_user: entries.into_iter().collect() }
     }
 }
 
@@ -167,44 +97,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ids_have_stable_database_values() {
-        for (id, stored) in [
-            (CustomizationId::Crown, "crown"),
-            (CustomizationId::Fire, "fire"),
-            (CustomizationId::Snake, "snake"),
-            (CustomizationId::Eggplant, "eggplant"),
-            (CustomizationId::Banana, "banana"),
-            (CustomizationId::Rooster, "rooster"),
-            (CustomizationId::Cactus, "cactus"),
-            (CustomizationId::Mushroom, "mushroom"),
-            (CustomizationId::Ruler, "ruler"),
-            (CustomizationId::Growth, "growth"),
-            (CustomizationId::Muscle, "muscle"),
-            (CustomizationId::Trophy, "trophy"),
-            (CustomizationId::Splash, "splash"),
-            (CustomizationId::Rocket, "rocket"),
-            (CustomizationId::Classic, "classic"),
-            (CustomizationId::Long, "long"),
-            (CustomizationId::Xxl, "xxl"),
-            (CustomizationId::Frame, "frame"),
-            (CustomizationId::Brackets, "brackets"),
-            (CustomizationId::Grower, "grower"),
-            (CustomizationId::Bold, "bold"),
-            (CustomizationId::Monospace, "monospace"),
+    fn names_have_stable_database_values() {
+        for (name, stored) in [
+            (CustomizationName::Crown, "crown"),
+            (CustomizationName::Fire, "fire"),
+            (CustomizationName::Snake, "snake"),
+            (CustomizationName::Eggplant, "eggplant"),
+            (CustomizationName::Banana, "banana"),
+            (CustomizationName::Rooster, "rooster"),
+            (CustomizationName::Cactus, "cactus"),
+            (CustomizationName::Mushroom, "mushroom"),
+            (CustomizationName::Ruler, "ruler"),
+            (CustomizationName::Growth, "growth"),
+            (CustomizationName::Muscle, "muscle"),
+            (CustomizationName::Trophy, "trophy"),
+            (CustomizationName::Splash, "splash"),
+            (CustomizationName::Rocket, "rocket"),
+            (CustomizationName::Classic, "classic"),
+            (CustomizationName::Long, "long"),
+            (CustomizationName::Xxl, "xxl"),
+            (CustomizationName::Frame, "frame"),
+            (CustomizationName::Brackets, "brackets"),
+            (CustomizationName::Grower, "grower"),
+            (CustomizationName::Bold, "bold"),
+            (CustomizationName::Monospace, "monospace"),
         ] {
-            assert_eq!(id.as_str(), stored);
-            assert_eq!(id.to_string(), stored);
+            assert_eq!(<&str>::from(name), stored);
+            assert_eq!(name.to_string(), stored);
             assert_eq!(
-                stored
-                    .parse::<CustomizationId>()
-                    .expect("the id must parse"),
-                id
+                stored.parse::<CustomizationName>()
+                    .expect("the name must parse"),
+                name
             );
         }
     }
 
     #[test]
-    fn an_unknown_id_is_rejected() {
-        assert!("unknown".parse::<CustomizationId>().is_err());
+    fn an_unknown_name_is_rejected() {
+        assert!("unknown".parse::<CustomizationName>().is_err());
     }
 }

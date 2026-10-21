@@ -176,22 +176,14 @@ fn get_chats_in_russian(count: AffectedRows) -> String {
 
 #[cfg(test)]
 mod test {
-    use teloxide::types::{InlineQuery, InlineQueryId, User, UserId};
+    use teloxide::types::{InlineQuery, InlineQueryId};
+    use crate::repo::test::telegram_user;
     use super::promo_inline_filter;
 
     fn query(text: &str) -> InlineQuery {
         InlineQuery {
             id: InlineQueryId("1".to_owned()),
-            from: User {
-                id: UserId(1),
-                is_bot: false,
-                first_name: "test".to_owned(),
-                last_name: None,
-                username: None,
-                language_code: None,
-                is_premium: false,
-                added_to_attachment_menu: false,
-            },
+            from: telegram_user(1, None),
             query: text.to_owned(),
             offset: String::default(),
             chat_type: None,

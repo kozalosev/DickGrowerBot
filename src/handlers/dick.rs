@@ -3,6 +3,7 @@ use autometrics::autometrics;
 use anyhow::anyhow;
 use chrono::{Datelike, Utc};
 use domain_types::traits::SaturatingInto;
+use futures::future::OptionFuture;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -10,7 +11,6 @@ use teloxide::macros::BotCommands;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
-use crate::customization::Decorations;
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
@@ -161,18 +161,15 @@ pub(crate) async fn top_impl(
         .take(usize::from(config.top_limit))
         .map(|d| d.owner_uid)
         .collect::<Vec<_>>();
-    let decorations = if config.features.customizations {
-        Some(repos.customizations
-            .decorations_for(&user_ids)
-            .await
-            .inspect_err(|error| tracing::warn!(
-                error = format!("{error:#}"),
-                "couldn't load customizations for the top"
-            ))
-            .unwrap_or_else(|_| Decorations::empty()))
-    } else {
-        None
-    };
+    let decorations = OptionFuture::from(
+            config.features.customizations
+                .then(|| repos.customizations.decorations_for(&user_ids))
+        )
+        .await
+        .and_then(|result| result
+            .inspect_err(|error| tracing::warn!(error = format!("{error:#}"), "couldn't load customizations for the top"))
+            .ok())
+        .unwrap_or_default();
     let mut any_inactive = false;
     let lines = dicks.into_iter()
         .take(usize::from(config.top_limit))
@@ -184,10 +181,7 @@ pub(crate) async fn top_impl(
             } else {
                 escaped_name
             };
-            let name = match &decorations {
-                Some(decorations) => decorations.apply(d.owner_uid, name),
-                None => name,
-            };
+            let name = decorations.apply(d.owner_uid, name);
             let now = Utc::now();
             let inactive = (now - d.grown_at).num_days() > i64::from(config.inactivity_days);
             let can_grow = now.num_days_from_ce() > d.grown_at.num_days_from_ce();
@@ -281,57 +275,11 @@ pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> Inl
 #[cfg(test)]
 mod tests {
     use sqlx::{Pool, Postgres};
-    use teloxide::types::UserId as TeloxideUserId;
 
     use super::*;
-    use crate::customization::CustomizationId;
+    use crate::customization::CustomizationName;
     use crate::domain::primitives::{LengthChange, Limit};
-    use crate::repo::test::{fresh_db, CHAT_ID_KIND, NAME, USER_ID};
-
-    fn telegram_user() -> TeloxideUser {
-        TeloxideUser {
-            id: TeloxideUserId(USER_ID.value()),
-            is_bot: false,
-            first_name: NAME.to_owned(),
-            last_name: None,
-            username: None,
-            language_code: Some("en".to_owned()),
-            is_premium: false,
-            added_to_attachment_menu: false,
-        }
-    }
-
-    fn config() -> AppConfig {
-        AppConfig {
-            top_limit: Limit::new(10),
-            inactivity_days: DaysCount::new(7),
-            ..Default::default()
-        }
-    }
-
-    async fn top(db: &Pool<Postgres>, config: &AppConfig) -> String {
-        let repos = repo::Repositories::new(db, config);
-        let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
-        let from = telegram_user();
-        top_impl(
-            &repos,
-            config,
-            FromRefs(&from, &chat_id),
-            &LanguageCode::new("en".to_owned()),
-            Page::first(),
-        )
-        .await.expect("couldn't build the top")
-        .lines
-    }
-
-    async fn seed_player(db: &Pool<Postgres>, config: &AppConfig) {
-        let repos = repo::Repositories::new(db, config);
-        repos.users.create_or_update(USER_ID, NAME)
-            .await.expect("couldn't create the user");
-        let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
-        repos.dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(5), &[])
-            .await.expect("couldn't create the dick");
-    }
+    use crate::repo::test::{fresh_db, telegram_user, CHAT_ID_KIND, NAME, USER_ID};
 
     #[tokio::test]
     async fn top_only_changes_the_decorated_name_and_the_flag_restores_old_text() {
@@ -341,16 +289,14 @@ mod tests {
         let baseline = top(&db, &config).await;
 
         repo::Customizations::new(db.clone())
-            .set_active(USER_ID, CustomizationId::Crown)
+            .set_active(USER_ID, CustomizationName::Crown)
             .await.expect("couldn't set the customization");
         let decorated = top(&db, &config).await;
         assert!(decorated.contains("👑 <u>"), "the prepared name must be decorated");
-        assert_eq!(decorated.replacen("👑 ", "", 1), baseline,
-            "position, length, markup and hints must stay unchanged");
+        assert_eq!(decorated.replacen("👑 ", "", 1), baseline, "position, length, markup and hints must stay unchanged");
 
         config.features.customizations = false;
-        assert_eq!(top(&db, &config).await, baseline,
-            "the disabled feature must preserve the previous top text");
+        assert_eq!(top(&db, &config).await, baseline, "the disabled feature must preserve the previous top text");
     }
 
     #[tokio::test]
@@ -364,7 +310,32 @@ mod tests {
             .execute(&db)
             .await.expect("couldn't remove the optional table for the failure test");
 
-        assert_eq!(top(&db, &config).await, baseline,
-            "optional cosmetics must fail open");
+        assert_eq!(top(&db, &config).await, baseline, "optional cosmetics must fail open");
+    }
+
+    fn config() -> AppConfig {
+        AppConfig {
+            top_limit: Limit::new(10),
+            inactivity_days: DaysCount::new(7),
+            ..Default::default()
+        }
+    }
+
+    async fn top(db: &Pool<Postgres>, config: &AppConfig) -> String {
+        let repos = repo::Repositories::new(db, config);
+        let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
+        let from = telegram_user(USER_ID.value(), Some("en"));
+        top_impl(&repos, config, FromRefs(&from, &chat_id), &LanguageCode::new("en".to_owned()), Page::first())
+            .await.expect("couldn't build the top")
+            .lines
+    }
+
+    async fn seed_player(db: &Pool<Postgres>, config: &AppConfig) {
+        let repos = repo::Repositories::new(db, config);
+        repos.users.create_or_update(USER_ID, NAME)
+             .await.expect("couldn't create the user");
+        let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
+        repos.dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(5), &[])
+             .await.expect("couldn't create the dick");
     }
 }

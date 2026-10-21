@@ -79,6 +79,19 @@ pub fn user_id(value: i64) -> UserId {
     UserId::new(value.saturating_into())
 }
 
+pub fn telegram_user(id: u64, language_code: Option<&str>) -> teloxide::types::User {
+    teloxide::types::User {
+        id: teloxide::types::UserId(id),
+        is_bot: false,
+        first_name: NAME.to_owned(),
+        last_name: None,
+        username: None,
+        language_code: language_code.map(ToOwned::to_owned),
+        is_premium: false,
+        added_to_attachment_menu: false,
+    }
+}
+
 pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
     let dicks = repo::Dicks::new(db.clone(), Default::default());
     let chat_id = ChatIdKind::ID(TelegramChatId::new(CHAT_ID));

@@ -183,7 +183,7 @@ async fn fill_all_tables(db: &Pool<Postgres>) {
 
     sqlx::query!("INSERT INTO Users (uid, name) VALUES ($1, $2)", USER_ID as UserId, NAME)
         .execute(db).await.expect("couldn't create the user");
-    sqlx::query!("INSERT INTO User_Customizations (uid, customization_id) VALUES ($1, 'crown')", USER_ID as UserId)
+    sqlx::query!("INSERT INTO User_Customizations (uid, customization_name) VALUES ($1, 'crown')", USER_ID as UserId)
         .execute(db).await.expect("couldn't create the customization");
     sqlx::query!("INSERT INTO Dicks (uid, chat_id, length) VALUES ($1, $2, 5)", USER_ID as UserId, internal_chat_id)
         .execute(db).await.expect("couldn't create the dick");

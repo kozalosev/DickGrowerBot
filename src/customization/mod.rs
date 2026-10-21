@@ -1,4 +1,4 @@
 mod model;
 mod renderer;
 
-pub use model::{CustomizationId, Decorations};
+pub use model::{CustomizationName, Decorations};

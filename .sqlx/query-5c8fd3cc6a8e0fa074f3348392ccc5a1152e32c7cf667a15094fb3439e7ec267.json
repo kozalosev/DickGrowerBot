@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uid AS \"uid: UserId\", customization_id\n                 FROM User_Customizations\n                WHERE uid = ANY($1)",
+  "query": "SELECT uid AS \"uid: UserId\", customization_name\n                 FROM User_Customizations\n                WHERE uid = ANY($1)",
   "describe": {
     "columns": [
       {
@@ -16,12 +16,12 @@
       },
       {
         "ordinal": 1,
-        "name": "customization_id",
+        "name": "customization_name",
         "type_info": "Varchar",
         "origin": {
           "Table": {
             "table": "user_customizations",
-            "name": "customization_id"
+            "name": "customization_name"
           }
         }
       }
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "84ad74860a4e86ec26033096d65a7feb67d4af7f2526be1d7028c9911b0ad719"
+  "hash": "5c8fd3cc6a8e0fa074f3348392ccc5a1152e32c7cf667a15094fb3439e7ec267"
 }
