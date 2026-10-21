@@ -327,7 +327,7 @@ mod tests {
         repos.users.create_or_update(USER_ID, NAME)
              .await.expect("couldn't create the user");
         let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
-        repos.dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(5), &[])
+        repos.dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(5))
              .await.expect("couldn't create the dick");
     }
 }

@@ -4,8 +4,10 @@ CREATE TABLE IF NOT EXISTS User_Customizations (
     updated_at         timestamptz NOT NULL DEFAULT current_timestamp
 );
 
--- Deletes every row the user owns and blocks them for p_ban_days. ON DELETE CASCADE does not help
--- here because erasure deliberately keeps the anonymized Users row so the temporary ban survives.
+-- Deletes every row the user owns and blocks them for p_ban_days.
+--
+-- The name and the settings are cleared and created_at is moved to now: nothing is left to tell who
+-- the person was, and a user who comes back after the ban starts with a fresh grace period.
 CREATE OR REPLACE FUNCTION erase_user(p_uid bigint, p_ban_days int DEFAULT 90)
     RETURNS void
     LANGUAGE PLPGSQL
@@ -38,6 +40,8 @@ BEGIN
     GET DIAGNOSTICS affected = ROW_COUNT; deleted := deleted + affected;
     DELETE FROM Perk_States            WHERE uid = p_uid;
     GET DIAGNOSTICS affected = ROW_COUNT; deleted := deleted + affected;
+    DELETE FROM Player_Settings        WHERE uid = p_uid;
+    GET DIAGNOSTICS affected = ROW_COUNT; deleted := deleted + affected;
     DELETE FROM Dick_of_Day            WHERE winner_uid = p_uid;
     GET DIAGNOSTICS affected = ROW_COUNT; deleted := deleted + affected;
     DELETE FROM User_Customizations    WHERE uid = p_uid;
@@ -45,6 +49,7 @@ BEGIN
 
     UPDATE Users
        SET name         = '',
+           settings     = '{}'::jsonb,
            created_at   = current_timestamp,
            banned_until = current_timestamp + make_interval(days => p_ban_days)
      WHERE uid = p_uid;

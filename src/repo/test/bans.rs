@@ -6,7 +6,7 @@ use crate::repo::test::{fresh_db, CHAT_ID, NAME, USER_ID};
 
 /// Every table `erase_user` must clear, as `(table, uid column)`. The guard test below fails when a
 /// new one appears in the schema, because then the function needs a new DELETE too.
-const TABLES_WITH_USER_ROWS: [(&str, &str); 9] = [
+const TABLES_WITH_USER_ROWS: [(&str, &str); 10] = [
     ("battle_stats", "uid"),
     ("dick_of_day", "winner_uid"),
     ("dicks", "uid"),
