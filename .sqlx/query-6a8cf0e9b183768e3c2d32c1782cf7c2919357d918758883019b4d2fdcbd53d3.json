@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO User_Customizations (uid, customization_name) VALUES ($1, $2)\n                   ON CONFLICT (uid) DO UPDATE\n                   SET customization_name = EXCLUDED.customization_name, updated_at = current_timestamp",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6a8cf0e9b183768e3c2d32c1782cf7c2919357d918758883019b4d2fdcbd53d3"
+}

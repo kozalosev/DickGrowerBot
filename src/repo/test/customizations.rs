@@ -59,7 +59,7 @@ async fn decorations_are_loaded_for_a_batch_and_unknown_names_are_ignored() {
     customizations.set_active(USER_ID, CustomizationName::Snake)
         .await.expect("couldn't set the customization");
     sqlx::query!(
-        "INSERT INTO User_Customizations (uid, customization_name) VALUES ($1, 'future-id')",
+        "INSERT INTO User_Customizations (uid, customization_name) VALUES ($1, 'future-name')",
         unknown_uid as crate::domain::primitives::UserId,
     )
     .execute(&db)

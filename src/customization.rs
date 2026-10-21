@@ -34,9 +34,9 @@ pub enum CustomizationName {
 
 #[derive(Clone, Copy, derive_more::Constructor)]
 #[allow(clippy::redundant_field_names, reason = "derive_more::Constructor spells the fields out")]
-pub(super) struct Customization {
-    pub prefix: &'static str,
-    pub suffix: &'static str,
+struct Customization {
+    prefix: &'static str,
+    suffix: &'static str,
 }
 
 impl From<CustomizationName> for Customization {
@@ -80,7 +80,10 @@ impl Decorations {
 
     pub fn apply(&self, uid: UserId, escaped_text: String) -> String {
         match self.by_user.get(&uid).copied() {
-            Some(name) => super::renderer::apply(name, escaped_text),
+            Some(name) => {
+                let customization = Customization::from(name);
+                [customization.prefix, &escaped_text, customization.suffix].concat()
+            }
             None => escaped_text,
         }
     }
@@ -95,6 +98,8 @@ impl FromIterator<(UserId, CustomizationName)> for Decorations {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const UID: UserId = UserId::new(1);
 
     #[test]
     fn names_have_stable_database_values() {
@@ -135,5 +140,67 @@ mod tests {
     #[test]
     fn an_unknown_name_is_rejected() {
         assert!("unknown".parse::<CustomizationName>().is_err());
+    }
+
+    #[test]
+    fn every_builtin_decoration_has_the_expected_shape() {
+        for (name, expected) in [
+            (CustomizationName::Crown, "👑 name"),
+            (CustomizationName::Fire, "🔥 name 🔥"),
+            (CustomizationName::Snake, "🐍 name"),
+            (CustomizationName::Eggplant, "🍆 name"),
+            (CustomizationName::Banana, "🍌 name"),
+            (CustomizationName::Rooster, "🐓 name"),
+            (CustomizationName::Cactus, "🌵 name"),
+            (CustomizationName::Mushroom, "🍄 name"),
+            (CustomizationName::Ruler, "📏 name 📏"),
+            (CustomizationName::Growth, "📈 name 📈"),
+            (CustomizationName::Muscle, "💪 name 💪"),
+            (CustomizationName::Trophy, "🏆 name 🏆"),
+            (CustomizationName::Splash, "💦 name 💦"),
+            (CustomizationName::Rocket, "🚀 name 🚀"),
+            (CustomizationName::Classic, "8===D name"),
+            (CustomizationName::Long, "8════════D name"),
+            (CustomizationName::Xxl, "[XXL] name"),
+            (CustomizationName::Frame, "꧁༺ name ༻꧂"),
+            (CustomizationName::Brackets, "『name』"),
+            (CustomizationName::Grower, "╰⋃╯ name"),
+            (CustomizationName::Bold, "<b>name</b>"),
+            (CustomizationName::Monospace, "<code>name</code>"),
+        ] {
+            assert_eq!(decorations(name).apply(UID, "name".to_owned()), expected);
+        }
+    }
+
+    #[test]
+    fn no_decoration_returns_the_original_text() {
+        assert_eq!(Decorations::empty().apply(UID, "name".to_owned()), "name");
+    }
+
+    #[test]
+    fn an_empty_string_is_safe() {
+        assert_eq!(
+            decorations(CustomizationName::Fire).apply(UID, String::new()),
+            "🔥  🔥"
+        );
+    }
+
+    #[test]
+    fn existing_html_is_preserved_without_a_second_escape() {
+        let escaped = "<u>Tom &amp; Jerry</u>".to_owned();
+        assert_eq!(
+            decorations(CustomizationName::Crown).apply(UID, escaped),
+            "👑 <u>Tom &amp; Jerry</u>"
+        );
+    }
+
+    #[test]
+    fn a_decoration_is_applied_once_per_call() {
+        let result = decorations(CustomizationName::Snake).apply(UID, "name".to_owned());
+        assert_eq!(result.matches('🐍').count(), 1);
+    }
+
+    fn decorations(name: CustomizationName) -> Decorations {
+        [(UID, name)].into_iter().collect()
     }
 }

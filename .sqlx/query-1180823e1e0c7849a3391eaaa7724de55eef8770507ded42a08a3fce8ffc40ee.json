@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT uid AS \"uid: UserId\", customization_name\n                 FROM User_Customizations\n                WHERE uid = ANY($1)",
+  "query": "SELECT uid AS \"uid: UserId\", customization_name\n                   FROM User_Customizations\n                   WHERE uid = ANY($1)",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "5c8fd3cc6a8e0fa074f3348392ccc5a1152e32c7cf667a15094fb3439e7ec267"
+  "hash": "1180823e1e0c7849a3391eaaa7724de55eef8770507ded42a08a3fce8ffc40ee"
 }
