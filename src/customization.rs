@@ -1,38 +1,21 @@
 use std::collections::HashMap;
-
+use serde::Deserialize;
+use domain_types_macro::domain_type;
 use crate::domain::primitives::UserId;
 
-#[derive(
-    Clone, Copy, Debug, Eq, Hash, PartialEq,
-    strum_macros::Display, strum_macros::EnumString, strum_macros::IntoStaticStr,
-)]
-#[strum(serialize_all = "lowercase")]
-pub enum CustomizationName {
-    Crown,
-    Fire,
-    Snake,
-    Eggplant,
-    Banana,
-    Rooster,
-    Cactus,
-    Mushroom,
-    Ruler,
-    Growth,
-    Muscle,
-    Trophy,
-    Splash,
-    Rocket,
-    Classic,
-    Long,
-    Xxl,
-    Frame,
-    Brackets,
-    Grower,
-}
+#[domain_type]
+pub struct CustomizationName(String);
 
 #[derive(Clone, Default)]
 pub struct Decorations {
-    by_user: HashMap<UserId, CustomizationName>,
+    by_user: HashMap<UserId, Customization>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Customization {
+    pub prefix: String,
+    pub suffix: String,
 }
 
 impl Decorations {
@@ -41,154 +24,43 @@ impl Decorations {
     }
 
     pub fn apply(&self, uid: UserId, escaped_text: String) -> String {
-        match self.by_user.get(&uid).copied() {
-            Some(name) => {
-                let customization = Customization::from(name);
-                [customization.prefix, &escaped_text, customization.suffix].concat()
-            }
-            None => escaped_text,
-        }
+        self.by_user.get(&uid)
+            .map(|decoration| [decoration.prefix.as_str(), &escaped_text, decoration.suffix.as_str()].concat())
+            .unwrap_or(escaped_text)
     }
 }
 
-impl FromIterator<(UserId, CustomizationName)> for Decorations {
-    fn from_iter<I: IntoIterator<Item = (UserId, CustomizationName)>>(entries: I) -> Self {
+impl FromIterator<(UserId, Customization)> for Decorations {
+    fn from_iter<I: IntoIterator<Item = (UserId, Customization)>>(entries: I) -> Self {
         Self { by_user: entries.into_iter().collect() }
     }
 }
 
-#[derive(Clone, Copy, derive_more::Constructor)]
-#[allow(clippy::redundant_field_names, reason = "derive_more::Constructor spells the fields out")]
-struct Customization {
-    prefix: &'static str,
-    suffix: &'static str,
-}
-
-impl From<CustomizationName> for Customization {
-    fn from(value: CustomizationName) -> Self {
-        match value {
-            CustomizationName::Crown => Customization::new("👑 ", ""),
-            CustomizationName::Fire => Customization::new("🔥 ", " 🔥"),
-            CustomizationName::Snake => Customization::new("🐍 ", ""),
-            CustomizationName::Eggplant => Customization::new("🍆 ", ""),
-            CustomizationName::Banana => Customization::new("🍌 ", ""),
-            CustomizationName::Rooster => Customization::new("🐓 ", ""),
-            CustomizationName::Cactus => Customization::new("🌵 ", ""),
-            CustomizationName::Mushroom => Customization::new("🍄 ", ""),
-            CustomizationName::Ruler => Customization::new("📏 ", " 📏"),
-            CustomizationName::Growth => Customization::new("📈 ", " 📈"),
-            CustomizationName::Muscle => Customization::new("💪 ", " 💪"),
-            CustomizationName::Trophy => Customization::new("🏆 ", " 🏆"),
-            CustomizationName::Splash => Customization::new("💦 ", " 💦"),
-            CustomizationName::Rocket => Customization::new("🚀 ", " 🚀"),
-            CustomizationName::Classic => Customization::new("8===D ", ""),
-            CustomizationName::Long => Customization::new("8════════D ", ""),
-            CustomizationName::Xxl => Customization::new("[XXL] ", ""),
-            CustomizationName::Frame => Customization::new("꧁༺ ", " ༻꧂"),
-            CustomizationName::Brackets => Customization::new("『", "』"),
-            CustomizationName::Grower => Customization::new("╰⋃╯ ", ""),
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
 
     const UID: UserId = UserId::new(1);
 
     #[test]
-    fn names_have_stable_database_values() {
-        for (name, stored) in [
-            (CustomizationName::Crown, "crown"),
-            (CustomizationName::Fire, "fire"),
-            (CustomizationName::Snake, "snake"),
-            (CustomizationName::Eggplant, "eggplant"),
-            (CustomizationName::Banana, "banana"),
-            (CustomizationName::Rooster, "rooster"),
-            (CustomizationName::Cactus, "cactus"),
-            (CustomizationName::Mushroom, "mushroom"),
-            (CustomizationName::Ruler, "ruler"),
-            (CustomizationName::Growth, "growth"),
-            (CustomizationName::Muscle, "muscle"),
-            (CustomizationName::Trophy, "trophy"),
-            (CustomizationName::Splash, "splash"),
-            (CustomizationName::Rocket, "rocket"),
-            (CustomizationName::Classic, "classic"),
-            (CustomizationName::Long, "long"),
-            (CustomizationName::Xxl, "xxl"),
-            (CustomizationName::Frame, "frame"),
-            (CustomizationName::Brackets, "brackets"),
-            (CustomizationName::Grower, "grower"),
-        ] {
-            assert_eq!(<&str>::from(name), stored);
-            assert_eq!(name.to_string(), stored);
-            let parsed = stored.parse::<CustomizationName>()
-                .expect("the name must parse");
-            assert_eq!(parsed, name);
-        }
-    }
-
-    #[test]
-    fn an_unknown_name_is_rejected() {
-        assert!("unknown".parse::<CustomizationName>().is_err());
-    }
-
-    #[test]
-    fn every_builtin_decoration_has_the_expected_shape() {
-        for (name, expected) in [
-            (CustomizationName::Crown, "👑 name"),
-            (CustomizationName::Fire, "🔥 name 🔥"),
-            (CustomizationName::Snake, "🐍 name"),
-            (CustomizationName::Eggplant, "🍆 name"),
-            (CustomizationName::Banana, "🍌 name"),
-            (CustomizationName::Rooster, "🐓 name"),
-            (CustomizationName::Cactus, "🌵 name"),
-            (CustomizationName::Mushroom, "🍄 name"),
-            (CustomizationName::Ruler, "📏 name 📏"),
-            (CustomizationName::Growth, "📈 name 📈"),
-            (CustomizationName::Muscle, "💪 name 💪"),
-            (CustomizationName::Trophy, "🏆 name 🏆"),
-            (CustomizationName::Splash, "💦 name 💦"),
-            (CustomizationName::Rocket, "🚀 name 🚀"),
-            (CustomizationName::Classic, "8===D name"),
-            (CustomizationName::Long, "8════════D name"),
-            (CustomizationName::Xxl, "[XXL] name"),
-            (CustomizationName::Frame, "꧁༺ name ༻꧂"),
-            (CustomizationName::Brackets, "『name』"),
-            (CustomizationName::Grower, "╰⋃╯ name"),
-        ] {
-            let decorated = decorations(name).apply(UID, "name".to_owned());
-            assert_eq!(decorated, expected);
-        }
-    }
-
-    #[test]
-    fn no_decoration_returns_the_original_text() {
-        let text = Decorations::empty().apply(UID, "name".to_owned());
-        assert_eq!(text, "name");
-    }
-
-    #[test]
-    fn an_empty_string_is_safe() {
-        let decorated = decorations(CustomizationName::Fire).apply(UID, String::new());
-        assert_eq!(decorated, "🔥  🔥");
-    }
-
-    #[test]
-    fn existing_html_is_preserved_without_a_second_escape() {
+    fn test_decoration_preserves_prepared_html() {
+        let decorations: Decorations = [(UID, Customization {
+            prefix: "👑 ".to_owned(),
+            suffix: " 🏆".to_owned(),
+        })].into_iter().collect();
         let escaped = "<u>Tom &amp; Jerry</u>".to_owned();
-        let decorated = decorations(CustomizationName::Crown).apply(UID, escaped);
-        assert_eq!(decorated, "👑 <u>Tom &amp; Jerry</u>");
+        let decorated = decorations.apply(UID, escaped.clone());
+        let plain = decorations.apply(UserId::new(2), escaped.clone());
+        let empty = decorations.apply(UID, String::new());
+        assert_eq!(decorated, "👑 <u>Tom &amp; Jerry</u> 🏆");
+        assert_eq!(plain, escaped);
+        assert_eq!(empty, "👑  🏆");
     }
 
     #[test]
-    fn a_decoration_is_applied_once_per_call() {
-        let result = decorations(CustomizationName::Snake).apply(UID, "name".to_owned());
-        assert_eq!(result.matches('🐍').count(), 1);
-    }
-
-    fn decorations(name: CustomizationName) -> Decorations {
-        [(UID, name)].into_iter().collect()
+    fn test_empty_decorations() {
+        let text = "<u>Tom &amp; Jerry</u>".to_owned();
+        let plain = Decorations::empty().apply(UID, text.clone());
+        assert_eq!(plain, text);
     }
 }

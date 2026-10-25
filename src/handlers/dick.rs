@@ -3,7 +3,6 @@ use autometrics::autometrics;
 use anyhow::anyhow;
 use chrono::{Datelike, Utc};
 use domain_types::traits::SaturatingInto;
-use futures::future::OptionFuture;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
 use teloxide::Bot;
@@ -11,6 +10,7 @@ use teloxide::macros::BotCommands;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
+use crate::customization::Decorations;
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
@@ -146,19 +146,20 @@ pub(crate) async fn top_impl(
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
     let has_more_pages = dicks.len() > usize::from(config.top_limit);
-    let user_ids = dicks.iter()
-        .take(usize::from(config.top_limit))
-        .map(|d| d.owner_uid)
-        .collect::<Vec<_>>();
-    let decorations = OptionFuture::from(
-            config.features.customizations
-                .then(|| repos.customizations.decorations_for(&user_ids))
-        )
-        .await
-        .and_then(|result| result
-            .inspect_err(|error| tracing::warn!(error = format!("{error:#}"), "couldn't load customizations for the top"))
-            .ok())
-        .unwrap_or_default();
+    let decorations = if config.features.customizations {
+        let user_ids = dicks.iter()
+            .take(usize::from(config.top_limit))
+            .map(|d| d.owner_uid)
+            .collect::<Vec<_>>();
+        repos.customizations.decorations_for(&user_ids)
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(error = format!("{error:#}"), "couldn't load customizations for the top")
+            })
+            .unwrap_or_default()
+    } else {
+        Decorations::empty()
+    };
     let mut any_inactive = false;
     let lines = dicks.into_iter()
         .take(usize::from(config.top_limit))
@@ -277,11 +278,12 @@ mod tests {
         seed_player(&db, &config).await;
         let baseline = top(&db, &config).await;
 
-        repo::Customizations::new(db.clone())
-            .set_active(USER_ID, CustomizationName::Crown)
+        repo::Customizations::new(db.clone(), config.customizations.clone())
+            .set_active(USER_ID, CustomizationName::of("crown"))
             .await.expect("couldn't set the customization");
         let decorated = top(&db, &config).await;
-        assert!(decorated.contains("👑 <u>"), "the prepared name must be decorated");
+        let has_crown = decorated.contains("👑 <u>");
+        assert!(has_crown, "the prepared name must be decorated");
         let undecorated = decorated.replacen("👑 ", "", 1);
         assert_eq!(undecorated, baseline, "position, length, markup and hints must stay unchanged");
 
@@ -309,6 +311,8 @@ mod tests {
         AppConfig {
             top_limit: Limit::new(10),
             inactivity_days: DaysCount::new(7),
+            customizations: crate::config::CustomizationsConfig::load(
+                concat!(env!("CARGO_MANIFEST_DIR"), "/customizations.yml")),
             ..Default::default()
         }
     }
@@ -325,9 +329,9 @@ mod tests {
     async fn seed_player(db: &Pool<Postgres>, config: &AppConfig) {
         let repos = repo::Repositories::new(db, config);
         repos.users.create_or_update(USER_ID, NAME)
-             .await.expect("couldn't create the user");
+            .await.expect("couldn't create the user");
         let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
         repos.dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(5))
-             .await.expect("couldn't create the dick");
+            .await.expect("couldn't create the dick");
     }
 }

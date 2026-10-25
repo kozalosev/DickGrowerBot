@@ -67,7 +67,7 @@ impl Repositories {
             broadcasts: ScheduledBroadcasts::new(db_conn.clone()),
             perk_states: PerkStates::new(db_conn.clone()),
             player_settings: PlayerSettings::new(db_conn.clone()),
-            customizations: Customizations::new(db_conn.clone()),
+            customizations: Customizations::new(db_conn.clone(), config.customizations.clone()),
         }
     }
 }
