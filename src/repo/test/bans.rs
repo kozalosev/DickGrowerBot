@@ -6,7 +6,7 @@ use crate::repo::test::{fresh_db, CHAT_ID, NAME, USER_ID};
 
 /// Every table `erase_user` must clear, as `(table, uid column)`. The guard test below fails when a
 /// new one appears in the schema, because then the function needs a new DELETE too.
-const TABLES_WITH_USER_ROWS: [(&str, &str); 9] = [
+const TABLES_WITH_USER_ROWS: [(&str, &str); 10] = [
     ("battle_stats", "uid"),
     ("dick_of_day", "winner_uid"),
     ("dicks", "uid"),
@@ -16,6 +16,7 @@ const TABLES_WITH_USER_ROWS: [(&str, &str); 9] = [
     ("player_settings", "uid"),
     ("promo_code_activations", "uid"),
     ("stale_dick_shrinks", "uid"),
+    ("user_customizations", "uid"),
 ];
 
 #[tokio::test]
@@ -184,6 +185,8 @@ async fn fill_all_tables(db: &Pool<Postgres>) {
 
     sqlx::query!("INSERT INTO Users (uid, name) VALUES ($1, $2)", USER_ID as UserId, NAME)
         .execute(db).await.expect("couldn't create the user");
+    sqlx::query!("INSERT INTO User_Customizations (uid, customization_name) VALUES ($1, 'crown')", USER_ID as UserId)
+        .execute(db).await.expect("couldn't create the customization");
     sqlx::query!("INSERT INTO Dicks (uid, chat_id, length) VALUES ($1, $2, 5)", USER_ID as UserId, internal_chat_id)
         .execute(db).await.expect("couldn't create the dick");
     sqlx::query!("INSERT INTO Battle_Stats (uid, chat_id) VALUES ($1, $2)", USER_ID as UserId, internal_chat_id)

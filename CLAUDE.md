@@ -240,7 +240,7 @@ sample.
 
 | Signal | Meaning | Handled in |
 |---|---|---|
-| `SIGHUP` | reload the announcements and the ban list | `reload.rs` |
+| `SIGHUP` | reload the announcements, customizations and ban list | `reload.rs` |
 | `SIGTERM` | stop, gracefully | `shutdown.rs` |
 | `SIGINT` | the same, from a terminal | `shutdown.rs` |
 
@@ -1477,6 +1477,41 @@ change to server-configs.
 
 `/stats` gets its line through `Perk::stats_line`, a hook with a default of `None`: the states are
 read once and handed round, so a perk with nothing to say costs nothing.
+
+### Name customizations
+
+The top and the inline top may decorate a player's name with a prefix and suffix from
+`customizations.yml`. The file maps a `CustomizationName` to its plain-text affixes:
+
+```yaml
+crown:
+  prefix: "👑 "
+fire:
+  prefix: "🔥 "
+  suffix: " 🔥"
+```
+
+Both affixes default to an empty string. They are HTML-escaped before rendering and applied to
+the already-escaped name, so they add no markup of their own. Add or edit entries in this file
+without rebuilding the bot; send `docker kill -s HUP dickgrowerbot` to reload the catalogue on
+Linux, or restart the bot on Windows. The Docker image includes the default catalogue, and Compose
+mounts the local file read-only so edits can be reloaded.
+
+`User_Customizations` (migration 52) holds one row per user: the **active** name and nothing else.
+It applies in every chat where that user appears in the top.
+Whether a user may have it is not decided here — whatever grants customizations later is the one that
+calls `Customizations::set_active`. The row cascades with the user and is listed in `erase_user`.
+
+The names are stored as text, and a stored name absent from the catalogue is skipped with a warning.
+Names longer than the database column's 64 characters are skipped when loading the file.
+A missing, unreadable or malformed file yields an empty catalogue. The top asks
+for the whole page in one query (`decorations_for`), and a failed lookup renders the top without
+decorations: cosmetics must not take the leaderboard down.
+
+```
+CUSTOMIZATIONS_ENABLED=true   # false => the top is rendered undecorated and the lookup is skipped
+CUSTOMIZATIONS_FILE=customizations.yml   # optional path override; relative to the working directory
+```
 
 ### Dependency injection
 

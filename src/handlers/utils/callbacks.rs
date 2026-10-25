@@ -291,19 +291,12 @@ macro_rules! check_invoked_by_owner_and_get_answer_params {
 /// need to exercise callback-data parsing.
 #[cfg(test)]
 pub(crate) fn build_callback_query(data: String) -> CallbackQuery {
-    use teloxide::types::{CallbackQueryId, User};
+    use teloxide::types::CallbackQueryId;
+    use crate::repo::test::telegram_user;
+
     CallbackQuery {
         id: CallbackQueryId(String::new()),
-        from: User {
-            id: UserId(0),
-            is_bot: false,
-            first_name: String::new(),
-            last_name: None,
-            username: None,
-            language_code: None,
-            is_premium: false,
-            added_to_attachment_menu: false,
-        },
+        from: telegram_user(0, None),
         message: None,
         inline_message_id: None,
         chat_instance: String::new(),

@@ -4,6 +4,7 @@ use crate::config::caches::CachesConfig;
 use crate::config::env::*;
 use crate::config::toggles::*;
 use crate::config::announcements::*;
+use crate::config::customizations::CustomizationsConfig;
 use crate::config::self_destruction::*;
 use crate::config::shrink::{BroadcastConfig, DailyShrinkConfig};
 use crate::config::incrementor::IncrementorConfig;
@@ -23,6 +24,7 @@ pub struct AppConfig {
     pub incrementor: IncrementorConfig,
     pub daily_shrink: DailyShrinkConfig,
     pub announcements: AnnouncementsConfig,
+    pub customizations: CustomizationsConfig,
     pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
     pub support_chat_id: Option<TelegramChatId>,
@@ -50,6 +52,7 @@ impl AppConfig {
         let dod_rich_exclusion_ratio = get_optional_env_ratio("DOD_RICH_EXCLUSION_RATIO");
         let chats_merging = get_env_value_or_default("CHATS_MERGING_ENABLED", false);
         let top_unlimited = get_env_value_or_default("TOP_UNLIMITED_ENABLED", false);
+        let customizations = get_env_value_or_default("CUSTOMIZATIONS_ENABLED", true);
         let multiple_loans = get_env_value_or_default("MULTIPLE_LOANS_ENABLED", false);
         let pvp_default_bet = env_value!("PVP_DEFAULT_BET": Bet, or = 1);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
@@ -79,6 +82,7 @@ impl AppConfig {
             },
         };
         let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
+        let customizations_file = get_env_value_or_default("CUSTOMIZATIONS_FILE", "customizations.yml".to_owned());
         let self_destruction = SelfDestructionConfig {
             notice: env_duration!("MSG_SELFDESTRUCT_DELAY_NOTICE"),
             report: env_duration!("MSG_SELFDESTRUCT_DELAY_REPORT"),
@@ -106,6 +110,7 @@ impl AppConfig {
             features: FeatureToggles {
                 chats_merging,
                 top_unlimited,
+                customizations,
                 multiple_loans,
                 dod_selection_mode,
                 pvp: BattlesFeatureToggles {
@@ -124,6 +129,7 @@ impl AppConfig {
             incrementor: IncrementorConfig::from_env(),
             daily_shrink,
             announcements: AnnouncementsConfig::load(&announcements_file),
+            customizations: CustomizationsConfig::load(&customizations_file),
             self_destruction,
             command_toggles: Default::default(),
             support_chat_id,
