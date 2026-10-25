@@ -28,6 +28,7 @@ services:
       - CHATS_MERGING_ENABLED
       - TOP_UNLIMITED_ENABLED
       - CUSTOMIZATIONS_ENABLED
+      - CUSTOMIZATIONS_FILE
       - MULTIPLE_LOANS_ENABLED
       - PVP_DEFAULT_BET
       - PVP_CHECK_ACCEPTOR_LENGTH
@@ -116,6 +117,7 @@ services:
       - 8080
     volumes:
       - ./announcements.yml:/announcements.yml:ro
+      - ./customizations.yml:/customizations.yml:ro
     networks:
       - postgres-network
       - user-service-network
