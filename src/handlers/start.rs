@@ -10,6 +10,7 @@ use crate::cache::Cache;
 use crate::config::MessageGroup::Notice;
 use crate::domain::primitives::{PromoCode, Username};
 use crate::help::HelpContainer;
+use crate::rate_limit::RateLimiter;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -25,8 +26,15 @@ pub async fn start_cmd_handler(
     cmd: StartCommands,
     help: HelpContainer,
     cache: Cache,
+    limiter: RateLimiter,
     deps: HandlerDeps,
 ) -> HandlerResult {
+    let StartCommands::Start(param) = &cmd;
+    if !param.starts_with(PROMO_START_PARAM_PREFIX) && limiter.start_exceeded(msg.chat.id.into()).await {
+        metrics::START_SPAM_LIMITED.inc();
+        return Ok(())
+    }
+
     let HandlerDeps { repos, lang_resolver, self_destruction, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let answer = if msg.from.as_ref().is_none() {

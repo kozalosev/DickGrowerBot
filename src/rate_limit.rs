@@ -8,7 +8,7 @@
 use std::time::Duration;
 use derive_more::Display;
 use crate::cache::{Cache, CacheKey};
-use crate::config::RateLimitConfig;
+use crate::config::{CommandSpamLimit, RateLimitConfig};
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::{RateLimit, UserId};
 use crate::metrics::{self, ThresholdCurve};
@@ -49,6 +49,17 @@ impl RateLimiter {
         user.max(chat)
     }
 
+    /// Counts a bare `/start` against its chat and tells whether it went over the limit.
+    pub async fn start_exceeded(&self, chat: ChatIdKind) -> bool {
+        let CommandSpamLimit { requests: limit, window } = self.config.commands.start;
+        if limit.is_zero() {
+            return false
+        }
+        self.cache.increment(StartKey(chat), window)
+            .await
+            .is_some_and(|count| count > u64::from(limit.value()))
+    }
+
     async fn count(&self, key: Option<impl CacheKey>, limit: RateLimit, curve: &ThresholdCurve) -> Option<Exceeded> {
         let key = key?;
         if limit.is_zero() {
@@ -80,14 +91,21 @@ struct ChatKey(ChatIdKind);
 
 impl CacheKey for ChatKey {}
 
+#[derive(Display)]
+#[display("ratelimit:start:{}", _0.qualified())]
+struct StartKey(ChatIdKind);
+
+impl CacheKey for StartKey {}
+
 #[cfg(test)]
 mod test {
     use std::time::Duration;
     use teloxide::types::ChatId;
     use crate::cache::Cache;
-    use crate::config::{CacheConfig, CacheMode, RateLimitConfig};
+    use crate::config::{CacheConfig, CacheMode, CommandSpamLimit, Commands, RateLimitConfig};
     use crate::domain::primitives::{Limit, RateLimit, UserId};
-    use crate::metrics::render_metrics;
+    use once_cell::sync::Lazy;
+    use crate::metrics::{self, render_metrics};
     use super::{Exceeded, RateLimiter};
 
     #[tokio::test]
@@ -154,11 +172,38 @@ mod test {
         assert_eq!(reached("rate_limit_chat_windows_total", 500), before);
     }
 
+    #[tokio::test]
+    async fn a_chat_gets_one_start_per_window() {
+        let limiter = limiter_with_start(1).await;
+
+        let mut verdicts = Vec::new();
+        for _ in 0..3 {
+            verdicts.push(limiter.start_exceeded(ChatId(-100).into()).await);
+        }
+        let other_chat = limiter.start_exceeded(ChatId(-200).into()).await;
+
+        assert_eq!(verdicts, [false, true, true]);
+        assert!(!other_chat);
+    }
+
+    #[tokio::test]
+    async fn a_zero_start_limit_lets_every_start_through() {
+        let limiter = limiter_with_start(0).await;
+
+        for _ in 0..10 {
+            let exceeded = limiter.start_exceeded(ChatId(-100).into()).await;
+            assert!(!exceeded);
+        }
+    }
+
     fn uid(n: u64) -> UserId {
         UserId::new(n)
     }
 
+    /// The curves register on first use, so they are forced here for a test that never observes one.
     fn reached(name: &str, threshold: u64) -> u64 {
+        Lazy::force(&metrics::RATE_LIMIT_USER_WINDOWS);
+        Lazy::force(&metrics::RATE_LIMIT_CHAT_WINDOWS);
         let series = format!("{name}{{reached=\"{threshold}\"}} ");
         render_metrics()
             .lines()
@@ -168,12 +213,26 @@ mod test {
     }
 
     async fn limiter(user: u32, chat: u32, warnings: u16) -> RateLimiter {
+        limiter_with(user, chat, warnings, 0).await
+    }
+
+    async fn limiter_with_start(start: u32) -> RateLimiter {
+        limiter_with(0, 0, 0, start).await
+    }
+
+    async fn limiter_with(user: u32, chat: u32, warnings: u16, start: u32) -> RateLimiter {
         let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
         let config = RateLimitConfig {
             user: RateLimit::new(user),
             chat: RateLimit::new(chat),
             window: Duration::from_mins(1),
             warnings: Limit::new(warnings),
+            commands: Commands {
+                start: CommandSpamLimit {
+                    requests: RateLimit::new(start),
+                    window: Duration::from_mins(10),
+                },
+            },
         };
         RateLimiter::new(&cache, config)
     }

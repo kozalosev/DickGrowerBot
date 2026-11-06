@@ -197,7 +197,17 @@ RATE_LIMIT_USER_REQUESTS=20   # requests per window per user; 0 => off
 RATE_LIMIT_CHAT_REQUESTS=60   # requests per window per chat; 0 => off
 RATE_LIMIT_WINDOW=1m
 RATE_LIMIT_WARNINGS=3         # requests over a limit that are still told so
+SPAM_LIMIT_START_REQUESTS=1   # bare /start commands a chat is answered per window; 0 => off
+SPAM_LIMIT_START_WINDOW=10m
 ```
+
+**A bare `/start` has a limit of its own, per chat.** Spam bots fire `/start` at the bot through
+Telegram's guest mode, and the general limits let each of them have the full start message — so the
+bot spammed the chat in return. Over `SPAM_LIMIT_START_REQUESTS` the command is dropped **without a
+word**, unlike the general limit: a notice would be the very message this exists to suppress. A
+promo deeplink (`/start promo-…`) is exempt, since that is how a channel's readers activate a code;
+it stays under the general limits. The check is the first thing `start_cmd_handler` does, before
+the language is resolved, and the dropped commands are counted in `start_spam_limited_total`.
 
 This protects the bot against a flood. One account sending `/help` at 150 a second used up
 Telegram's quota answering it, and every real user waited 20 seconds or got nothing.

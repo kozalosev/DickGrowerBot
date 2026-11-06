@@ -12,6 +12,7 @@ pub struct RateLimitConfig {
     /// How many requests past the limit are still told why they get nothing. Every one after them
     /// is dropped in silence, since answering a flood is how it spends Telegram's quota.
     pub warnings: Limit,
+    pub commands: Commands,
 }
 
 impl RateLimitConfig {
@@ -21,6 +22,24 @@ impl RateLimitConfig {
             chat: env_value!("RATE_LIMIT_CHAT_REQUESTS": RateLimit, or = 60),
             window: env_duration!("RATE_LIMIT_WINDOW", or = mins(1), at_least = secs(1)),
             warnings: env_value!("RATE_LIMIT_WARNINGS": Limit, or = 3),
+            commands: Commands {
+                start: CommandSpamLimit {
+                    requests: env_value!("SPAM_LIMIT_START_REQUESTS": RateLimit, or = 1),
+                    window: env_duration!("SPAM_LIMIT_START_WINDOW", or = mins(10), at_least = secs(1)),
+                }
+            }
         }
     }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct Commands {
+    /// How many bare `/start`s a chat is answered in a window; the rest are dropped in silence.
+    pub start: CommandSpamLimit,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct CommandSpamLimit {
+    pub requests: RateLimit,
+    pub window: Duration,
 }
