@@ -1,0 +1,54 @@
+# Name decorations, shared by a user across all chats.
+# Keys are stored in User_Customizations.customization_name; keep them stable (up to 64 characters).
+# Prefix and suffix are plain text (HTML is escaped). Either may be omitted.
+# Add or edit entries here, then send SIGHUP to reload them without rebuilding.
+
+crown:
+  prefix: "👑 "
+fire:
+  prefix: "🔥 "
+  suffix: " 🔥"
+snake:
+  prefix: "🐍 "
+eggplant:
+  prefix: "🍆 "
+banana:
+  prefix: "🍌 "
+rooster:
+  prefix: "🐓 "
+cactus:
+  prefix: "🌵 "
+mushroom:
+  prefix: "🍄 "
+ruler:
+  prefix: "📏 "
+  suffix: " 📏"
+growth:
+  prefix: "📈 "
+  suffix: " 📈"
+muscle:
+  prefix: "💪 "
+  suffix: " 💪"
+trophy:
+  prefix: "🏆 "
+  suffix: " 🏆"
+splash:
+  prefix: "💦 "
+  suffix: " 💦"
+rocket:
+  prefix: "🚀 "
+  suffix: " 🚀"
+classic:
+  prefix: "8===D "
+long:
+  prefix: "8════════D "
+xxl:
+  prefix: "[XXL] "
+frame:
+  prefix: "꧁༺ "
+  suffix: " ༻꧂"
+brackets:
+  prefix: "『"
+  suffix: "』"
+grower:
+  prefix: "╰⋃╯ "

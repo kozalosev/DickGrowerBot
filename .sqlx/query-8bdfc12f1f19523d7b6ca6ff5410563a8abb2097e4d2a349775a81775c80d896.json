@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT customization_name FROM User_Customizations WHERE uid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "customization_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "user_customizations",
+            "name": "customization_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8bdfc12f1f19523d7b6ca6ff5410563a8abb2097e4d2a349775a81775c80d896"
+}

@@ -10,6 +10,7 @@ use teloxide::macros::BotCommands;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::config::{AppConfig, MessageGroup};
+use crate::customization::Decorations;
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
@@ -145,6 +146,20 @@ pub(crate) async fn top_impl(
     let query_limit = config.top_limit + 1; // fetch +1 row to know whether more rows exist or not
     let dicks = repos.dicks.get_top(&chat_id, offset, query_limit, config.inactivity_days).await?;
     let has_more_pages = dicks.len() > usize::from(config.top_limit);
+    let decorations = if config.features.customizations {
+        let user_ids = dicks.iter()
+            .take(usize::from(config.top_limit))
+            .map(|d| d.owner_uid)
+            .collect::<Vec<_>>();
+        repos.customizations.decorations_for(&user_ids)
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(error = format!("{error:#}"), "couldn't load customizations for the top")
+            })
+            .unwrap_or_default()
+    } else {
+        Decorations::empty()
+    };
     let mut any_inactive = false;
     let lines = dicks.into_iter()
         .take(usize::from(config.top_limit))
@@ -156,6 +171,7 @@ pub(crate) async fn top_impl(
             } else {
                 escaped_name
             };
+            let name = decorations.apply(d.owner_uid, name);
             let now = Utc::now();
             let inactive = (now - d.grown_at).num_days() > i64::from(config.inactivity_days);
             let can_grow = now.num_days_from_ce() > d.grown_at.num_days_from_ce();
@@ -244,4 +260,78 @@ pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> Inl
         buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
     InlineKeyboardMarkup::new(vec![buttons])
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::{Pool, Postgres};
+
+    use super::*;
+    use crate::customization::CustomizationName;
+    use crate::domain::primitives::{LengthChange, Limit};
+    use crate::repo::test::{fresh_db, telegram_user, CHAT_ID_KIND, NAME, USER_ID};
+
+    #[tokio::test]
+    async fn top_only_changes_the_decorated_name_and_the_flag_restores_old_text() {
+        let db = fresh_db().await;
+        let mut config = config();
+        seed_player(&db, &config).await;
+        let baseline = top(&db, &config).await;
+
+        repo::Customizations::new(db.clone(), config.customizations.clone())
+            .set_active(USER_ID, CustomizationName::of("crown"))
+            .await.expect("couldn't set the customization");
+        let decorated = top(&db, &config).await;
+        let has_crown = decorated.contains("👑 <u>");
+        assert!(has_crown, "the prepared name must be decorated");
+        let undecorated = decorated.replacen("👑 ", "", 1);
+        assert_eq!(undecorated, baseline, "position, length, markup and hints must stay unchanged");
+
+        config.features.customizations = false;
+        let disabled = top(&db, &config).await;
+        assert_eq!(disabled, baseline, "the disabled feature must preserve the previous top text");
+    }
+
+    #[tokio::test]
+    async fn a_customization_repository_error_does_not_block_the_top() {
+        let db = fresh_db().await;
+        let config = config();
+        seed_player(&db, &config).await;
+        let baseline = top(&db, &config).await;
+
+        sqlx::query("DROP TABLE User_Customizations")
+            .execute(&db)
+            .await.expect("couldn't remove the optional table for the failure test");
+
+        let after_failure = top(&db, &config).await;
+        assert_eq!(after_failure, baseline, "optional cosmetics must fail open");
+    }
+
+    fn config() -> AppConfig {
+        AppConfig {
+            top_limit: Limit::new(10),
+            inactivity_days: DaysCount::new(7),
+            customizations: crate::config::CustomizationsConfig::load(
+                concat!(env!("CARGO_MANIFEST_DIR"), "/customizations.yml")),
+            ..Default::default()
+        }
+    }
+
+    async fn top(db: &Pool<Postgres>, config: &AppConfig) -> String {
+        let repos = repo::Repositories::new(db, config);
+        let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
+        let from = telegram_user(USER_ID.value(), Some("en"));
+        top_impl(&repos, config, FromRefs(&from, &chat_id), &LanguageCode::new("en".to_owned()), Page::first())
+            .await.expect("couldn't build the top")
+            .lines
+    }
+
+    async fn seed_player(db: &Pool<Postgres>, config: &AppConfig) {
+        let repos = repo::Repositories::new(db, config);
+        repos.users.create_or_update(USER_ID, NAME)
+            .await.expect("couldn't create the user");
+        let chat_id = ChatIdPartiality::Specific(CHAT_ID_KIND);
+        repos.dicks.create_or_grow(USER_ID, &chat_id, LengthChange::signed(5))
+            .await.expect("couldn't create the dick");
+    }
 }
