@@ -20,8 +20,7 @@ pub enum MessageKind {
 }
 
 /// How far a row got. `Created` and `Warned` are the actionable ones — a message that already
-/// carries the warning has only its deletion left, and an inline message stays `Created` to its
-/// end, as a warning would tell nothing its placeholder doesn't.
+/// carries the warning has only its deletion, or its placeholder, left.
 ///
 /// The rest are terminal and stay in the table until the cleaning process removes them, so that a
 /// queue which isn't doing its job can be read rather than guessed at.

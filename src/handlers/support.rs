@@ -395,9 +395,8 @@ fn sent_by(msg: &Message, user_id: TelegramUserId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
-    use axum::{Json, Router};
     use serde_json::{Value, json};
+    use crate::fake_telegram::FakeApi;
 
     const SUPPORT_CHAT: i64 = -1001234567890;
     const BOT_ID: u64 = 777;
@@ -535,39 +534,33 @@ mod tests {
 
     #[tokio::test]
     async fn delivers_the_reply_with_a_button_to_answer_it() {
-        let (calls, server, bot) = fake_api(true).await;
+        let api = fake_api(true).await;
         let msg: Message = serde_json::from_value(reply_message()).unwrap();
         let recipient = recipient(reply_message(), Some(SUPPORT_CHAT))
             .expect("a recipient");
 
-        support_reply_handler(bot, msg, recipient)
+        support_reply_handler(api.bot.clone(), msg, recipient)
             .await.unwrap();
 
-        let calls = calls.lock().unwrap().clone();
+        let calls = api.calls();
         assert_eq!(calls.len(), 1);
         let (path, body) = &calls[0];
         assert_eq!(path, "/bot123:token/CopyMessage");
         let data = &body["reply_markup"]["inline_keyboard"][0][0]["callback_data"];
         assert_eq!(data, "support:10");
-        server.abort();
     }
 
     #[tokio::test]
     async fn reports_a_copy_failure_in_the_support_chat() {
-        let (calls, server, bot) = fake_api(false).await;
+        let api = fake_api(false).await;
         let msg: Message = serde_json::from_value(reply_message()).unwrap();
         let recipient = recipient(reply_message(), Some(SUPPORT_CHAT))
             .expect("a recipient");
 
-        support_reply_handler(bot, msg, recipient)
+        support_reply_handler(api.bot.clone(), msg, recipient)
             .await.unwrap();
 
-        let paths: Vec<_> = calls.lock().unwrap()
-            .iter()
-            .map(|(path, _)| path.clone())
-            .collect();
-        assert_eq!(paths, ["/bot123:token/CopyMessage", "/bot123:token/SendMessage"]);
-        server.abort();
+        assert_eq!(api.methods(), ["CopyMessage", "SendMessage"]);
     }
 
     fn reply_message() -> Value {
@@ -634,48 +627,24 @@ mod tests {
         support_answered_ticket(msg, me)
     }
 
-    type Calls = Arc<Mutex<Vec<(String, Value)>>>;
-
-    /// A Bot API that records each call and answers `CopyMessage` with success or a refusal.
-    async fn fake_api(copy_succeeds: bool) -> (Calls, tokio::task::JoinHandle<()>, Bot) {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let recorded = Arc::clone(&calls);
-        let app = Router::new().fallback(move |request: axum::extract::Request| {
-            let recorded = Arc::clone(&recorded);
-            async move {
-                let path = request.uri().path().to_owned();
-                let body = axum::body::to_bytes(request.into_body(), usize::MAX)
-                    .await.unwrap();
-                let body = serde_json::from_slice(&body).unwrap_or(Value::Null);
-                recorded.lock().unwrap().push((path.clone(), body));
-                if path.ends_with("/CopyMessage") && !copy_succeeds {
-                    Json(json!({
-                        "ok": false,
-                        "error_code": 403,
-                        "description": "Forbidden: bot was blocked by the user"
-                    }))
-                } else if path.ends_with("/CopyMessage") {
-                    Json(json!({ "ok": true, "result": { "message_id": 30 } }))
-                } else {
-                    Json(json!({
-                        "ok": true,
-                        "result": {
-                            "message_id": 21,
-                            "date": 0,
-                            "chat": { "id": SUPPORT_CHAT, "type": "supergroup", "title": "Support" },
-                            "text": "Delivery failed"
-                        }
-                    }))
+    /// A Bot API that answers `CopyMessage` with success or a refusal.
+    async fn fake_api(copy_succeeds: bool) -> FakeApi {
+        FakeApi::start(move |method| match method {
+            "CopyMessage" if !copy_succeeds => json!({
+                "ok": false,
+                "error_code": 403,
+                "description": "Forbidden: bot was blocked by the user"
+            }),
+            "CopyMessage" => json!({ "ok": true, "result": { "message_id": 30 } }),
+            _ => json!({
+                "ok": true,
+                "result": {
+                    "message_id": 21,
+                    "date": 0,
+                    "chat": { "id": SUPPORT_CHAT, "type": "supergroup", "title": "Support" },
+                    "text": "Delivery failed"
                 }
-            }
-        });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        let api_url = reqwest::Url::parse(&format!("http://{address}/")).unwrap();
-        let bot = Bot::new("123:token").set_api_url(api_url);
-        (calls, server, bot)
+            }),
+        }).await
     }
 }

@@ -48,6 +48,12 @@ pub async fn remember_deletion_right(cache: &Cache, chat_id: ChatId, may_delete:
     cache.set_flag(BotAdminKey::new(chat_id), may_delete, ttl).await
 }
 
+/// Whether an inline message posted into this chat is worth trying to delete. Nothing known counts
+/// as yes: a refusal costs one request and is remembered.
+pub async fn may_delete_inline(cache: &Cache, chat_id: ChatId) -> bool {
+    cached_deletion_right(cache, chat_id).await != Some(false)
+}
+
 /// Records the bot's rights on every change of its own status.
 ///
 /// Not an endpoint. The same update may be the one that adds the bot to a legacy group, and that

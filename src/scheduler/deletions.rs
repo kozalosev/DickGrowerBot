@@ -13,8 +13,12 @@ use crate::config::SelfDestructionConfig;
 use crate::config::MessageGroup;
 use domain_types::traits::ApproxInto;
 use crate::cache::Cache;
+use crate::cleanup::CleanupPolicy;
 use crate::handlers::rights;
+use crate::handlers::utils::resolve_inline_message_id;
+use crate::domain::objects::ChatCleanupSettings;
 use crate::domain::primitives::ScheduledDeletionId;
+use crate::domain::primitives::chat::InlineMessageId;
 use crate::metrics;
 use crate::repo::{DeletionState, DeletionTarget, MessageKind, Repositories, ScheduledDeletion};
 use super::backoff;
@@ -42,6 +46,16 @@ enum Outcome {
     Failed,
 }
 
+/// Acts on the messages of one run and writes down what became of them.
+struct Cleaner<'a> {
+    bot: &'a Throttle<Bot>,
+    repos: &'a Repositories,
+    cache: &'a Cache,
+    cleanup: &'a CleanupPolicy,
+    config: &'a SelfDestructionConfig,
+    bot_admin_ttl: Duration,
+}
+
 /// Takes one batch of messages whose time has come and acts on each of them.
 #[autometrics]
 #[tracing::instrument(skip_all)]
@@ -49,6 +63,7 @@ pub async fn run_pending_deletions(
     bot: &Throttle<Bot>,
     repos: &Repositories,
     cache: &Cache,
+    cleanup: &CleanupPolicy,
     config: &SelfDestructionConfig,
     bot_admin_ttl: Duration,
 ) -> anyhow::Result<()> {
@@ -67,10 +82,9 @@ pub async fn run_pending_deletions(
     // the bound here is our own connection and database pools, not Telegram's patience. If that
     // turns out to be wrong, a 429 is not final: the row is postponed and tried again, and it
     // shows up as `telegram_request_errors_total{kind="rate_limited"}`.
+    let cleaner = &Cleaner { bot, repos, cache, cleanup, config, bot_admin_ttl };
     stream::iter(due)
-        .for_each_concurrent(usize::from(config.concurrency), |deletion| async move {
-            act_and_record(bot, repos, cache, config, bot_admin_ttl, deletion).await
-        })
+        .for_each_concurrent(usize::from(config.concurrency), |deletion| cleaner.act_and_record(deletion))
         .await;
     Ok(())
 }
@@ -80,7 +94,7 @@ pub async fn run_pending_deletions(
 /// Run once, before the worker's first tick: only a worker that isn't running can let a message
 /// reach that age, and a restart is what ends that. Before the claim, because `claim_due` orders by
 /// `fire_after` and would hand out the dead rows ahead of every live one. The per-message check in
-/// [`act`] stays behind it for the row that crosses the line while the worker is up.
+/// [`Cleaner::act`] stays behind it for the row that crosses the line while the worker is up.
 pub(super) async fn expire_stale(repos: &Repositories, config: &SelfDestructionConfig) {
     loop {
         let Ok(expired) = repos.deletions.expire_stale(Utc::now() - MAX_AGE, config.expiry_batch_size).await else {
@@ -103,60 +117,6 @@ pub(super) async fn expire_stale(repos: &Repositories, config: &SelfDestructionC
     }
 }
 
-/// Acts on one message and writes down what became of it.
-async fn act_and_record(
-    bot: &Throttle<Bot>,
-    repos: &Repositories,
-    cache: &Cache,
-    config: &SelfDestructionConfig,
-    bot_admin_ttl: Duration,
-    deletion: ScheduledDeletion,
-) {
-    let id = deletion.id;
-    let group = deletion.group;
-    let kind = deletion.kind;
-    let failures = deletion.attempts;
-    let outcome = act(bot, cache, config, bot_admin_ttl, deletion).await;
-    tracing::debug!(id = %id, group = %group, kind = %kind, ?outcome, "the message is dealt with");
-
-    // Only an ending is counted, and each one only once, so the outcomes add up to the number of
-    // messages. A warning and a retry are steps, not endings; retries have their own counter.
-    let result = match outcome {
-        Outcome::Removed => finish(repos, id, group, kind, DeletionState::Removed).await,
-        Outcome::RemovedBefore => finish(repos, id, group, kind, DeletionState::RemovedBefore).await,
-        Outcome::Expired => finish(repos, id, group, kind, DeletionState::Expired).await,
-        Outcome::Failed => finish(repos, id, group, kind, DeletionState::Failed).await,
-        Outcome::Warned => repos.deletions.mark_warned(id, Utc::now() + config.warning).await,
-        Outcome::Retry => {
-            metrics::SELF_DESTRUCTION_RETRIES.record(group, kind);
-            let next_attempt = Utc::now() + backoff(config.retry_delay, failures, config.max_retry_delay);
-            match repos.deletions.postpone(id, next_attempt).await {
-                Ok(attempts) if attempts >= config.max_attempts => {
-                    tracing::warn!(id = %id, attempts = %attempts, "giving up on a self-destructing message");
-                    finish(repos, id, group, kind, DeletionState::Failed).await
-                },
-                other => other.map(|_| ()),
-            }
-        },
-    };
-    if let Err(e) = result {
-        tracing::error!(id = %id, error = format!("{e:#}"), "couldn't record the outcome of a self-destruction");
-    }
-}
-
-/// Stores the state a row ended in and counts that ending. Both happen here, so the table and the
-/// counter always say the same thing.
-async fn finish(
-    repos: &Repositories,
-    id: ScheduledDeletionId,
-    group: MessageGroup,
-    kind: MessageKind,
-    state: DeletionState,
-) -> anyhow::Result<()> {
-    metrics::SELF_DESTRUCTION.record(group, kind, state);
-    repos.deletions.finish(id, state).await
-}
-
 /// Removes the rows that were finished long enough ago, and reports what is left.
 ///
 /// Separate from the worker on purpose: the finished rows are the only account of what the worker
@@ -174,84 +134,212 @@ pub async fn clean_finished_deletions(repos: &Repositories, retention: Duration)
     Ok(())
 }
 
-/// Does to the message whatever its row asks for, and says what became of it.
-async fn act(
-    bot: &Throttle<Bot>,
-    cache: &Cache,
-    config: &SelfDestructionConfig,
-    bot_admin_ttl: Duration,
-    deletion: ScheduledDeletion,
-) -> Outcome {
-    // Telegram refuses to delete a message older than 48 hours, so the row is kept as `expired`
-    // rather than spent on a request that is certain to be refused. `expire_stale` finishes nearly
-    // all of them before the claim; only a row that crossed the line since, or one it failed to
-    // reach, gets here. An inline message is edited, not deleted, and no age limit applies to that.
-    let is_chat_message = matches!(deletion.target, DeletionTarget::ChatMessage { .. });
-    let age = (Utc::now() - deletion.created_at).to_std().unwrap_or(Duration::ZERO);
-    if is_chat_message && age > MAX_AGE {
-        tracing::debug!(kind = %deletion.kind, created_at = %deletion.created_at,
-            "the message got too old to be deleted while it waited");
-        return Outcome::Expired
+impl Cleaner<'_> {
+    /// Acts on one message and writes down what became of it.
+    async fn act_and_record(&self, deletion: ScheduledDeletion) {
+        let config = self.config;
+        let id = deletion.id;
+        let group = deletion.group;
+        let kind = deletion.kind;
+        let failures = deletion.attempts;
+        let outcome = self.act(deletion).await;
+        tracing::debug!(id = %id, group = %group, kind = %kind, ?outcome, "the message is dealt with");
+
+        // Only an ending is counted, and each one only once, so the outcomes add up to the number of
+        // messages. A warning and a retry are steps, not endings; retries have their own counter.
+        let finish_as = |state| self.finish(id, group, kind, state);
+        let result = match outcome {
+            Outcome::Removed => finish_as(DeletionState::Removed).await,
+            Outcome::RemovedBefore => finish_as(DeletionState::RemovedBefore).await,
+            Outcome::Expired => finish_as(DeletionState::Expired).await,
+            Outcome::Failed => finish_as(DeletionState::Failed).await,
+            Outcome::Warned => self.repos.deletions.mark_warned(id, Utc::now() + config.warning).await,
+            Outcome::Retry => {
+                metrics::SELF_DESTRUCTION_RETRIES.record(group, kind);
+                let next_attempt = Utc::now() + backoff(config.retry_delay, failures, config.max_retry_delay);
+                match self.repos.deletions.postpone(id, next_attempt).await {
+                    Ok(attempts) if attempts >= config.max_attempts => {
+                        tracing::warn!(id = %id, attempts = %attempts, "giving up on a self-destructing message");
+                        finish_as(DeletionState::Failed).await
+                    },
+                    other => other.map(|_| ()),
+                }
+            },
+        };
+        if let Err(e) = result {
+            tracing::error!(id = %id, error = format!("{e:#}"), "couldn't record the outcome of a self-destruction");
+        }
     }
 
-    match &deletion.target {
-        DeletionTarget::InlineMessage(inline_message_id) => {
-            let placeholder = t!("self_destruction.placeholder", locale = &deletion.lang_code);
-            let request = bot.edit_message_text_inline(inline_message_id.value(), placeholder)
-                .parse_mode(Html);
-            outcome_of(request.await.map(|_| ()), &deletion, cache, bot_admin_ttl).await
-        },
-        DeletionTarget::ChatMessage { chat_id, message_id } => {
-            let chat = ChatId::from(*chat_id);
-            let message = MessageId::from(*message_id);
-            // A command belongs to its sender, so it can't be edited into anything — it is only
-            // ever deleted, at the moment its answer's warning runs out.
-            let warn = !config.warning.is_zero()
-                && deletion.state == DeletionState::Created
-                && deletion.kind != MessageKind::Command;
-            if warn {
-                let notice = t!("self_destruction.warning", locale = &deletion.lang_code,
-                                seconds = config.warning.as_secs());
-                let request = bot.edit_message_text(chat, message, notice).parse_mode(Html);
-                return outcome_of_warning(request.await.map(|_| ()), chat, message)
+    /// Stores the state a row ended in and counts that ending. Both happen here, so the table and the
+    /// counter always say the same thing.
+    async fn finish(
+        &self,
+        id: ScheduledDeletionId,
+        group: MessageGroup,
+        kind: MessageKind,
+        state: DeletionState,
+    ) -> anyhow::Result<()> {
+        metrics::SELF_DESTRUCTION.record(group, kind, state);
+        self.repos.deletions.finish(id, state).await
+    }
+
+    /// Does to the message whatever its row asks for, and says what became of it.
+    async fn act(&self, deletion: ScheduledDeletion) -> Outcome {
+        // Telegram refuses to delete a message older than 48 hours, so the row is kept as `expired`
+        // rather than spent on a request that is certain to be refused. `expire_stale` finishes nearly
+        // all of them before the claim; only a row that crossed the line since, or one it failed to
+        // reach, gets here.
+        let too_old = (Utc::now() - deletion.created_at).to_std().unwrap_or(Duration::ZERO) > MAX_AGE;
+        // A command belongs to its sender, so it can't be edited into anything — it is only ever
+        // deleted, at the moment its answer's warning runs out.
+        let warn = !self.config.warning.is_zero()
+            && deletion.state == DeletionState::Created
+            && deletion.kind != MessageKind::Command;
+
+        match &deletion.target {
+            DeletionTarget::InlineMessage(inline_message_id) => {
+                let resolved = resolve_inline(inline_message_id);
+                let deletable = match resolved {
+                    Some((chat, _)) => rights::may_delete_inline(self.cache, chat).await,
+                    None => false,
+                };
+                let maybe_chat = resolved.map(|(chat, _)| chat);
+
+                let Some((chat, message)) = resolved.filter(|_| deletable && !too_old) else {
+                    let otherwise = if too_old {
+                        tracing::debug!(kind = %deletion.kind, created_at = %deletion.created_at,
+                            "the inline message got too old to be deleted while it waited");
+                        Outcome::Expired
+                    } else {
+                        Outcome::Failed
+                    };
+                    if !self.may_shrink(&deletion, maybe_chat).await {
+                        return otherwise
+                    }
+                    if warn {
+                        return self.warn_inline(&deletion, inline_message_id).await
+                    }
+                    return self.shrink(&deletion, inline_message_id).await
+                };
+
+                if warn {
+                    return self.warn_inline(&deletion, inline_message_id).await
+                }
+                let result = self.bot.delete_message(chat, message).await.map(|_| ());
+                if let Some(outcome) = outcome_of_inline_deletion(result) {
+                    return outcome
+                }
+                rights::remember_deletion_right(self.cache, chat, false, self.bot_admin_ttl).await;
+                if !self.may_shrink(&deletion, Some(chat)).await {
+                    return Outcome::Failed
+                }
+                self.shrink(&deletion, inline_message_id).await
+            },
+            DeletionTarget::ChatMessage { chat_id, message_id } => {
+                if too_old {
+                    tracing::debug!(kind = %deletion.kind, created_at = %deletion.created_at,
+                        "the message got too old to be deleted while it waited");
+                    return Outcome::Expired
+                }
+                let chat = ChatId::from(*chat_id);
+                let message = MessageId::from(*message_id);
+                if warn {
+                    let request = self.bot.edit_message_text(chat, message, self.warning(&deletion)).parse_mode(Html);
+                    return outcome_of_warning(request.await.map(|_| ()), deletion.id)
+                }
+                self.outcome_of(self.bot.delete_message(chat, message).await.map(|_| ()), &deletion).await
+            },
+        }
+    }
+
+    /// Whether the chat lets an inline message the bot can't delete be replaced with the placeholder.
+    async fn may_shrink(&self, deletion: &ScheduledDeletion, chat: Option<ChatId>) -> bool {
+        let settings = match chat {
+            Some(chat) => self.cleanup.settings(&chat.into()).await,
+            None => ChatCleanupSettings::default(),
+        };
+        let allowed = self.config.inline_delay_for_chat(deletion.group, &settings).is_some();
+        if !allowed {
+            tracing::debug!(kind = %deletion.kind, "the inline message may be neither deleted nor shrunk");
+        }
+        allowed
+    }
+
+    async fn warn_inline(&self, deletion: &ScheduledDeletion, inline_message_id: &InlineMessageId) -> Outcome {
+        let request = self.bot.edit_message_text_inline(inline_message_id.value(), self.warning(deletion))
+            .parse_mode(Html);
+        outcome_of_warning(request.await.map(|_| ()), deletion.id)
+    }
+
+    /// Replaces an inline message with the placeholder.
+    async fn shrink(&self, deletion: &ScheduledDeletion, inline_message_id: &InlineMessageId) -> Outcome {
+        let placeholder = t!("self_destruction.placeholder", locale = &deletion.lang_code);
+        let request = self.bot.edit_message_text_inline(inline_message_id.value(), placeholder)
+            .parse_mode(Html);
+        self.outcome_of(request.await.map(|_| ()), deletion).await
+    }
+
+    fn warning(&self, deletion: &ScheduledDeletion) -> String {
+        let seconds = self.config.warning.as_secs();
+        t!("self_destruction.warning", locale = &deletion.lang_code, seconds = seconds).to_string()
+    }
+
+
+    /// Turns the answer of the Bot API into an outcome, remembering what it says about the chat.
+    async fn outcome_of(&self, result: Result<(), RequestError>, deletion: &ScheduledDeletion) -> Outcome {
+        let error = match result {
+            Ok(()) => return Outcome::Removed,
+            Err(e) => e,
+        };
+
+        // A message that is already gone is the outcome we were after, reached by someone else.
+        if is_gone(&error) {
+            tracing::debug!(kind = %deletion.kind, error = %error, "the message was already gone");
+            return Outcome::RemovedBefore
+        }
+
+        if is_refused(&error) && deletion.kind == MessageKind::Command {
+            // The bot may not delete messages here. Remembering that keeps every later command out of
+            // the queue instead of into this same failure.
+            if let DeletionTarget::ChatMessage { chat_id, .. } = deletion.target {
+                rights::remember_deletion_right(self.cache, ChatId::from(chat_id), false, self.bot_admin_ttl).await;
             }
-            outcome_of(bot.delete_message(chat, message).await.map(|_| ()), &deletion, cache, bot_admin_ttl).await
-        },
+        }
+        if is_final(&error) {
+            tracing::warn!(kind = %deletion.kind, error = %error, "the message can't be removed at all");
+            return Outcome::Failed
+        }
+
+        tracing::warn!(kind = %deletion.kind, error = %error, "couldn't remove the self-destructing message");
+        Outcome::Retry
     }
 }
 
-/// Turns the answer of the Bot API into an outcome, remembering what it says about the chat.
-async fn outcome_of(
-    result: Result<(), RequestError>,
-    deletion: &ScheduledDeletion,
-    cache: &Cache,
-    bot_admin_ttl: Duration,
-) -> Outcome {
-    let error = match result {
-        Ok(()) => return Outcome::Removed,
-        Err(e) => e,
+/// The chat and the message an inline message was posted as, when its id names them: only a
+/// supergroup's does.
+fn resolve_inline(inline_message_id: &InlineMessageId) -> Option<(ChatId, MessageId)> {
+    let info = resolve_inline_message_id(inline_message_id.value())
+        .inspect_err(|e| tracing::warn!(error = %e, "couldn't resolve the inline_message_id"))
+        .ok()?;
+    info.chat_id.map(|chat_id| (ChatId::from(chat_id), info.message_id))
+}
+
+/// What the deletion of an inline message means for the row, or `None` when the bot can't delete
+/// it and the message is to be shrunk instead.
+fn outcome_of_inline_deletion(result: Result<(), RequestError>) -> Option<Outcome> {
+    let Err(error) = result else {
+        return Some(Outcome::Removed)
     };
-
-    // A message that is already gone is the outcome we were after, reached by someone else.
     if is_gone(&error) {
-        tracing::debug!(kind = %deletion.kind, error = %error, "the message was already gone");
-        return Outcome::RemovedBefore
-    }
-
-    if is_refused(&error) && deletion.kind == MessageKind::Command {
-        // The bot may not delete messages here. Remembering that keeps every later command out of
-        // the queue instead of into this same failure.
-        if let DeletionTarget::ChatMessage { chat_id, .. } = deletion.target {
-            rights::remember_deletion_right(cache, ChatId::from(chat_id), false, bot_admin_ttl).await;
-        }
+        return Some(Outcome::RemovedBefore)
     }
     if is_final(&error) {
-        tracing::warn!(kind = %deletion.kind, error = %error, "the message can't be removed at all");
-        return Outcome::Failed
+        tracing::debug!(error = %error, "the inline message can't be deleted, so it is shrunk instead");
+        return None
     }
-
-    tracing::warn!(kind = %deletion.kind, error = %error, "couldn't remove the self-destructing message");
-    Outcome::Retry
+    tracing::warn!(error = %error, "couldn't delete the self-destructing inline message");
+    Some(Outcome::Retry)
 }
 
 /// What the warning attempt means for the row.
@@ -259,17 +347,16 @@ async fn outcome_of(
 /// A message that is already gone will not come back, so the row ends here rather than a grace
 /// period and a certain-to-fail deletion later. Any other failure carries on: a message that could
 /// not be warned is still worth deleting on time, and the notice is the part worth losing.
-fn outcome_of_warning(result: Result<(), RequestError>, chat: ChatId, message: MessageId) -> Outcome {
+fn outcome_of_warning(result: Result<(), RequestError>, id: ScheduledDeletionId) -> Outcome {
     let error = match result {
         Ok(()) => return Outcome::Warned,
         Err(e) => e,
     };
     if is_gone(&error) {
-        tracing::debug!(chat_id = %chat, message_id = %message, "the message was gone before its warning");
+        tracing::debug!(id = %id, "the message was gone before its warning");
         return Outcome::RemovedBefore
     }
-    tracing::warn!(chat_id = %chat, message_id = %message, error = %error,
-        "couldn't edit the message with the warning");
+    tracing::warn!(id = %id, error = %error, "couldn't edit the message with the warning");
     Outcome::Warned
 }
 
@@ -317,16 +404,25 @@ fn is_final(error: &RequestError) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+    use crate::config::{CacheConfig, CacheMode, DeletionMode, InlineGroups};
+    use crate::domain::primitives::{AttemptsCount, LanguageCode};
+    use crate::fake_telegram::FakeApi;
+    use crate::handlers::utils::inline_message_id_of;
+    use crate::repo::test::{fresh_db, repos};
     use super::*;
+
+    const CHAT_ID: i64 = -1001100294568;
+    /// Too short to be any of Telegram's formats, so it names no chat.
+    const UNRESOLVABLE_ID: &str = "AgAAAOEcAABzXwsRJ0Cs2A";
 
     /// A message someone else removed used to be warned first and only found missing a grace
     /// period later, at the cost of two requests and a warn-level line for a normal event.
     #[test]
     fn a_message_gone_before_its_warning_ends_there() {
-        let chat = ChatId(-1001);
-        let message = MessageId(1);
+        let id = ScheduledDeletionId::new(1);
         for gone in [ApiError::MessageToEditNotFound, ApiError::MessageToDeleteNotFound, ApiError::MessageIdInvalid] {
-            let outcome = outcome_of_warning(Err(RequestError::Api(gone)), chat, message);
+            let outcome = outcome_of_warning(Err(RequestError::Api(gone)), id);
             assert_eq!(outcome, Outcome::RemovedBefore);
         }
     }
@@ -335,15 +431,30 @@ mod tests {
     /// deletion is not.
     #[test]
     fn a_warning_that_merely_failed_still_leads_to_a_deletion() {
-        let chat = ChatId(-1001);
-        let message = MessageId(1);
-        assert_eq!(outcome_of_warning(Ok(()), chat, message), Outcome::Warned);
+        let id = ScheduledDeletionId::new(1);
+        assert_eq!(outcome_of_warning(Ok(()), id), Outcome::Warned);
 
         let transient = RequestError::Api(ApiError::Unknown("Bad Gateway".to_owned()));
-        assert_eq!(outcome_of_warning(Err(transient), chat, message), Outcome::Warned);
+        assert_eq!(outcome_of_warning(Err(transient), id), Outcome::Warned);
 
         let rate_limited = RequestError::RetryAfter(teloxide::types::Seconds::from_seconds(5));
-        assert_eq!(outcome_of_warning(Err(rate_limited), chat, message), Outcome::Warned);
+        assert_eq!(outcome_of_warning(Err(rate_limited), id), Outcome::Warned);
+    }
+
+    /// Only a refusal hands the message over to the placeholder; a transient failure is retried.
+    #[test]
+    fn only_a_refused_inline_deletion_falls_back() {
+        assert_eq!(outcome_of_inline_deletion(Ok(())), Some(Outcome::Removed));
+
+        let gone = RequestError::Api(ApiError::MessageToDeleteNotFound);
+        assert_eq!(outcome_of_inline_deletion(Err(gone)), Some(Outcome::RemovedBefore));
+
+        for refused in [ApiError::MessageCantBeDeleted, ApiError::ChatNotFound, ApiError::BotKickedFromSupergroup] {
+            assert_eq!(outcome_of_inline_deletion(Err(RequestError::Api(refused))), None);
+        }
+
+        let transient = RequestError::Api(ApiError::Unknown("Bad Gateway".to_owned()));
+        assert_eq!(outcome_of_inline_deletion(Err(transient)), Some(Outcome::Retry));
     }
 
     #[test]
@@ -374,5 +485,121 @@ mod tests {
         let rate_limited = RequestError::RetryAfter(teloxide::types::Seconds::from_seconds(5));
         assert!(!is_final(&rate_limited));
         assert!(!is_refused(&rate_limited));
+    }
+
+    /// An inline message the bot may delete is warned first, like any other.
+    #[tokio::test]
+    async fn an_inline_message_is_warned_before_it_is_deleted() {
+        let (outcome, api, _) = act_on_inline(inline_message_id_of(CHAT_ID), "", DeletionState::Created).await;
+
+        assert_eq!(outcome, Outcome::Warned);
+        assert_eq!(api.methods(), ["EditMessageText"]);
+        assert_eq!(api.calls()[0].1["text"], warning_text());
+    }
+
+    /// The deletion is refused, so the message is edited into the placeholder, and the bot
+    /// remembers that it may not delete messages there.
+    #[tokio::test]
+    async fn an_inline_message_that_cant_be_deleted_is_shrunk_instead() {
+        let (outcome, api, cache) = act_on_inline(inline_message_id_of(CHAT_ID), "report", DeletionState::Warned).await;
+
+        assert_eq!(outcome, Outcome::Removed);
+        assert_eq!(api.methods(), ["DeleteMessage", "EditMessageText"]);
+        let calls = api.calls();
+        assert_eq!(calls[0].1["chat_id"], CHAT_ID);
+        assert_eq!(calls[0].1["message_id"], 42);
+        assert_eq!(calls[1].1["inline_message_id"], inline_message_id_of(CHAT_ID));
+        assert_eq!(calls[1].1["text"], placeholder_text());
+        let known = rights::cached_deletion_right(&cache, ChatId(CHAT_ID)).await;
+        assert_eq!(known, Some(false));
+    }
+
+    /// A group the placeholder is not allowed for keeps its message when the deletion is refused.
+    #[tokio::test]
+    async fn an_inline_message_that_may_not_be_shrunk_is_left_alone() {
+        let (outcome, api, _) = act_on_inline(inline_message_id_of(CHAT_ID), "", DeletionState::Warned).await;
+
+        assert_eq!(outcome, Outcome::Failed);
+        assert_eq!(api.methods(), ["DeleteMessage"]);
+    }
+
+    /// An id that names no chat can only be shrunk, and it is warned about first all the same.
+    #[tokio::test]
+    async fn an_inline_message_is_warned_before_it_is_shrunk() {
+        let (outcome, api, _) = act_on_inline(UNRESOLVABLE_ID.to_owned(), "report", DeletionState::Created).await;
+        assert_eq!(outcome, Outcome::Warned);
+        assert_eq!(api.methods(), ["EditMessageText"]);
+        assert_eq!(api.calls()[0].1["text"], warning_text());
+
+        let (outcome, api, _) = act_on_inline(UNRESOLVABLE_ID.to_owned(), "report", DeletionState::Warned).await;
+        assert_eq!(outcome, Outcome::Removed);
+        assert_eq!(api.methods(), ["EditMessageText"]);
+        assert_eq!(api.calls()[0].1["text"], placeholder_text());
+    }
+
+    /// A message that will be neither deleted nor shrunk isn't warned about either.
+    #[tokio::test]
+    async fn an_inline_message_that_will_stay_is_not_warned_about() {
+        let (outcome, api, _) = act_on_inline(UNRESOLVABLE_ID.to_owned(), "", DeletionState::Created).await;
+
+        assert_eq!(outcome, Outcome::Failed);
+        assert!(api.methods().is_empty());
+    }
+
+    /// Runs one inline `Report` message through [`Cleaner::act`] against an API that refuses every
+    /// deletion, with `inline_groups` deciding whether a placeholder is allowed.
+    async fn act_on_inline(
+        inline_message_id: String,
+        inline_groups: &str,
+        state: DeletionState,
+    ) -> (Outcome, FakeApi, Cache) {
+        let api = FakeApi::start(|method| match method {
+            "DeleteMessage" => json!({
+                "ok": false,
+                "error_code": 400,
+                "description": "Bad Request: message can't be deleted"
+            }),
+            _ => json!({ "ok": true, "result": true }),
+        }).await;
+        let db = fresh_db().await;
+        let repos = repos(&db);
+        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
+        let cleanup = CleanupPolicy::new(repos.chats.clone(), cache.clone(), Duration::from_hours(1));
+        let config = SelfDestructionConfig {
+            mode: DeletionMode::Enabled,
+            report: Duration::from_mins(2),
+            warning: Duration::from_secs(15),
+            inline_groups: inline_groups.parse::<InlineGroups>().expect("couldn't parse the groups"),
+            ..Default::default()
+        };
+        let bot = Throttle::new_spawn(api.bot.clone(), Default::default());
+        let cleaner = Cleaner {
+            bot: &bot, repos: &repos, cache: &cache, cleanup: &cleanup, config: &config,
+            bot_admin_ttl: Duration::from_hours(1),
+        };
+
+        let outcome = cleaner.act(inline_deletion(inline_message_id, state)).await;
+        (outcome, api, cache)
+    }
+
+    fn inline_deletion(inline_message_id: String, state: DeletionState) -> ScheduledDeletion {
+        ScheduledDeletion {
+            id: ScheduledDeletionId::new(1),
+            target: DeletionTarget::InlineMessage(InlineMessageId::new(inline_message_id)),
+            kind: MessageKind::Inline,
+            group: MessageGroup::Report,
+            lang_code: LanguageCode::new("en".to_owned()),
+            state,
+            created_at: Utc::now(),
+            attempts: AttemptsCount::new(0),
+        }
+    }
+
+    fn warning_text() -> String {
+        t!("self_destruction.warning", locale = "en", seconds = 15).to_string()
+    }
+
+    fn placeholder_text() -> String {
+        t!("self_destruction.placeholder", locale = "en").to_string()
     }
 }

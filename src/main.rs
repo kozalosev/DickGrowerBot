@@ -27,6 +27,8 @@ mod telegram_backoff;
 
 #[cfg(test)]
 mod test_containers;
+#[cfg(test)]
+mod fake_telegram;
 
 use std::net::SocketAddr;
 use futures::future::join_all;

@@ -10,6 +10,7 @@ use teloxide::Bot;
 use teloxide::adaptors::throttle::{Settings, Throttle};
 use domain_types::traits::SaturatingInto;
 use crate::cache::Cache;
+use crate::cleanup::CleanupPolicy;
 use crate::config::{get_env_value_or_default, AppConfig, ThrottleConfig};
 use crate::domain::primitives::AttemptsCount;
 use crate::handlers::utils::date::duration_till_next_day;
@@ -185,6 +186,7 @@ pub fn spawn_deletion_worker(
 ) {
     let self_destruction = config.self_destruction;
     let bot_admin_ttl = config.caches.bot_admin;
+    let cleanup = CleanupPolicy::new(repos.chats.clone(), cache.clone(), config.caches.chat_cleanup);
     if !self_destruction.enabled() {
         tracing::info!("the self-destruction of messages is disabled (set the MSG_SELFDESTRUCT_DELAY_* variables to enable it)");
         return;
@@ -214,7 +216,7 @@ pub fn spawn_deletion_worker(
             // A failed tick is logged and forgotten: the rows are still there, and the next tick
             // picks them up. Only the count is skipped, as it comes from the same database.
             resilient(async {
-                if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &self_destruction, bot_admin_ttl).await {
+                if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &cleanup, &self_destruction, bot_admin_ttl).await {
                     tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
                 }
             }).await;

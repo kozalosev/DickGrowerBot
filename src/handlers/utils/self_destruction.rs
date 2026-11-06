@@ -5,6 +5,7 @@ use teloxide::prelude::Requester;
 use teloxide::types::{ChatId, Message, MessageId, UserId as TeloxideUserId};
 use crate::config::{MessageGroup, SelfDestructionConfig, MAX_DELAY};
 use crate::handlers::rights;
+use crate::handlers::utils::try_resolve_chat_id;
 use crate::domain::primitives::{CharCount, LanguageCode};
 use crate::domain::objects::ChatCleanupSettings;
 use crate::domain::primitives::chat::{ChatIdKind, InlineMessageId, TelegramChatId, TelegramMessageId};
@@ -111,10 +112,13 @@ impl SelfDestructionService {
             .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't schedule the self-destruction"));
     }
 
-    /// Schedules an inline message to be replaced with the placeholder, on the terms of the chat it
-    /// went to — its delay, and its say in whether inline messages are touched at all. An inline
-    /// message can never be deleted, so the chat keeps whatever is put there instead, which is why
-    /// a chat that said nothing follows the operator's list rather than its own delays.
+    /// Schedules an inline message to self-destruct on the terms of the chat it went to.
+    ///
+    /// In a supergroup the `inline_message_id` names the chat and the message, so a bot that may
+    /// delete messages there deletes it on the ordinary delays. Anywhere else it can only be
+    /// replaced with the placeholder, which the chat keeps for good, so the chat's say in whether
+    /// inline messages are touched at all applies, and a chat that said nothing follows the
+    /// operator's list rather than its own delays.
     ///
     /// `chat` is `None` where the update doesn't name one: a legacy group without an anchor, or a
     /// chosen result whose `inline_message_id` encodes no chat. Then the bot's own settings apply.
@@ -131,7 +135,11 @@ impl SelfDestructionService {
             Some(chat) => self.cleanup.settings(chat).await,
             None => ChatCleanupSettings::default(),
         };
-        let Some(base_delay) = self.config.inline_delay_for_chat(group, &settings) else {
+        let deletable = match try_resolve_chat_id(inline_message_id.value()) {
+            Some(chat_id) => rights::may_delete_inline(&self.cache, chat_id.into()).await,
+            None => false,
+        };
+        let Some(base_delay) = self.config.inline_delay(group, &settings, deletable) else {
             return
         };
         let delay = base_delay
@@ -145,16 +153,16 @@ impl SelfDestructionService {
             lang_code: lang_code.clone(),
             fire_after: Utc::now() + delay,
         };
-        tracing::debug!(delay = ?delay, "scheduling the placeholdering of an inline message");
+        tracing::debug!(delay = ?delay, deletable = %deletable, "scheduling the self-destruction of an inline message");
         self.deletions.schedule(&[row]).await
-            .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't schedule the placeholdering"));
+            .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't schedule the self-destruction"));
     }
 
-    /// Calls off the placeholdering of an inline message that has become worth keeping — an
+    /// Calls off the self-destruction of an inline message that has become worth keeping — an
     /// application answered before it could expire.
     #[tracing::instrument(skip_all, fields(inline_message_id = %inline_message_id))]
     pub async fn cancel_inline(&self, inline_message_id: InlineMessageId) {
-        if self.config.inline_groups.is_empty() {
+        if !self.config.enabled() {
             return
         }
         self.cancel(DeletionTarget::InlineMessage(inline_message_id)).await
@@ -237,6 +245,11 @@ fn target_of(msg: &Message) -> DeletionTarget {
 
 #[cfg(test)]
 mod tests {
+    use sqlx::{Pool, Postgres};
+    use crate::config::{CacheConfig, CacheMode, DeletionMode, InlineGroups};
+    use crate::handlers::utils::tghack;
+    use crate::repo::Chats;
+    use crate::repo::test::fresh_db;
     use super::*;
 
     #[test]
@@ -250,5 +263,45 @@ mod tests {
     #[test]
     fn reading_time_zero_speed_disables_adjustment() {
         assert_eq!(reading_time(CharCount::new(5000), 0), Duration::ZERO);
+    }
+
+    /// The bot opens no group for the placeholder, so only a message it can delete is scheduled.
+    #[tokio::test]
+    async fn only_a_deletable_inline_message_ignores_the_placeholder_policy() {
+        const CHAT_ID: i64 = -1001100294568;
+        let db = fresh_db().await;
+        let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
+        let service = service(&db, &cache);
+        let lang_code = LanguageCode::new("en".to_owned());
+        let schedule = |id: String| service.schedule_inline(InlineMessageId::new(id), None, MessageGroup::Report,
+                                                            CharCount::new(0), &lang_code);
+
+        schedule("AgAAAOEcAABzXwsRJ0Cs2A".to_owned()).await;
+        assert_eq!(scheduled(&db).await, 0, "an id that names no chat can only be shrunk");
+
+        schedule(tghack::inline_message_id_of(CHAT_ID)).await;
+        assert_eq!(scheduled(&db).await, 1, "a supergroup's message is deleted on the ordinary delay");
+
+        rights::remember_deletion_right(&cache, ChatId(CHAT_ID - 1), false, Duration::from_hours(1)).await;
+        schedule(tghack::inline_message_id_of(CHAT_ID - 1)).await;
+        assert_eq!(scheduled(&db).await, 1, "a chat known to refuse can only be shrunk");
+    }
+
+    fn service(db: &Pool<Postgres>, cache: &Cache) -> SelfDestructionService {
+        let config = SelfDestructionConfig {
+            mode: DeletionMode::Enabled,
+            report: Duration::from_mins(2),
+            inline_groups: InlineGroups::default(),
+            ..Default::default()
+        };
+        let cleanup = CleanupPolicy::new(Chats::new(db.clone(), Default::default()), cache.clone(), Duration::from_hours(1));
+        SelfDestructionService::new(config, ScheduledDeletions::new(db.clone()), cleanup, cache.clone(),
+                                    TeloxideUserId(1), Duration::from_hours(1))
+    }
+
+    async fn scheduled(db: &Pool<Postgres>) -> i64 {
+        sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM Scheduled_Message_Deletions"#)
+            .fetch_one(db)
+            .await.expect("couldn't count the scheduled deletions")
     }
 }
