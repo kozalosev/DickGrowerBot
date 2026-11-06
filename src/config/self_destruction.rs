@@ -203,12 +203,28 @@ impl SelfDestructionConfig {
         }
     }
 
-    /// How long an inline message of this group lives in a chat, or `None` when it is left alone.
+    /// How long an inline message lives, given whether the bot may delete it. A deleted message
+    /// leaves nothing behind, so it follows the chat's delays like any other; one that can only be
+    /// shrunk follows [`Self::inline_delay_for_chat`].
+    pub fn inline_delay(
+        &self,
+        group: MessageGroup,
+        settings: &ChatCleanupSettings,
+        deletable: bool,
+    ) -> Option<Duration> {
+        if deletable {
+            self.delay_for_chat(group, settings)
+        } else {
+            self.inline_delay_for_chat(group, settings)
+        }
+    }
+
+    /// How long an inline message of this group lives in a chat when it can only be rewritten into
+    /// the placeholder, or `None` when it is left alone.
     ///
-    /// An inline message can't be deleted, only rewritten into the placeholder, so a chat that said
-    /// nothing about them follows [`Self::inline_groups`] — the operator's list of what may be
-    /// touched at all. A chat that did say something decides for itself, and the delay is its own
-    /// either way.
+    /// The placeholder stays in the chat for good, so a chat that said nothing about them follows
+    /// [`Self::inline_groups`] — the operator's list of what may be touched at all. A chat that did
+    /// say something decides for itself, and the delay is its own either way.
     pub fn inline_delay_for_chat(
         &self,
         group: MessageGroup,
@@ -419,6 +435,24 @@ mod tests {
         let chose = chose(MessageGroup::Notice, 5);
         assert_eq!(config.inline_delay_for_chat(MessageGroup::Notice, &chose),
                    Some(Duration::from_mins(5)));
+    }
+
+    /// A message the bot can delete leaves no placeholder behind, so neither the bot's list nor the
+    /// chat's switch holds it back.
+    #[test]
+    fn a_deletable_inline_message_follows_the_ordinary_delays() {
+        let config = enabled(SelfDestructionConfig {
+            report: Duration::from_mins(2),
+            inline_groups: InlineGroups::default(),
+            ..Default::default()
+        });
+        let untouched = ChatCleanupSettings::default();
+        assert_eq!(config.inline_delay(MessageGroup::Report, &untouched, true), Some(Duration::from_mins(2)));
+        assert_eq!(config.inline_delay(MessageGroup::Report, &untouched, false), None);
+
+        let kept = ChatCleanupSettings::new(Default::default(), Some(false));
+        assert_eq!(config.inline_delay(MessageGroup::Report, &kept, true), Some(Duration::from_mins(2)));
+        assert_eq!(config.inline_delay(MessageGroup::Report, &kept, false), None);
     }
 
     #[test]

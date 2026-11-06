@@ -484,14 +484,35 @@ to the bot, takes nothing away and asks nothing.
 The setting is cached like the chat language and the allowed topics — the same shape, the same
 lifetime, and the same read-through (see "The store of short-lived values").
 
-**Inline messages obey the chat too, where the chat can be named.** An inline message can only be
-rewritten into the placeholder, never deleted, so it gets a switch of its own in the picker rather
-than following the delays quietly — the `inline` key of the same jsonb object, a boolean beside the
-group names (a group can never be called that, so the two live together). It is a tri-state like the
-delays: absent means the chat said nothing and `MSG_SELFDESTRUCT_INLINE_GROUPS` decides which groups
-are touched, `true` means every group the chat cleans up, `false` means none.
+**Inline messages obey the chat too, where the chat can be named.** An inline message the bot can't
+delete can only be rewritten into the placeholder, so that case gets a switch of its own in the
+picker rather than following the delays quietly — the `inline` key of the same jsonb object, a
+boolean beside the group names (a group can never be called that, so the two live together). It is a
+tri-state like the delays: absent means the chat said nothing and `MSG_SELFDESTRUCT_INLINE_GROUPS`
+decides which groups are touched, `true` means every group the chat cleans up, `false` means none.
 `SelfDestructionConfig::inline_delay_for_chat` is where the two meet, and the delay is the chat's
 either way.
+
+**An inline message the bot can delete is simply deleted**, on the ordinary delays, warning
+included, and neither the switch nor the list holds it back: nothing is left behind.
+That is possible in a supergroup only. There, the `inline_message_id` encodes the chat and the
+message's own id, which is shared by every member, so `deleteMessage` works on it as on any other
+message. A legacy group's id encodes neither.
+
+The bot also has to hold the right, and the rights cache answers that. Nothing known counts as yes
+(`rights::may_delete_inline`), the same guess `ENABLED` makes for commands. `schedule_inline` picks
+the delay by it (`SelfDestructionConfig::inline_delay`). The worker asks again when the row is due,
+so nothing about the right is stored in the row.
+
+A deletion that is refused teaches the cache, and the message falls back to the placeholder in the
+same tick. It does so only if the switch and the list would have allowed one, read from the chat's
+settings at that moment (`scheduler::deletions::Cleaner::may_shrink`); otherwise the row ends
+`failed`. A message that reaches Telegram's 48 hours takes the same fallback and ends `expired`
+instead.
+
+**Every inline message is warned first, whichever way it goes**, exactly like a reply: the worker
+settles on the ending — deletion, placeholder or none — before the warning, so a message that is
+going to stay is never told otherwise.
 
 Naming the chat is the part that isn't always possible. `inline_chosen_handler` already works only
 for anchored groups (it filters on a row holding both the id and the instance), and
@@ -523,7 +544,7 @@ Two things are load-bearing in the schema:
   idempotent (`ON CONFLICT DO NOTHING`), which is why paging through a leaderboard can't push its
   deletion off for ever, and give `cancel` an exact key;
 * the **`state`** enum carries the grace period in the same row: the message is edited into the
-  warning and rescheduled, rather than held in memory. An inline row stays `created` to its end.
+  warning and rescheduled, rather than held in memory.
 
 **Whether the bot may delete the command** is not in the schema at all — it lives in the cache
 (see "The store of short-lived values" below), because the bot is *told* the answer rather than
@@ -685,10 +706,10 @@ Two limits are Telegram's:
   its request finally goes out. **48** is the real thing (`scheduler::deletions::MAX_AGE`): a
   message that reaches it — only a queue that fell behind can bring one there — is marked `expired`
   without spending a request on a certain refusal.
-* **An inline message can never be deleted, only edited.** So those are replaced with the
-  `self_destruction.placeholder` text instead, and only for the groups
-  `MSG_SELFDESTRUCT_INLINE_GROUPS` names — whatever is put there stays in the chat for good, which
-  is worth being conservative about. The bot gets an `inline_message_id` from a
+* **An inline message can only be edited, unless the bot may delete it in a supergroup** (see
+  above). Where it can't, it is replaced with the `self_destruction.placeholder` text instead, and
+  only for the groups `MSG_SELFDESTRUCT_INLINE_GROUPS` names — whatever is put there stays in the
+  chat for good, which is worth being conservative about. The bot gets an `inline_message_id` from a
   `ChosenInlineResult`, so that is where the scheduling sits. Legacy groups send no chosen result,
   so `inline_callback_handler` schedules too. The second call only fills the gap: the unique index
   on `inline_message_id` makes the insert do nothing for a message that already waits, so paging
