@@ -88,8 +88,8 @@ commands:
     position: "La tua posizione nella classifica è <b>%{pos}</b>."
     tomorrow: "Hai già giocato con il tuo pisello oggi."
   top:
-    description: "Mostra i peni più grandi del gruppo"
-    title: "Classifica dei peni più grandi:"
+    description: "Mostra i piselli più grandi del gruppo"
+    title: "Classifica dei piselli più grandi:"
     line: "%{n}|<b>%{name}</b> — <b>%{length}</b> cm"
     ending: "<i>[+] significa che un giocatore non ha ancora fatto crescere il suo pisello oggi.</i>"
     ending_inactive: "<i>[~] significa che un giocatore non ha fatto crescere il suo pisello per più di %{days} giorni.</i>"
@@ -139,7 +139,7 @@ commands:
     streak: "Giorni di fila: <b>%{current}</b>\nLa serie più lunga di crescite: <b>%{max}</b>"
     pvp: "Tasso di vittoria: <b>%{win_rate}</b>.\nSfide: <b>%{battles}</b>.\nVittorie: <b>%{wins}</b>.\nSerie di vittorie massima: <b>%{win_streak}</b>.\nLunghezza acquisita: <b>%{acquired} cm</b>.\nLunghezza persa: <b>%{lost} cm</b>."
     notice: "La raccolta delle statistiche è iniziata il 2 Luglio 2024."
-    personal: "<i>Le tue statistiche personali:</i>\n— Numero di gruppi in cui giochi: <b>%{chats}</b>.\n— Lunghezza massima raggiunta: <b>%{max_length}</b>.\n— Somma dei tuoi peni in tutti i gruppi: <b>%{total_length}</b>."
+    personal: "<i>Le tue statistiche personali:</i>\n— Numero di gruppi in cui giochi: <b>%{chats}</b>.\n— Lunghezza massima raggiunta: <b>%{max_length}</b>.\n— Somma dei tuoi piselli in tutti i gruppi: <b>%{total_length}</b>."
   loan:
     description: "Debito? Prendi un prestito!"
     debt: "Ti rimangono da pagare <b>%{debt} cm</b>"
@@ -155,7 +155,7 @@ commands:
     errors:
       positive_length: "Mi dispiace, amico, questa iniziativa sociale è pensata solo per ragazze con desideri molto, molto profondi. Non posso far diventare il tuo amico ancora più grande :("
   import:
-    description: "Importa peni da altri bot"
+    description: "Importa piselli da altri bot"
     result:
       titles:
         imported: "I seguenti utenti sono stati importati:"
@@ -210,7 +210,7 @@ inline:
     button: "Cliccami!"
     titles:
       grow: "Fai crescere il tuo pisello!"
-      top: "Mostra i peni più grandi del gruppo"
+      top: "Mostra i piselli più grandi del gruppo"
       dick_of_day: "Eleggi il pisello del Giorno"
       pvp: "Sfida gli altri con una scommessa di %{bet} cm!"
       stats: "Statistiche"
