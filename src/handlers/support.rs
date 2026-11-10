@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
-use teloxide::Bot;
+use teloxide::{Bot, RequestError};
 use crate::dialogue::CachedDialogueStorage;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::{CopyMessageSetters, SendMessageSetters};
@@ -23,10 +23,11 @@ use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboar
 use teloxide::utils::html;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::primitives::chat::TelegramChatId;
-use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
+use crate::handlers::{HandlerDeps, HandlerResult, reply_html, rights};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::handlers::utils::get_full_name;
 use crate::{metrics, reply_html};
+use crate::metrics::StartupCheck;
 
 /// One request per user per minute. A `const` rather than an environment variable: the knob is too
 /// small to be worth a line in every deployment file.
@@ -140,6 +141,50 @@ impl SupportService {
         last_sent.retain(|_, at| now.duration_since(*at) < RATE_LIMIT);
         last_sent.insert(uid, now).is_none()
     }
+}
+
+/// Why the chat set in `SUPPORT_CHAT_ID` can't be used.
+#[derive(Debug, Display)]
+pub enum Unusable {
+    #[display("the group was upgraded to the supergroup {}", _0.0)]
+    Migrated(ChatId),
+    #[display("the bot can't post there")]
+    CannotPost,
+    #[display("{_0}")]
+    Unknown(RequestError),
+}
+
+impl From<RequestError> for Unusable {
+    fn from(e: RequestError) -> Self {
+        match e {
+            RequestError::MigrateToChatId(new_id) => Self::Migrated(new_id),
+            e => Self::Unknown(e),
+        }
+    }
+}
+
+/// The support chat to use: the configured one when the bot can post there, none otherwise.
+pub async fn check_support_chat(bot: &Bot, chat_id: Option<TelegramChatId>, me: &Me) -> Option<TelegramChatId> {
+    let chat_id = chat_id?;
+    let checked = support_chat_usable(bot, chat_id, me).await;
+    metrics::STARTUP_VERIFICATION_ERROR.report(StartupCheck::SupportChat, checked.is_err());
+    checked
+        .inspect(|()| tracing::info!(%chat_id, "the support chat is usable"))
+        .inspect_err(|e| tracing::error!(%chat_id, reason = %e, "the support chat is unusable, so /support is disabled"))
+        .ok()
+        .map(|()| chat_id)
+}
+
+async fn support_chat_usable(bot: &Bot, chat_id: TelegramChatId, me: &Me) -> Result<(), Unusable> {
+    let chat_id = ChatId::from(chat_id);
+    bot.get_chat(chat_id).await?;
+    if chat_id.is_user() {
+        return Ok(())
+    }
+    let member = bot.get_chat_member(chat_id, me.id).await?;
+    rights::may_post(&member)
+        .then_some(())
+        .ok_or(Unusable::CannotPost)
 }
 
 enum Relayed {
@@ -563,6 +608,75 @@ mod tests {
         assert_eq!(api.methods(), ["CopyMessage", "SendMessage"]);
     }
 
+    #[tokio::test]
+    async fn a_group_the_bot_may_post_in_is_usable() {
+        let api = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), member_answer("member")).await;
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(SUPPORT_CHAT), &me()).await;
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(api.methods(), ["GetChat", "GetChatMember"]);
+    }
+
+    #[tokio::test]
+    async fn a_group_the_bot_is_muted_in_is_not() {
+        let api = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), muted_answer()).await;
+
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(SUPPORT_CHAT), &me()).await;
+        assert!(matches!(result, Err(Unusable::CannotPost)), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_chat_disables_support() {
+        let not_found = json!({ "ok": false, "error_code": 400, "description": "Bad Request: chat not found" });
+        let api = chat_api(not_found, member_answer("member")).await;
+
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(SUPPORT_CHAT), &me()).await;
+        assert!(matches!(result, Err(Unusable::Unknown(_))), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn a_migrated_group_names_its_new_id() {
+        let migrated = json!({
+            "ok": false,
+            "error_code": 400,
+            "description": "Bad Request: group chat was upgraded to a supergroup chat",
+            "parameters": { "migrate_to_chat_id": SUPPORT_CHAT }
+        });
+        let api = chat_api(migrated, member_answer("member")).await;
+
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(-4242), &me()).await;
+        assert!(matches!(result, Err(Unusable::Migrated(ChatId(SUPPORT_CHAT)))), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn a_private_chat_needs_no_membership() {
+        let api = chat_api(chat_answer(USER_ID, "private"), member_answer("left")).await;
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(USER_ID), &me()).await;
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(api.methods(), ["GetChat"]);
+    }
+
+    /// The only test that reports to the gauge, since the tests share it and run in parallel.
+    #[tokio::test]
+    async fn the_check_reports_its_outcome() {
+        let usable = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), member_answer("member")).await;
+        let chat = check(&usable, SUPPORT_CHAT).await;
+        assert_eq!(chat, Some(TelegramChatId::new(SUPPORT_CHAT)));
+        assert_verification(0);
+
+        let unusable = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), muted_answer()).await;
+        let chat = check(&unusable, SUPPORT_CHAT).await;
+        assert_eq!(chat, None);
+        assert_verification(1);
+    }
+
+    #[tokio::test]
+    async fn an_unset_chat_asks_nothing() {
+        let api = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), member_answer("member")).await;
+        let chat = check_support_chat(&api.bot, None, &me()).await;
+        assert_eq!(chat, None);
+        assert!(api.methods().is_empty());
+    }
+
     fn reply_message() -> Value {
         json!({
             "message_id": 20,
@@ -646,5 +760,87 @@ mod tests {
                 }
             }),
         }).await
+    }
+
+    async fn check(api: &FakeApi, chat_id: i64) -> Option<TelegramChatId> {
+        check_support_chat(&api.bot, Some(TelegramChatId::new(chat_id)), &me()).await
+    }
+
+    fn assert_verification(expected: i64) {
+        let series = format!("startup_verification_error{{kind=\"support_chat_unusable\"}} {expected}");
+        let rendered = metrics::render_metrics();
+        assert!(rendered.contains(&series), "{series} is missing from:
+{rendered}");
+    }
+
+    async fn chat_api(get_chat: Value, get_chat_member: Value) -> FakeApi {
+        FakeApi::start(move |method| match method {
+            "GetChat" => get_chat.clone(),
+            "GetChatMember" => get_chat_member.clone(),
+            _ => json!({ "ok": false, "error_code": 400, "description": "Bad Request: unexpected" }),
+        }).await
+    }
+
+    fn chat_answer(id: i64, kind: &str) -> Value {
+        let mut chat = json!({
+            "id": id,
+            "type": kind,
+            "max_reaction_count": 11,
+            "accepted_gift_types": {
+                "unlimited_gifts": false, "limited_gifts": false,
+                "unique_gifts": false, "premium_subscription": false
+            }
+        });
+        if kind == "private" {
+            chat["first_name"] = json!("Name");
+        } else {
+            chat["title"] = json!("Support");
+        }
+        json!({ "ok": true, "result": chat })
+    }
+
+    fn member_answer(status: &str) -> Value {
+        json!({
+            "ok": true,
+            "result": {
+                "status": status,
+                "user": { "id": BOT_ID, "is_bot": true, "first_name": "Bot" }
+            }
+        })
+    }
+
+    fn muted_answer() -> Value {
+        json!({
+            "ok": true,
+            "result": {
+                "status": "restricted",
+                "user": { "id": BOT_ID, "is_bot": true, "first_name": "Bot" },
+                "until_date": 0,
+                "is_member": true,
+                "can_send_messages": false,
+                "can_send_audios": false,
+                "can_send_documents": false,
+                "can_send_photos": false,
+                "can_send_videos": false,
+                "can_send_video_notes": false,
+                "can_send_voice_notes": false,
+                "can_send_polls": false,
+                "can_send_other_messages": false,
+                "can_add_web_page_previews": false,
+                "can_change_info": false,
+                "can_invite_users": false,
+                "can_pin_messages": false,
+                "can_manage_topics": false
+            }
+        })
+    }
+
+    fn me() -> Me {
+        serde_json::from_value(json!({
+            "id": BOT_ID, "is_bot": true, "first_name": "Bot", "username": "TestBot",
+            "can_join_groups": true, "can_read_all_group_messages": false,
+            "supports_inline_queries": true, "can_connect_to_business_account": false,
+            "has_main_web_app": false
+        })).expect("couldn't build the bot's own user")
     }
 }

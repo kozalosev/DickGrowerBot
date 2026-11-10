@@ -160,12 +160,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = config::BotConfig::build_bot(telegram_backoff.clone())?;
     bot.delete_webhook().await?;
 
+    let me = bot.get_me().await?;
+    let support_chat_id = handlers::check_support_chat(&bot, app_config.support_chat_id, &me).await;
+
     // The personal /language relies on the user-service; when it's unavailable, hide /language from
     // the private-chat menu. The chat-wide /language (groups, admins-only) stays available regardless.
     let command_toggles = commands::CommandToggles {
         env: app_config.command_toggles.clone(),
         personal_language_enabled: language_service.user_service_enabled(),
-        support_enabled: app_config.support_chat_id.is_some(),
+        support_enabled: support_chat_id.is_some(),
         cleanup_enabled: app_config.self_destruction.configurable(),
         mentions_enabled: app_config.daily_shrink.enabled(),
     };
@@ -179,7 +182,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Result<(), _>>()
         .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
 
-    let me = bot.get_me().await?;
     let perks = handlers::perks::all(&app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
                                                         &repos.perk_states, perks).await?;
@@ -190,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let self_destruction = SelfDestructionService::new(app_config.self_destruction.clone(),
                                                        repos.deletions.clone(), cleanup_policy.clone(),
                                                        cache.clone(), me.user.id, app_config.caches.bot_admin);
-    let support_service = SupportService::new(app_config.support_chat_id);
+    let support_service = SupportService::new(support_chat_id);
 
     let webhook_url = integrations_config.webhook_url;
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));

@@ -101,7 +101,7 @@ fn may_post_again(upd: &ChatMemberUpdated) -> bool {
 
 /// Whether the bot could send a message with that status. Being present is enough for every status
 /// but `restricted`, which is the muted one and carries the answer as a field of its own.
-fn may_post(member: &ChatMember) -> bool {
+pub(crate) fn may_post(member: &ChatMember) -> bool {
     match &member.kind {
         ChatMemberKind::Restricted(restricted) => restricted.is_member && restricted.can_send_messages,
         kind => kind.is_present(),

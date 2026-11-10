@@ -88,6 +88,8 @@ pub static CACHE_LOCAL_ENTRIES: Lazy<Gauge> = Lazy::new(||
     Gauge::new("cache_local_entries", "number of values the cache is holding in this process, as of the last sweep. Zero when the values are shared through Redis and it is answering; non-zero there too, for as long as cache_fallback_active reports an outage, since that is when a Redis backend starts holding its own values here instead. A number to watch rather than to alert on: keeping the values here is a setting, and the only one a single instance of the bot needs"));
 pub static CACHE_FALLBACK_ACTIVE: Lazy<Gauge> = Lazy::new(||
     Gauge::new("cache_fallback_active", "1 when the bot was told to share its cached values through Redis and isn't: either it fell back to its own process as it started, or the most recent call to Redis failed. 0 once a call succeeds again. cache_local_entries says whether the values are kept here, this says only whether Redis is presently answering"));
+pub static STARTUP_VERIFICATION_ERROR: Lazy<StartupVerificationGauge> = Lazy::new(||
+    StartupVerificationGauge::new("startup_verification_error", "1 for each check made at startup that failed, 0 for one that passed, by kind. The feature behind a failed check is off until the next restart, which is the only time the value changes. A check that didn't run, because its feature isn't configured, has no series"));
 pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
     CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
@@ -376,6 +378,30 @@ impl Counter {
 
     pub fn inc_by(&self, count: u64) {
         self.0.inc_by(count)
+    }
+}
+
+/// What a startup check found, by the kind of check.
+pub struct StartupVerificationGauge(prometheus::IntGaugeVec);
+
+/// A check made once at startup, named by what its failure means.
+#[derive(Clone, Copy, derive_more::Display)]
+pub enum StartupCheck {
+    #[display("support_chat_unusable")]
+    SupportChat,
+}
+
+impl StartupVerificationGauge {
+    fn new(name: &str, help: &str) -> Self {
+        let inner = prometheus::IntGaugeVec::new(Opts::new(name, help), &["kind"])
+            .unwrap_or_else(|e| panic!("unable to create the {name} gauge vec: {e}"));
+        REGISTRY.register(Box::new(inner.clone()))
+            .unwrap_or_else(|e| panic!("unable to register the {name} gauge vec: {e}"));
+        Self(inner)
+    }
+
+    pub fn report(&self, check: StartupCheck, failed: bool) {
+        self.0.with_label_values(&[&check.to_string()]).set(failed.into())
     }
 }
 
