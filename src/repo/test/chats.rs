@@ -1,7 +1,7 @@
 use sqlx::{Pool, Postgres};
 use crate::domain::enums::MessageGroup;
 use crate::domain::primitives::{DaysCount, DelayMinutes, LengthChange, Limit, Offset, SupportedLanguage};
-use crate::domain::primitives::chat::{InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
+use crate::domain::primitives::chat::{ChatTitle, InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource};
 use crate::repo;
 use crate::repo::ChatMigrationOutcome;
@@ -522,6 +522,67 @@ async fn merge_keeps_dicks_from_both_chats() {
     assert_eq!(chat.dicks_left().await, 0);
 }
 
+#[tokio::test]
+async fn chat_title_roundtrip() {
+    let db = fresh_db().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let chat_id = TelegramChatId::new(CHAT_ID);
+
+    // an unknown chat is not created for its title
+    let changed = chats.set_title(&chat_id, &title("chat"))
+        .await.expect("couldn't store the title");
+    assert!(!changed);
+    let chat = chats.get_chat(chat_id.into())
+        .await.expect("couldn't fetch the chat");
+    assert!(chat.is_none());
+
+    chats.upsert_chat(&ChatIdPartiality::Specific(chat_id.into()))
+        .await.expect("couldn't create the chat");
+    assert_eq!(title_of(&db, chat_id).await, None);
+
+    let changed = chats.set_title(&chat_id, &title("chat"))
+        .await.expect("couldn't store the title");
+    assert!(changed);
+    assert_eq!(title_of(&db, chat_id).await, Some("chat".to_owned()));
+
+    let changed = chats.set_title(&chat_id, &title("chat"))
+        .await.expect("couldn't store the same title");
+    assert!(!changed, "an unchanged title must not rewrite the row");
+
+    let changed = chats.set_title(&chat_id, &title("renamed"))
+        .await.expect("couldn't store a new title");
+    assert!(changed);
+    assert_eq!(title_of(&db, chat_id).await, Some("renamed".to_owned()));
+}
+
+#[tokio::test]
+async fn chat_title_survives_the_migration() {
+    let db = fresh_db().await;
+    let chats = repo::Chats::new(db.clone(), Default::default());
+    let (old, new) = (TelegramChatId::new(CHAT_ID), TelegramChatId::new(-1001234567890));
+    chats.upsert_chat(&ChatIdPartiality::Specific(old.into()))
+        .await.expect("couldn't create the chat");
+    chats.set_title(&old, &title("chat"))
+        .await.expect("couldn't store the title");
+
+    chats.migrate_chat_id(&old, &new)
+        .await.expect("couldn't migrate the chat");
+
+    assert_eq!(title_of(&db, new).await, Some("chat".to_owned()));
+}
+
+#[tokio::test]
+async fn chat_title_survives_the_merge() {
+    let db = fresh_db().await;
+    let chat = SplitChat::create(&db).await;
+    chat.chats.set_title(&chat.full.id, &title("chat"))
+        .await.expect("couldn't store the title");
+
+    chat.merge().await;
+
+    assert_eq!(title_of(&db, chat.full.id).await, Some("chat".to_owned()));
+}
+
 /// The state both merge tests start from: one row keyed by `chat_id`, another keyed by
 /// `chat_instance` — exactly how a legacy group looks after being played through commands and
 /// inline mode without ever having been anchored.
@@ -741,4 +802,14 @@ async fn check_chat(chats: &repo::Chats, chat_id: TelegramChatId, inst: Telegram
     assert!(chat.is_some());
     assert_eq!(chat.as_ref().unwrap().chat_id.unwrap(), chat_id.value());
     assert_eq!(chat.unwrap().chat_instance.as_deref().unwrap(), inst.value());
+}
+
+fn title(value: &str) -> ChatTitle {
+    ChatTitle::new(value.to_owned())
+}
+
+async fn title_of(db: &Pool<Postgres>, chat_id: TelegramChatId) -> Option<String> {
+    sqlx::query_scalar!("SELECT title FROM Chats WHERE chat_id = $1", chat_id.value())
+        .fetch_one(db)
+        .await.expect("couldn't read the title")
 }

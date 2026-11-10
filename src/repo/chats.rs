@@ -6,7 +6,7 @@ use sqlx::{Postgres, Transaction};
 use crate::domain::enums::MessageGroup;
 use crate::domain::objects::{AllowedTopics, ChatCleanupSettings};
 use crate::domain::primitives::{DelayMinutes, SupportedLanguage};
-use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ChatTitle, InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
 use crate::repo::ensure_only_one_row_updated;
 use crate::repository;
 
@@ -194,6 +194,19 @@ repository!(Chats, with_feature_toggles,
             .await
             .map(|result| result.rows_affected() > 0)
             .context(format!("couldn't clear the unreachable mark of the chat with id = {chat_id}"))
+    }
+,
+    /// Stores the chat's title and says whether it changed. A chat the bot doesn't know yet is
+    /// left alone, and an unchanged title writes nothing.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn set_title(&self, chat_id: &TelegramChatId, title: &ChatTitle) -> anyhow::Result<bool> {
+        sqlx::query!("UPDATE Chats SET title = $2 WHERE chat_id = $1 AND title IS DISTINCT FROM $2",
+                chat_id as &TelegramChatId, title as &ChatTitle)
+            .execute(&self.pool)
+            .await
+            .map(|result| result.rows_affected() > 0)
+            .context(format!("couldn't store the title of the chat with id = {chat_id}"))
     }
 ,
     #[autometrics]

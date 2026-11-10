@@ -19,6 +19,7 @@ pub mod topics;
 pub mod cleanup;
 pub mod mentions;
 pub mod rights;
+pub mod titles;
 
 use derive_more::Constructor;
 use rust_i18n::t;
@@ -378,7 +379,7 @@ pub mod checks {
 
     /// Whether the message is one of our commands: by name, and by the `@username` when Telegram's
     /// menu appended one, since a group tends to hold several bots.
-    fn is_our_command(msg: &Message, me: &Me) -> bool {
+    pub(crate) fn is_our_command(msg: &Message, me: &Me) -> bool {
         let Some(command) = msg.text().or_else(|| msg.caption())
             .and_then(|text| text.split_whitespace().next())
             .and_then(|word| word.strip_prefix('/'))

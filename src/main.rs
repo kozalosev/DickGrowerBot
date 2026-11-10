@@ -86,6 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         // First of all: a flood must be stopped before it costs anything, and this writes nothing.
         .branch(dptree::filter_map_async(checks::rate_limit_exceeded).endpoint(checks::handle_rate_limited))
+        // No endpoint: the message goes on to the branches below. It writes only the chat's row,
+        // never a user's, so it may sit above the ban gate.
+        .branch(Update::filter_message().filter_map(handlers::titles::title_to_remember).inspect_async(handlers::titles::remember_chat_title))
         .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
         .branch(Update::filter_message().filter_map(handlers::support_reply_recipient).endpoint(handlers::support_reply_handler))
         // /topics goes above the gate it configures, or a chat could lock itself out of its own
@@ -134,6 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // the very update that adds the bot to a group — as an administrator too, in one step.
         .branch(Update::filter_my_chat_member()
             .inspect_async(handlers::rights::remember_bot_rights)
+            .inspect_async(handlers::titles::remember_member_chat_title)
             .filter(handlers::setup::added_to_legacy_group_filter)
             .endpoint(handlers::setup::added_to_legacy_group_handler))
         // The buttons need the same gate as the commands: a keyboard outlives the message it came
