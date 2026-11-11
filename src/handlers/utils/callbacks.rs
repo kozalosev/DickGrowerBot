@@ -279,12 +279,15 @@ where
 
 #[macro_export]
 macro_rules! check_invoked_by_owner_and_get_answer_params {
-    ($bot:ident, $query:ident, $user_id:expr) => {
+    ($bot:ident, $query:ident, $user_id:expr, on_another_user = $rejected:expr) => {
         match $crate::handlers::utils::callbacks::prepare_callback_answer_params(&$bot, &$query, $user_id).await? {
             $crate::handlers::utils::callbacks::CallbackAnswerParams::Answer(answer) => *answer,
-            $crate::handlers::utils::callbacks::CallbackAnswerParams::AnotherUser => return Ok(()),
+            $crate::handlers::utils::callbacks::CallbackAnswerParams::AnotherUser => {
+                $rejected;
+                return Ok(())
+            },
         }
-    }
+    };
 }
 
 /// Builds a minimal [`CallbackQuery`] carrying the given callback `data`, for tests that only

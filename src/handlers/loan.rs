@@ -9,6 +9,7 @@ use teloxide::requests::Requester;
 use teloxide::types::ReplyMarkup;
 use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
 
+use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::objects::Loan;
@@ -64,17 +65,20 @@ pub(crate) async fn loan_impl(
     if let Some(Loan { debt, .. }) = maybe_loan
         && !config.features.multiple_loans
     {
+        metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::Debt);
         let left_to_pay = t!("commands.loan.debt", locale = lang_code, debt = debt).to_string();
         return Ok(HandlerImplResult::OnlyText(left_to_pay))
     }
 
     if config.loan_payout_ratio <= 0.0 || config.loan_payout_ratio >= 1.0 {
+        metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::FeatureDisabled);
         let err_text = t!("errors.feature_disabled", locale = lang_code).to_string();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
     let length = repos.dicks.fetch_length(DomainUserId::from(from), &chat_id_kind).await?;
     if length >= 0 {
+        metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PositiveLength);
         let err_text = t!("commands.loan.errors.positive_length", locale = lang_code).to_string();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
@@ -120,7 +124,8 @@ pub async fn loan_callback_handler(
     let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     let data = LoanCallbackData::parse(&query)?;
-    let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid,
+        on_another_user = metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::AnotherUser));
 
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
     // Whatever the answer is, the message stops being an application the moment it gets one, and
@@ -133,6 +138,7 @@ pub async fn loan_callback_handler(
     };
     match data.action {
         LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {
+            metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::FeatureDisabled);
             answer.show_alert.replace(true);
             answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
         }
@@ -163,6 +169,7 @@ pub async fn loan_callback_handler(
             }
         }
         LoanCallbackAction::Confirmed { .. } => {
+            metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PayoutRatioChanged);
             let updated_text = t!("commands.loan.callback.payout_ratio_changed", locale = &lang_code);
             callbacks::edit_message_text(&bot, edit_msg_params, updated_text).await?;
         }
@@ -195,7 +202,10 @@ fn borrow_result_to_text(borrow_result: repo::BorrowResult, lang_code: &Language
             t!("commands.loan.callback.success", locale = lang_code).to_string()
         }
         // the user might have got a positive length between the loan application and the button click
-        repo::BorrowResult::NotEligible => t!("commands.loan.errors.positive_length", locale = lang_code).to_string()
+        repo::BorrowResult::NotEligible => {
+            metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PositiveLength);
+            t!("commands.loan.errors.positive_length", locale = lang_code).to_string()
+        },
     }
 }
 

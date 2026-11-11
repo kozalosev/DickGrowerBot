@@ -9,10 +9,11 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Me, Message, UserId};
+use crate::metrics::RejectionReason;
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
 use crate::domain::objects::{ExternalUser, OriginalBotKind};
-use crate::domain::primitives::{Length, UserId as DomainUserId, Username};
+use crate::domain::primitives::{LanguageCode, Length, UserId as DomainUserId, Username};
 
 pub const ORIGINAL_BOT_USERNAMES: [&str; 2] = ["pipisabot", "kraft28_bot"];
 
@@ -32,20 +33,38 @@ pub enum ImportCommands {
 
 struct ParseResult(OriginalBotKind, String);
 
-#[derive(strum_macros::Display)]
-#[strum(serialize_all="snake_case")]
-enum BeforeImportCheckErrors {
+enum CheckRejection {
     NotAdmin,
     BotNotAdmin,
     NotReply,
     LegacyGroup,
     TooManyMembers,
-    Other(anyhow::Error)
 }
 
-impl <T: Into<anyhow::Error>> From<T> for BeforeImportCheckErrors {
-    fn from(value: T) -> Self {
-        Self::Other(anyhow!(value))
+enum CheckOutcome {
+    Accepted(ParseResult),
+    Rejected(CheckRejection),
+}
+
+impl From<&CheckRejection> for RejectionReason {
+    fn from(value: &CheckRejection) -> Self {
+        match value {
+            CheckRejection::NotAdmin => Self::AdminsOnly,
+            CheckRejection::BotNotAdmin => Self::BotNotAdmin,
+            CheckRejection::NotReply => Self::NotReply,
+            CheckRejection::LegacyGroup => Self::LegacyGroup,
+            CheckRejection::TooManyMembers => Self::TooManyMembers,
+        }
+    }
+}
+
+impl From<&ImportError> for RejectionReason {
+    fn from(value: &ImportError) -> Self {
+        match value {
+            ImportError::NothingFound => Self::NothingFound,
+            ImportError::AmbiguousNames(_) => Self::AmbiguousNames,
+            ImportError::InvalidLines(_) => Self::InvalidLines,
+        }
     }
 }
 
@@ -91,11 +110,11 @@ pub async fn import_cmd_handler(
 ) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
-    let parsed = check_and_parse_message(&bot, bot_info.id, &msg, &repos).await;
-    let source = parsed.as_ref().ok().map(|p| p.0);
+    let leaderboard = replied_leaderboard(&msg);
+    let source = leaderboard.as_ref().map(|p| p.0);
     metrics::CMD_IMPORT.invoked(source);
-    let answer = match parsed {
-        Ok(parsed) => {
+    let answer = match check_message(&bot, bot_info.id, &msg, &repos, leaderboard).await? {
+        CheckOutcome::Accepted(parsed) => {
             match import_impl(&repos, msg.chat.id, parsed).await {
                 Ok(r) => {
                     metrics::CMD_IMPORT.finished(source);
@@ -136,72 +155,70 @@ pub async fn import_cmd_handler(
                         .join("\n\n")
                 }
                 Err(e) => match e.downcast::<ImportError>() {
-                    Ok(ImportError::NothingFound) => {
-                        metrics::CMD_IMPORT.rejected(source);
-                        t!("commands.import.errors.nothing_found", locale = &lang_code).to_string()
+                    Ok(import_error) => {
+                        metrics::CMD_IMPORT.rejected((&import_error).into(), source);
+                        import_error_text(import_error, &lang_code)
                     },
-                    Ok(ImportError::AmbiguousNames(names)) => {
-                        metrics::CMD_IMPORT.rejected(source);
-                        let names = names.into_iter()
-                            .map(|name| name.escaped())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        t!("commands.import.errors.ambiguous_names", locale = &lang_code, names = names).to_string()
-                    },
-                    Ok(ImportError::InvalidLines(lines)) => {
-                        metrics::CMD_IMPORT.rejected(source);
-                        tracing::error!(lines = ?lines, "invalid lines in the imported message");
-                        let invalid_lines = lines.iter()
-                            .map(|line| t!("commands.import.errors.invalid_lines.line", locale = &lang_code,
-                                line = line))
-                            .map(|cow_str| cow_str.to_string())
-                            .collect::<Vec<String>>()
-                            .join("\n");
-                        t!("commands.import.errors.invalid_lines.template", locale = &lang_code,
-                            invalid_lines = invalid_lines).to_string()
-                    },
-                    Err(e) => {
-                        metrics::CMD_IMPORT.failed(source);
-                        Err(e)?
-                    },
+                    Err(e) => Err(e)?,
                 }
             }
 
         },
-        Err(BeforeImportCheckErrors::Other(e)) => {
-            metrics::CMD_IMPORT.failed(source);
-            Err(e)?
-        },
-        Err(BeforeImportCheckErrors::NotReply) => {
-            metrics::CMD_IMPORT.rejected(source);
-            let origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ");
-            t!("commands.import.errors.not_reply", locale = &lang_code,
-                origin_bots = origin_bots).to_string()
-        },
-        Err(BeforeImportCheckErrors::LegacyGroup) => {
-            metrics::CMD_IMPORT.rejected(source);
-            t!("commands.import.errors.legacy_group", locale = &lang_code).to_string()
-        },
-        Err(e) => {
-            metrics::CMD_IMPORT.rejected(source);
-            let t_key = format!("commands.import.errors.{e}");
-            t!(&t_key, locale = &lang_code).to_string()
+        CheckOutcome::Rejected(rejection) => {
+            metrics::CMD_IMPORT.rejected((&rejection).into(), source);
+            check_rejection_text(rejection, &lang_code)
         },
     };
     reply_html!(bot, msg, answer);
     Ok(())
 }
 
+fn check_rejection_text(rejection: CheckRejection, lang_code: &LanguageCode) -> String {
+    match rejection {
+        CheckRejection::NotAdmin => t!("commands.import.errors.not_admin", locale = lang_code),
+        CheckRejection::BotNotAdmin => t!("commands.import.errors.bot_not_admin", locale = lang_code),
+        CheckRejection::NotReply => {
+            let origin_bots = ORIGINAL_BOT_USERNAMES.map(|name| format!("@{name}")).join(", ");
+            t!("commands.import.errors.not_reply", locale = lang_code, origin_bots = origin_bots)
+        },
+        CheckRejection::LegacyGroup => t!("commands.import.errors.legacy_group", locale = lang_code),
+        CheckRejection::TooManyMembers => t!("commands.import.errors.too_many_members", locale = lang_code),
+    }.to_string()
+}
+
+fn import_error_text(error: ImportError, lang_code: &LanguageCode) -> String {
+    match error {
+        ImportError::NothingFound => t!("commands.import.errors.nothing_found", locale = lang_code),
+        ImportError::AmbiguousNames(names) => {
+            let names = names.into_iter()
+                .map(|name| name.escaped())
+                .collect::<Vec<_>>()
+                .join(", ");
+            t!("commands.import.errors.ambiguous_names", locale = lang_code, names = names)
+        },
+        ImportError::InvalidLines(lines) => {
+            tracing::error!(lines = ?lines, "invalid lines in the imported message");
+            let invalid_lines = lines.iter()
+                .map(|line| t!("commands.import.errors.invalid_lines.line", locale = lang_code, line = line))
+                .map(|cow_str| cow_str.to_string())
+                .collect::<Vec<String>>()
+                .join("\n");
+            t!("commands.import.errors.invalid_lines.template", locale = lang_code, invalid_lines = invalid_lines)
+        },
+    }.to_string()
+}
+
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(msg)))]
-async fn check_and_parse_message(
+async fn check_message(
     bot: &Bot,
     bot_id: UserId,
     msg: &Message,
     repos: &repo::Repositories,
-) -> Result<ParseResult, BeforeImportCheckErrors> {
+    leaderboard: Option<ParseResult>,
+) -> anyhow::Result<CheckOutcome> {
     if msg.chat.is_group() {
-        return Err(BeforeImportCheckErrors::LegacyGroup);
+        return Ok(CheckOutcome::Rejected(CheckRejection::LegacyGroup));
     }
 
     let admin_ids: Vec<UserId> = bot.get_chat_administrators(msg.chat.id)
@@ -210,26 +227,32 @@ async fn check_and_parse_message(
         .map(|m| m.user.id)
         .collect();
     let from_id = msg.from.as_ref()
-        .ok_or(BeforeImportCheckErrors::Other(anyhow!("not from a user")))?
+        .ok_or(anyhow!("not from a user"))?
         .id;
     if !admin_ids.contains(&from_id) {
-        return Err(BeforeImportCheckErrors::NotAdmin)
+        return Ok(CheckOutcome::Rejected(CheckRejection::NotAdmin))
     }
     // Reading another bot's message only works if this bot is itself an admin
     if !admin_ids.contains(&bot_id) {
-        return Err(BeforeImportCheckErrors::BotNotAdmin)
+        return Ok(CheckOutcome::Rejected(CheckRejection::BotNotAdmin))
     }
 
     let chat_id_kind = msg.chat.id.into();
     let members_count = repos.users.get_chat_members(&chat_id_kind).await?.len();
     if members_count > MAX_MEMBERS_FOR_IMPORT {
-        return Err(BeforeImportCheckErrors::TooManyMembers)
+        return Ok(CheckOutcome::Rejected(CheckRejection::TooManyMembers))
     }
 
+    let outcome = leaderboard
+        .map(CheckOutcome::Accepted)
+        .unwrap_or(CheckOutcome::Rejected(CheckRejection::NotReply));
+    Ok(outcome)
+}
+
+fn replied_leaderboard(msg: &Message) -> Option<ParseResult> {
     msg.reply_to_message()
         .filter(|m| m.forward_origin().is_none())
         .and_then(check_reply_source_and_text)
-        .ok_or(BeforeImportCheckErrors::NotReply)
 }
 
 fn check_reply_source_and_text(reply: &Message) -> Option<ParseResult> {

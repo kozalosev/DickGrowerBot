@@ -56,7 +56,45 @@ pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
     Counter::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
-pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(ImportCommandCounters::new);
+pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(|| ImportCommandCounters::new(ImportReasons {
+    any_source: &[RejectionReason::LegacyGroup, RejectionReason::AdminsOnly, RejectionReason::BotNotAdmin,
+        RejectionReason::TooManyMembers],
+    without_source: &[RejectionReason::NotReply],
+    with_source: &[RejectionReason::NothingFound, RejectionReason::AmbiguousNames, RejectionReason::InvalidLines],
+}));
+pub static CMD_GROW_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_grow_rejected_total", "count of /grow invocations answered with why nothing was done, by reason",
+        &[RejectionReason::DoneToday, RejectionReason::Banned]));
+pub static CMD_TOP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_top_rejected_total", "count of /top invocations answered with why nothing was done, by reason",
+        &[RejectionReason::FeatureDisabled]));
+pub static CMD_LOAN_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_loan_rejected_total", "count of /loan invocations answered with why nothing was done, by reason",
+        &[RejectionReason::FeatureDisabled, RejectionReason::Debt, RejectionReason::PositiveLength, RejectionReason::PayoutRatioChanged, RejectionReason::AnotherUser]));
+pub static CMD_DOD_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_dick_of_day_rejected_total", "count of /dick_of_day invocations answered with why nothing was done, by reason",
+        &[RejectionReason::DoneToday, RejectionReason::NoCandidates]));
+pub static CMD_PVP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_pvp_rejected_total", "count of /pvp invocations answered with why nothing was done, by reason",
+        &[RejectionReason::MissingArgument, RejectionReason::SamePerson, RejectionReason::NotEnoughInitiator, RejectionReason::NotEnoughAcceptor, RejectionReason::AlreadyInProgress]));
+pub static CMD_PROMO_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_promo_rejected_total", "count of /promo invocations answered with why nothing was done, by reason",
+        &[RejectionReason::InvalidArgument, RejectionReason::NotFound, RejectionReason::NotStarted, RejectionReason::Expired, RejectionReason::Exhausted, RejectionReason::NotPlaying, RejectionReason::AlreadyActivated]));
+pub static CMD_LANGUAGE_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_language_rejected_total", "count of /language invocations answered with why nothing was done, by reason",
+        &[RejectionReason::FeatureDisabled, RejectionReason::InvalidArgument, RejectionReason::AdminsOnly, RejectionReason::AnotherUser, RejectionReason::NotRegistered]));
+pub static CMD_TOPICS_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_topics_rejected_total", "count of /topics invocations answered with why nothing was done, by reason",
+        &[RejectionReason::NotAForum, RejectionReason::AdminsOnly, RejectionReason::AnotherUser]));
+pub static CMD_CLEANUP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_cleanup_rejected_total", "count of /cleanup invocations answered with why nothing was done, by reason",
+        &[RejectionReason::FeatureDisabled, RejectionReason::AdminsOnly, RejectionReason::AnotherUser]));
+pub static CMD_MENTIONS_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_mentions_rejected_total", "count of /mentions invocations answered with why nothing was done, by reason",
+        &[RejectionReason::GroupHint, RejectionReason::NotPlaying]));
+pub static CMD_SUPPORT_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("command_support_rejected_total", "count of /support invocations answered with why nothing was done, by reason",
+        &[RejectionReason::FeatureDisabled, RejectionReason::TooOften]));
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 pub static PROMO_ATTEMPTS: Lazy<CounterVec> = Lazy::new(||
@@ -224,6 +262,17 @@ fn force_registration() {
     Lazy::force(&CMD_STATS);
     Lazy::force(&CMD_SHRINKS);
     Lazy::force(&CMD_IMPORT);
+    Lazy::force(&CMD_GROW_REJECTED);
+    Lazy::force(&CMD_TOP_REJECTED);
+    Lazy::force(&CMD_LOAN_REJECTED);
+    Lazy::force(&CMD_DOD_REJECTED);
+    Lazy::force(&CMD_PVP_REJECTED);
+    Lazy::force(&CMD_PROMO_REJECTED);
+    Lazy::force(&CMD_LANGUAGE_REJECTED);
+    Lazy::force(&CMD_TOPICS_REJECTED);
+    Lazy::force(&CMD_CLEANUP_REJECTED);
+    Lazy::force(&CMD_MENTIONS_REJECTED);
+    Lazy::force(&CMD_SUPPORT_REJECTED);
     Lazy::force(&CMD_PROMO);
     Lazy::force(&PROMO_ATTEMPTS);
     Lazy::force(&PROMO_ATTEMPT_USERS);
@@ -325,7 +374,68 @@ pub struct ComplexCommandCounters {
     invoked: Counter,
     finished: Counter,
 }
-pub struct ImportCommandCounters(CounterVec);
+/// Phases of `/import` by the bot it imports from, and its rejections by the same.
+pub struct ImportCommandCounters {
+    usage: CounterVec,
+    rejected: CounterVec,
+    reasons: ImportReasons,
+}
+
+/// The reasons of `/import`, by whether the source bot can be known when they are given.
+struct ImportReasons {
+    any_source: &'static [RejectionReason],
+    without_source: &'static [RejectionReason],
+    with_source: &'static [RejectionReason],
+}
+
+/// The rejections of one command by reason: the user was told what to change, and nothing was done.
+pub struct RejectionCounter {
+    vec: CounterVec,
+    reasons: &'static [RejectionReason],
+}
+
+/// An outcome of a command that may be a refusal.
+pub trait RejectableOutcome {
+    fn rejection(&self) -> Option<RejectionReason>;
+}
+
+/// Why a command was refused. The values of the `reason` label of the rejection counters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum_macros::Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum RejectionReason {
+    FeatureDisabled,
+    AdminsOnly,
+    AnotherUser,
+    Banned,
+    NotPlaying,
+    MissingArgument,
+    InvalidArgument,
+    DoneToday,
+    NoCandidates,
+    Debt,
+    PositiveLength,
+    PayoutRatioChanged,
+    SamePerson,
+    NotEnoughInitiator,
+    NotEnoughAcceptor,
+    AlreadyInProgress,
+    NotFound,
+    NotStarted,
+    Expired,
+    Exhausted,
+    AlreadyActivated,
+    NotRegistered,
+    NotAForum,
+    GroupHint,
+    TooOften,
+    BotNotAdmin,
+    NotReply,
+    LegacyGroup,
+    TooManyMembers,
+    NothingFound,
+    AmbiguousNames,
+    InvalidLines,
+}
 pub struct BothModesCounters {
     pub chat: Counter,
     pub inline: Counter,
@@ -501,43 +611,71 @@ impl ComplexCommandCounters {
 }
 
 impl ImportCommandCounters {
-
-    const STATES: [&'static str; 4] = ["invoked", "finished", "rejected", "failed"];
-
-    fn new() -> Self {
-        let vec = CounterVec::new(
+    fn new(reasons: ImportReasons) -> Self {
+        let usage = CounterVec::new(
             "command_import_usage_total",
-            "count of /import invocations and their outcomes by source bot",
+            "count of /import invocations and the imports that finished, by source bot",
             &["state", "bot"],
         );
-        for state in Self::STATES {
-            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
-                vec.counter(&[state, &import_source_label(bot)]);
+        let rejected = CounterVec::new(
+            "command_import_rejected_total",
+            "count of /import invocations answered with what the user has to change, by reason and source bot",
+            &["reason", "bot"],
+        );
+        for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+            let label = import_source_label(bot);
+            usage.counter(&["invoked", &label]);
+            if bot.is_some() {
+                usage.counter(&["finished", &label]);
+            }
+            for reason in reasons.possible(bot) {
+                rejected.counter(&[&reason.to_string(), &label]);
             }
         }
-        Self(vec)
+        Self { usage, rejected, reasons }
     }
 
     pub fn invoked(&self, bot: Option<OriginalBotKind>) {
-        self.count("invoked", bot)
+        self.usage.inc(&["invoked", &import_source_label(bot)])
     }
 
     pub fn finished(&self, bot: Option<OriginalBotKind>) {
-        self.count("finished", bot)
+        debug_assert!(bot.is_some(), "an import finished without a source bot");
+        self.usage.inc(&["finished", &import_source_label(bot)])
     }
 
-    /// Answered with an explanation of what the user has to change.
-    pub fn rejected(&self, bot: Option<OriginalBotKind>) {
-        self.count("rejected", bot)
+    pub fn rejected(&self, reason: RejectionReason, bot: Option<OriginalBotKind>) {
+        debug_assert!(self.reasons.possible(bot).any(|r| r == reason), "{reason} is not a reason of /import here");
+        self.rejected.inc(&[&reason.to_string(), &import_source_label(bot)])
+    }
+}
+
+impl ImportReasons {
+    fn possible(&self, bot: Option<OriginalBotKind>) -> impl Iterator<Item = RejectionReason> + '_ {
+        let by_source = if bot.is_some() { self.with_source } else { self.without_source };
+        self.any_source.iter().chain(by_source).copied()
+    }
+}
+
+impl RejectionCounter {
+    fn new(name: &str, help: &str, reasons: &'static [RejectionReason]) -> Self {
+        let vec = CounterVec::new(name, help, &["reason"]);
+        for reason in reasons {
+            vec.counter(&[&reason.to_string()]);
+        }
+        Self { vec, reasons }
     }
 
-    /// Ended with an error nobody was told about.
-    pub fn failed(&self, bot: Option<OriginalBotKind>) {
-        self.count("failed", bot)
+    pub fn rejected(&self, reason: RejectionReason) {
+        debug_assert!(self.reasons.contains(&reason), "{reason} is not a reason of this command");
+        self.vec.inc(&[&reason.to_string()])
     }
 
-    fn count(&self, state: &str, bot: Option<OriginalBotKind>) {
-        self.0.counter(&[state, &import_source_label(bot)]).inc()
+    /// Counts the outcome if it is a refusal.
+    pub fn count(&self, outcome: &impl RejectableOutcome) {
+        if let Some(reason) = outcome.rejection() {
+            self.rejected(reason);
+        }
     }
 }
 
@@ -1112,10 +1250,12 @@ mod tests {
     use crate::domain::objects::OriginalBotKind;
     use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-                BROADCAST_LANGUAGE, CMD_IMPORT, ImportCommandCounters, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
+                BROADCAST_LANGUAGE, CMD_IMPORT, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
                 SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics,
                 PROMO_ATTEMPT_USERS, RATE_LIMIT_CHAT_WINDOWS, RATE_LIMIT_USER_WINDOWS, ThresholdCounter,
-                ThresholdCurve};
+                ThresholdCurve, RejectionCounter, RejectionReason, CMD_GROW_REJECTED, CMD_TOP_REJECTED, CMD_LOAN_REJECTED,
+                CMD_DOD_REJECTED, CMD_PVP_REJECTED, CMD_PROMO_REJECTED, CMD_LANGUAGE_REJECTED,
+                CMD_TOPICS_REJECTED, CMD_CLEANUP_REJECTED, CMD_MENTIONS_REJECTED, CMD_SUPPORT_REJECTED};
     use std::time::Duration;
     use crate::cache::Cache;
     use crate::config::{CacheConfig, CacheMode};
@@ -1133,18 +1273,52 @@ mod tests {
         }
     }
 
+    /// `state` holds the phases only; a refusal is a reason of the rejection counter. A series that
+    /// can never move is not exported.
     #[test]
-    fn import_counter_exports_every_state_for_every_source() {
+    fn import_counters_export_only_the_possible_combinations() {
         Lazy::force(&CMD_IMPORT);
         let rendered = render_metrics();
-        for state in ImportCommandCounters::STATES {
-            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
-                let bot = import_source_label(bot);
-                let series = format!("command_import_usage_total{{bot=\"{bot}\",state=\"{state}\"}}");
-                assert!(rendered.contains(&series), "{series} is missing from:
-{rendered}");
+        let reasons = &CMD_IMPORT.reasons;
+        let every_reason: Vec<_> = [reasons.any_source, reasons.without_source, reasons.with_source].concat();
+        for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+            let label = import_source_label(bot);
+            for (state, possible) in [("invoked", true), ("finished", bot.is_some())] {
+                let series = format!("command_import_usage_total{{bot=\"{label}\",state=\"{state}\"}}");
+                assert_eq!(rendered.contains(&series), possible, "{series} in:\n{rendered}");
+            }
+            for &reason in &every_reason {
+                let possible = reasons.possible(bot).any(|r| r == reason);
+                let series = format!("command_import_rejected_total{{bot=\"{label}\",reason=\"{reason}\"}}");
+                assert_eq!(rendered.contains(&series), possible, "{series} in:\n{rendered}");
             }
         }
+        assert!(!rendered.contains("state=\"rejected\""), "a rejection is still a state:\n{rendered}");
+        assert!(!rendered.contains("state=\"failed\""), "a failure is still a state:\n{rendered}");
+    }
+
+    /// An alert's `increase()` needs a series before its first sample, so every reason is exported
+    /// at zero from the start.
+    #[test]
+    fn every_rejection_reason_is_exported() {
+        assert_exported(&CMD_GROW_REJECTED, "command_grow_rejected_total");
+        assert_exported(&CMD_TOP_REJECTED, "command_top_rejected_total");
+        assert_exported(&CMD_LOAN_REJECTED, "command_loan_rejected_total");
+        assert_exported(&CMD_DOD_REJECTED, "command_dick_of_day_rejected_total");
+        assert_exported(&CMD_PVP_REJECTED, "command_pvp_rejected_total");
+        assert_exported(&CMD_PROMO_REJECTED, "command_promo_rejected_total");
+        assert_exported(&CMD_LANGUAGE_REJECTED, "command_language_rejected_total");
+        assert_exported(&CMD_TOPICS_REJECTED, "command_topics_rejected_total");
+        assert_exported(&CMD_CLEANUP_REJECTED, "command_cleanup_rejected_total");
+        assert_exported(&CMD_MENTIONS_REJECTED, "command_mentions_rejected_total");
+        assert_exported(&CMD_SUPPORT_REJECTED, "command_support_rejected_total");
+    }
+
+    #[test]
+    fn a_reason_is_written_in_snake_case() {
+        assert_eq!(RejectionReason::PayoutRatioChanged.to_string(), "payout_ratio_changed");
+        assert_eq!(RejectionReason::BotNotAdmin.to_string(), "bot_not_admin");
+        assert_eq!(RejectionReason::NotAForum.to_string(), "not_a_forum");
     }
 
     /// The dashboard watches the failure rate here, and a ratio needs all of its series from the
@@ -1347,5 +1521,16 @@ mod tests {
 
     async fn local_cache() -> Cache {
         Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await
+    }
+
+    fn assert_exported(counter: &Lazy<RejectionCounter>, name: &str) {
+        let rendered = {
+            Lazy::force(counter);
+            render_metrics()
+        };
+        for reason in counter.reasons {
+            let series = format!("{name}{{reason=\"{reason}\"}}");
+            assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
     }
 }

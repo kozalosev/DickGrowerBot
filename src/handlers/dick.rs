@@ -9,6 +9,7 @@ use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
+use crate::metrics::RejectionReason;
 use crate::config::{AppConfig, MessageGroup};
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
@@ -77,6 +78,7 @@ pub(crate) async fn grow_impl(
     let user = match repos.users.create_or_update(uid, &name).await {
         Ok(user) => user,
         Err(e) if let Some(date) = banned_until_of(&e) => {
+            metrics::CMD_GROW_REJECTED.rejected(RejectionReason::Banned);
             let text = t!("errors.banned", locale = lang_code, date = date).to_string();
             return Ok(TaggedReply { text, group: MessageGroup::Notice })
         },
@@ -106,7 +108,10 @@ pub(crate) async fn grow_impl(
             };
             (text, MessageGroup::Event)
         },
-        None => (t!("commands.grow.tomorrow", locale = lang_code).to_string(), MessageGroup::Notice)
+        None => {
+            metrics::CMD_GROW_REJECTED.rejected(RejectionReason::DoneToday);
+            (t!("commands.grow.tomorrow", locale = lang_code).to_string(), MessageGroup::Notice)
+        },
     };
     let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
     Ok(TaggedReply { text: format!("{main_part}{time_left_part}"), group })
@@ -211,6 +216,7 @@ pub async fn page_callback_handler(
     let lang_code = lang_resolver.execute().await;
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
+        metrics::CMD_TOP_REJECTED.rejected(RejectionReason::FeatureDisabled);
         return answer_callback_feature_disabled(bot, &q, edit_msg_req_params, lang_code).await
     }
 

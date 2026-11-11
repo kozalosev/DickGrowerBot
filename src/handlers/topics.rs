@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
 use crate::domain::objects::AllowedTopics;
 use crate::domain::primitives::LanguageCode;
@@ -36,12 +37,14 @@ pub async fn topics_cmd_handler(
     metrics::CMD_TOPICS.invoked();
 
     if !is_forum(&msg.chat) {
+        metrics::CMD_TOPICS_REJECTED.rejected(RejectionReason::NotAForum);
         reply_html!(bot, msg, t!("commands.topics.errors.not_a_forum", locale = &lang_code));
         return Ok(());
     }
     let from_id = msg.from.as_ref().map(|user| user.id)
         .ok_or(anyhow!("unexpected absence of a FROM field"))?;
     if !is_chat_admin(&bot, &msg, from_id).await? {
+        metrics::CMD_TOPICS_REJECTED.rejected(RejectionReason::AdminsOnly);
         reply_html!(bot, msg, t!("commands.topics.errors.admins_only", locale = &lang_code));
         return Ok(());
     }
@@ -70,7 +73,8 @@ pub async fn topics_callback_handler(
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let data = TopicsCallbackData::parse(&query)?;
-    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid,
+        on_another_user = metrics::CMD_TOPICS_REJECTED.rejected(RejectionReason::AnotherUser));
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
 
     let message = query.message.as_ref()

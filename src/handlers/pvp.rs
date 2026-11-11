@@ -1,6 +1,7 @@
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use domain_types::traits::SaturatingInto;
+use crate::metrics::RejectionReason;
 use crate::domain::primitives::Coefficient;
 use futures::join;
 use rand::RngExt;
@@ -127,6 +128,7 @@ pub async fn pvp_cmd_handler_no_args(bot: Bot, msg: Message, deps: HandlerDeps) 
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
+    metrics::CMD_PVP_REJECTED.rejected(RejectionReason::MissingArgument);
 
     reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
     Ok(())
@@ -234,11 +236,15 @@ pub async fn pvp_callback_handler(
 
     let callback_data = BattleCallbackData::parse(&query)?;
     if callback_data.initiator == query.from.id {
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::SamePerson);
         return send_error_callback_answer(bot, query, "commands.pvp.errors.same_person").await;
     }
     let _battle_guard = match battle_locker.try_lock(&callback_data).await {
         Some(lock) => lock,
-        None => return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await
+        None => {
+            metrics::CMD_PVP_REJECTED.rejected(RejectionReason::AlreadyInProgress);
+            return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await
+        },
     };
 
     let params = BattleParams {
@@ -319,6 +325,7 @@ pub(crate) async fn pvp_impl_start(
         let btn_data = BattleCallbackData::new(initiator.uid, bet);
         HandlerImplResult::WithKeyboard { text, buttons: vec![CallbackButton::new(btn_label, btn_data)] }
     } else {
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
         HandlerImplResult::OnlyText(t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string())
     };
     Ok(data)
@@ -387,9 +394,11 @@ async fn pvp_impl_attack(
         };
         CallbackResult::EditMessage(format!("{text}{withheld_part}{battle_stats}"), None)
     } else if enough_acceptor {
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
         let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string();
         CallbackResult::EditMessage(text, None)
     } else {
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughAcceptor);
         let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code).to_string();
         CallbackResult::ShowError(text)
     };

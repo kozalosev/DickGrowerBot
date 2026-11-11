@@ -12,6 +12,7 @@ use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
 use teloxide::{Bot, RequestError};
+use crate::metrics::{RejectableOutcome, RejectionReason};
 use crate::dialogue::CachedDialogueStorage;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::{CopyMessageSetters, SendMessageSetters};
@@ -191,6 +192,16 @@ enum Relayed {
     Sent,
     TooOften,
     Disabled,
+}
+
+impl RejectableOutcome for Relayed {
+    fn rejection(&self) -> Option<RejectionReason> {
+        match self {
+            Self::Sent => None,
+            Self::TooOften => Some(RejectionReason::TooOften),
+            Self::Disabled => Some(RejectionReason::FeatureDisabled),
+        }
+    }
 }
 
 impl Relayed {
@@ -388,6 +399,7 @@ async fn relay(
 ) -> anyhow::Result<String> {
     let from = msg.from.as_ref().ok_or(anyhow::anyhow!("no from user"))?;
     let relayed = support.relay(bot, from, lang_code, text, ticket).await?;
+    metrics::CMD_SUPPORT_REJECTED.count(&relayed);
     Ok(t!(relayed.tr_key(), locale = lang_code).to_string())
 }
 
@@ -769,8 +781,7 @@ mod tests {
     fn assert_verification(expected: i64) {
         let series = format!("startup_verification_error{{kind=\"support_chat_unusable\"}} {expected}");
         let rendered = metrics::render_metrics();
-        assert!(rendered.contains(&series), "{series} is missing from:
-{rendered}");
+        assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
     }
 
     async fn chat_api(get_chat: Value, get_chat_member: Value) -> FakeApi {

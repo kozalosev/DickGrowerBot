@@ -4,6 +4,7 @@ use rust_i18n::t;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::Message;
+use crate::metrics::RejectionReason;
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
 use crate::domain::objects::{DickOfDayResult, GrowthResult, User};
@@ -114,11 +115,13 @@ fn chosen_answer(
 }
 
 fn already_chosen_answer(name: &Username, lang_code: &LanguageCode) -> (String, MessageGroup) {
+    metrics::CMD_DOD_REJECTED.rejected(RejectionReason::DoneToday);
     let text = t!("commands.dod.already_chosen", locale = lang_code, name = name.escaped()).to_string();
     (text, MessageGroup::Notice)
 }
 
 fn no_candidates_answer(lang_code: &LanguageCode) -> (String, MessageGroup) {
+    metrics::CMD_DOD_REJECTED.rejected(RejectionReason::NoCandidates);
     let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
     (text, MessageGroup::Notice)
 }

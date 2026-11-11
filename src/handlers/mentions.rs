@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::{CallbackQuery, Message, Requester};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::metrics::RejectionReason;
 use crate::config::MessageGroup::Notice;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::primitives::chat::ChatIdKind;
@@ -31,6 +32,7 @@ pub async fn mentions_cmd_handler(bot: Bot, msg: Message, deps: HandlerDeps) -> 
     metrics::CMD_MENTIONS.invoked();
 
     if !msg.chat.is_private() {
+        metrics::CMD_MENTIONS_REJECTED.rejected(RejectionReason::GroupHint);
         reply_html_ephemeral!(bot, msg, t!("commands.mentions.group_hint", locale = &lang_code),
             self_destruction, Notice, lang_code);
         return Ok(())
@@ -78,7 +80,11 @@ pub async fn mentions_callback_handler(bot: Bot, query: CallbackQuery, deps: Han
                 None => "commands.shrink.mentions.not_playing",
             };
             let not_playing = toggled.is_none();
-            metrics::CMD_MENTIONS.finished();
+            if not_playing {
+                metrics::CMD_MENTIONS_REJECTED.rejected(RejectionReason::NotPlaying);
+            } else {
+                metrics::CMD_MENTIONS.finished();
+            }
             bot.answer_callback_query(query.id)
                 .show_alert(not_playing)
                 .text(t!(key, locale = &lang_code))

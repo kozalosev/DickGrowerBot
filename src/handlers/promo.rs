@@ -7,6 +7,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{CallbackQuery, Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, ReplyMarkup, User};
+use crate::metrics::{RejectableOutcome, RejectionReason};
 use crate::dialogue::CachedDialogueStorage;
 use crate::handlers::{CallbackButton, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
 use crate::handlers::utils::callbacks;
@@ -52,6 +53,21 @@ enum ActivationOutcome {
     Exhausted,
     NoDicks,
     AlreadyActivated,
+}
+
+impl RejectableOutcome for ActivationOutcome {
+    fn rejection(&self) -> Option<RejectionReason> {
+        match self {
+            Self::Success | Self::Confirmation => None,
+            Self::InvalidFormat => Some(RejectionReason::InvalidArgument),
+            Self::NotFound => Some(RejectionReason::NotFound),
+            Self::NotStarted => Some(RejectionReason::NotStarted),
+            Self::Expired => Some(RejectionReason::Expired),
+            Self::Exhausted => Some(RejectionReason::Exhausted),
+            Self::NoDicks => Some(RejectionReason::NotPlaying),
+            Self::AlreadyActivated => Some(RejectionReason::AlreadyActivated),
+        }
+    }
 }
 
 impl TryFrom<ActivationError> for ActivationOutcome {
@@ -232,6 +248,7 @@ async fn activate(
         },
         Err(e) => {
             let outcome = ActivationOutcome::try_from(e)?;
+            metrics::CMD_PROMO_REJECTED.count(&outcome);
             let t_key = format!("commands.promo.errors.{outcome}");
             (t!(&t_key, locale = &lang_code).to_string(), outcome)
         }
@@ -252,6 +269,7 @@ async fn activate_or_refuse(
         Err(e) => {
             tracing::info!(error = %e, "the promo code doesn't fit the format");
             record_attempt(cache, UserId::from(user), ActivationOutcome::InvalidFormat).await;
+            metrics::CMD_PROMO_REJECTED.rejected(RejectionReason::InvalidArgument);
             let text = t!("commands.promo.errors.invalid_format", locale = &lang_code).to_string();
             Ok(HandlerImplResult::OnlyText(text))
         }

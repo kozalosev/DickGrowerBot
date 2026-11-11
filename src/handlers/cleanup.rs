@@ -9,6 +9,7 @@ use teloxide::{Bot, RequestError};
 use teloxide::macros::BotCommands;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html, reply_html_ephemeral};
 use crate::cleanup::CleanupPolicy;
 use crate::config::{DeletionMode, MessageGroup, SelfDestructionConfig};
@@ -45,12 +46,14 @@ pub async fn cleanup_cmd_handler(
     let config = config.self_destruction;
     // Nothing self-destructs under this mode, so the refusal can't either.
     if !config.configurable() {
+        metrics::CMD_CLEANUP_REJECTED.rejected(RejectionReason::FeatureDisabled);
         reply_html!(bot, msg, t!("errors.feature_disabled", locale = &lang_code));
         return Ok(());
     }
     let from_id = msg.from.as_ref().map(|user| user.id)
         .ok_or(anyhow!("unexpected absence of a FROM field"))?;
     if !is_chat_admin(&bot, &msg, from_id).await? {
+        metrics::CMD_CLEANUP_REJECTED.rejected(RejectionReason::AdminsOnly);
         reply_html_ephemeral!(bot, msg, t!("commands.cleanup.errors.admins_only", locale = &lang_code),
             self_destruction, MessageGroup::Notice, lang_code);
         return Ok(());
@@ -80,7 +83,8 @@ pub async fn cleanup_callback_handler(
     let HandlerDeps { lang_resolver, config, self_destruction, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let data = CleanupCallbackData::parse(&query)?;
-    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid,
+        on_another_user = metrics::CMD_CLEANUP_REJECTED.rejected(RejectionReason::AnotherUser));
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
 
     let message = query.message.as_ref()
