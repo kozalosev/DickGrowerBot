@@ -284,7 +284,10 @@ dashboard's rate panel reads `state!="finished"` as "invocations", so a `state` 
 else breaks it.
 
 A refusal, where the user is told what to change and nothing is done, is a reason of
-`command_<name>_rejected_total{reason}`. The reasons are one enum, `metrics::RejectionReason`, so
+`command_rejected_total{command, reason}`, one metric for every command; the `command` values are
+the `<name>` of the usage counters, so the two join. `/import` alone keeps
+`command_import_rejected_total{reason, bot}`, because no other command has a `bot` and a metric's
+labels are the same on every series. The reasons are one enum, `metrics::RejectionReason`, so
 the same refusal is spelled the same in every command (`admins_only`, `another_user`,
 `feature_disabled`). Each counter lists the reasons its command can give, and exports them at zero
 from startup, so an alert's `increase()` sees the first one; a debug build asserts that nothing

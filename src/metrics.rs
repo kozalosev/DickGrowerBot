@@ -62,39 +62,48 @@ pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(|| ImportCommandC
     without_source: &[RejectionReason::NotReply],
     with_source: &[RejectionReason::NothingFound, RejectionReason::AmbiguousNames, RejectionReason::InvalidLines],
 }));
+static COMMAND_REJECTIONS: Lazy<CounterVec> = Lazy::new(||
+    CounterVec::new("command_rejected_total", "count of command invocations answered with why nothing was done, by command and reason",
+        &["command", "reason"]));
 pub static CMD_GROW_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_grow_rejected_total", "count of /grow invocations answered with why nothing was done, by reason",
-        &[RejectionReason::DoneToday, RejectionReason::Banned]));
+    RejectionCounter::new("grow", &[RejectionReason::DoneToday, RejectionReason::Banned]));
 pub static CMD_TOP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_top_rejected_total", "count of /top invocations answered with why nothing was done, by reason",
-        &[RejectionReason::FeatureDisabled]));
+    RejectionCounter::new("top", &[RejectionReason::FeatureDisabled]));
 pub static CMD_LOAN_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_loan_rejected_total", "count of /loan invocations answered with why nothing was done, by reason",
-        &[RejectionReason::FeatureDisabled, RejectionReason::Debt, RejectionReason::PositiveLength, RejectionReason::PayoutRatioChanged, RejectionReason::AnotherUser]));
+    RejectionCounter::new("loan", &[
+        RejectionReason::FeatureDisabled, RejectionReason::Debt, RejectionReason::PositiveLength,
+        RejectionReason::PayoutRatioChanged, RejectionReason::AnotherUser,
+    ]));
 pub static CMD_DOD_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_dick_of_day_rejected_total", "count of /dick_of_day invocations answered with why nothing was done, by reason",
-        &[RejectionReason::DoneToday, RejectionReason::NoCandidates]));
+    RejectionCounter::new("dick_of_day", &[RejectionReason::DoneToday, RejectionReason::NoCandidates]));
 pub static CMD_PVP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_pvp_rejected_total", "count of /pvp invocations answered with why nothing was done, by reason",
-        &[RejectionReason::MissingArgument, RejectionReason::SamePerson, RejectionReason::NotEnoughInitiator, RejectionReason::NotEnoughAcceptor, RejectionReason::AlreadyInProgress]));
+    RejectionCounter::new("pvp", &[
+        RejectionReason::MissingArgument, RejectionReason::SamePerson, RejectionReason::NotEnoughInitiator,
+        RejectionReason::NotEnoughAcceptor, RejectionReason::AlreadyInProgress,
+    ]));
 pub static CMD_PROMO_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_promo_rejected_total", "count of /promo invocations answered with why nothing was done, by reason",
-        &[RejectionReason::InvalidArgument, RejectionReason::NotFound, RejectionReason::NotStarted, RejectionReason::Expired, RejectionReason::Exhausted, RejectionReason::NotPlaying, RejectionReason::AlreadyActivated]));
+    RejectionCounter::new("promo", &[
+        RejectionReason::InvalidArgument, RejectionReason::NotFound, RejectionReason::NotStarted,
+        RejectionReason::Expired, RejectionReason::Exhausted, RejectionReason::NotPlaying,
+        RejectionReason::AlreadyActivated,
+    ]));
 pub static CMD_LANGUAGE_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_language_rejected_total", "count of /language invocations answered with why nothing was done, by reason",
-        &[RejectionReason::FeatureDisabled, RejectionReason::InvalidArgument, RejectionReason::AdminsOnly, RejectionReason::AnotherUser, RejectionReason::NotRegistered]));
+    RejectionCounter::new("language", &[
+        RejectionReason::FeatureDisabled, RejectionReason::InvalidArgument, RejectionReason::AdminsOnly,
+        RejectionReason::AnotherUser, RejectionReason::NotRegistered,
+    ]));
 pub static CMD_TOPICS_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_topics_rejected_total", "count of /topics invocations answered with why nothing was done, by reason",
-        &[RejectionReason::NotAForum, RejectionReason::AdminsOnly, RejectionReason::AnotherUser]));
+    RejectionCounter::new("topics", &[
+        RejectionReason::NotAForum, RejectionReason::AdminsOnly, RejectionReason::AnotherUser,
+    ]));
 pub static CMD_CLEANUP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_cleanup_rejected_total", "count of /cleanup invocations answered with why nothing was done, by reason",
-        &[RejectionReason::FeatureDisabled, RejectionReason::AdminsOnly, RejectionReason::AnotherUser]));
+    RejectionCounter::new("cleanup", &[
+        RejectionReason::FeatureDisabled, RejectionReason::AdminsOnly, RejectionReason::AnotherUser,
+    ]));
 pub static CMD_MENTIONS_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_mentions_rejected_total", "count of /mentions invocations answered with why nothing was done, by reason",
-        &[RejectionReason::GroupHint, RejectionReason::NotPlaying]));
+    RejectionCounter::new("mentions", &[RejectionReason::GroupHint, RejectionReason::NotPlaying]));
 pub static CMD_SUPPORT_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
-    RejectionCounter::new("command_support_rejected_total", "count of /support invocations answered with why nothing was done, by reason",
-        &[RejectionReason::FeatureDisabled, RejectionReason::TooOften]));
+    RejectionCounter::new("support", &[RejectionReason::FeatureDisabled, RejectionReason::TooOften]));
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 pub static PROMO_ATTEMPTS: Lazy<CounterVec> = Lazy::new(||
@@ -389,8 +398,9 @@ struct ImportReasons {
 }
 
 /// The rejections of one command by reason: the user was told what to change, and nothing was done.
+/// Every command counts into the same `command_rejected_total`, under its own `command` label.
 pub struct RejectionCounter {
-    vec: CounterVec,
+    command: &'static str,
     reasons: &'static [RejectionReason],
 }
 
@@ -658,17 +668,16 @@ impl ImportReasons {
 }
 
 impl RejectionCounter {
-    fn new(name: &str, help: &str, reasons: &'static [RejectionReason]) -> Self {
-        let vec = CounterVec::new(name, help, &["reason"]);
+    fn new(command: &'static str, reasons: &'static [RejectionReason]) -> Self {
         for reason in reasons {
-            vec.counter(&[&reason.to_string()]);
+            COMMAND_REJECTIONS.counter(&[command, &reason.to_string()]);
         }
-        Self { vec, reasons }
+        Self { command, reasons }
     }
 
     pub fn rejected(&self, reason: RejectionReason) {
-        debug_assert!(self.reasons.contains(&reason), "{reason} is not a reason of this command");
-        self.vec.inc(&[&reason.to_string()])
+        debug_assert!(self.reasons.contains(&reason), "{reason} is not a reason of /{}", self.command);
+        COMMAND_REJECTIONS.inc(&[self.command, &reason.to_string()])
     }
 
     /// Counts the outcome if it is a refusal.
@@ -1301,17 +1310,17 @@ mod tests {
     /// at zero from the start.
     #[test]
     fn every_rejection_reason_is_exported() {
-        assert_exported(&CMD_GROW_REJECTED, "command_grow_rejected_total");
-        assert_exported(&CMD_TOP_REJECTED, "command_top_rejected_total");
-        assert_exported(&CMD_LOAN_REJECTED, "command_loan_rejected_total");
-        assert_exported(&CMD_DOD_REJECTED, "command_dick_of_day_rejected_total");
-        assert_exported(&CMD_PVP_REJECTED, "command_pvp_rejected_total");
-        assert_exported(&CMD_PROMO_REJECTED, "command_promo_rejected_total");
-        assert_exported(&CMD_LANGUAGE_REJECTED, "command_language_rejected_total");
-        assert_exported(&CMD_TOPICS_REJECTED, "command_topics_rejected_total");
-        assert_exported(&CMD_CLEANUP_REJECTED, "command_cleanup_rejected_total");
-        assert_exported(&CMD_MENTIONS_REJECTED, "command_mentions_rejected_total");
-        assert_exported(&CMD_SUPPORT_REJECTED, "command_support_rejected_total");
+        assert_exported(&CMD_GROW_REJECTED);
+        assert_exported(&CMD_TOP_REJECTED);
+        assert_exported(&CMD_LOAN_REJECTED);
+        assert_exported(&CMD_DOD_REJECTED);
+        assert_exported(&CMD_PVP_REJECTED);
+        assert_exported(&CMD_PROMO_REJECTED);
+        assert_exported(&CMD_LANGUAGE_REJECTED);
+        assert_exported(&CMD_TOPICS_REJECTED);
+        assert_exported(&CMD_CLEANUP_REJECTED);
+        assert_exported(&CMD_MENTIONS_REJECTED);
+        assert_exported(&CMD_SUPPORT_REJECTED);
     }
 
     #[test]
@@ -1523,13 +1532,14 @@ mod tests {
         Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await
     }
 
-    fn assert_exported(counter: &Lazy<RejectionCounter>, name: &str) {
+    fn assert_exported(counter: &Lazy<RejectionCounter>) {
         let rendered = {
             Lazy::force(counter);
             render_metrics()
         };
         for reason in counter.reasons {
-            let series = format!("{name}{{reason=\"{reason}\"}}");
+            let command = counter.command;
+            let series = format!("command_rejected_total{{command=\"{command}\",reason=\"{reason}\"}}");
             assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
         }
     }
