@@ -116,12 +116,12 @@ fn chosen_answer(
 
 fn already_chosen_answer(name: &Username, lang_code: &LanguageCode) -> (String, MessageGroup) {
     metrics::CMD_DOD_REJECTED.rejected(RejectionReason::DoneToday);
-    let text = t!("commands.dod.already_chosen", locale = lang_code, name = name.escaped()).to_string();
+    let text = t!("commands.dod.already_chosen", locale = lang_code, name = name.escaped()).into_owned();
     (text, MessageGroup::Notice)
 }
 
 fn no_candidates_answer(lang_code: &LanguageCode) -> (String, MessageGroup) {
     metrics::CMD_DOD_REJECTED.rejected(RejectionReason::NoCandidates);
-    let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
+    let text = t!("commands.dod.no_candidates", locale = lang_code).into_owned();
     (text, MessageGroup::Notice)
 }

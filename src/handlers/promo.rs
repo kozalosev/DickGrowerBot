@@ -110,7 +110,7 @@ pub async fn promo_cmd_handler(
         PromoCommands::Promo(code) if code.is_empty() => {
             dialogue.update(PromoCommandState::Requested).await?;
 
-            HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).to_string())
+            HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).into_owned())
         }
         PromoCommands::Promo(code) => {
             dialogue.exit().await?;
@@ -141,7 +141,7 @@ pub async fn promo_requested_handler(
             activate_or_refuse(repos.promo, &cache, user, code.to_owned(), lang_code).await?
         },
         None => {
-            HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).to_string())
+            HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).into_owned())
         }
     };
     reply_html!(bot, msg, answer.text(), reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
@@ -188,7 +188,7 @@ pub async fn promo_callback_handler(bot: Bot, query: CallbackQuery, deps: Handle
     let lang_code = lang_resolver.execute().await;
     let text = match PromoCallbackData::parse(&query)? {
         PromoCallbackData::Confirm(code) => activate(repos.promo, &query.from, &code, &lang_code).await?.answer,
-        PromoCallbackData::Cancel => t!("commands.promo.confirmation.cancelled", locale = &lang_code).to_string(),
+        PromoCallbackData::Cancel => t!("commands.promo.confirmation.cancelled", locale = &lang_code).into_owned(),
     };
     let params = callbacks::get_params_for_message_edit(&query)?;
     bot.answer_callback_query(query.id).await?;
@@ -210,7 +210,7 @@ pub(crate) async fn promo_activation_impl(
     let (answer, outcome) = match preview {
         Some(preview) => (HandlerImplResult::WithKeyboard {
             text: t!("commands.promo.confirmation.text", locale = lang_code,
-                length = preview.bonus_length.value().unsigned_abs(), chats = preview.chats).to_string(),
+                length = preview.bonus_length.value().unsigned_abs(), chats = preview.chats).into_owned(),
             buttons: confirmation_buttons(promo_code, lang_code),
         }, ActivationOutcome::Confirmation),
         None => {
@@ -242,15 +242,14 @@ async fn activate(
             let text = t!("commands.promo.success.template", locale = &lang_code,
                 ending = t!(&format!("commands.promo.success.{direction}.{plurality}"), locale = &lang_code,
                     growth = bonus.unsigned_abs(), affected_chats = res.chats_affected,
-                    word_chats = chats_in_russian))
-                .to_string();
+                    word_chats = chats_in_russian)).into_owned();
             (text, ActivationOutcome::Success)
         },
         Err(e) => {
             let outcome = ActivationOutcome::try_from(e)?;
             metrics::CMD_PROMO_REJECTED.count(&outcome);
             let t_key = format!("commands.promo.errors.{outcome}");
-            (t!(&t_key, locale = &lang_code).to_string(), outcome)
+            (t!(&t_key, locale = &lang_code).into_owned(), outcome)
         }
     };
     Ok(PromoCodeActivationResult { answer: text, outcome })
@@ -270,7 +269,7 @@ async fn activate_or_refuse(
             tracing::info!(error = %e, "the promo code doesn't fit the format");
             record_attempt(cache, UserId::from(user), ActivationOutcome::InvalidFormat).await;
             metrics::CMD_PROMO_REJECTED.rejected(RejectionReason::InvalidArgument);
-            let text = t!("commands.promo.errors.invalid_format", locale = &lang_code).to_string();
+            let text = t!("commands.promo.errors.invalid_format", locale = &lang_code).into_owned();
             Ok(HandlerImplResult::OnlyText(text))
         }
     }
@@ -284,10 +283,10 @@ async fn record_attempt(cache: &Cache, uid: UserId, outcome: ActivationOutcome) 
 fn confirmation_buttons(code: &PromoCode, lang_code: &LanguageCode) -> Vec<CallbackButton<PromoCallbackData>> {
     vec![
         CallbackButton::new(
-            t!("commands.promo.confirmation.buttons.confirm", locale = lang_code).to_string(),
+            t!("commands.promo.confirmation.buttons.confirm", locale = lang_code).into_owned(),
             PromoCallbackData::Confirm(code.clone())),
         CallbackButton::new(
-            t!("commands.promo.confirmation.buttons.cancel", locale = lang_code).to_string(),
+            t!("commands.promo.confirmation.buttons.cancel", locale = lang_code).into_owned(),
             PromoCallbackData::Cancel),
     ]
 }

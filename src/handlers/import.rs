@@ -183,7 +183,7 @@ fn check_rejection_text(rejection: CheckRejection, lang_code: &LanguageCode) -> 
         },
         CheckRejection::LegacyGroup => t!("commands.import.errors.legacy_group", locale = lang_code),
         CheckRejection::TooManyMembers => t!("commands.import.errors.too_many_members", locale = lang_code),
-    }.to_string()
+    }.into_owned()
 }
 
 fn import_error_text(error: ImportError, lang_code: &LanguageCode) -> String {
@@ -205,7 +205,7 @@ fn import_error_text(error: ImportError, lang_code: &LanguageCode) -> String {
                 .join("\n");
             t!("commands.import.errors.invalid_lines.template", locale = lang_code, invalid_lines = invalid_lines)
         },
-    }.to_string()
+    }.into_owned()
 }
 
 #[autometrics]

@@ -320,13 +320,13 @@ pub(crate) async fn pvp_impl_start(
     tracing::debug!(uid = %initiator.uid, chat_id = %p.chat_id, bet = %bet, enough, "starting a PvP");
 
     let data = if enough {
-        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).to_string();
-        let btn_label = t!("commands.pvp.button", locale = &p.lang_code).to_string();
+        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).into_owned();
+        let btn_label = t!("commands.pvp.button", locale = &p.lang_code).into_owned();
         let btn_data = BattleCallbackData::new(initiator.uid, bet);
         HandlerImplResult::WithKeyboard { text, buttons: vec![CallbackButton::new(btn_label, btn_data)] }
     } else {
         metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
-        HandlerImplResult::OnlyText(t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string())
+        HandlerImplResult::OnlyText(t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).into_owned())
     };
     Ok(data)
 }
@@ -360,7 +360,7 @@ async fn pvp_impl_attack(
                 let mut stats_str = t!("commands.pvp.results.stats.text", locale = &p.lang_code,
                     winner_win_rate = winner_stats.win_rate_percentage(), loser_win_rate = loser_stats.win_rate_percentage(),
                     winner_win_streak = winner_stats.win_streak_current, winner_win_streak_max = winner_stats.win_streak_max,
-                ).to_string();
+                ).into_owned();
                 if loser_stats.prev_win_streak > 1 {
                     stats_str.push('\n');
                     stats_str.push_str(&t!("commands.pvp.results.stats.lost_win_streak", locale = &p.lang_code,
@@ -395,11 +395,11 @@ async fn pvp_impl_attack(
         CallbackResult::EditMessage(format!("{text}{withheld_part}{battle_stats}"), None)
     } else if enough_acceptor {
         metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
-        let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string();
+        let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).into_owned();
         CallbackResult::EditMessage(text, None)
     } else {
         metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughAcceptor);
-        let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code).to_string();
+        let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code).into_owned();
         CallbackResult::ShowError(text)
     };
     Ok(result)

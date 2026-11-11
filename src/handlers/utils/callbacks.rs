@@ -190,7 +190,7 @@ pub async fn answer_and_edit_page(
     bot: &Bot,
     q: &CallbackQuery,
     params: &EditMessageReqParamsKind,
-    text: String,
+    text: impl Into<String>,
     keyboard: InlineKeyboardMarkup,
 ) -> anyhow::Result<()> {
     let (answered, edited) = match params {
@@ -235,7 +235,7 @@ pub async fn prepare_callback_answer_params(
     let mut answer = bot.answer_callback_query(query.id.clone());
     let res = if query.from.id != user_id {
         answer.show_alert.replace(true);
-        answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code).to_string());
+        answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code).into_owned());
         answer.await?;
         CallbackAnswerParams::AnotherUser
     } else {

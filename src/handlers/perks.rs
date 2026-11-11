@@ -153,7 +153,7 @@ impl Perk for StreakPerk {
     fn stats_line(&self, state: Option<&JsonValue>, lang_code: &LanguageCode) -> Option<String> {
         let state = state.and_then(parse_streak)?;
         Some(t!("commands.stats.streak", locale = lang_code,
-            current = state.streak, max = state.max).to_string())
+            current = state.streak, max = state.max).into_owned())
     }
 
     fn enabled(&self) -> bool {

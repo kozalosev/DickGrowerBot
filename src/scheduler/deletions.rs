@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 use autometrics::autometrics;
 use chrono::Utc;
@@ -280,9 +281,9 @@ impl Cleaner<'_> {
         self.outcome_of(request.await.map(|_| ()), deletion).await
     }
 
-    fn warning(&self, deletion: &ScheduledDeletion) -> String {
+    fn warning(&self, deletion: &ScheduledDeletion) -> Cow<'static, str> {
         let seconds = self.config.warning.as_secs();
-        t!("self_destruction.warning", locale = &deletion.lang_code, seconds = seconds).to_string()
+        t!("self_destruction.warning", locale = &deletion.lang_code, seconds = seconds)
     }
 
 
@@ -596,10 +597,10 @@ mod tests {
     }
 
     fn warning_text() -> String {
-        t!("self_destruction.warning", locale = "en", seconds = 15).to_string()
+        t!("self_destruction.warning", locale = "en", seconds = 15).into_owned()
     }
 
     fn placeholder_text() -> String {
-        t!("self_destruction.placeholder", locale = "en").to_string()
+        t!("self_destruction.placeholder", locale = "en").into_owned()
     }
 }

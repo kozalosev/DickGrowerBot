@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::anyhow;
 use rust_i18n::t;
@@ -101,16 +102,16 @@ pub async fn topics_callback_handler(
 ///
 /// The other topics can't be named — the Bot API doesn't tell us their names — so they are a count
 /// rather than a list, and each one is managed from inside itself.
-fn render_state(allowed: &AllowedTopics, current: TopicId, lang_code: &LanguageCode) -> String {
+fn render_state(allowed: &AllowedTopics, current: TopicId, lang_code: &LanguageCode) -> Cow<'static, str> {
     if allowed.is_unrestricted() {
-        return t!("commands.topics.state.unrestricted", locale = lang_code).to_string()
+        return t!("commands.topics.state.unrestricted", locale = lang_code)
     }
     let key = if allowed.allows(current) {
         "commands.topics.state.allowed_here"
     } else {
         "commands.topics.state.forbidden_here"
     };
-    t!(key, locale = lang_code, count = allowed.count()).to_string()
+    t!(key, locale = lang_code, count = allowed.count())
 }
 
 /// The picker: what to do with the topic the command was invoked in, and how to lift the
@@ -135,7 +136,7 @@ fn build_keyboard(
     };
     let data = TopicsCallbackData { uid, current, action };
     rows.push(vec![InlineKeyboardButton::callback(
-        t!(label, locale = lang_code).to_string(),
+        t!(label, locale = lang_code),
         data.to_data_string())]);
 
     // Only a chat that has a restriction can be offered to lift it.
@@ -144,7 +145,7 @@ fn build_keyboard(
             uid, current, action: TopicsAction::AllowAll,
         };
         rows.push(vec![InlineKeyboardButton::callback(
-            t!("commands.topics.buttons.allow_everywhere", locale = lang_code).to_string(),
+            t!("commands.topics.buttons.allow_everywhere", locale = lang_code),
             data.to_data_string())]);
     }
 

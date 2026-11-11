@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use anyhow::anyhow;
 use autometrics::autometrics;
 use rust_i18n::t;
@@ -94,9 +95,9 @@ pub async fn mentions_callback_handler(bot: Bot, query: CallbackQuery, deps: Han
     Ok(())
 }
 
-fn render_state(enabled: bool, lang_code: &LanguageCode) -> String {
+fn render_state(enabled: bool, lang_code: &LanguageCode) -> Cow<'static, str> {
     let key = if enabled { "commands.mentions.enabled" } else { "commands.mentions.disabled" };
-    t!(key, locale = lang_code).to_string()
+    t!(key, locale = lang_code)
 }
 
 fn build_keyboard(enabled: bool, lang_code: &LanguageCode) -> InlineKeyboardMarkup {

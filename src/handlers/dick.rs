@@ -79,7 +79,7 @@ pub(crate) async fn grow_impl(
         Ok(user) => user,
         Err(e) if let Some(date) = banned_until_of(&e) => {
             metrics::CMD_GROW_REJECTED.rejected(RejectionReason::Banned);
-            let text = t!("errors.banned", locale = lang_code, date = date).to_string();
+            let text = t!("errors.banned", locale = lang_code, date = date).into_owned();
             return Ok(TaggedReply { text, group: MessageGroup::Notice })
         },
         Err(e) => return Err(e)
@@ -110,7 +110,7 @@ pub(crate) async fn grow_impl(
         },
         None => {
             metrics::CMD_GROW_REJECTED.rejected(RejectionReason::DoneToday);
-            (t!("commands.grow.tomorrow", locale = lang_code).to_string(), MessageGroup::Notice)
+            (t!("commands.grow.tomorrow", locale = lang_code).into_owned(), MessageGroup::Notice)
         },
     };
     let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
@@ -167,7 +167,7 @@ pub(crate) async fn top_impl(
             let pos: i64 = d.position.map(|p| p.saturating_into())
                 .unwrap_or_else(|| (i + 1).saturating_into());
             let mut line = t!("commands.top.line", locale = &lang_code,
-                n = pos, name = name, length = d.length).to_string();
+                n = pos, name = name, length = d.length).into_owned();
             if inactive {
                 any_inactive = true;
                 line.push_str(" [~]")

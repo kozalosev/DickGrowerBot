@@ -323,12 +323,12 @@ pub async fn inline_callback_handler(
                 Ok(CallbackDataParseResult::Ok(_)) => panic!("unexpected CallbackDataParseResult::Ok(_)")
             };
             let t_key = format!("inline.callback.errors.{key}");
-            let text = t!(&t_key, locale = &lang_code).to_string();
+            let text = t!(&t_key, locale = &lang_code).into_owned();
             answer.text.replace(text);
             answer.show_alert.replace(true);
         }
     } else {
-        let text = t!("inline.callback.errors.no_data", locale = &lang_code).to_string();
+        let text = t!("inline.callback.errors.no_data", locale = &lang_code).into_owned();
         answer.text.replace(text);
         answer.show_alert.replace(true);
     };

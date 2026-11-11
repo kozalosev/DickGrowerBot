@@ -5,6 +5,7 @@
 //! It is the way out for a data deletion or access request — see the privacy policy — so it stays
 //! above the ban gate in the dispatcher tree and must never write a row for its sender.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -327,7 +328,7 @@ pub async fn support_cmd_handler(
     let SupportCommands::Support(text) = cmd;
     let answer = if text.trim().is_empty() {
         dialogue.update(SupportCommandState::Requested).await?;
-        t!("commands.support.request", locale = &lang_code).to_string()
+        t!("commands.support.request", locale = &lang_code)
     } else {
         dialogue.exit().await?;
         relay(&bot, &msg, &support, &text, &lang_code, None).await?
@@ -377,13 +378,13 @@ async fn answer_request(
         // of a request would only confuse both sides.
         Some(text) if text.starts_with('/') => {
             dialogue.exit().await?;
-            t!("commands.support.cancelled", locale = &lang_code).to_string()
+            t!("commands.support.cancelled", locale = &lang_code)
         }
         Some(text) => {
             dialogue.exit().await?;
             relay(&bot, &msg, &support, text, &lang_code, ticket).await?
         }
-        None => t!("commands.support.request", locale = &lang_code).to_string()
+        None => t!("commands.support.request", locale = &lang_code)
     };
     reply_html!(bot, msg, answer);
     Ok(())
@@ -396,11 +397,11 @@ async fn relay(
     text: &str,
     lang_code: &LanguageCode,
     ticket: Option<SupportTicket>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Cow<'static, str>> {
     let from = msg.from.as_ref().ok_or(anyhow::anyhow!("no from user"))?;
     let relayed = support.relay(bot, from, lang_code, text, ticket).await?;
     metrics::CMD_SUPPORT_REJECTED.count(&relayed);
-    Ok(t!(relayed.tr_key(), locale = lang_code).to_string())
+    Ok(t!(relayed.tr_key(), locale = lang_code))
 }
 
 /// The link right after the emoji can only be the bot's own, and so can the `<code>` with the id:

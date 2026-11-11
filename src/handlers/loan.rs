@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::anyhow;
 use derive_more::Display;
@@ -66,20 +67,20 @@ pub(crate) async fn loan_impl(
         && !config.features.multiple_loans
     {
         metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::Debt);
-        let left_to_pay = t!("commands.loan.debt", locale = lang_code, debt = debt).to_string();
+        let left_to_pay = t!("commands.loan.debt", locale = lang_code, debt = debt).into_owned();
         return Ok(HandlerImplResult::OnlyText(left_to_pay))
     }
 
     if config.loan_payout_ratio <= 0.0 || config.loan_payout_ratio >= 1.0 {
         metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::FeatureDisabled);
-        let err_text = t!("errors.feature_disabled", locale = lang_code).to_string();
+        let err_text = t!("errors.feature_disabled", locale = lang_code).into_owned();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
     let length = repos.dicks.fetch_length(DomainUserId::from(from), &chat_id_kind).await?;
     if length >= 0 {
         metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PositiveLength);
-        let err_text = t!("commands.loan.errors.positive_length", locale = lang_code).to_string();
+        let err_text = t!("commands.loan.errors.positive_length", locale = lang_code).into_owned();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
@@ -87,7 +88,7 @@ pub(crate) async fn loan_impl(
     let payout_percentage = FloatPercentage::from(config.loan_payout_ratio).to_string();
 
     let btn_agree = CallbackButton::new(
-        t!("commands.loan.confirmation.buttons.agree", locale = lang_code).to_string(),
+        t!("commands.loan.confirmation.buttons.agree", locale = lang_code).into_owned(),
         LoanCallbackData {
             uid: from.id,
             action: LoanCallbackAction::Confirmed {
@@ -97,7 +98,7 @@ pub(crate) async fn loan_impl(
         }
     );
     let btn_disagree = CallbackButton::new(
-        t!("commands.loan.confirmation.buttons.disagree", locale = lang_code).to_string(),
+        t!("commands.loan.confirmation.buttons.disagree", locale = lang_code).into_owned(),
         LoanCallbackData {
             uid: from.id,
             action: LoanCallbackAction::Refused
@@ -105,7 +106,7 @@ pub(crate) async fn loan_impl(
     );
     Ok(HandlerImplResult::WithKeyboard {
         text: t!("commands.loan.confirmation.text", locale = lang_code,
-            debt = debt, payout_percentage = payout_percentage).to_string(),
+            debt = debt, payout_percentage = payout_percentage).into_owned(),
         buttons: vec![btn_agree, btn_disagree]
     })
 }
@@ -140,7 +141,7 @@ pub async fn loan_callback_handler(
         LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {
             metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::FeatureDisabled);
             answer.show_alert.replace(true);
-            answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
+            answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).into_owned());
         }
         LoanCallbackAction::Confirmed { value: debt, payout_ratio } if payout_ratio == config.loan_payout_ratio => {
             match edit_msg_params {
@@ -195,16 +196,16 @@ pub async fn loan_callback_handler(
     Ok(())
 }
 
-fn borrow_result_to_text(borrow_result: repo::BorrowResult, lang_code: &LanguageCode) -> String {
+fn borrow_result_to_text(borrow_result: repo::BorrowResult, lang_code: &LanguageCode) -> Cow<'static, str> {
     match borrow_result {
         repo::BorrowResult::Granted => {
             metrics::CMD_LOAN_COUNTER.finished.inc();
-            t!("commands.loan.callback.success", locale = lang_code).to_string()
+            t!("commands.loan.callback.success", locale = lang_code)
         }
         // the user might have got a positive length between the loan application and the button click
         repo::BorrowResult::NotEligible => {
             metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PositiveLength);
-            t!("commands.loan.errors.positive_length", locale = lang_code).to_string()
+            t!("commands.loan.errors.positive_length", locale = lang_code)
         },
     }
 }

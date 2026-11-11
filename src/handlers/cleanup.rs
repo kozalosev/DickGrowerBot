@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 use std::vec as row;
 use autometrics::autometrics;
@@ -206,7 +207,7 @@ fn delays(config: &SelfDestructionConfig, group: MessageGroup, button: &ButtonBu
         .collect();
     Screen {
         text: t!("commands.cleanup.pick.prompt", locale = lang_code,
-            group = group_name(group, lang_code)).to_string(),
+            group = group_name(group, lang_code)).into_owned(),
         keyboard: InlineKeyboardMarkup::new(rows),
     }
 }
@@ -227,7 +228,7 @@ fn warning(
         "commands.cleanup.warning.no_rights"
     };
     Screen {
-        text: t!(key, locale = lang_code, group = group_name(group, lang_code)).to_string(),
+        text: t!(key, locale = lang_code, group = group_name(group, lang_code)).into_owned(),
         keyboard: InlineKeyboardMarkup::new([
             row![button.of(ButtonKind::Confirm, CleanupAction::SetConfirmed(group, minutes))],
             row![button.of(ButtonKind::Back, CleanupAction::Back)],
@@ -241,32 +242,32 @@ fn state_line(name: &str, delay: Option<Duration>, lang_code: &LanguageCode) -> 
         Some(delay) => t!("commands.cleanup.state.cleaned", locale = lang_code,
             group = name, delay = format_delay(delay, lang_code)),
         None => t!("commands.cleanup.state.kept", locale = lang_code, group = name),
-    }.to_string()
+    }.into_owned()
 }
 
 /// The label of the button that opens a group's delay list: the group and what it has now.
 fn group_label(name: &str, delay: Option<Duration>, lang_code: &LanguageCode) -> String {
     let delay = match delay {
         Some(delay) => format_delay(delay, lang_code),
-        None => t!("commands.cleanup.delays.kept", locale = lang_code).to_string(),
+        None => t!("commands.cleanup.delays.kept", locale = lang_code),
     };
-    t!("commands.cleanup.buttons.group", locale = lang_code, group = name, delay = delay).to_string()
+    t!("commands.cleanup.buttons.group", locale = lang_code, group = name, delay = delay).into_owned()
 }
 
 /// A delay as an admin reads it: whole hours where it divides, minutes otherwise. The list is
 /// written in minutes, so an hour would otherwise appear on a button as "60 min".
-fn format_delay(delay: Duration, lang_code: &LanguageCode) -> String {
+fn format_delay(delay: Duration, lang_code: &LanguageCode) -> Cow<'static, str> {
     let minutes = delay.as_secs() / 60;
     if minutes >= 60 && minutes.is_multiple_of(60) {
-        t!("commands.cleanup.delays.hours", locale = lang_code, count = minutes / 60).to_string()
+        t!("commands.cleanup.delays.hours", locale = lang_code, count = minutes / 60)
     } else {
-        t!("commands.cleanup.delays.minutes", locale = lang_code, count = minutes).to_string()
+        t!("commands.cleanup.delays.minutes", locale = lang_code, count = minutes)
     }
 }
 
 fn group_name(group: MessageGroup, lang_code: &LanguageCode) -> String {
     let key = format!("commands.cleanup.groups.{group}");
-    t!(&key, locale = lang_code).to_string()
+    t!(&key, locale = lang_code).into_owned()
 }
 
 /// The buttons whose label is a fixed line of the locale file rather than something built from the

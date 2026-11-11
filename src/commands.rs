@@ -127,7 +127,7 @@ async fn set_commands(
         .filter(|cmd| toggles.enabled(&cmd.description))
         .map(|mut cmd| {
             let t_key = format!("commands.{}.description", cmd.description);
-            cmd.description = t!(&t_key, locale = lang_code).to_string();
+            cmd.description = t!(&t_key, locale = lang_code).into_owned();
             cmd
         })
         .collect();

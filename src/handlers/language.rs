@@ -161,7 +161,7 @@ pub async fn language_callback_handler(
                 .ok_or(anyhow!("a chat-language callback without an attached message"))?;
             apply_chat_language(&language_service, &chat_id, data.selection.into_option(), &lang_code).await?
         }
-    }.to_string();
+    };
 
     callbacks::edit_message_text(&bot, edit_msg_params, text).await?;
     answer.await?;
@@ -216,7 +216,7 @@ fn build_language_keyboard(scope: LanguageScope, uid: UserId, lang_code: &Langua
     }).collect();
     // Only the chat-wide picker can revert to per-user resolution.
     if scope == LanguageScope::Chat {
-        let label = t!("commands.language.chat.auto_button", locale = lang_code).to_string();
+        let label = t!("commands.language.chat.auto_button", locale = lang_code);
         let data = LanguageCallbackData { scope, uid, selection: LanguageSelection::Auto };
         rows.push(vec![InlineKeyboardButton::callback(label, data.to_data_string())]);
     }

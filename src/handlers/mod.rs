@@ -229,7 +229,7 @@ pub(crate) async fn answer_callback_feature_disabled(
 ) -> HandlerResult {
     let mut answer = bot.answer_callback_query(q.id.clone());
     answer.show_alert.replace(true);
-    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).into_owned());
     answer.await?;
 
     match edit_msg_req_params {
@@ -491,7 +491,7 @@ pub mod checks {
 
         let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
         let lang_code = lang_resolver.execute().await;
-        let answer = t!("errors.rate_limited", locale = &lang_code).to_string();
+        let answer = t!("errors.rate_limited", locale = &lang_code);
         let cache_time = limiter.window().as_secs().saturating_into();
 
         match upd.kind {

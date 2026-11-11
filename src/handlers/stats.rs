@@ -57,7 +57,7 @@ async fn personal_stats_impl(
 ) -> anyhow::Result<String> {
     repos.personal_stats.get_personal_stats(UserId::from(from_refs.0)).await
         .map(|stats| t!("commands.stats.personal", locale = lang_code,
-            chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).to_string())
+            chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).into_owned())
 }
 
 pub(crate) async fn chat_stats_impl(

@@ -85,7 +85,7 @@ pub(crate) fn render_shrinks_page(
     has_more_pages: bool,
 ) -> ShrinksPage {
     if rows.is_empty() {
-        let lines = t!("commands.shrink.empty", locale = lang_code).to_string();
+        let lines = t!("commands.shrink.empty", locale = lang_code).into_owned();
         return ShrinksPage { lines, has_more_pages: false };
     }
 
@@ -213,7 +213,7 @@ pub(crate) async fn recent_shrinks_impl(
 ) -> anyhow::Result<(ShrinksPage, Option<InlineKeyboardMarkup>)> {
     let chat_id = from_refs.1.kind();
     let Some(date) = repos.shrinks.get_latest_shrink_date(&chat_id).await? else {
-        let lines = t!("commands.shrink.empty", locale = lang_code).to_string();
+        let lines = t!("commands.shrink.empty", locale = lang_code).into_owned();
         return Ok((ShrinksPage { lines, has_more_pages: false }, None));
     };
 
