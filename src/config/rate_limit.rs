@@ -26,7 +26,11 @@ impl RateLimitConfig {
                 start: CommandSpamLimit {
                     requests: env_value!("SPAM_LIMIT_START_REQUESTS": RateLimit, or = 1),
                     window: env_duration!("SPAM_LIMIT_START_WINDOW", or = mins(10), at_least = secs(1)),
-                }
+                },
+                promo: CommandSpamLimit {
+                    requests: env_value!("SPAM_LIMIT_PROMO_REQUESTS": RateLimit, or = 30),
+                    window: env_duration!("SPAM_LIMIT_PROMO_WINDOW", or = hours(1), at_least = secs(1)),
+                },
             }
         }
     }
@@ -36,6 +40,9 @@ impl RateLimitConfig {
 pub struct Commands {
     /// How many bare `/start`s a chat is answered in a window; the rest are dropped in silence.
     pub start: CommandSpamLimit,
+    /// How many promo codes a user may try in a window; the attempts past it are refused like
+    /// any request over a limit.
+    pub promo: CommandSpamLimit,
 }
 
 #[derive(Clone, Copy, Default)]

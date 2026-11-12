@@ -194,6 +194,7 @@ commands:
       exhausted: "This promo code exists, but every activation of it has already been used up 😞"
       invalid_format: "That doesn't look like a promo code 🤔 They are 3 to 16 characters long: letters, digits, hyphens and underscores."
       already_activated: "It seems you already used this promocode earlier 🤨"
+      too_often: "Too many attempts to guess a promo code 🤚 Take a break and try again in %{minutes} minutes."
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
     inline:
       switch_button: "Activate promo code '%{code}'…"

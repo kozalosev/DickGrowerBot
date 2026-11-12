@@ -4,9 +4,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::{Message, ReplyMarkup};
-use crate::handlers::{HandlerDeps, HandlerImplResult, HandlerResult, promo_activation_impl, PROMO_START_PARAM_PREFIX, reply_html};
+use crate::handlers::{HandlerDeps, HandlerImplResult, HandlerResult, try_activate, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, reply_html_ephemeral};
-use crate::cache::Cache;
 use crate::config::MessageGroup::Notice;
 use crate::domain::primitives::{PromoCode, Username};
 use crate::help::HelpContainer;
@@ -25,7 +24,6 @@ pub async fn start_cmd_handler(
     msg: Message,
     cmd: StartCommands,
     help: HelpContainer,
-    cache: Cache,
     limiter: RateLimiter,
     deps: HandlerDeps,
 ) -> HandlerResult {
@@ -39,7 +37,7 @@ pub async fn start_cmd_handler(
     let lang_code = lang_resolver.execute().await;
     let answer = if msg.from.as_ref().is_none() {
         tracing::warn!(message = ?msg, "the /start command was invoked without a FROM field");
-        HandlerImplResult::OnlyText(help.get_help_message(&lang_code).to_owned())
+        Some(HandlerImplResult::OnlyText(help.get_help_message(&lang_code).to_owned()))
     } else {
         match cmd {
             StartCommands::Start(promo_code) if promo_code.starts_with(PROMO_START_PARAM_PREFIX) => {
@@ -48,17 +46,19 @@ pub async fn start_cmd_handler(
                 let encoded_promo_code = promo_code.strip_prefix(PROMO_START_PARAM_PREFIX)
                     .expect("promo start param prefix must be present here");
                 let promo_code = decode_promo_code(encoded_promo_code)?;
-                promo_activation_impl(repos.promo, &cache, user, &promo_code, &lang_code).await?
+                try_activate(repos.promo, &limiter, user, promo_code, &lang_code).await?
             }
             StartCommands::Start(_) => {
                 metrics::CMD_START_COUNTER.inc();
                 let username = Username::new(msg.from.as_ref().unwrap().first_name.clone());
-                HandlerImplResult::OnlyText(help.get_start_message(username, &lang_code))
+                Some(HandlerImplResult::OnlyText(help.get_start_message(username, &lang_code)))
             }
         }
     };
-    reply_html_ephemeral!(bot, msg, answer.text(), self_destruction, Notice, lang_code,
-        reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
+    if let Some(answer) = answer {
+        reply_html_ephemeral!(bot, msg, answer.text(), self_destruction, Notice, lang_code,
+            reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
+    }
     Ok(())
 }
 

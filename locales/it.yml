@@ -194,6 +194,7 @@ commands:
       exhausted: "Mi dispiace, ma questo codice promozionale è già stato utilizzato il numero massimo di volte 😞"
       invalid_format: "Questo non sembra un codice promozionale 🤔 Sono lunghi da 3 a 16 caratteri: lettere, numeri, trattini e trattini bassi."
       already_activated: "Sembra che tu abbia già utilizzato questo codice promozionale 🤨"
+      too_often: "Troppi tentativi di indovinare un codice promozionale 🤚 Fai una pausa e riprova tra %{minutes} minuti."
       no_dicks: "Non hai ancora alcun pene. 🤔 Devi aggiungermi ad un gruppo ed eseguire il comando <code>/grow</code>!"
     inline:
       switch_button: "Attiva il codice promozionale '%{code}'…"

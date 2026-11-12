@@ -1,5 +1,3 @@
-use std::fmt::Display;
-use std::time::Duration;
 use axum::routing::get;
 use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
@@ -8,7 +6,6 @@ use strum::IntoEnumIterator;
 use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
-use crate::cache::{Cache, CacheKey};
 use crate::config::MessageGroup;
 use crate::domain::objects::OriginalBotKind;
 use crate::domain::primitives::SupportedLanguage;
@@ -85,7 +82,7 @@ pub static CMD_PROMO_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
     RejectionCounter::new("promo", &[
         RejectionReason::InvalidArgument, RejectionReason::NotFound, RejectionReason::NotStarted,
         RejectionReason::Expired, RejectionReason::Exhausted, RejectionReason::NotPlaying,
-        RejectionReason::AlreadyActivated,
+        RejectionReason::AlreadyActivated, RejectionReason::TooOften,
     ]));
 pub static CMD_LANGUAGE_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
     RejectionCounter::new("language", &[
@@ -108,9 +105,9 @@ pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 pub static PROMO_ATTEMPTS: Lazy<CounterVec> = Lazy::new(||
     CounterVec::new("promo_activation_attempts_total", "count of promo code activation attempts typed or followed by a user, by what became of them: success, confirmation (asked to confirm a code that shrinks), invalid_format, or the reason the code was refused", &["outcome"]));
-pub static PROMO_ATTEMPT_USERS: Lazy<ThresholdCounter> = Lazy::new(||
-    ThresholdCounter::new("promo_attempt_users_total", "count of users who reached this many promo code attempts within an hour. reached=\"1\" is everyone who tried; the share of it at a higher threshold is the share who needed that many attempts or more",
-        Duration::from_hours(1), &[1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 50, 100]));
+pub static PROMO_ATTEMPT_USERS: Lazy<ThresholdCurve> = Lazy::new(||
+    ThresholdCurve::new("promo_attempt_users_total", "count of users who reached this many promo code attempts within SPAM_LIMIT_PROMO_WINDOW. reached=\"1\" is everyone who tried; the share of it at a higher threshold is the share who needed that many attempts or more. Nothing is counted while SPAM_LIMIT_PROMO_REQUESTS is 0",
+        &[1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 50, 100]));
 pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
     UserServiceCounters::new("user_service_get_total", "count of user-service get() resolutions, split by whether they were served from cache or sent over gRPC"));
 pub static CMD_LANGUAGE: Lazy<LanguageCommandCounters> = Lazy::new(||
@@ -1019,19 +1016,11 @@ impl ChatMigrationCounter {
     }
 }
 
-/// How far each subject gets within a fixed window, counted as the thresholds it reaches.
+/// How far each subject gets within a window, counted as the thresholds it reaches.
 ///
-/// A count per subject can't be a label, so it is kept in the store, and only the threshold a hit
-/// lands on — one of a short, fixed list — is counted. The series form a survival curve: the first
-/// is everyone, and each later one is how many got that far.
-pub struct ThresholdCounter {
-    curve: ThresholdCurve,
-    name: &'static str,
-    window: Duration,
-}
-
-/// The series of such a curve, for a count that is already known: whoever holds it reports each
-/// new value, and only the ones on the list are counted.
+/// A count per subject can't be a label, so whoever keeps the count reports each new value, and
+/// only the ones on a short, fixed list are counted. The series form a survival curve: the first is
+/// everyone, and each later one is how many got that far.
 pub struct ThresholdCurve {
     vec: CounterVec,
     thresholds: &'static [u64],
@@ -1050,25 +1039,6 @@ pub struct DailyShrinkCounters {
     retries: Counter,
 }
 
-impl ThresholdCounter {
-    fn new(name: &'static str, help: &str, window: Duration, thresholds: &'static [u64]) -> Self {
-        Self { curve: ThresholdCurve::new(name, help, thresholds), name, window }
-    }
-
-    /// Counts one hit for the subject. A store that can't be asked only costs the curve a sample.
-    pub async fn hit(&self, cache: &Cache, subject: impl Display) {
-        if let Some(reached) = self.reached(cache, subject).await {
-            self.curve.record(reached)
-        }
-    }
-
-    async fn reached(&self, cache: &Cache, subject: impl Display) -> Option<u64> {
-        let key = ThresholdKey { name: self.name, subject: subject.to_string() };
-        let count = cache.or_local().increment(key, self.window).await?;
-        self.curve.on_list(count)
-    }
-}
-
 impl ThresholdCurve {
     fn new(name: &str, help: &str, thresholds: &'static [u64]) -> Self {
         let vec = CounterVec::new(name, help, &["reached"]);
@@ -1080,28 +1050,11 @@ impl ThresholdCurve {
 
     /// Reports that a subject's count has just become `count`.
     pub fn observe(&self, count: u64) {
-        if let Some(reached) = self.on_list(count) {
-            self.record(reached)
+        if self.thresholds.contains(&count) {
+            self.vec.counter(&[&count.to_string()]).inc()
         }
     }
-
-    fn record(&self, reached: u64) {
-        self.vec.counter(&[&reached.to_string()]).inc()
-    }
-
-    fn on_list(&self, count: u64) -> Option<u64> {
-        self.thresholds.contains(&count).then_some(count)
-    }
 }
-
-#[derive(derive_more::Display)]
-#[display("thresholds:{name}:{subject}")]
-struct ThresholdKey {
-    name: &'static str,
-    subject: String,
-}
-
-impl CacheKey for ThresholdKey {}
 
 impl DailyShrinkCounters {
     fn new() -> Self {
@@ -1262,13 +1215,9 @@ mod tests {
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
                 BROADCAST_LANGUAGE, CMD_IMPORT, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
                 SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics,
-                PROMO_ATTEMPT_USERS, RATE_LIMIT_CHAT_WINDOWS, RATE_LIMIT_USER_WINDOWS, ThresholdCounter,
-                ThresholdCurve, RejectionCounter, RejectionReason, CMD_GROW_REJECTED, CMD_TOP_REJECTED, CMD_LOAN_REJECTED,
+                PROMO_ATTEMPT_USERS, RATE_LIMIT_CHAT_WINDOWS, RATE_LIMIT_USER_WINDOWS, ThresholdCurve, RejectionCounter, RejectionReason, CMD_GROW_REJECTED, CMD_TOP_REJECTED, CMD_LOAN_REJECTED,
                 CMD_DOD_REJECTED, CMD_PVP_REJECTED, CMD_PROMO_REJECTED, CMD_LANGUAGE_REJECTED,
                 CMD_TOPICS_REJECTED, CMD_CLEANUP_REJECTED, CMD_MENTIONS_REJECTED, CMD_SUPPORT_REJECTED};
-    use std::time::Duration;
-    use crate::cache::Cache;
-    use crate::config::{CacheConfig, CacheMode};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.
@@ -1470,34 +1419,6 @@ mod tests {
         assert_eq!(language_label(None), "unknown");
     }
 
-    /// Each subject is counted apart, and only the counts on the list are reported.
-    #[tokio::test]
-    async fn each_subject_reports_the_thresholds_it_reaches() {
-        let cache = local_cache().await;
-        let counter = ThresholdCounter::new("test_thresholds_per_subject_total", "test",
-            Duration::from_hours(1), &[1, 2, 3, 5]);
-
-        let mut reached = Vec::new();
-        for _ in 0..5 {
-            reached.push(counter.reached(&cache, 1).await);
-        }
-        reached.push(counter.reached(&cache, 2).await);
-
-        assert_eq!(reached, [Some(1), Some(2), Some(3), None, Some(5), Some(1)]);
-    }
-
-    #[tokio::test]
-    async fn two_counters_keep_apart_counts_for_the_same_subject() {
-        let cache = local_cache().await;
-        let first = ThresholdCounter::new("test_thresholds_first_total", "test", Duration::from_hours(1), &[1, 2]);
-        let second = ThresholdCounter::new("test_thresholds_second_total", "test", Duration::from_hours(1), &[1, 2]);
-
-        first.reached(&cache, 1).await;
-        let reached = second.reached(&cache, 1).await;
-
-        assert_eq!(reached, Some(1));
-    }
-
     /// A subject's count that is already known is reported straight to the curve, and the counts
     /// between two thresholds are not counted.
     #[test]
@@ -1516,7 +1437,7 @@ mod tests {
     #[test]
     fn every_threshold_is_exported_at_zero() {
         let curves = [
-            ("promo_attempt_users_total", &PROMO_ATTEMPT_USERS.curve),
+            ("promo_attempt_users_total", &*PROMO_ATTEMPT_USERS),
             ("rate_limit_user_windows_total", &*RATE_LIMIT_USER_WINDOWS),
             ("rate_limit_chat_windows_total", &*RATE_LIMIT_CHAT_WINDOWS),
         ];
@@ -1527,10 +1448,6 @@ mod tests {
                 assert!(rendered.contains(&series), "{series} is not exported");
             }
         }
-    }
-
-    async fn local_cache() -> Cache {
-        Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await
     }
 
     fn assert_exported(counter: &Lazy<RejectionCounter>) {

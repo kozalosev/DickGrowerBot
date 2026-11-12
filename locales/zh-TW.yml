@@ -127,6 +127,7 @@ commands:
       exhausted: "這個神秘代碼的名額已經用完了 😞"
       invalid_format: "這看起來不像神秘代碼 🤔 它由 3 到 16 個字元組成：字母、數字、連字號和底線。"
       already_activated: "神秘代碼已經啟用過了 🤨"
+      too_often: "猜神秘代碼的次數太多了 🤚 休息一下，%{minutes} 分鐘後再試吧。"
       no_dicks: "看起來你還沒有任何老二。🤔 現在是時候把我加入一個聊天並執行 <code>/grow</code> 命令了！"
     inline:
       switch_button: "啟用神秘代碼 '%{code}'…"
