@@ -8,7 +8,7 @@
 //! [`BanList::spawn_listen_task`] reloads on it. The timer stays behind that as the backstop, for
 //! the moments a listener is reconnecting and hears nothing.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 use chrono::{DateTime, Utc};
@@ -25,7 +25,7 @@ const CHANNEL: &str = "bans";
 /// fresh meanwhile, so there is nothing to be gained by hurrying.
 const RECONNECT_DELAY: Duration = Duration::from_mins(1);
 
-type Bans = HashMap<UserId, DateTime<Utc>>;
+type Bans = FxHashMap<UserId, DateTime<Utc>>;
 
 #[derive(Clone)]
 pub struct BanList {
@@ -35,7 +35,7 @@ pub struct BanList {
 
 impl BanList {
     pub async fn load(users: Users) -> Self {
-        let list = Self { users, bans: Arc::new(RwLock::new(Bans::new())) };
+        let list = Self { users, bans: Arc::new(RwLock::new(Bans::default())) };
         list.refresh().await;
         list
     }

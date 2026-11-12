@@ -1,18 +1,27 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::ops::Not;
 use std::str::FromStr;
 use std::sync::Arc;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use crate::config::env::get_env_value_or_default;
 use crate::domain::primitives::{Counter, TextHash, LanguageCode, SupportedLanguage};
 
 #[derive(Clone, Default)]
 pub struct AnnouncementsConfig {
     pub max_shows: Counter,
-    pub announcements: HashMap<SupportedLanguage, Announcement>,
+    pub announcements: FxHashMap<SupportedLanguage, Announcement>,
 }
 
 impl AnnouncementsConfig {
+    pub fn from_env() -> Self {
+        Self::load(&Self::file_path())
+    }
+
+    pub fn file_path() -> String {
+        get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_owned())
+    }
+
     pub fn get(&self, lang_code: &LanguageCode) -> Option<&Announcement> {
         self.announcements.get(&lang_code.to_supported_language())
     }
@@ -35,7 +44,7 @@ impl AnnouncementsConfig {
         let file: AnnouncementsFile = serde_saphyr::from_str(&content)
             .inspect_err(|e| tracing::warn!(path = %path, error = %e, "couldn't parse the announcements file"))
             .unwrap_or_default();
-        let base: HashMap<SupportedLanguage, Announcement> = file.texts.into_iter()
+        let base: FxHashMap<SupportedLanguage, Announcement> = file.texts.into_iter()
             .filter_map(|(code, text)| SupportedLanguage::from_str(&code)
                 .inspect_err(|_| tracing::warn!(code = %code, "skipping an unknown language code of the announcements file"))
                 .ok().zip(Announcement::new(text.trim().to_owned())))
@@ -47,13 +56,13 @@ impl AnnouncementsConfig {
     /// Fills gaps in the per-language announcement map from the `fallback` config: for each
     /// `source -> [targets]` entry, any target that has no announcement of its own borrows the
     /// source's. Sources are resolved from the immutable `base` snapshot, so fallback is
-    /// non-transitive and independent of `HashMap` iteration order. A target listed under two
+    /// non-transitive and independent of the map's iteration order. A target listed under two
     /// different sources resolves to one of them nondeterministically — list each target under a
     /// single source.
     fn apply_fallback(
-        base: HashMap<SupportedLanguage, Announcement>,
-        fallback: HashMap<String, Vec<String>>,
-    ) -> HashMap<SupportedLanguage, Announcement> {
+        base: FxHashMap<SupportedLanguage, Announcement>,
+        fallback: FxHashMap<String, Vec<String>>,
+    ) -> FxHashMap<SupportedLanguage, Announcement> {
         let mut announcements = base.clone();
         for (source_code, target_codes) in fallback {
             let source_ann = SupportedLanguage::from_str(&source_code).ok()
@@ -91,11 +100,11 @@ struct AnnouncementsFile {
     #[serde(default)]
     max_shows: Counter,
     #[serde(default)]
-    texts: HashMap<String, String>,
+    texts: FxHashMap<String, String>,
     /// Maps a source language to the target languages that borrow its text when they have no
     /// announcement of their own. See [`AnnouncementsConfig::apply_fallback`].
     #[serde(default)]
-    fallback: HashMap<String, Vec<String>>,
+    fallback: FxHashMap<String, Vec<String>>,
 }
 
 #[derive(Clone)]

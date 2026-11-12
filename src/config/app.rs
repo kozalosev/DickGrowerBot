@@ -3,7 +3,6 @@ use reqwest::Url;
 use crate::config::caches::CachesConfig;
 use crate::config::env::*;
 use crate::config::toggles::*;
-use crate::config::announcements::*;
 use crate::config::self_destruction::*;
 use crate::config::shrink::{BroadcastConfig, DailyShrinkConfig};
 use crate::config::incrementor::IncrementorConfig;
@@ -24,7 +23,6 @@ pub struct AppConfig {
     pub pvp_default_bet: Bet,
     pub incrementor: IncrementorConfig,
     pub daily_shrink: DailyShrinkConfig,
-    pub announcements: AnnouncementsConfig,
     pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
     pub support_chat_id: Option<TelegramChatId>,
@@ -82,7 +80,6 @@ impl AppConfig {
                 language_sample: env_value!("MOST_POPULAR_LANGUAGE_SAMPLE_SIZE": Limit, or = 100, at_least = 1),
             },
         };
-        let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
         let self_destruction = SelfDestructionConfig {
             notice: env_duration!("MSG_SELFDESTRUCT_DELAY_NOTICE"),
             report: env_duration!("MSG_SELFDESTRUCT_DELAY_REPORT"),
@@ -129,7 +126,6 @@ impl AppConfig {
             pvp_default_bet,
             incrementor: IncrementorConfig::from_env(),
             daily_shrink,
-            announcements: AnnouncementsConfig::load(&announcements_file),
             self_destruction,
             command_toggles: Default::default(),
             support_chat_id,

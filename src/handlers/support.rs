@@ -6,7 +6,7 @@
 //! above the ban gate in the dispatcher tree and must never write a row for its sender.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use autometrics::autometrics;
@@ -85,7 +85,7 @@ pub struct SupportRecipient {
 #[derive(Clone)]
 pub struct SupportService {
     chat_id: Option<TelegramChatId>,
-    last_sent: Arc<Mutex<HashMap<UserId, Instant>>>,
+    last_sent: Arc<Mutex<FxHashMap<UserId, Instant>>>,
 }
 
 impl SupportService {

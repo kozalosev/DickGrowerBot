@@ -1,5 +1,6 @@
 use autometrics::autometrics;
-use std::collections::HashSet;
+use ahash::AHashSet;
+use rustc_hash::FxHashSet;
 use anyhow::{anyhow, bail};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -286,7 +287,7 @@ async fn import_impl(repos: &repo::Repositories, chat_id: ChatId, parsed: ParseR
         .collect();
     let (existing, not_found) = resolve_users(&parsed.0, top, &members)?;
 
-    let imported_uids: HashSet<UserId> = repos.import.get_imported_users(chat_id)
+    let imported_uids: FxHashSet<UserId> = repos.import.get_imported_users(chat_id)
         .await?.into_iter()
         .map(|u| u.uid.into())
         .collect();
@@ -314,7 +315,7 @@ fn resolve_users(
     top: Vec<OriginalUser>,
     members: &[ChatMember],
 ) -> Result<(Vec<UserInfo>, Vec<Username>), ImportError> {
-    let mut shown: HashSet<Username> = HashSet::new();
+    let mut shown: AHashSet<Username> = AHashSet::new();
     let mut ambiguous: Vec<Username> = Vec::new();
     let mut found: Vec<UserInfo> = Vec::new();
     let mut not_found: Vec<Username> = Vec::new();

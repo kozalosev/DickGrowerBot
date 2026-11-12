@@ -1778,6 +1778,25 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   A cast that is genuinely right keeps an `#[allow]` carrying the reason, on the narrowest scope
   that works — never a whole function, or it will also cover the next cast written on that line.
 
+- **Every map picks its hasher**, and std's `HashMap`/`HashSet` is not one of the choices
+  (`disallowed-types` in `clippy.toml`):
+
+  | The keys are | Use |
+  |---|---|
+  | ours, Telegram-assigned ids, enums, an operator's file | `FxHashMap` / `FxHashSet` (`rustc-hash`) |
+  | chosen by a user — usernames, free text | `AHashMap` / `AHashSet` (`ahash`) |
+
+  Fx is the fastest, but it is public and unseeded, so keys an attacker chooses can be made to
+  collide and turn every lookup into a scan. AHash is seeded at random per process, which closes
+  that, and is still faster than SipHash. The import's set of leaderboard names is the one place
+  that needs it today.
+
+  A library whose signature takes a std map (prometheus's `Desc`, the OTLP exporter's headers)
+  gets one under an `#[allow(clippy::disallowed_types, reason = "…")]` on the statement that builds
+  it. Generated code is handled the same way, on the module around it: `users::generated` for
+  prost, and `translations` in `main.rs` for `rust_i18n::i18n!`, which is why that macro sits in a
+  module of its own and is glob-imported back — an `#[allow]` on a macro call is ignored.
+
 - **ALWAYS** break a function signature onto one parameter per line when the single-line signature
   reaches **120+ characters**. Put the opening `(` at the end of the `fn` line, each parameter on
   its own line with a trailing comma, and the closing `)` plus return type on their own line

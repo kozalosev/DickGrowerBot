@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use futures::future::join_all;
 use once_cell::sync::Lazy;
 use rust_i18n::t;
@@ -17,7 +17,7 @@ use crate::handlers::stats::StatsCommands;
 /// Built from the same `bot_commands()` the menu is built from, so a command added there is
 /// covered here as well. It exists for the topic gate: in a group with several bots most `/…`
 /// messages are addressed to someone else, and a gate that judged them all would answer for them.
-pub static COMMAND_NAMES: Lazy<HashSet<String>> = Lazy::new(|| {
+pub static COMMAND_NAMES: Lazy<FxHashSet<String>> = Lazy::new(|| {
     [
         StartCommands::bot_commands(),
         HelpCommands::bot_commands(),

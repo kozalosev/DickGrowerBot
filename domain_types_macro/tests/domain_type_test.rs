@@ -228,6 +228,7 @@ mod validated_value_types {
     }
 
     #[test]
+    #[allow(clippy::disallowed_types, reason = "the derived Hash is checked against the std hasher")]
     fn eq_ord_hash_usable_without_arithmetic() {
         use std::collections::HashSet;
 

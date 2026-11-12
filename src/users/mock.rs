@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Arc, Mutex};
 use teloxide::types::UserId;
 use tonic::Status;
@@ -11,7 +11,7 @@ use crate::domain::primitives::LanguageCode;
 /// `set_language` → `NotFound`), so tests can exercise the unregistered path too.
 #[derive(Clone, Default)]
 pub struct UserServiceClientMock {
-    users: Arc<Mutex<HashMap<UserId, User>>>,
+    users: Arc<Mutex<FxHashMap<UserId, User>>>,
 }
 
 impl UserServiceClientMock {
@@ -37,7 +37,7 @@ impl UserServiceClient for UserServiceClientMock {
         Ok(self.users.lock().unwrap().get(&uid).cloned())
     }
 
-    async fn get_user_languages(&self, uids: &[UserId]) -> Result<HashMap<UserId, LanguageCode>, Status> {
+    async fn get_user_languages(&self, uids: &[UserId]) -> Result<FxHashMap<UserId, LanguageCode>, Status> {
         let users = self.users.lock().unwrap();
         Ok(uids.iter()
             .filter_map(|uid| {

@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use crate::config::env::{list_items, parse_sorted_numbers};
 use crate::domain::objects::ChatCleanupSettings;
@@ -78,7 +79,7 @@ impl std::fmt::Display for InlineGroups {
 /// [`MAX_DELAY`] are dropped when the variable is read — the first says nothing the picker doesn't
 /// already offer, and the second is a delay the bot could never honour.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct DelayOptions(Vec<DelayMinutes>);
+pub struct DelayOptions(Arc<[DelayMinutes]>);
 
 /// A minute for the impatient, an hour for the tolerant, and three steps in between. Unset means
 /// this rather than nothing, because a bot that offers no delays offers no choice worth the
@@ -297,7 +298,7 @@ mod tests {
     /// A configuration with nothing offered to the chats either, so that `enabled()` answers about
     /// the four delays alone.
     fn offering_nothing(config: SelfDestructionConfig) -> SelfDestructionConfig {
-        SelfDestructionConfig { delay_options: DelayOptions(Vec::new()), ..enabled(config) }
+        SelfDestructionConfig { delay_options: DelayOptions(Arc::default()), ..enabled(config) }
     }
 
     #[test]

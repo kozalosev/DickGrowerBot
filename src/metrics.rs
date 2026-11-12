@@ -339,6 +339,7 @@ struct DbPoolCollector {
 }
 
 impl DbPoolCollector {
+    #[allow(clippy::disallowed_types, reason = "prometheus takes a std map")]
     fn new(pool: sqlx::Pool<sqlx::Postgres>) -> Self {
         let size_desc = prometheus::core::Desc::new(
             "db_pool_size".to_owned(),

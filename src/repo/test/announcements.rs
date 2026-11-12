@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use sqlx::{Pool, Postgres};
 use crate::{config, repo};
 use crate::config::Announcement;
@@ -154,7 +154,7 @@ fn get_languages() -> [LanguageCode; 2] {
         .map(LanguageCode::new)
 }
 
-fn get_announcements_as_map(n: u8) -> HashMap<SupportedLanguage, Announcement> {
+fn get_announcements_as_map(n: u8) -> FxHashMap<SupportedLanguage, Announcement> {
     [(EN, format!("test {n}")), (RU, format!("тест {n}"))]
         .map(|(lang, ann)| (lang, Announcement::new(ann).expect("test text couldn't be empty")))
         .into_iter().collect()

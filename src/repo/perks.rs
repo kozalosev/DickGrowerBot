@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use anyhow::Context;
 use autometrics::autometrics;
 use chrono::NaiveDate;
@@ -17,7 +17,7 @@ use crate::repository;
 /// once-a-day rule compares `current_date`. A perk that counts days has to count the same ones.
 pub struct PerkStatesSnapshot {
     pub today: NaiveDate,
-    states: HashMap<PerkId, JsonValue>,
+    states: FxHashMap<PerkId, JsonValue>,
 }
 
 impl PerkStatesSnapshot {
@@ -30,7 +30,7 @@ repository!(PerkStates,
     /// Gives every perk the id its states are keyed by, creating the rows a first run needs.
     #[autometrics]
     #[tracing::instrument(skip_all)]
-    pub async fn register_all(&self, names: &[PerkName]) -> anyhow::Result<HashMap<PerkName, PerkId>> {
+    pub async fn register_all(&self, names: &[PerkName]) -> anyhow::Result<FxHashMap<PerkName, PerkId>> {
         let names: Vec<String> = names.iter()
             .map(|name| name.value().to_owned())
             .collect();
@@ -132,10 +132,10 @@ repository!(PerkStates,
 
 /// The states arrive as one jsonb object keyed by the perk id, which is how the whole set costs a
 /// single row. A key that isn't a number belongs to no perk, so it is dropped.
-fn parse_states(value: JsonValue) -> HashMap<PerkId, JsonValue> {
+fn parse_states(value: JsonValue) -> FxHashMap<PerkId, JsonValue> {
     let JsonValue::Object(entries) = value else {
         tracing::warn!(value = ?value, "the perk states are not an object");
-        return HashMap::default()
+        return FxHashMap::default()
     };
     entries.into_iter()
         .filter_map(|(key, state)| key.parse()

@@ -18,3 +18,11 @@ disallowed-methods = [
     { path = "dick_grower_bot::domain::primitives::promo::PromoCode::from_literal", reason = "use literal!(PromoCode = …)" },
     { path = "dick_grower_bot::domain::primitives::ratio::Ratio::from_literal", reason = "use literal!(Ratio = …)" },
 ]
+
+# Every map picks its hasher: `Fx*` (rustc-hash) where the keys are ours, Telegram ids or enums,
+# `AHash*` (ahash, randomly seeded) where a user chooses them. Fx is public and unseeded, so chosen
+# keys could be made to collide. Std's SipHash stays only where a library's signature demands it.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "FxHashMap for our keys, AHashMap for keys a user chooses" },
+    { path = "std::collections::HashSet", reason = "FxHashSet for our keys, AHashSet for keys a user chooses" },
+]

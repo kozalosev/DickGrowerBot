@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::ops::RangeInclusive;
 use domain_types::traits::SaturatingInto;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ const MAX_REROLLS: usize = 10;
 #[derive(Clone)]
 pub struct Incrementor {
     config: IncrementorConfig,
-    perks: Vec<RegisteredPerk>,
+    perks: Arc<[RegisteredPerk]>,
     perk_states: repo::PerkStates,
 }
 
@@ -121,7 +121,7 @@ pub struct PerkEffect {
 
 pub struct Increment {
     pub base: LengthChange,
-    pub by_perks: HashMap<PerkName, PerkEffect>,
+    pub by_perks: FxHashMap<PerkName, PerkEffect>,
     pub total: LengthChange,
 }
 
@@ -161,7 +161,7 @@ impl Incrementor {
                     .ok_or_else(|| anyhow!("the perk {name} was not given an id"))?;
                 Ok(RegisteredPerk { id, perk: Arc::from(perk) })
             })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Arc<[_]>>>()?;
 
         Ok(Self {
             config,
@@ -305,7 +305,7 @@ impl Incrementor {
         };
 
         let mut additional_change = SignedLengthChange::new(0);
-        let mut by_perks = HashMap::new();
+        let mut by_perks = FxHashMap::default();
         let mut perk_states = Vec::new();
         for RegisteredPerk { id, perk } in self.perks.iter() {
             let ctx = PerkContext {
@@ -342,7 +342,7 @@ impl Increment {
     fn of_base(base: LengthChange) -> Self {
         Self {
             base,
-            by_perks: HashMap::default(),
+            by_perks: FxHashMap::default(),
             total: base,
         }
     }
@@ -581,7 +581,7 @@ mod test_incrementor {
         Incrementor {
             config,
             perk_states: repo::PerkStates::new(db.clone()),
-            perks: Vec::default()
+            perks: Arc::default()
         }
     }
 

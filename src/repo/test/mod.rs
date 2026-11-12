@@ -93,7 +93,7 @@ pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
 /// `let repo::Repositories { users, dicks, .. } = repos(&db);`. A test that needs a repository
 /// configured differently — a feature toggle turned on — still builds that one itself.
 pub fn repos(db: &Pool<Postgres>) -> repo::Repositories {
-    repo::Repositories::new(db, &Default::default())
+    repo::Repositories::new(db, &Default::default(), Default::default())
 }
 
 /// The `Chats.id` of [`CHAT_ID`], which is what every other table's `chat_id` column points at.

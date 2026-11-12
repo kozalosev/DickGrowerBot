@@ -20,7 +20,7 @@
 //! trip, so a Redis that never fails never pays for one. [`sync_fallback_to_redis`] hands whatever
 //! is still there back to Redis the moment it answers again, before the routing switches back.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -431,7 +431,7 @@ impl RedisHealth {
 /// The values kept in this process, in one map for every kind of them, so that there is one sweeper
 /// and one number to watch however many tenants there are.
 #[derive(Clone, Default)]
-struct LocalStore(Arc<Mutex<HashMap<String, Entry>>>);
+struct LocalStore(Arc<Mutex<FxHashMap<String, Entry>>>);
 
 struct Entry {
     bytes: Vec<u8>,
@@ -519,7 +519,7 @@ impl LocalStore {
         }))
     }
 
-    fn entries(&self) -> MutexGuard<'_, HashMap<String, Entry>> {
+    fn entries(&self) -> MutexGuard<'_, FxHashMap<String, Entry>> {
         lock(&self.0)
     }
 

@@ -1,5 +1,6 @@
 use std::ops::RangeInclusive;
 use std::str::FromStr;
+use std::sync::Arc;
 use crate::config::env::{env_value, get_env_value_or_default, parse_sorted_numbers};
 use crate::domain::primitives::{DaysCount, PerkName, Ratio};
 use domain_types::literal;
@@ -26,7 +27,7 @@ pub struct PerksConfig {
 /// A day below the second is dropped when the variable is read: every streak is at least a day
 /// long, so such a grade would be a flat bonus for everybody rather than a reward for coming back.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct StreakGrades(Vec<DaysCount>);
+pub struct StreakGrades(Arc<[DaysCount]>);
 
 impl Default for IncrementorConfig {
     fn default() -> Self {

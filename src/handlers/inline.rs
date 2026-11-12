@@ -1,5 +1,5 @@
 use autometrics::autometrics;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fmt::Debug;
 use std::str::FromStr;
 use anyhow::{anyhow, Context};
@@ -127,7 +127,7 @@ struct ExternalVariant {
 }
 
 struct ExternalVariants {
-    result_ids: HashSet<&'static str>,
+    result_ids: FxHashSet<&'static str>,
     builders: Vec<ExternalVariantBuilder>
 }
 impl ExternalVariants {

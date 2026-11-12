@@ -49,7 +49,11 @@ pub struct Repositories {
 }
 
 impl Repositories {
-    pub fn new(db_conn: &Pool<Postgres>, config: &config::AppConfig) -> Self {
+    pub fn new(
+        db_conn: &Pool<Postgres>,
+        config: &config::AppConfig,
+        announcements: config::AnnouncementsConfig,
+    ) -> Self {
         Self {
             users: Users::new(db_conn.clone()),
             dicks: Dicks::new(db_conn.clone(), config.features),
@@ -57,7 +61,7 @@ impl Repositories {
             import: Import::new(db_conn.clone()),
             promo: Promo::new(db_conn.clone()),
             loans: Loans::new(db_conn.clone(), config),
-            announcements: Announcements::new(db_conn.clone(), config.announcements.clone()),
+            announcements: Announcements::new(db_conn.clone(), announcements),
             pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features),
             personal_stats: PersonalStatsRepo::new(db_conn.clone()),
             shrinks: Shrinks::new(db_conn.clone()),

@@ -15,9 +15,9 @@ use crate::repo::Announcements;
 #[cfg(unix)]
 pub fn spawn_reload_on_sighup(announcements: Announcements, bans: BanList) {
     use tokio::signal::unix::{signal, SignalKind};
-    use crate::config::get_env_value_or_default;
+    use crate::config::AnnouncementsConfig;
 
-    let path = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_owned());
+    let path = AnnouncementsConfig::file_path();
     tokio::spawn(async move {
         let mut hangups = match signal(SignalKind::hangup()) {
             Ok(hangups) => hangups,
