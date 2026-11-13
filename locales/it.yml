@@ -96,7 +96,7 @@ commands:
     empty: "Nessuno sta giocando :("
   shrink:
     notification:
-      header: "✂️ <b>Ora di potare i trascurati!</b> Questi cazzi non sono cresciuti per %{days}+ giorni e si sono un po' accorciati:"
+      header: "✂️ <b>Ora di potare i trascurati!</b> Questi piselli non sono cresciuti per %{days}+ giorni e si sono un po' accorciati:"
       line: "— <b>%{name}</b> ha perso <b>%{lost}</b> cm (ora <b>%{length}</b> cm)"
     recent:
       header: "✂️ <b>Chi si è accorciato di recente:</b>"
@@ -130,7 +130,7 @@ commands:
       no_args: "Chiama il comando con un numero di centimetri che sei disposto a scommettere."
       not_enough:
         initiator: "Meh. Il pisello dello sfidante non è lungo abbastanza per una tale scommessa!"
-        acceptor: "Il tuo membro non è abbastanza lungo 😣"
+        acceptor: "Il tuo pisello non è abbastanza lungo 😣"
       same_person: "Non puoi sfidarti da solo!"
       battle_already_in_progress: "La battaglia è già in corso! Il messaggio verrà aggiornato in un momento…"
   stats:
