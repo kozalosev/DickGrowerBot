@@ -3,8 +3,11 @@ on:
   push:
     branches:
       - '**'
+  pull_request:
 jobs:
   Run-tests:
+    # A branch of this repository is already built on push; a pull request is built only from a fork.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
@@ -45,6 +48,7 @@ jobs:
       - run: echo "🍏 This job's status is ${{ job.status }}."
 
   Build-Docker-image:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
