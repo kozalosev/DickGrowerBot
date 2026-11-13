@@ -108,10 +108,10 @@ commands:
       resumed: "Ti taggo di nuovo in questa chat."
       not_playing: "Non giochi in questa chat, quindi qui non ti taggo comunque."
   dod:
-    description: "Eleggi il pisello del Giorno"
-    result: "Il pisello del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pisello è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."
+    description: "Eleggi il Pisello del Giorno"
+    result: "Il Pisello del Giorno è <b><a href=\"tg://user?id=%{uid}\">%{name}</a></b>!\n\nIl suo pisello è cresciuto di <b>%{growth} cm</b> e ora è lungo <b>%{length}</b> cm."
     position: "La sua posizione nella classifica è <b>%{pos}</b>."
-    already_chosen: "Il pisello del Giorno è già stato scelto oggi! Si tratta di <b>%{name}</b>."
+    already_chosen: "Il Pisello del Giorno è già stato scelto oggi! Si tratta di <b>%{name}</b>."
     no_candidates: "Non ci sono candidati per l'elezione, in questo gruppo non gioca nessuno 😢"
   pvp:
     description: "Combatti con il pisello del tuo amico!"
@@ -211,7 +211,7 @@ inline:
     titles:
       grow: "Fai crescere il tuo pisello!"
       top: "Mostra i piselli più grandi del gruppo"
-      dick_of_day: "Eleggi il pisello del Giorno"
+      dick_of_day: "Eleggi il Pisello del Giorno"
       pvp: "Sfida gli altri con una scommessa di %{bet} cm!"
       stats: "Statistiche"
       loan: "Sei in debito? Chiedi un prestito!"
