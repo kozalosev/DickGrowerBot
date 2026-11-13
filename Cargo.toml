@@ -85,14 +85,13 @@ once_cell = "1.21.4"
 futures = "0.3.33"
 itertools = "0.15.0"
 derive-where = "1.6.1"
-async-trait = "0.1.91"
 num-traits = "0.2.19"
-downcast-rs = "2.0.2"
 rustc-hash = "2.1.3"
 ahash = "0.8.11"
 # Local subcrates
 domain_types = { version = "0.1.0", path = "domain_types" }
 domain_types_macro = { version = "0.1.0", path = "domain_types_macro" }
+enum_dispatch = "0.3.13"
 
 [dev-dependencies]
 testcontainers = { version = "0.28.0", features = ["reusable-containers"] }

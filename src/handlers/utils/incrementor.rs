@@ -3,35 +3,33 @@ use std::ops::RangeInclusive;
 use domain_types::traits::SaturatingInto;
 use std::sync::Arc;
 use anyhow::{anyhow, Context};
-use async_trait::async_trait;
 use chrono::NaiveDate;
 use derive_more::Display;
-use downcast_rs::{Downcast, impl_downcast};
+use enum_dispatch::enum_dispatch;
 use num_traits::PrimInt;
 use rand::distr::uniform::SampleUniform;
 use rand::RngExt;
 use rust_i18n::t;
 use sqlx::types::JsonValue;
 use sqlx::PgConnection;
-use crate::repo::{self, Dicks, GrowthTx, PerkStates};
+use crate::repo::{self, GrowthTx};
 use crate::config::IncrementorConfig;
 use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
+use crate::handlers::perks::AnyPerk;
 use domain_types::literal;
 
 const MAX_REROLLS: usize = 10;
 
-#[derive(Clone)]
-pub struct Incrementor {
+pub struct Incrementor<P = AnyPerk> {
     config: IncrementorConfig,
-    perks: Arc<[RegisteredPerk]>,
+    perks: Arc<[RegisteredPerk<P>]>,
     perk_states: repo::PerkStates,
 }
 
-#[async_trait]
-#[allow(clippy::double_must_use)]
-pub trait Perk: Send + Sync + Downcast {
+#[enum_dispatch]
+pub trait Perk: Send + Sync + 'static {
     fn name(&self) -> PerkName;
     async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome>;
 
@@ -44,12 +42,13 @@ pub trait Perk: Send + Sync + Downcast {
         true
     }
 }
-impl_downcast!(Perk);
 
-pub trait ConfigurablePerk: Perk {
+/// A perk whose settings are worth showing outside the incrementor, found among the perks of type `P`.
+pub trait ConfigurablePerk<P>: Sized {
     type Config;
 
     fn get_config(&self) -> Self::Config;
+    fn find_in(perk: &P) -> Option<&Self>;
 }
 
 #[derive(Display, Clone, Hash, PartialEq)]
@@ -125,10 +124,9 @@ pub struct Increment {
     pub total: LengthChange,
 }
 
-#[derive(Clone)]
-struct RegisteredPerk {
+struct RegisteredPerk<P> {
     id: PerkId,
-    perk: Arc<dyn Perk>,
+    perk: P,
 }
 
 type BaseIncrement = SignedLengthChange;
@@ -139,11 +137,21 @@ impl BaseIncrement {
     }
 }
 
-impl Incrementor {
+impl<P> Clone for Incrementor<P> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            perks: Arc::clone(&self.perks),
+            perk_states: self.perk_states.clone(),
+        }
+    }
+}
+
+impl<P: Perk> Incrementor<P> {
     pub async fn new(
         config: IncrementorConfig,
         perk_states: &repo::PerkStates,
-        perks: Vec<Box<dyn Perk>>,
+        perks: Vec<P>,
     ) -> anyhow::Result<Self> {
         let (enabled, disabled): (Vec<_>, Vec<_>) = perks
             .into_iter()
@@ -159,7 +167,7 @@ impl Incrementor {
                 let id = ids.get(&name)
                     .copied()
                     .ok_or_else(|| anyhow!("the perk {name} was not given an id"))?;
-                Ok(RegisteredPerk { id, perk: Arc::from(perk) })
+                Ok(RegisteredPerk { id, perk })
             })
             .collect::<anyhow::Result<Arc<[_]>>>()?;
 
@@ -174,12 +182,10 @@ impl Incrementor {
         self.config.clone()
     }
 
-    pub fn find_perk_config<P: ConfigurablePerk>(&self) -> Option<P::Config> {
+    pub fn find_perk_config<C: ConfigurablePerk<P>>(&self) -> Option<C::Config> {
         self.perks.iter()
-            .map(|registered| &registered.perk)
-            .find(|p| p.is::<P>())
-            .and_then(|p| p.downcast_ref::<P>())
-            .map(ConfigurablePerk::get_config)
+            .find_map(|registered| C::find_in(&registered.perk))
+            .map(C::get_config)
     }
 
     /// What the perks have to add to `/stats`. Their states are read once and handed out, so a
@@ -199,12 +205,12 @@ impl Incrementor {
     }
 
     #[cfg(test)]
-    fn set_perks(&mut self, perks: Vec<Box<dyn Perk>>) {
+    fn set_perks(&mut self, perks: Vec<P>) {
         self.perks = perks.into_iter()
             .enumerate()
             .map(|(n, perk)| RegisteredPerk {
                 id: PerkId::new(n.saturating_into()),
-                perk: Arc::from(perk),
+                perk,
             })
             .collect();
     }
@@ -296,8 +302,8 @@ impl Incrementor {
         source: ChangeSource,
         lang_code: &LanguageCode,
     ) -> anyhow::Result<Increment> {
-        let current_length = Dicks::fetch_length_internal(conn, dick.0, chat_id).await?;
-        let states = PerkStates::read_internal(conn, dick.0, chat_id).await?;
+        let current_length = repo::Dicks::fetch_length_internal(conn, dick.0, chat_id).await?;
+        let states = repo::PerkStates::read_internal(conn, dick.0, chat_id).await?;
         let base = LengthChange::from(base_increment);
         let change_intent = ChangeIntent {
             base_increment: base,
@@ -333,7 +339,7 @@ impl Incrementor {
 
         let total = (base + additional_change)
             .context("an overflow in the increment calculation")?;
-        PerkStates::write_all_internal(conn, chat_id, dick.0, &perk_states).await?;
+        repo::PerkStates::write_all_internal(conn, chat_id, dick.0, &perk_states).await?;
         Ok(Increment { base, by_perks, total })
     }
 }
@@ -430,12 +436,11 @@ mod test_incrementor {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use async_trait::async_trait;
     use sqlx::{Pool, Postgres};
     use crate::config::IncrementorConfig;
     use crate::domain::objects::DickOfDayResult;
     use crate::domain::primitives::{Debt, DaysCount, LanguageCode, LengthChange, PayoutRatio, PerkName, Ratio};
-    use crate::handlers::perks::LoanPayoutPerk;
+    use crate::handlers::perks::{AnyPerk, LoanPayoutPerk};
     use crate::handlers::utils::{AdditionalChange, Incrementor, Perk, PerkContext, PerkOutcome};
     use crate::repo;
     use crate::repo::GrowthTx;
@@ -479,7 +484,7 @@ mod test_incrementor {
         // the payout cancels the whole roll out, so every attempt pays and is rolled back
         let loans = take_loan(&db, literal!(PayoutRatio = 0.9)).await;
         let mut incr = incrementor(&db, config.clone());
-        incr.set_perks(vec![Box::new(LoanPayoutPerk)]);
+        incr.set_perks(vec![AnyPerk::LoanPayout(LoanPayoutPerk)]);
         sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
             .execute(&db)
             .await.expect("couldn't move the last growth to yesterday");
@@ -494,7 +499,7 @@ mod test_incrementor {
         let loans = take_loan(&db, literal!(PayoutRatio = 0.5)).await;
         let config = IncrementorConfig { growth_range: 4..=4, ..config };
         let mut incr = incrementor(&db, config);
-        incr.set_perks(vec![Box::new(LoanPayoutPerk)]);
+        incr.set_perks(vec![AnyPerk::LoanPayout(LoanPayoutPerk)]);
         sqlx::query("UPDATE Dicks SET updated_at = updated_at - interval '1 day'")
             .execute(&db)
             .await.expect("couldn't move the last growth to yesterday again");
@@ -522,7 +527,7 @@ mod test_incrementor {
             dod_bonus_range: 1..=1,
             perks: Default::default(),
         });
-        incr.set_perks(vec![Box::new(LoanPayoutPerk)]);
+        incr.set_perks(vec![AnyPerk::LoanPayout(LoanPayoutPerk)]);
         // borrowing has just brought the length back to zero, and a loan needs a negative one
         sqlx::query("UPDATE Dicks SET length = -10, updated_at = updated_at - interval '1 day'")
             .execute(&db)
@@ -577,7 +582,7 @@ mod test_incrementor {
             .debt
     }
 
-    fn incrementor(db: &Pool<Postgres>, config: IncrementorConfig) -> Incrementor {
+    fn incrementor<P>(db: &Pool<Postgres>, config: IncrementorConfig) -> Incrementor<P> {
         Incrementor {
             config,
             perk_states: repo::PerkStates::new(db.clone()),
@@ -594,7 +599,7 @@ mod test_incrementor {
         LanguageCode::new("en".to_owned())
     }
 
-    async fn test_growth_increment_base(incr: &Incrementor, dicks: &repo::Dicks) {
+    async fn test_growth_increment_base(incr: &Incrementor<TestPerk>, dicks: &repo::Dicks) {
         let lang_code = lang();
         for _ in 0..100 {
             let mut growth_tx = begin(dicks).await;
@@ -613,7 +618,7 @@ mod test_incrementor {
         }
     }
 
-    async fn test_dod_increment_base(incr: &Incrementor, dicks: &repo::Dicks) {
+    async fn test_dod_increment_base(incr: &Incrementor<TestPerk>, dicks: &repo::Dicks) {
         let lang_code = lang();
         for _ in 0..100 {
             let mut growth_tx = begin(dicks).await;
@@ -623,83 +628,10 @@ mod test_incrementor {
         }
     }
 
-    /// What a test perk has to say; the rest of `Perk` is the same for all of them.
-    trait TestPerk: Send + Sync + 'static {
-        fn label(&self) -> String;
-        fn change(&self, ctx: &PerkContext<'_>) -> LengthChange;
-    }
-
-    #[async_trait]
-    impl<T: TestPerk> Perk for T {
-        fn name(&self) -> PerkName {
-            PerkName::of(self.label()).expect("a valid perk name")
-        }
-
-        async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome> {
-            Ok(AdditionalChange(self.change(&ctx)).into())
-        }
-
-        fn enabled(&self) -> bool {
-            true
-        }
-    }
-
-    #[derive(Clone)]
-    struct AddPerk {
-        value: i64,
-    }
-
-    impl AddPerk {
-        fn boxed(value: i64) -> Box<Self> {
-            Box::new(Self { value })
-        }
-    }
-
-    impl TestPerk for AddPerk {
-        fn label(&self) -> String {
-            format!("add-perk-{}", self.value)
-        }
-
-        fn change(&self, _: &PerkContext<'_>) -> LengthChange {
-            LengthChange::signed(self.value)
-        }
-    }
-
-    /// Cancels the base increment out completely on its first `times` calls and does nothing after.
-    #[derive(Clone)]
-    struct CancelFirstPerk {
-        times: usize,
-        calls: Arc<AtomicUsize>,
-    }
-
-    impl CancelFirstPerk {
-        fn boxed(times: usize) -> Box<Self> {
-            Box::new(Self { times, calls: Arc::new(AtomicUsize::new(0)) })
-        }
-
-        fn calls(&self) -> usize {
-            self.calls.load(Ordering::SeqCst)
-        }
-    }
-
-    impl TestPerk for CancelFirstPerk {
-        fn label(&self) -> String {
-            format!("cancel-first-{}", self.times)
-        }
-
-        fn change(&self, ctx: &PerkContext<'_>) -> LengthChange {
-            if self.calls.fetch_add(1, Ordering::SeqCst) < self.times {
-                LengthChange::signed(-ctx.intent.base_increment.value())
-            } else {
-                LengthChange::signed(0)
-            }
-        }
-    }
-
-    async fn test_with_perks(incr: &Incrementor, dicks: &repo::Dicks) {
+    async fn test_with_perks(incr: &Incrementor<TestPerk>, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
-        let perk_plus2 = AddPerk::boxed(2);
-        let perk_minus1 = AddPerk::boxed(-1);
+        let perk_plus2 = TestPerk::Add(2);
+        let perk_minus1 = TestPerk::Add(-1);
         incr.set_perks(vec![perk_plus2.clone(), perk_minus1.clone()]);
         let lang_code = lang();
 
@@ -721,30 +653,9 @@ mod test_incrementor {
         }
     }
 
-    /// A perk whose query fails, which poisons a Postgres transaction unless it is rolled back.
-    struct FailingPerk;
-
-    #[async_trait]
-    impl Perk for FailingPerk {
-        fn name(&self) -> PerkName {
-            literal!(PerkName = "failing")
-        }
-
-        async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome> {
-            sqlx::query("SELECT * FROM there_is_no_such_table")
-                .execute(ctx.conn)
-                .await?;
-            Ok(AdditionalChange::zero().into())
-        }
-
-        fn enabled(&self) -> bool {
-            true
-        }
-    }
-
-    async fn test_failing_perk(incr: &Incrementor, dicks: &repo::Dicks) {
+    async fn test_failing_perk(incr: &Incrementor<TestPerk>, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
-        incr.set_perks(vec![AddPerk::boxed(2), Box::new(FailingPerk)]);
+        incr.set_perks(vec![TestPerk::Add(2), TestPerk::Failing]);
 
         let mut growth_tx = begin(dicks).await;
         let increment = incr.dod_increment(&mut growth_tx, &lang()).await;
@@ -756,11 +667,10 @@ mod test_incrementor {
         assert!(matches!(result, DickOfDayResult::NoDick | DickOfDayResult::Chosen(_)));
     }
 
-    async fn test_perk_with_overflow(incr: &Incrementor, dicks: &repo::Dicks) {
+    async fn test_perk_with_overflow(incr: &Incrementor<TestPerk>, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
         // lengths are i64 now, so only an i64 overflow triggers the fallback
-        let perk_add_max_int = AddPerk::boxed(i64::MAX);
-        incr.set_perks(vec![perk_add_max_int.clone()]);
+        incr.set_perks(vec![TestPerk::Add(i64::MAX)]);
 
         let mut growth_tx = begin(dicks).await;
         let increment = incr.dod_increment(&mut growth_tx, &lang()).await;
@@ -768,10 +678,10 @@ mod test_incrementor {
         assert!(increment.by_perks.is_empty());
     }
 
-    async fn test_perks_cannot_cancel_growth(incr: &Incrementor, dicks: &repo::Dicks) {
+    async fn test_perks_cannot_cancel_growth(incr: &Incrementor<TestPerk>, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
         incr.config.growth_range = 1..=1;
-        incr.set_perks(vec![AddPerk::boxed(-1)]);
+        incr.set_perks(vec![TestPerk::Add(-1)]);
         let mut growth_tx = begin(dicks).await;
         let positive = incr.growth_increment(&mut growth_tx, DaysCount::new(0), &lang()).await;
         assert_eq!(positive.base.value(), 1);
@@ -779,35 +689,77 @@ mod test_incrementor {
 
         incr.config.growth_range = -1..=-1;
         incr.config.grow_shrink_ratio = literal!(Ratio = 0.0);
-        incr.set_perks(vec![AddPerk::boxed(1)]);
+        incr.set_perks(vec![TestPerk::Add(1)]);
         let mut growth_tx = begin(dicks).await;
         let negative = incr.growth_increment(&mut growth_tx, DaysCount::new(2), &lang()).await;
         assert_eq!(negative.base.value(), -1);
         assert_eq!(negative.total.value(), -1);
 
         incr.config.growth_range = 1..=1;
-        let perk = CancelFirstPerk::boxed(3);
-        incr.set_perks(vec![perk.clone()]);
+        let (perk, calls) = TestPerk::cancel_first(3);
+        incr.set_perks(vec![perk]);
         let mut growth_tx = begin(dicks).await;
         let rerolled = incr.growth_increment(&mut growth_tx, DaysCount::new(0), &lang()).await;
         assert_eq!(rerolled.total.value(), 1);
-        assert_eq!(perk.calls(), 4);
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
     }
 
-    async fn test_perks_cannot_cancel_dod(incr: &Incrementor, dicks: &repo::Dicks) {
+    async fn test_perks_cannot_cancel_dod(incr: &Incrementor<TestPerk>, dicks: &repo::Dicks) {
         let mut incr = incr.clone();
         incr.config.dod_bonus_range = 1..=1;
-        incr.set_perks(vec![AddPerk::boxed(-1)]);
+        incr.set_perks(vec![TestPerk::Add(-1)]);
         let mut growth_tx = begin(dicks).await;
         let cancelled = incr.dod_increment(&mut growth_tx, &lang()).await;
         assert_eq!(cancelled.base.value(), 1);
         assert_eq!(cancelled.total.value(), 1);
 
-        let perk = CancelFirstPerk::boxed(3);
-        incr.set_perks(vec![perk.clone()]);
+        let (perk, calls) = TestPerk::cancel_first(3);
+        incr.set_perks(vec![perk]);
         let mut growth_tx = begin(dicks).await;
         let rerolled = incr.dod_increment(&mut growth_tx, &lang()).await;
         assert_eq!(rerolled.total.value(), 1);
-        assert_eq!(perk.calls(), 4);
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[derive(Clone)]
+    enum TestPerk {
+        Add(i64),
+        /// Cancels the base increment out completely on its first `times` calls and does nothing after.
+        CancelFirst { times: usize, calls: Arc<AtomicUsize> },
+        /// Runs a query that fails, which poisons a Postgres transaction unless it is rolled back.
+        Failing,
+    }
+
+    impl TestPerk {
+        fn cancel_first(times: usize) -> (Self, Arc<AtomicUsize>) {
+            let calls = Arc::new(AtomicUsize::new(0));
+            (Self::CancelFirst { times, calls: Arc::clone(&calls) }, calls)
+        }
+    }
+
+    impl Perk for TestPerk {
+        fn name(&self) -> PerkName {
+            match self {
+                Self::Add(value) => PerkName::of(format!("add-perk-{value}")).expect("a valid perk name"),
+                Self::CancelFirst { times, .. } => PerkName::of(format!("cancel-first-{times}")).expect("a valid perk name"),
+                Self::Failing => literal!(PerkName = "failing"),
+            }
+        }
+
+        async fn apply(&self, ctx: PerkContext<'_>) -> anyhow::Result<PerkOutcome> {
+            let change = match self {
+                Self::Add(value) => *value,
+                Self::CancelFirst { times, calls } if calls.fetch_add(1, Ordering::SeqCst) < *times =>
+                    -ctx.intent.base_increment.value(),
+                Self::CancelFirst { .. } => 0,
+                Self::Failing => {
+                    sqlx::query("SELECT * FROM there_is_no_such_table")
+                        .execute(ctx.conn)
+                        .await?;
+                    0
+                },
+            };
+            Ok(AdditionalChange(LengthChange::signed(change)).into())
+        }
     }
 }

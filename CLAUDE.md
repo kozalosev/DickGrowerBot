@@ -1540,6 +1540,14 @@ needs no migration, only a row in `Perks`, and that name-to-id dictionary is rea
 `Incrementor::new` at startup, in a single statement for all of them. Nothing looks a perk up by
 name afterwards.
 
+**The set of perks is closed: they are the variants of `perks::AnyPerk`**, not trait objects. That
+is what lets `Perk::apply` be a native async method — no boxed future per call — and lets
+`find_perk_config` find a perk with a `match` (`ConfigurablePerk::find_in`) rather than a downcast.
+`enum_dispatch` writes the forwarding, so a new perk is a variant there and an entry in
+`perks::all`. It awaits inside each arm only when the trait declares `apply` as a plain `async fn`;
+with `-> impl Future + Send` every arm is a different future type and the `match` doesn't compile. `Incrementor` is generic over the perk type, defaulting to `AnyPerk`, only so that its
+tests can run perks of their own.
+
 **A growth is one transaction, and the perks write through it.** `Dicks::begin_growth` (or
 `begin_dod`) opens a `GrowthTx`, which owns the transaction; `Incrementor::growth_increment` takes it
 by `&mut`, hands the perks its connection as `PerkContext::conn`, and the caller ends it with
