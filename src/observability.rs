@@ -224,7 +224,6 @@ fn sampler() -> Sampler {
 /// Other backends ignore both headers.
 fn build_logger_provider(endpoint: String) -> Result<SdkLoggerProvider, Box<dyn Error>> {
     #[allow(clippy::disallowed_types, reason = "the exporter takes a std map")]
-    #[allow(clippy::disallowed_types, reason = "the exporter takes a std map")]
     let headers = std::collections::HashMap::from([
         ("VL-Stream-Fields".to_owned(), "service.name".to_owned()),
         ("VL-Msg-Field".to_owned(), "_msg,summary".to_owned()),

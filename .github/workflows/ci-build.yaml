@@ -22,7 +22,10 @@ jobs:
 
       - name: Set up Rust
         uses: hecrj/setup-rust-action@v2
+        # From 1.100, `#[derive(BotCommands)]` on a `String` argument trips `unreachable_code`.
+        # TODO: drop the pin once #208 is fixed.
         with:
+          rust-version: "1.99"
           components: clippy
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2

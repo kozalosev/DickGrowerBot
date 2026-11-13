@@ -275,10 +275,7 @@ pub mod checks {
     use super::{reply_html, topics, HandlerResult, BAN_DATE_FORMAT};
 
     pub fn is_group_chat(msg: Message) -> bool {
-        if msg.chat.is_private() || msg.chat.is_channel() {
-            return false
-        }
-        true
+        !(msg.chat.is_private() || msg.chat.is_channel())
     }
 
     pub fn is_not_group_chat(msg: Message) -> bool {

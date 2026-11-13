@@ -1,4 +1,4 @@
-FROM rust:1.96-alpine3.21 AS chef
+FROM rust:1.99-alpine3.21 AS chef
 WORKDIR /build
 # `protoc` and `protobuf-dev` are required by the build script to generate the
 # user-service gRPC client from the vendored proto contract.
