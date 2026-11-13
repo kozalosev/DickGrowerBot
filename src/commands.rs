@@ -2,11 +2,11 @@ use rustc_hash::FxHashSet;
 use futures::future::join_all;
 use once_cell::sync::Lazy;
 use rust_i18n::t;
-use teloxide::{Bot, RequestError};
+use teloxide::RequestError;
 use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
-use crate::config::CachedEnvToggles;
+use crate::config::{CachedEnvToggles, ThrottledBot};
 use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, MentionsCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
@@ -61,7 +61,7 @@ pub struct CommandToggles {
 }
 
 pub async fn set_my_commands(
-    bot: &Bot,
+    bot: &ThrottledBot,
     lang_code: &str,
     toggles: &CommandToggles,
 ) -> Result<(), RequestError> {
@@ -114,7 +114,7 @@ pub async fn set_my_commands(
 }
 
 async fn set_commands(
-    bot: &Bot,
+    bot: &ThrottledBot,
     commands: Vec<Vec<BotCommand>>,
     scope: BotCommandScope,
     lang_code: &str,

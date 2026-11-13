@@ -8,12 +8,11 @@ use once_cell::sync::Lazy;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
-use teloxide::Bot;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
-use crate::config::{AppConfig, MessageGroup};
+use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{CharCount, LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, InlineMessageId, TelegramChatInstanceId};
@@ -154,7 +153,7 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: InlineQuery,
     deps: HandlerDeps,
 ) -> HandlerResult {
@@ -220,7 +219,7 @@ pub async fn inline_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_chosen_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     result: ChosenInlineResult,
     incr: Incrementor,
     deps: HandlerDeps,
@@ -270,7 +269,7 @@ pub async fn inline_chosen_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     incr: Incrementor,
     deps: HandlerDeps,

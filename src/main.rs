@@ -160,7 +160,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .endpoint(handlers::support_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
 
-    let bot = config::BotConfig::build_bot(telegram_backoff.clone())?;
+    let raw_bot = config::BotConfig::build_bot(telegram_backoff.clone())?;
+    let bot = config::ThrottleConfig::from_env().wrap(raw_bot.clone());
     bot.delete_webhook().await?;
 
     let me = bot.get_me().await?;
@@ -204,15 +205,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
-    // One throttle for both schedulers: it counts the requests in a worker of its own, so a second
-    // one would count a second budget and let twice as much through.
-    // TODO: [#153] Use a common `Throttle` object shared between handlers and schedulers
-    let throttled_bot = scheduler::throttled(bot.clone(), config::ThrottleConfig::from_env());
     scheduler::spawn_daily_shrink(repos.clone(), app_config.clone());
-    scheduler::spawn_broadcast_worker(throttled_bot.clone(), repos.clone(), language_service.clone(),
+    scheduler::spawn_broadcast_worker(bot.clone(), repos.clone(), language_service.clone(),
                                       topic_policy.clone(), cache.clone(), app_config.clone());
     scheduler::spawn_broadcast_cleaner(repos.clone(), app_config.clone());
-    scheduler::spawn_deletion_worker(throttled_bot, repos.clone(), cache.clone(), app_config.clone(), telegram_backoff);
+    scheduler::spawn_deletion_worker(bot.clone(), repos.clone(), cache.clone(), app_config.clone(), telegram_backoff);
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
     scheduler::spawn_queue_reporter(repos.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
@@ -245,7 +242,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(url) => {
             tracing::info!(url = %url, "setting a webhook");
 
-            let (mut listener, stop_flag, bot_router) = axum_to_router(bot.clone(), Options::new(addr, url)).await?;
+            let (mut listener, stop_flag, bot_router) = axum_to_router(raw_bot, Options::new(addr, url)).await?;
             let stop_token = listener.stop_token();
 
             let error_handler = LoggingErrorHandler::with_custom_text("An error from the update listener");
@@ -276,14 +273,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => {
             tracing::info!("the polling dispatcher is activating");
 
-            let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
+            let mut dispatcher = Dispatcher::builder(bot, handler)
                 .default_handler(ignore_unknown_updates)
                 .error_handler(ContextLoggingErrorHandler::new("An error in a handler"))
                 .dependencies(deps)
                 .build();
             shutdown::spawn_stop_on_signal(dispatcher.shutdown_token());
             let bot_fut = tokio::spawn(metrics::TASK_POLLING_DISPATCHER.instrument(async move {
-                let listener = polling_default(bot).await;
+                let listener = polling_default(raw_bot).await;
                 let listener_error_handler = ContextLoggingErrorHandler::new("An error from the update listener");
                 dispatcher.dispatch_with_listener(listener, listener_error_handler).await
             }));

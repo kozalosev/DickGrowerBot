@@ -5,12 +5,11 @@ use chrono::{Datelike, Utc};
 use domain_types::traits::SaturatingInto;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
 use crate::metrics::RejectionReason;
-use crate::config::{AppConfig, MessageGroup};
+use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
@@ -32,7 +31,7 @@ pub enum DickCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn dick_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: DickCommands,
     incr: Incrementor,
@@ -208,7 +207,7 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn page_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     q: CallbackQuery,
     deps: HandlerDeps,
 ) -> HandlerResult {

@@ -2,11 +2,11 @@ use autometrics::autometrics;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{CallbackQuery, Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, ReplyMarkup, User};
+use crate::config::ThrottledBot;
 use crate::metrics::{RejectableOutcome, RejectionReason};
 use crate::dialogue::CachedDialogueStorage;
 use crate::handlers::{CallbackButton, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
@@ -98,7 +98,7 @@ struct PromoCodeActivationResult {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn promo_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: PromoCommands,
     dialogue: PromoCodeDialogue,
@@ -130,7 +130,7 @@ pub async fn promo_cmd_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn promo_requested_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     dialogue: PromoCodeDialogue,
     limiter: RateLimiter,
@@ -161,7 +161,7 @@ pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn promo_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
@@ -190,7 +190,7 @@ pub fn promo_callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn promo_callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn promo_callback_handler(bot: ThrottledBot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let text = match PromoCallbackData::parse(&query)? {

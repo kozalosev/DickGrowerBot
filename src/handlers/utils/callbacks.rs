@@ -6,11 +6,11 @@ use futures::future::join;
 use futures::TryFutureExt;
 use ParseMode::Html;
 use rust_i18n::t;
-use teloxide::Bot;
-use teloxide::payloads::{AnswerCallbackQuery, EditMessageTextInlineSetters, EditMessageTextSetters};
+use teloxide::payloads::{EditMessageTextInlineSetters, EditMessageTextSetters};
 use teloxide::prelude::ChatId;
-use teloxide::requests::{JsonRequest, Requester};
+use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, InlineKeyboardMarkup, MessageId, ParseMode, UserId};
+use crate::config::ThrottledBot;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::LanguageCode;
 use super::disabled_link_preview;
@@ -138,7 +138,7 @@ pub fn get_params_for_message_edit(q: &CallbackQuery) -> Result<EditMessageReqPa
 /// Edits the text of the message a callback query is attached to, transparently handling both
 /// regular chat messages and inline messages.
 pub async fn edit_message_text(
-    bot: &Bot,
+    bot: &ThrottledBot,
     params: EditMessageReqParamsKind,
     text: impl Into<String>,
 ) -> Result<(), teloxide::RequestError> {
@@ -161,7 +161,7 @@ pub async fn edit_message_text(
 /// Like [`edit_message_text`], but also replaces the keyboard and renders the text as HTML —
 /// for a message whose buttons change along with what they say.
 pub async fn edit_message_text_with_keyboard(
-    bot: &Bot,
+    bot: &ThrottledBot,
     params: EditMessageReqParamsKind,
     text: impl Into<String>,
     keyboard: Option<InlineKeyboardMarkup>,
@@ -187,7 +187,7 @@ pub async fn edit_message_text_with_keyboard(
 }
 
 pub async fn answer_and_edit_page(
-    bot: &Bot,
+    bot: &ThrottledBot,
     q: &CallbackQuery,
     params: &EditMessageReqParamsKind,
     text: impl Into<String>,
@@ -222,12 +222,12 @@ pub async fn answer_and_edit_page(
 
 pub enum CallbackAnswerParams {
     // boxed to keep the enum small: the request is far larger than the `AnotherUser` variant
-    Answer(Box<JsonRequest<AnswerCallbackQuery>>),
+    Answer(Box<<ThrottledBot as Requester>::AnswerCallbackQuery>),
     AnotherUser,
 }
 
 pub async fn prepare_callback_answer_params(
-    bot: &Bot,
+    bot: &ThrottledBot,
     query: &CallbackQuery,
     user_id: UserId,
 ) -> Result<CallbackAnswerParams, teloxide::RequestError> {

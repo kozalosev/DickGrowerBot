@@ -23,12 +23,12 @@ pub mod titles;
 
 use derive_more::Constructor;
 use rust_i18n::t;
-use teloxide::Bot;
-use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextInlineSetters, EditMessageTextSetters, SendMessage, SendMessageSetters};
-use teloxide::requests::{JsonRequest, Requester};
+use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextInlineSetters, EditMessageTextSetters, SendMessageSetters};
+use teloxide::requests::Requester;
 use teloxide::sugar::request::RequestLinkPreviewExt;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters};
 use teloxide::types::ParseMode::Html;
+use crate::config::ThrottledBot;
 
 pub use dick::*;
 pub use help::*;
@@ -91,7 +91,7 @@ pub enum CallbackResult {
 }
 
 impl CallbackResult {
-    pub async fn apply(self, bot: Bot, callback_query: CallbackQuery) -> anyhow::Result<()> {
+    pub async fn apply(self, bot: ThrottledBot, callback_query: CallbackQuery) -> anyhow::Result<()> {
         let answer_req = bot.answer_callback_query(callback_query.id);
         match self {
             CallbackResult::EditMessage(text, keyboard) => {
@@ -162,13 +162,13 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
     }
 }
 
-pub fn reply_html<T: Into<String>>(bot: &Bot, msg: &Message, answer: T) -> JsonRequest<SendMessage> {
+pub fn reply_html<T: Into<String>>(bot: &ThrottledBot, msg: &Message, answer: T) -> <ThrottledBot as Requester>::SendMessage {
     // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer)
         .parse_mode(Html)
         .disable_link_preview(true);
     if msg.chat.is_group() || msg.chat.is_supergroup() {
-        answer.reply_parameters.replace(ReplyParameters::new(msg.id));
+        answer = answer.reply_parameters(ReplyParameters::new(msg.id));
     }
     answer
 }
@@ -184,7 +184,7 @@ macro_rules! reply_html {
     ($bot:expr, $msg:ident, $answer:expr $(, $field:ident = $value:expr)* $(,)?) => {{
         #[allow(unused_mut)]
         let mut request = reply_html(&$bot, &$msg, $answer);
-        $( request.$field = ::core::convert::Into::into($value); )*
+        $( ::teloxide::requests::HasPayload::payload_mut(&mut request).$field = ::core::convert::Into::into($value); )*
         // The error handler runs outside the handler's span, so the ids of the message being
         // answered survive only in this context.
         anyhow::Context::context(
@@ -209,7 +209,7 @@ macro_rules! reply_html_ephemeral {
     }};
 }
 
-pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
+pub async fn send_error_callback_answer(bot: ThrottledBot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&query.from);
     bot.answer_callback_query(query.id)
         .show_alert(true)
@@ -222,7 +222,7 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
 /// keyboard off the message it was attached to — a stale button can outlive the toggle that
 /// enabled its feature.
 pub(crate) async fn answer_callback_feature_disabled(
-    bot: Bot,
+    bot: ThrottledBot,
     q: &CallbackQuery,
     edit_msg_req_params: utils::callbacks::EditMessageReqParamsKind,
     lang_code: LanguageCode,
@@ -255,7 +255,6 @@ pub mod checks {
     use std::ops::Not;
     use chrono::{DateTime, Utc};
     use rust_i18n::t;
-    use teloxide::Bot;
     use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
     use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
     use teloxide::requests::Requester;
@@ -263,7 +262,7 @@ pub mod checks {
     use teloxide::utils::command::BotCommands;
     use crate::bans::BanList;
     use crate::commands::COMMAND_NAMES;
-    use crate::config::MessageGroup;
+    use crate::config::{MessageGroup, ThrottledBot};
     use crate::domain::primitives::{LanguageCode, UserId};
     use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
     use crate::handlers::HandlerDeps;
@@ -288,7 +287,7 @@ pub mod checks {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
-    pub async fn handle_not_group_chat(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+    pub async fn handle_not_group_chat(bot: ThrottledBot, msg: Message, deps: HandlerDeps) -> HandlerResult {
         let HandlerDeps { lang_resolver, .. } = deps;
         let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.not_group_chat", locale = &lang_code);
@@ -312,7 +311,7 @@ pub mod checks {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     async fn handle_group_account(
-        bot: Bot,
+        bot: ThrottledBot,
         msg: Message,
         deps: HandlerDeps,
     ) -> HandlerResult {
@@ -356,7 +355,7 @@ pub mod checks {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg)))]
-    async fn handle_needs_setup(bot: Bot, msg: Message) -> HandlerResult {
+    async fn handle_needs_setup(bot: ThrottledBot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         super::setup::send_setup_message(&bot, msg.chat.id, &lang_code).await?;
         Ok(())
@@ -403,7 +402,7 @@ pub mod checks {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     pub async fn handle_forbidden_topic(
-        bot: Bot,
+        bot: ThrottledBot,
         msg: Message,
         deps: HandlerDeps,
     ) -> HandlerResult {
@@ -443,7 +442,7 @@ pub mod checks {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
     pub async fn handle_forbidden_topic_callback(
-        bot: Bot,
+        bot: ThrottledBot,
         query: CallbackQuery,
         deps: HandlerDeps,
     ) -> HandlerResult {
@@ -478,7 +477,7 @@ pub mod checks {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = ?upd.from().map(|u| u.id.0), ?verdict, lang_code = tracing::field::Empty))]
     pub async fn handle_rate_limited(
-        bot: Bot,
+        bot: ThrottledBot,
         upd: Update,
         verdict: Exceeded,
         limiter: RateLimiter,
@@ -531,7 +530,7 @@ pub mod checks {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = ?upd.from().map(|u| u.id.0), lang_code = tracing::field::Empty))]
-    pub async fn handle_banned(bot: Bot, upd: Update, bans: BanList, deps: HandlerDeps) -> HandlerResult {
+    pub async fn handle_banned(bot: ThrottledBot, upd: Update, bans: BanList, deps: HandlerDeps) -> HandlerResult {
         let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
         let Some(until) = banned_until(&upd, bans) else {
             return Ok(())
@@ -585,10 +584,10 @@ pub mod checks {
 
     pub mod inline {
         use autometrics::autometrics;
-        use teloxide::Bot;
         use teloxide::payloads::AnswerInlineQuerySetters;
         use teloxide::prelude::{InlineQuery, Requester};
         use teloxide::types::ChatType;
+        use crate::config::ThrottledBot;
         use super::HandlerResult;
 
         pub fn is_group_chat(query: InlineQuery) -> bool {
@@ -603,7 +602,7 @@ pub mod checks {
 
         #[autometrics]
         #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
-        pub async fn handle_not_group_chat_inline(bot: Bot, query: InlineQuery) -> HandlerResult {
+        pub async fn handle_not_group_chat_inline(bot: ThrottledBot, query: InlineQuery) -> HandlerResult {
             bot.answer_inline_query(query.id, vec![])
                 .is_personal(true)
                 .cache_time(1)

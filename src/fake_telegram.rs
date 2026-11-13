@@ -4,13 +4,14 @@ use std::sync::{Arc, Mutex};
 use axum::{Json, Router};
 use serde_json::Value;
 use teloxide::Bot;
+use crate::config::{ThrottleConfig, ThrottledBot};
 
 /// The path and the body of each request, in the order they arrived.
 pub type Calls = Arc<Mutex<Vec<(String, Value)>>>;
 
 /// A running fake API. Dropping it stops the server.
 pub struct FakeApi {
-    pub bot: Bot,
+    pub bot: ThrottledBot,
     calls: Calls,
     server: tokio::task::JoinHandle<()>,
 }
@@ -40,7 +41,7 @@ impl FakeApi {
             axum::serve(listener, app).await.expect("the fake API stopped");
         });
         let api_url = reqwest::Url::parse(&format!("http://{address}/")).expect("invalid API URL");
-        let bot = Bot::new("123:token").set_api_url(api_url);
+        let bot = ThrottleConfig::from_env().wrap(Bot::new("123:token").set_api_url(api_url));
         Self { bot, calls, server }
     }
 

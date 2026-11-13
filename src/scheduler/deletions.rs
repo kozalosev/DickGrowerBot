@@ -4,13 +4,12 @@ use autometrics::autometrics;
 use chrono::Utc;
 use futures::{stream, StreamExt};
 use rust_i18n::t;
-use teloxide::{ApiError, Bot, RequestError};
-use teloxide::adaptors::Throttle;
+use teloxide::{ApiError, RequestError};
 use teloxide::payloads::{EditMessageTextInlineSetters, EditMessageTextSetters};
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, MessageId};
 use teloxide::types::ParseMode::Html;
-use crate::config::SelfDestructionConfig;
+use crate::config::{SelfDestructionConfig, ThrottledBot};
 use crate::config::MessageGroup;
 use domain_types::traits::ApproxInto;
 use crate::cache::Cache;
@@ -49,7 +48,7 @@ enum Outcome {
 
 /// Acts on the messages of one run and writes down what became of them.
 struct Cleaner<'a> {
-    bot: &'a Throttle<Bot>,
+    bot: &'a ThrottledBot,
     repos: &'a Repositories,
     cache: &'a Cache,
     cleanup: &'a CleanupPolicy,
@@ -61,7 +60,7 @@ struct Cleaner<'a> {
 #[autometrics]
 #[tracing::instrument(skip_all)]
 pub async fn run_pending_deletions(
-    bot: &Throttle<Bot>,
+    bot: &ThrottledBot,
     repos: &Repositories,
     cache: &Cache,
     cleanup: &CleanupPolicy,
@@ -573,9 +572,8 @@ mod tests {
             inline_groups: inline_groups.parse::<InlineGroups>().expect("couldn't parse the groups"),
             ..Default::default()
         };
-        let bot = Throttle::new_spawn(api.bot.clone(), Default::default());
         let cleaner = Cleaner {
-            bot: &bot, repos: &repos, cache: &cache, cleanup: &cleanup, config: &config,
+            bot: &api.bot, repos: &repos, cache: &cache, cleanup: &cleanup, config: &config,
             bot_admin_ttl: Duration::from_hours(1),
         };
 

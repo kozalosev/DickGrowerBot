@@ -2,11 +2,11 @@ use std::borrow::Cow;
 use anyhow::anyhow;
 use autometrics::autometrics;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::{CallbackQuery, Message, Requester};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
 use crate::config::MessageGroup::Notice;
 use crate::domain::primitives::{LanguageCode, UserId};
@@ -27,7 +27,7 @@ pub enum MentionsCommands {
 /// In a group, answers with a hint.
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
-pub async fn mentions_cmd_handler(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+pub async fn mentions_cmd_handler(bot: ThrottledBot, msg: Message, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, self_destruction, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_MENTIONS.invoked();
@@ -57,7 +57,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn mentions_callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn mentions_callback_handler(bot: ThrottledBot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let uid = UserId::from(&query.from);

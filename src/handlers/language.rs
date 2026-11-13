@@ -2,11 +2,11 @@ use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::anyhow;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdPartiality, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
@@ -36,7 +36,7 @@ impl LanguageCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn language_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: LanguageCommands,
     language_service: LanguageService,
@@ -61,7 +61,7 @@ pub async fn language_cmd_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = from_id.0, lang_code = %lang_code))]
 async fn handle_personal_language(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     from_id: UserId,
     arg: &str,
@@ -75,9 +75,9 @@ async fn handle_personal_language(
     }
     if arg.trim().is_empty() {
         let keyboard = build_language_keyboard(LanguageScope::User, from_id, lang_code);
-        let mut request = reply_html(&bot, &msg, t!("commands.language.prompt", locale = lang_code));
-        request.reply_markup = Some(ReplyMarkup::InlineKeyboard(keyboard));
-        request.await?;
+        reply_html(&bot, &msg, t!("commands.language.prompt", locale = lang_code))
+            .reply_markup(ReplyMarkup::InlineKeyboard(keyboard))
+            .await?;
     } else if let Some(lang) = parse_language_arg(arg) {
         let text = apply_user_language(&ls, from_id, lang, lang_code).await?.to_string();
         reply_html!(bot, msg, text);
@@ -91,7 +91,7 @@ async fn handle_personal_language(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = from_id.0, lang_code = %lang_code))]
 async fn handle_chat_language(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     from_id: UserId,
     arg: &str,
@@ -126,7 +126,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn language_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     language_service: LanguageService,
     deps: HandlerDeps,

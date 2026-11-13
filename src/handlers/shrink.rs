@@ -4,9 +4,8 @@ use autometrics::autometrics;
 use chrono::NaiveDate;
 use derive_more::Display;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup};
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ThrottledBot};
 use crate::domain::primitives::{LanguageCode, Limit, Offset, Page};
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::handlers::{answer_callback_feature_disabled, FromRefs, HandlerDeps, HandlerResult};
@@ -231,7 +230,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn shrink_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     q: CallbackQuery,
     deps: HandlerDeps,
 ) -> HandlerResult {

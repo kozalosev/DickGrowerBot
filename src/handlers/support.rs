@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
-use teloxide::{Bot, RequestError};
+use teloxide::RequestError;
 use crate::metrics::{RejectableOutcome, RejectionReason};
 use crate::dialogue::CachedDialogueStorage;
 use teloxide::macros::BotCommands;
@@ -23,6 +23,7 @@ use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboar
                       Message, MessageEntityKind, MessageEntityRef, MessageId, ParseMode, ReplyParameters,
                       User as TelegramUser, UserId as TelegramUserId};
 use teloxide::utils::html;
+use crate::config::ThrottledBot;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html, rights};
@@ -106,7 +107,7 @@ impl SupportService {
 
     async fn relay(
         &self,
-        bot: &Bot,
+        bot: &ThrottledBot,
         from: &TelegramUser,
         lang_code: &LanguageCode,
         text: &str,
@@ -166,7 +167,7 @@ impl From<RequestError> for Unusable {
 }
 
 /// The support chat to use: the configured one when the bot can post there, none otherwise.
-pub async fn check_support_chat(bot: &Bot, chat_id: Option<TelegramChatId>, me: &Me) -> Option<TelegramChatId> {
+pub async fn check_support_chat(bot: &ThrottledBot, chat_id: Option<TelegramChatId>, me: &Me) -> Option<TelegramChatId> {
     let chat_id = chat_id?;
     let checked = support_chat_usable(bot, chat_id, me).await;
     metrics::STARTUP_VERIFICATION_ERROR.report(StartupCheck::SupportChat, checked.is_err());
@@ -177,7 +178,7 @@ pub async fn check_support_chat(bot: &Bot, chat_id: Option<TelegramChatId>, me: 
         .map(|()| chat_id)
 }
 
-async fn support_chat_usable(bot: &Bot, chat_id: TelegramChatId, me: &Me) -> Result<(), Unusable> {
+async fn support_chat_usable(bot: &ThrottledBot, chat_id: TelegramChatId, me: &Me) -> Result<(), Unusable> {
     let chat_id = ChatId::from(chat_id);
     bot.get_chat(chat_id).await?;
     if chat_id.is_user() {
@@ -276,7 +277,7 @@ pub fn support_callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg)))]
-pub async fn support_reply_handler(bot: Bot, msg: Message, recipient: SupportRecipient) -> HandlerResult {
+pub async fn support_reply_handler(bot: ThrottledBot, msg: Message, recipient: SupportRecipient) -> HandlerResult {
     let SupportRecipient { chat_id, lang_code, ticket } = recipient;
     let keyboard = InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
         t!("commands.support.reply_button", locale = &lang_code),
@@ -297,7 +298,7 @@ pub async fn support_reply_handler(bot: Bot, msg: Message, recipient: SupportRec
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = %query.from.id))]
 pub async fn support_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     dialogue: SupportDialogue,
     deps: HandlerDeps,
@@ -314,7 +315,7 @@ pub async fn support_callback_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn support_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: SupportCommands,
     dialogue: SupportDialogue,
@@ -340,7 +341,7 @@ pub async fn support_cmd_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn support_requested_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     dialogue: SupportDialogue,
     support: SupportService,
@@ -352,7 +353,7 @@ pub async fn support_requested_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn support_follow_up_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     ticket: SupportTicket,
     dialogue: SupportDialogue,
@@ -363,7 +364,7 @@ pub async fn support_follow_up_handler(
 }
 
 async fn answer_request(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     dialogue: SupportDialogue,
     support: SupportService,
@@ -391,7 +392,7 @@ async fn answer_request(
 }
 
 async fn relay(
-    bot: &Bot,
+    bot: &ThrottledBot,
     msg: &Message,
     support: &SupportService,
     text: &str,

@@ -3,12 +3,12 @@ use autometrics::autometrics;
 use anyhow::anyhow;
 use derive_more::Display;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::requests::Requester;
 use teloxide::types::ReplyMarkup;
 use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
+use crate::config::ThrottledBot;
 
 use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, metrics, reply_html_ephemeral, repo};
@@ -33,7 +33,7 @@ pub enum LoanCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn loan_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     deps: HandlerDeps,
 ) -> HandlerResult {
@@ -118,7 +118,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn loan_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     deps: HandlerDeps,
 ) -> HandlerResult {

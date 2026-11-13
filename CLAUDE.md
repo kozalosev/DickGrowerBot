@@ -972,49 +972,72 @@ administrator. Telegram sends that update either way, so nothing polls and nobod
 command in the chat first. It is only ever *taken off* there: whether the bot lost the right is what
 a failed send finds out.
 
-### One throttle for the schedulers
+### One throttle for everything
 
-The daily shrink's broadcast worker and the deletion worker both reach many chats at once, and both
-hold `teloxide`'s `Throttle`. They share **one**, built by `scheduler::throttled` and cloned into
-both (`main.rs`).
+Every request the bot sends goes through **one** teloxide `Throttle`: the answers to users, the
+shrink broadcast and the deletion worker alike. `ThrottleConfig::wrap` (`config/throttle.rs`) builds
+it once in `main.rs`, and everything else receives a clone of that `ThrottledBot`. The only thing
+that keeps the raw `Bot` is the update listener (`polling_default`, `axum_to_router`), whose
+`getUpdates` and `setWebhook` the adaptor would pass straight through anyway. The dispatcher runs
+`dptree::type_check` when it is built, so a handler that still asks for a plain `Bot` panics at
+startup rather than quietly going around the throttle.
 
-**It only governs the broadcast.** The adaptor throttles the message-*sending* methods and passes
-everything else through, so the deletion worker — which only deletes and edits — is not bounded by
-it at all. That is teloxide's judgement, not an oversight: the documented limits (30 a second, one
-a second per chat) are about sending, and a deletion produces no message and no notification. What
-bounds the worker is `MSG_SELFDESTRUCT_CONCURRENCY`. If that judgement is ever wrong, a 429 is not
-final — the row is postponed and tried again, and it shows as
-`telegram_request_errors_total{kind="rate_limited"}`.
+**There must be exactly one.** The adaptor counts requests in a worker task that the wrapper spawns,
+and a clone only adds a handle to that same worker. Two wrappers would keep two separate histories,
+each would allow the full budget, and together they would send twice as much.
 
-Sharing is not a nicety. The adaptor counts requests inside a worker task that the wrapper spawns,
-and a clone only adds a handle to that same worker. Two wrappers would be two workers with two
-separate histories, so each would allow the full 30 requests per second and 1 per second per chat.
-Together they would send twice as much, and a pause after a 429 would stop only the one that got it.
-
-The dispatcher and the handlers still use the plain `Bot`. They answer one user at a time, and their
-rate follows the users.
-
-Because those answers are **not** counted by the throttle, the schedulers are given less than
-Telegram allows. What is left over is the room the answers need.
+**It only governs sending.** The adaptor throttles the message-*sending* methods and passes
+everything else through: edits, deletions, callback answers and inline answers. So the deletion
+worker is not bounded by it at all. That is teloxide's judgement, not an oversight: the documented
+limits are about sending, and a deletion produces no message and no notification. What bounds the
+worker is `MSG_SELFDESTRUCT_CONCURRENCY`. If that judgement is ever wrong, a 429 is not final: the
+row is postponed and tried again, and it shows as `telegram_request_errors_total{kind="rate_limited"}`.
 
 ```
-THROTTLE_MESSAGES_PER_SEC_OVERALL=20      # Telegram allows 30; the rest is for the answers to users
+THROTTLE_MESSAGES_PER_SEC_OVERALL=30
 THROTTLE_MESSAGES_PER_SEC_CHAT=1
-THROTTLE_MESSAGES_PER_MIN_CHAT=15         # private chats and legacy groups
-THROTTLE_MESSAGES_PER_MIN_SUPERGROUP=10   # every chat whose id starts with -100
+THROTTLE_MESSAGES_PER_MIN_CHAT=20         # private chats and legacy groups
+THROTTLE_MESSAGES_PER_MIN_SUPERGROUP=60   # every chat whose id starts with -100
 ```
 
-The last one is the interesting one, and its teloxide name
-(`messages_per_min_channel_or_supergroup`) is easy to misread. The adaptor picks it whenever
-`ChatId::is_channel_or_supergroup()` holds, and that is only a check that the id starts with -100.
-Supergroups pass it, so this limit governs most of the chats the bot serves, while
-`THROTTLE_MESSAGES_PER_MIN_CHAT` is left for private chats and the few legacy groups. The bot is
-never in a channel; the name is teloxide's.
+**The overall limit is Telegram's own**, since nothing is left outside the throttle to need a
+reserve. Telegram's 30 a second is approximate and aimed at bulk sending, so a burst of answers past
+it is held back for a second rather than refused.
 
-`Settings::on_queue_full` is wired to `telegram_throttle_queue_full_total`. The queue holds 30
-requests, and teloxide reports it as full at most once every 4 seconds, so the counter counts
-moments, not requests. A few of them at midnight are normal — that is the shrink broadcast. A number
-that keeps growing all day means the schedulers ask for more than Telegram allows.
+**The private-chat limit is Telegram's 20, the supergroup one deliberately looser.** It is 20 for
+private chats and legacy groups: that is Telegram's limit for a group, and a private chat never
+reaches it, because `RATE_LIMIT_USER_REQUESTS` already holds its only member to 20 a window. The
+legacy groups are few, so the queue problem below doesn't arise there.
+
+The supergroups are where it would. The adaptor's queue holds only `THROTTLE_MESSAGES_PER_SEC_OVERALL` requests, every chat shares it, and a
+request held back by its chat's per-minute limit keeps its slot. At 20, a busy supergroup's answers
+at midnight would fill the queue, and every other chat would wait behind them for minutes. At 60 the
+limit matches `RATE_LIMIT_CHAT_REQUESTS`, which already drops a chat's requests past that within its
+window, so it never holds a handler's answer back. A chat going past 20 is rare: on the rate
+limiter's curve, 341 out of about 357K chat windows reached 20 counted requests.
+
+The price is the occasional 429 from a group that did go past Telegram's limit. The adaptor answers
+it by **pausing every chat** for the `retry_after` and then retrying the request, so the answer is
+late rather than lost. Watch `telegram_request_errors_total{kind="rate_limited"}`: a steady stream of
+those means the per-minute limits should come down. Issue #205 is about patching the fork so that a
+429 pauses only its own chat and a held-back chat doesn't take the queue's slots. Once that lands,
+the supergroup limit can come down to Telegram's 20.
+
+A hang *inside* the throttle (see the broadcast worker's `DAILY_SHRINK_BROADCAST_SEND_TIMEOUT`) now
+stops the answers to users too, not only the broadcast. Only the broadcast has a timeout around its
+sends.
+
+The supergroup limit's teloxide name (`messages_per_min_channel_or_supergroup`) is easy to misread.
+The adaptor picks it whenever `ChatId::is_channel_or_supergroup()` holds, and that is only a check
+that the id starts with -100. Supergroups pass it, so this limit governs most of the chats the bot
+serves, while `THROTTLE_MESSAGES_PER_MIN_CHAT` is left for private chats and the few legacy groups.
+The bot is never in a channel; the name is teloxide's.
+
+`Settings::on_queue_full` is wired to `telegram_throttle_queue_full_total`. The queue holds
+`THROTTLE_MESSAGES_PER_SEC_OVERALL` requests, and teloxide reports it as full at most once every
+4 seconds, so the counter counts moments, not requests. A few of them at midnight are normal: that
+is the shrink broadcast. A number that keeps growing all day means the bot asks for more than the
+limits allow, and the answers to users are waiting in that queue too.
 
 ### Observability / tracing
 

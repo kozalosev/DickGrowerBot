@@ -6,12 +6,10 @@ use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 use futures::FutureExt;
-use teloxide::Bot;
-use teloxide::adaptors::throttle::{Settings, Throttle};
 use domain_types::traits::SaturatingInto;
 use crate::cache::Cache;
 use crate::cleanup::CleanupPolicy;
-use crate::config::{get_env_value_or_default, AppConfig, ThrottleConfig};
+use crate::config::{get_env_value_or_default, AppConfig, ThrottledBot};
 use crate::domain::primitives::AttemptsCount;
 use crate::handlers::utils::date::duration_till_next_day;
 use crate::metrics;
@@ -32,23 +30,6 @@ use broadcasts::{clean_finished_broadcasts, run_pending_broadcasts, BroadcastDep
 const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_mins(1);
 
 const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
-
-/// A bot that keeps the schedulers inside Telegram's rate limits.
-///
-/// Both schedulers send to many chats at once, so they need this. They must also share one, because
-/// the counting happens in a worker task the wrapper spawns, and two of them would count two
-/// budgets and allow twice as much. A clone of this shares the same worker.
-///
-/// The dispatcher and the handlers keep the plain `Bot`: they answer one user at a time.
-pub fn throttled(bot: Bot, config: ThrottleConfig) -> Throttle<Bot> {
-    let settings = Settings::default()
-        .limits(config.into())
-        .on_queue_full(|pending| async move {
-            metrics::TELEGRAM_THROTTLE_QUEUE_FULL.inc();
-            tracing::warn!(pending, "the throttle queue is full, requests are waiting for their turn");
-        });
-    Throttle::spawn_with_settings(bot, settings)
-}
 
 /// Spawns a detached, best-effort task that runs the daily shrink at UTC midnight, once every
 /// `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
@@ -105,7 +86,7 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
 /// after the restart claims every summary that fell due meanwhile — which is what makes a broadcast
 /// to a few hundred thousand chats possible at all.
 pub fn spawn_broadcast_worker(
-    bot: Throttle<Bot>,
+    bot: ThrottledBot,
     repos: Repositories,
     language_service: LanguageService,
     topics: TopicPolicy,
@@ -178,7 +159,7 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
 /// group is permanent. Unlike the two schedulers above, this one survives a restart: the messages
 /// it acts on are rows, and the tick after the restart finds every one that fell due meanwhile.
 pub fn spawn_deletion_worker(
-    bot: Throttle<Bot>,
+    bot: ThrottledBot,
     repos: Repositories,
     cache: Cache,
     config: AppConfig,
@@ -298,7 +279,7 @@ fn paced(period: Duration) -> tokio::time::Interval {
 /// gets another tick instead of dying with nothing but a stale heartbeat to show for it.
 ///
 /// `AssertUnwindSafe` is what makes this compile: the futures here borrow `Repositories`,
-/// `Throttle<Bot>` and the like across an `.await`, none of which the compiler can prove safe to
+/// `ThrottledBot` and the like across an `.await`, none of which the compiler can prove safe to
 /// resume after a panic. Nothing here holds a lock that could be left half-updated by one — the
 /// state that matters (the database, Redis) lives outside this process — so asserting it is safe
 /// in practice.

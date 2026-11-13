@@ -2,8 +2,7 @@ use std::time::Duration;
 use autometrics::autometrics;
 use chrono::Utc;
 use futures::{stream, StreamExt};
-use teloxide::{ApiError, Bot, RequestError};
-use teloxide::adaptors::Throttle;
+use teloxide::{ApiError, RequestError};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::{Request, Requester};
 use teloxide::sugar::request::RequestLinkPreviewExt;
@@ -11,7 +10,7 @@ use teloxide::types::{ChatId, ReplyMarkup, UserId as TeloxideUserId};
 use teloxide::types::ParseMode::Html;
 use domain_types::traits::ApproxInto;
 use crate::cache::{Cache, CacheKey};
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ThrottledBot};
 use crate::domain::primitives::{LanguageCode, Page, ScheduledBroadcastId, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::handlers::shrink::{build_shrink_keyboard, shrinks_page_for_internal_chat, ShrinkView};
@@ -31,7 +30,7 @@ impl CacheKey for BroadcastLanguageKey {}
 /// The services every summary needs, bundled so the per-chat calls stay readable.
 #[derive(Clone, Copy)]
 pub struct BroadcastDeps<'a> {
-    pub bot: &'a Throttle<Bot>,
+    pub bot: &'a ThrottledBot,
     pub repos: &'a Repositories,
     pub language_service: &'a LanguageService,
     pub topics: &'a TopicPolicy,
@@ -173,8 +172,6 @@ async fn send(deps: BroadcastDeps<'_>, broadcast: &ScheduledBroadcast) -> (Outco
     let keyboard = build_shrink_keyboard(ShrinkView::Broadcast, broadcast.shrink_date,
                                          Page::first(), page.has_more_pages, None, &lang_code);
 
-    // The throttled request wraps the payload, so the keyboard goes through the setter rather than
-    // the field the plain `Bot` exposes.
     let mut request = bot.send_message(ChatId(broadcast.chat_id.value()), page.lines)
         .parse_mode(Html)
         .disable_link_preview(true);

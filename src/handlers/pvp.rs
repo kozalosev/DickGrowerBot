@@ -6,12 +6,12 @@ use crate::domain::primitives::Coefficient;
 use futures::join;
 use rand::RngExt;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
+use crate::config::ThrottledBot;
 use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackButton, CallbackResult, HandlerDeps,
     HandlerImplResult, HandlerResult};
 use crate::{metrics, reply_html, reply_html_ephemeral, repo};
@@ -98,7 +98,7 @@ impl TryFrom<String> for BattleCallbackData {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn pvp_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: BattleCommands,
     deps: HandlerDeps,
@@ -124,7 +124,7 @@ pub async fn pvp_cmd_handler(
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
-pub async fn pvp_cmd_handler_no_args(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+pub async fn pvp_cmd_handler_no_args(bot: ThrottledBot, msg: Message, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
@@ -146,7 +146,7 @@ pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn pvp_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn pvp_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
@@ -212,7 +212,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn pvp_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     battle_locker: BattleLocks,
     deps: HandlerDeps,

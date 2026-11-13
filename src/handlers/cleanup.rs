@@ -6,14 +6,14 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
-use teloxide::{Bot, RequestError};
+use teloxide::RequestError;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
 use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html, reply_html_ephemeral};
 use crate::cleanup::CleanupPolicy;
-use crate::config::{DeletionMode, MessageGroup, SelfDestructionConfig};
+use crate::config::{DeletionMode, MessageGroup, SelfDestructionConfig, ThrottledBot};
 use crate::domain::objects::ChatCleanupSettings;
 use crate::domain::primitives::{DelayMinutes, LanguageCode};
 use crate::domain::primitives::chat::ChatIdPartiality;
@@ -35,7 +35,7 @@ pub enum CleanupCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn cleanup_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cleanup: CleanupPolicy,
     deps: HandlerDeps,
@@ -76,7 +76,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn cleanup_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     cleanup: CleanupPolicy,
     deps: HandlerDeps,
@@ -141,7 +141,7 @@ struct Screen {
 
 impl Screen {
     /// Puts the screen in place of the message a press came from.
-    async fn edit(self, bot: &Bot, params: EditMessageReqParamsKind) -> Result<(), RequestError> {
+    async fn edit(self, bot: &ThrottledBot, params: EditMessageReqParamsKind) -> Result<(), RequestError> {
         callbacks::edit_message_text_with_keyboard(bot, params, self.text, Some(self.keyboard)).await
     }
 }

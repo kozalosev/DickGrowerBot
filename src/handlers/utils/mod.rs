@@ -8,9 +8,9 @@ pub use tghack::*;
 pub use incrementor::*;
 pub use self_destruction::*;
 
-use teloxide::Bot;
 use teloxide::prelude::{Requester, UserId};
 use teloxide::types::{Chat, ChatKind, LinkPreviewOptions, Message, PublicChatKind, User};
+use crate::config::ThrottledBot;
 use crate::domain::primitives::{DaysCount, Username};
 
 pub fn disabled_link_preview() -> LinkPreviewOptions {
@@ -42,7 +42,7 @@ pub fn is_forum(chat: &Chat) -> bool {
 /// callback's owner check only proves who invoked the picker, and rights can be taken away
 /// between the message and the tap.
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = user_id.0))]
-pub async fn is_chat_admin(bot: &Bot, msg: &Message, user_id: UserId) -> anyhow::Result<bool> {
+pub async fn is_chat_admin(bot: &ThrottledBot, msg: &Message, user_id: UserId) -> anyhow::Result<bool> {
     let admins = bot.get_chat_administrators(msg.chat.id).await?;
     Ok(admins.into_iter().any(|member| member.user.id == user_id))
 }

@@ -6,10 +6,10 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatId, Me, Message, UserId};
+use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html, repo};
@@ -104,7 +104,7 @@ enum ImportError {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn import_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     bot_info: Me,
     msg: Message,
     deps: HandlerDeps,
@@ -212,7 +212,7 @@ fn import_error_text(error: ImportError, lang_code: &LanguageCode) -> String {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(msg)))]
 async fn check_message(
-    bot: &Bot,
+    bot: &ThrottledBot,
     bot_id: UserId,
     msg: &Message,
     repos: &repo::Repositories,

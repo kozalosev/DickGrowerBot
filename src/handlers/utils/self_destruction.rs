@@ -1,9 +1,8 @@
 use std::time::Duration;
 use chrono::Utc;
-use teloxide::Bot;
 use teloxide::prelude::Requester;
 use teloxide::types::{ChatId, Message, MessageId, UserId as TeloxideUserId};
-use crate::config::{MessageGroup, SelfDestructionConfig, MAX_DELAY};
+use crate::config::{MessageGroup, SelfDestructionConfig, ThrottledBot, MAX_DELAY};
 use crate::handlers::rights;
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::domain::primitives::{CharCount, LanguageCode};
@@ -62,7 +61,7 @@ impl SelfDestructionService {
     #[tracing::instrument(skip_all, fields(group = %group, chat_id = %sent.chat.id, message_id = %sent.id))]
     pub async fn schedule(
         &self,
-        bot: &Bot,
+        bot: &ThrottledBot,
         command: &Message,
         sent: &Message,
         group: MessageGroup,
@@ -200,7 +199,7 @@ impl SelfDestructionService {
     ///
     /// [`DeletionMode::Enabled`]: crate::config::DeletionMode::Enabled
     /// [`DeletionMode::OnlyWithCommand`]: crate::config::DeletionMode::OnlyWithCommand
-    async fn may_delete_commands(&self, bot: &Bot, chat_id: ChatId) -> bool {
+    async fn may_delete_commands(&self, bot: &ThrottledBot, chat_id: ChatId) -> bool {
         if let Some(known) = rights::cached_deletion_right(&self.cache, chat_id).await {
             return known
         }
@@ -214,7 +213,7 @@ impl SelfDestructionService {
     /// `/cleanup`, which warns an admin whose chat is about to lose the answers while keeping the
     /// commands. A press is rare enough to be worth the request, and the answer it stores serves
     /// every message that follows.
-    pub async fn may_delete_here(&self, bot: &Bot, chat_id: ChatId) -> bool {
+    pub async fn may_delete_here(&self, bot: &ThrottledBot, chat_id: ChatId) -> bool {
         match rights::cached_deletion_right(&self.cache, chat_id).await {
             Some(known) => known,
             None => self.ask_about_the_rights(bot, chat_id).await,
@@ -223,7 +222,7 @@ impl SelfDestructionService {
 
     /// Asks Telegram and remembers the answer. A failed request answers "no": keeping both
     /// messages is the harmless outcome.
-    async fn ask_about_the_rights(&self, bot: &Bot, chat_id: ChatId) -> bool {
+    async fn ask_about_the_rights(&self, bot: &ThrottledBot, chat_id: ChatId) -> bool {
         let is_admin = match bot.get_chat_member(chat_id, self.bot_id).await {
             Ok(member) => member.can_delete_messages(),
             Err(e) => {

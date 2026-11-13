@@ -1,9 +1,9 @@
 use autometrics::autometrics;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::{Message, ReplyMarkup};
+use crate::config::ThrottledBot;
 use crate::handlers::{HandlerDeps, HandlerImplResult, HandlerResult, try_activate, PROMO_START_PARAM_PREFIX, reply_html};
 use crate::{metrics, reply_html_ephemeral};
 use crate::config::MessageGroup::Notice;
@@ -20,7 +20,7 @@ pub enum StartCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn start_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: StartCommands,
     help: HelpContainer,

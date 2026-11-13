@@ -22,10 +22,10 @@ use anyhow::anyhow;
 use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
 use teloxide::types::{ChatMemberUpdated, ChatMigration, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+use crate::config::ThrottledBot;
 
 use crate::config::AppConfig;
 use crate::domain::primitives::LanguageCode;
@@ -60,7 +60,7 @@ impl TryFrom<String> for SetupCallbackData {
 ///
 /// Deliberately not a reply to any particular message and not restricted to admins: the
 /// `chat_instance` is chat-level, so a tap by *any* member yields the same pairing.
-pub async fn send_setup_message(bot: &Bot, chat_id: ChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
+pub async fn send_setup_message(bot: &ThrottledBot, chat_id: ChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
     let btn_label = t!("setup.button", locale = lang_code);
     let keyboard = InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback(btn_label, SetupCallbackData.to_data_string())
@@ -83,7 +83,7 @@ pub fn added_to_legacy_group_filter(upd: ChatMemberUpdated, config: AppConfig) -
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = upd.chat.id.0, uid = upd.from.id.0))]
-pub async fn added_to_legacy_group_handler(bot: Bot, upd: ChatMemberUpdated) -> HandlerResult {
+pub async fn added_to_legacy_group_handler(bot: ThrottledBot, upd: ChatMemberUpdated) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&upd.from);
     send_setup_message(&bot, upd.chat.id, &lang_code).await?;
     Ok(())
@@ -99,7 +99,7 @@ pub fn migration_filter(msg: Message) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, lang_code = tracing::field::Empty))]
 pub async fn migration_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     deps: HandlerDeps,
 ) -> HandlerResult {
@@ -153,7 +153,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0))]
-pub async fn setup_callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn setup_callback_handler(bot: ThrottledBot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, .. } = deps;
     SetupCallbackData::parse(&query)?;
     let lang_code = LanguageCode::from_user(&query.from);
