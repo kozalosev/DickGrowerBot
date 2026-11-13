@@ -11,7 +11,6 @@ use crate::cache::Cache;
 use crate::cleanup::CleanupPolicy;
 use crate::config::{get_env_value_or_default, AppConfig, ThrottledBot};
 use crate::domain::primitives::AttemptsCount;
-use crate::handlers::utils::date::duration_till_next_day;
 use crate::metrics;
 use crate::telegram_backoff::TelegramBackoff;
 use crate::repo::Repositories;
@@ -31,9 +30,10 @@ const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_mins(1);
 
 const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
 
-/// Spawns a detached, best-effort task that runs the daily shrink at UTC midnight, once every
-/// `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
-/// midnight; failures are logged and never abort the loop.
+/// Spawns a detached, best-effort task that runs the daily shrink at `DAILY_SHRINK_TIME` (UTC),
+/// once every `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself
+/// isn't persisted — a restart just waits for the next start; failures are logged and never abort
+/// the loop.
 ///
 /// What the run produces *is* persisted: the summaries it owes are rows, written by the same
 /// statement that shrank the dicks, so nothing here has to survive for a chat to be notified.
@@ -46,9 +46,9 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
     metrics::DAILY_SHRINK_PERIOD.set(i64::from(period_days.value()) * SECONDS_PER_DAY);
     tracing::info!(batch_size = %config.daily_shrink.batch_size, ratio = %config.daily_shrink.ratio,
         inactivity_days = %config.daily_shrink.inactivity_days, %period_days,
-        "the daily shrink scheduler has started");
+        start_time = %config.daily_shrink.start_time, "the daily shrink scheduler has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK.instrument(async move {
-        // A failed run is logged and forgotten: the next midnight tries again, and one bad day
+        // A failed run is logged and forgotten: the next start tries again, and one bad day
         // must not stop the scheduler for good.
         let run = || async {
             run_daily_shrink(repos.clone(), config.clone())
@@ -63,12 +63,9 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
             resilient(run()).await;
         }
         loop {
-            let Some(till_next_day) = duration_till_next_day().and_then(|d| d.to_std().ok()) else {
-                tracing::error!("couldn't compute a valid duration till the next UTC midnight, stopping the daily shrink scheduler");
-                return;
-            };
-            tracing::debug!(sleeping_for = ?till_next_day, "waiting for the next UTC midnight");
-            tokio::time::sleep(till_next_day).await;
+            let till_next_run = config.daily_shrink.till_next_run(chrono::Utc::now());
+            tracing::debug!(sleeping_for = ?till_next_run, "waiting for the next shrink run");
+            tokio::time::sleep(till_next_run).await;
 
             if !config.daily_shrink.is_due(chrono::Utc::now().date_naive()) {
                 tracing::debug!("not a shrink day");
@@ -244,13 +241,13 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 /// It runs whatever the features say. Both gauges read tables that exist regardless, a disabled
 /// feature simply reports zero, and a gauge that stops being published is indistinguishable from a
 /// worker that died — which is what the alerts are watching for.
-pub fn spawn_queue_reporter(repos: Repositories) {
+pub fn spawn_queue_reporter(repos: Repositories, config: AppConfig) {
     tokio::spawn(async move {
         let mut ticker = paced(QUEUE_GAUGE_INTERVAL);
         loop {
             ticker.tick().await;
 
-            resilient(report_queues(&repos)).await;
+            resilient(report_queues(&repos, &config)).await;
         }
     });
 }
@@ -310,13 +307,16 @@ fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
 /// A failure here loses one sample of a gauge and nothing else — the queues, the rows and the
 /// workers are untouched, and the next tick publishes again — so it is a `warn`. A database that is
 /// down has already been reported by the run that failed.
-async fn report_queues(repos: &Repositories) {
+async fn report_queues(repos: &Repositories, config: &AppConfig) {
     match repos.broadcasts.count_pending().await {
         Ok(pending) => metrics::DAILY_SHRINK_BROADCAST_PENDING.set(pending.saturating_into()),
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending shrink summaries"),
     }
     match repos.shrinks.get_last_shrink_timestamp().await {
-        Ok(Some(at)) => metrics::DAILY_SHRINK_LAST_RUN_TIMESTAMP.set(at.timestamp()),
+        Ok(Some(at)) => {
+            let scheduled_at = config.daily_shrink.scheduled_at(at.date_naive());
+            metrics::DAILY_SHRINK_LAST_RUN_TIMESTAMP.set(scheduled_at.timestamp())
+        },
         Ok(None) => {},
         Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the time of the last shrink"),
     }

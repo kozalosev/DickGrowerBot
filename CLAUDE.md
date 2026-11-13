@@ -874,7 +874,8 @@ DAILY_SHRINK_RATIO=0.01                # unset or 0 => the whole feature is off,
 DAILY_SHRINK_INACTIVITY_DAYS=7
 DAILY_SHRINK_RAMP_UP_DAYS=7
 DAILY_SHRINK_PERIOD_DAYS=1             # days between two runs; 7 => weekly, always on the same weekday
-DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
+DAILY_SHRINK_TIME=00:00                # UTC time of day a run starts at
+DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for the next start
 DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
 DAILY_SHRINK_BATCH_DELAY=0s            # rest between two batches; 0 => back to back
 DAILY_SHRINK_EXPIRY_BATCH_SIZE=5000    # rows one statement of the nightly cleanup expires
@@ -889,8 +890,16 @@ DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
 DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY=3d       # 0 => finished rows are kept for ever
 ```
 
+**`DAILY_SHRINK_TIME` moves the run off midnight**, which is the bot's busiest hour: the batches
+and the broadcast that follows them compete with the players' `/grow`s for the pool and for
+Telegram's quota. It is a UTC time of day, `HH:MM`, and an unset or unreadable value is midnight.
+It moves only the hour. The growth's own day still turns at UTC midnight, and every date the shrink
+writes or compares (`shrink_date`, `Stale_Dick_Shrinks.created_at`, `expire_superseded`) is the
+date of the run, so a start of `04:00` shrinks for the day it runs on. The liveness gauge below
+reports that date *at* the start time, so its alert needs no term for it.
+
 **`DAILY_SHRINK_PERIOD_DAYS` makes the game milder, not the cuts deeper.** The scheduler still wakes
-at every midnight and runs only when `DailyShrinkConfig::is_due` says so — the day's number counted
+at every start and runs only when `DailyShrinkConfig::is_due` says so — the day's number counted
 from a fixed date, modulo the period, so nothing has to be remembered and a restart can't shift the
 schedule. A run takes off what a daily one would; the ramp-up and the grace period are counted in
 days of staleness, not in runs, so neither changes meaning. `DAILY_SHRINK_RUN_ON_STARTUP` ignores the
@@ -917,7 +926,7 @@ through a chat merge like `Perk_States` (the surviving chat wins key by key) and
 `erase_user`, which also empties `Users.settings`.
 
 **Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
-`MAX(created_at)` in `Stale_Dick_Shrinks`, not any of the `daily_shrink_*` counters. A counter that
+`MAX(created_at)` in `Stale_Dick_Shrinks` and published as that date at `DAILY_SHRINK_TIME`, not any of the `daily_shrink_*` counters. A counter that
 moves once a day reads zero both when nothing happened and when nobody scraped it before the process
 restarted, and nothing afterwards tells the two apart — which is how a fortnight of silence went
 unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > daily_shrink_period_seconds + 2h`, and on

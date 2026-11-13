@@ -203,7 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (metrics_router, prometheus_layer) = metrics::init();
     metrics::register_db_pool_collector(db_conn.clone());
 
-    // Best-effort background job that shrinks inactive dicks at each UTC midnight. Spawned before
+    // Best-effort background job that shrinks inactive dicks at DAILY_SHRINK_TIME. Spawned before
     // `deps!` moves the shared services, and before the webhook/polling split so it runs in both.
     scheduler::spawn_daily_shrink(repos.clone(), app_config.clone());
     scheduler::spawn_broadcast_worker(bot.clone(), repos.clone(), language_service.clone(),
@@ -211,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     scheduler::spawn_broadcast_cleaner(repos.clone(), app_config.clone());
     scheduler::spawn_deletion_worker(bot.clone(), repos.clone(), cache.clone(), app_config.clone(), telegram_backoff);
     scheduler::spawn_deletion_cleaner(repos.clone(), app_config.clone());
-    scheduler::spawn_queue_reporter(repos.clone());
+    scheduler::spawn_queue_reporter(repos.clone(), app_config.clone());
     reload::spawn_reload_on_sighup(repos.announcements.clone(), ban_list.clone());
     ban_list.spawn_listen_task(db_conn.clone());
     ban_list.spawn_refresh_task(app_config.caches.ban_list_refresh);
