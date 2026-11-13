@@ -482,7 +482,7 @@ mod test {
     use crate::handlers::utils::callbacks::build_callback_query;
     use crate::handlers::utils::inline_message_id_of;
     use crate::repo::Chats;
-    use crate::repo::test::fresh_db;
+    use crate::repo::test::{fresh_db, telegram_user};
     use crate::users::generated::{User as ServiceUser, user::Options};
     use crate::users::mock::UserServiceClientMock;
     use super::{decode_user, encode_user, inline_chat_candidates, most_popular_language,
@@ -565,7 +565,7 @@ mod test {
     fn chosen_result_update(inline_message_id: Option<String>) -> Update {
         let result = ChosenInlineResult {
             result_id: "grow".to_owned(),
-            from: tg_user(1, None),
+            from: telegram_user(1, None),
             location: None,
             inline_message_id,
             query: String::new(),
@@ -630,19 +630,6 @@ mod test {
         assert!(inline_chat_candidates(&in_chat, true).is_empty());
     }
 
-    fn tg_user(id: u64, language_code: Option<&str>) -> User {
-        User {
-            id: UserId(id),
-            is_bot: false,
-            first_name: "tester".to_owned(),
-            last_name: None,
-            username: None,
-            language_code: language_code.map(ToOwned::to_owned),
-            is_premium: false,
-            added_to_attachment_menu: false,
-        }
-    }
-
     /// A supergroup the bot knows by both of its keys — the state an inline invocation has to be
     /// resolved from.
     const SUPERGROUP_ID: i64 = -1001100294568;
@@ -675,7 +662,7 @@ mod test {
     async fn chat_language_wins_for_inline_updates() {
         let db = fresh_db().await;
         let ls = language_service_of(db.clone(), true).await;
-        let en_user = tg_user(1, Some("en"));
+        let en_user = telegram_user(1, Some("en"));
 
         // By the chat id decoded out of the inline_message_id...
         let mut update = inline_callback_update(Some(inline_message_id_of(SUPERGROUP_ID)), CHAT_INSTANCE);
@@ -792,7 +779,7 @@ mod test {
             is_premium: false,
         });
 
-        let user = tg_user(1, Some("ru"));
+        let user = telegram_user(1, Some("ru"));
         let resolved = resolve_language_for(Some(&user), &svc).await;
         assert_eq!(resolved.to_string(), "it");
     }
@@ -801,10 +788,10 @@ mod test {
     async fn falls_back_to_telegram_then_default() {
         let svc = UserServiceClientMock::new();
         // Unregistered user: fall back to the Telegram-provided code.
-        let with_tg = tg_user(2, Some("ru"));
+        let with_tg = telegram_user(2, Some("ru"));
         assert_eq!(resolve_language_for(Some(&with_tg), &svc).await.to_string(), "ru");
         // No Telegram code and no service record: the default.
-        let without_tg = tg_user(3, None);
+        let without_tg = telegram_user(3, None);
         assert_eq!(resolve_language_for(Some(&without_tg), &svc).await.to_string(), "en");
         // Service disabled entirely: use the Telegram code.
         let disabled = UserService::<UserServiceClientMock>::Disabled;

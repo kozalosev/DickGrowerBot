@@ -13,6 +13,7 @@ mod broadcasts;
 mod deletions;
 mod perks;
 mod mentions;
+mod customizations;
 
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -79,6 +80,19 @@ pub async fn fresh_db() -> Pool<Postgres> {
 /// Such a value is not known while the code is compiled, so `literal!` does not fit.
 pub fn user_id(value: i64) -> UserId {
     UserId::new(value.saturating_into())
+}
+
+pub fn telegram_user(id: u64, language_code: Option<&str>) -> teloxide::types::User {
+    teloxide::types::User {
+        id: teloxide::types::UserId(id),
+        is_bot: false,
+        first_name: NAME.to_owned(),
+        last_name: None,
+        username: None,
+        language_code: language_code.map(ToOwned::to_owned),
+        is_premium: false,
+        added_to_attachment_menu: false,
+    }
 }
 
 pub fn get_chat_id_and_dicks(db: &Pool<Postgres>) -> (ChatIdKind, repo::Dicks) {
@@ -224,4 +238,3 @@ async fn connect_and_migrate(url: Url) -> Pool<Postgres> {
     repo::establish_database_connection(&conf)
         .await.expect("couldn't establish a database connection")
 }
-

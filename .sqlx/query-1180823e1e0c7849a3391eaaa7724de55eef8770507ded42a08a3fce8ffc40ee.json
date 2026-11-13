@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uid AS \"uid: UserId\", customization_name\n                   FROM User_Customizations\n                   WHERE uid = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uid: UserId",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_customizations",
+            "name": "uid"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "customization_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "user_customizations",
+            "name": "customization_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1180823e1e0c7849a3391eaaa7724de55eef8770507ded42a08a3fce8ffc40ee"
+}

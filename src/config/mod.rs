@@ -8,6 +8,7 @@ pub_use_modules!(
     bot,
     toggles,
     announcements,
+    customizations,
     self_destruction,
     throttle,
     rate_limit,

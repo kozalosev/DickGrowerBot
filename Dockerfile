@@ -44,6 +44,7 @@ RUN cargo build --release && mv target/release/dick-grower-bot /dickGrowerBot
 FROM alpine:3.21
 RUN apk update && apk add --no-cache libgcc
 COPY --from=builder /dickGrowerBot /usr/local/bin/
+COPY customizations.yml /customizations.yml
 # Import the user and group files from the builder
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
@@ -73,6 +74,8 @@ ARG HELP_GIT_REPO
 ARG HELP_AUCTION_BOT
 ARG CHATS_MERGING_ENABLED
 ARG TOP_UNLIMITED_ENABLED
+ARG CUSTOMIZATIONS_ENABLED
+ARG CUSTOMIZATIONS_FILE
 ARG MULTIPLE_LOANS_ENABLED
 ARG PVP_DEFAULT_BET
 ARG PVP_CHECK_ACCEPTOR_LENGTH
