@@ -1006,31 +1006,27 @@ row is postponed and tried again, and it shows as `telegram_request_errors_total
 THROTTLE_MESSAGES_PER_SEC_OVERALL=30
 THROTTLE_MESSAGES_PER_SEC_CHAT=1
 THROTTLE_MESSAGES_PER_MIN_CHAT=20         # private chats and legacy groups
-THROTTLE_MESSAGES_PER_MIN_SUPERGROUP=60   # every chat whose id starts with -100
+THROTTLE_MESSAGES_PER_MIN_SUPERGROUP=20   # every chat whose id starts with -100
 ```
 
-**The overall limit is Telegram's own**, since nothing is left outside the throttle to need a
-reserve. Telegram's 30 a second is approximate and aimed at bulk sending, so a burst of answers past
-it is held back for a second rather than refused.
+**The limits are Telegram's own.** The overall one needs no reserve, since nothing is left outside
+the throttle. Telegram's 30 a second is approximate and aimed at bulk sending, so a burst of answers
+past it is held back for a second rather than refused. The per-minute limits are Telegram's 20 for a
+group. A private chat never reaches that, because `RATE_LIMIT_USER_REQUESTS` already holds its only
+member to 20 a window.
 
-**The private-chat limit is Telegram's 20, the supergroup one deliberately looser.** It is 20 for
-private chats and legacy groups: that is Telegram's limit for a group, and a private chat never
-reaches it, because `RATE_LIMIT_USER_REQUESTS` already holds its only member to 20 a window. The
-legacy groups are few, so the queue problem below doesn't arise there.
+**A chat over its limit holds back only itself.** The fork's worker queues pending requests per chat
+and walks the chats one by one. So a busy supergroup's answers at midnight wait for their own
+minute, and every other chat's requests go past them. Upstream's worker kept them all in one queue
+of `THROTTLE_MESSAGES_PER_SEC_OVERALL` slots, where a held-back request kept its slot and one group
+could block the bot. That is why the supergroup limit used to be 60.
 
-The supergroups are where it would. The adaptor's queue holds only `THROTTLE_MESSAGES_PER_SEC_OVERALL` requests, every chat shares it, and a
-request held back by its chat's per-minute limit keeps its slot. At 20, a busy supergroup's answers
-at midnight would fill the queue, and every other chat would wait behind them for minutes. At 60 the
-limit matches `RATE_LIMIT_CHAT_REQUESTS`, which already drops a chat's requests past that within its
-window, so it never holds a handler's answer back. A chat going past 20 is rare: on the rate
-limiter's curve, 341 out of about 357K chat windows reached 20 counted requests.
-
-The price is the occasional 429 from a group that did go past Telegram's limit. The adaptor answers
-it by **pausing every chat** for the `retry_after` and then retrying the request, so the answer is
-late rather than lost. Watch `telegram_request_errors_total{kind="rate_limited"}`: a steady stream of
-those means the per-minute limits should come down. Issue #205 is about patching the fork so that a
-429 pauses only its own chat and a held-back chat doesn't take the queue's slots. Once that lands,
-the supergroup limit can come down to Telegram's 20.
+**A 429 pauses only the chat that got it.** The adaptor holds that chat's requests for the
+`retry_after` and then retries the refused one, so the answer is late rather than lost. Only when
+three chats are refused at the same time (`Settings::global_freeze_chats`, teloxide's default) does
+it pause every chat, because that points to the bot-wide limit rather than to one group. Watch
+`telegram_request_errors_total{kind="rate_limited"}`: a steady stream of those means the limits
+should come down.
 
 A hang *inside* the throttle (see the broadcast worker's `DAILY_SHRINK_BROADCAST_SEND_TIMEOUT`) now
 stops the answers to users too, not only the broadcast. Only the broadcast has a timeout around its
@@ -1042,11 +1038,19 @@ that the id starts with -100. Supergroups pass it, so this limit governs most of
 serves, while `THROTTLE_MESSAGES_PER_MIN_CHAT` is left for private chats and the few legacy groups.
 The bot is never in a channel; the name is teloxide's.
 
-`Settings::on_queue_full` is wired to `telegram_throttle_queue_full_total`. The queue holds
-`THROTTLE_MESSAGES_PER_SEC_OVERALL` requests, and teloxide reports it as full at most once every
-4 seconds, so the counter counts moments, not requests. A few of them at midnight are normal: that
-is the shrink broadcast. A number that keeps growing all day means the bot asks for more than the
-limits allow, and the answers to users are waiting in that queue too.
+`Settings::on_queue_full` is wired to `telegram_throttle_queue_full_total`. The worker calls it when
+requests that their chats' limits would allow are still waiting, because
+`THROTTLE_MESSAGES_PER_SEC_OVERALL` is used up. It does so at most once every 4 seconds, so the
+counter counts moments, not requests. A few of them at midnight are normal: that is the shrink
+broadcast. A number that keeps growing all day means the bot asks for more than the overall limit
+allows, and the answers to users are waiting too.
+
+**How long a request waited is `telegram_throttle_wait_seconds{chat_kind}`**, from
+`Settings::on_wait`, which the fork calls for every request the worker lets through. `chat_kind`
+is `private`, `group` or `supergroup`. `telegram_request_duration_seconds` can't show this wait,
+because `TelegramObserver` sits below the adaptor and starts timing only once the throttle has let
+the request go. The buckets separate no wait from a few hundred milliseconds, and those from the
+seconds that a held-back chat waits.
 
 ### Observability / tracing
 

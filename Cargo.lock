@@ -3857,7 +3857,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 [[package]]
 name = "teloxide"
 version = "0.17.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#b120b78a79c39bacfbdf136ecd2af2be4a26a2f2"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#12d0b1ebdfa9a1e3a5f833edb92bb5d5ced08b3c"
 dependencies = [
  "aquamarine",
  "axum",
@@ -3886,7 +3886,7 @@ dependencies = [
 [[package]]
 name = "teloxide-core"
 version = "0.13.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#b120b78a79c39bacfbdf136ecd2af2be4a26a2f2"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#12d0b1ebdfa9a1e3a5f833edb92bb5d5ced08b3c"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -3913,13 +3913,12 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
- "vecrem",
 ]
 
 [[package]]
 name = "teloxide-macros"
 version = "0.10.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#b120b78a79c39bacfbdf136ecd2af2be4a26a2f2"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#12d0b1ebdfa9a1e3a5f833edb92bb5d5ced08b3c"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -4573,12 +4572,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "vecrem"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4808a28789238714a29163e4cb8031f0f050dd670f7a0cc74b6d80f3ce343fa"
 
 [[package]]
 name = "version_check"

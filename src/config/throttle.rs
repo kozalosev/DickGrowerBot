@@ -11,9 +11,6 @@ use crate::metrics;
 pub type ThrottledBot = Throttle<Bot>;
 
 /// How fast the bot may send messages to Telegram, answers and schedulers alike.
-///
-/// The per-minute limits are deliberately looser than Telegram's own: a chat held back by them
-/// keeps its place in a queue every chat shares.
 #[derive(Clone, Copy)]
 pub struct ThrottleConfig {
     pub messages_per_sec_overall: RateLimit,
@@ -31,7 +28,7 @@ impl ThrottleConfig {
             messages_per_sec_overall: env_value!("THROTTLE_MESSAGES_PER_SEC_OVERALL": RateLimit, or = 30, at_least = 1),
             messages_per_sec_chat: env_value!("THROTTLE_MESSAGES_PER_SEC_CHAT": RateLimit, or = 1, at_least = 1),
             messages_per_min_chat: env_value!("THROTTLE_MESSAGES_PER_MIN_CHAT": RateLimit, or = 20, at_least = 1),
-            messages_per_min_channel_or_supergroup: env_value!("THROTTLE_MESSAGES_PER_MIN_SUPERGROUP": RateLimit, or = 60, at_least = 1),
+            messages_per_min_channel_or_supergroup: env_value!("THROTTLE_MESSAGES_PER_MIN_SUPERGROUP": RateLimit, or = 20, at_least = 1),
         }
     }
 
@@ -41,7 +38,8 @@ impl ThrottleConfig {
             .on_queue_full(|pending| async move {
                 metrics::TELEGRAM_THROTTLE_QUEUE_FULL.inc();
                 tracing::warn!(pending, "the throttle queue is full, requests are waiting for their turn");
-            });
+            })
+            .on_wait(|kind, waited| metrics::TELEGRAM_THROTTLE_WAIT.record(kind, waited));
         Throttle::spawn_with_settings(bot, settings)
     }
 }

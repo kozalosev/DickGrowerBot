@@ -3,6 +3,8 @@ use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
 use strum::IntoEnumIterator;
+use std::time::Duration;
+use teloxide::adaptors::throttle::ThrottledChatKind;
 use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
@@ -189,7 +191,10 @@ pub static TELEGRAM_REQUEST_DURATION: Lazy<TelegramRequestDuration> = Lazy::new(
     TelegramRequestDuration::new("telegram_request_duration_seconds",
         "how long a request to the Telegram Bot API took, by method and outcome — the failed ones are measured too, so that a timeout (the slowest case there is) is not missing from the histogram"));
 pub static TELEGRAM_THROTTLE_QUEUE_FULL: Lazy<Counter> = Lazy::new(||
-    Counter::new("telegram_throttle_queue_full_total", "how many times the throttle worker found its queue full, which means the schedulers are asking for more requests than Telegram's limits allow and the extra ones are waiting. Teloxide reports this at most once every 4 seconds, so this counts moments, not requests"));
+    Counter::new("telegram_throttle_queue_full_total", "how many times requests that their chats' limits allowed were still waiting because THROTTLE_MESSAGES_PER_SEC_OVERALL was used up, which means the bot asks for more than the overall limit allows. Teloxide reports this at most once every 4 seconds, so this counts moments, not requests"));
+pub static TELEGRAM_THROTTLE_WAIT: Lazy<TelegramThrottleWait> = Lazy::new(||
+    TelegramThrottleWait::new("telegram_throttle_wait_seconds",
+        "how long a request waited in the throttle before it was let through to Telegram, by the kind of its chat (private/group/supergroup)"));
 
 pub static DB_POOL_CONNECTIONS_OPENED: Lazy<Counter> = Lazy::new(||
     Counter::new("db_pool_connections_opened_total", "count of new physical connections opened by the sqlx pool"));
@@ -307,6 +312,7 @@ fn force_registration() {
     Lazy::force(&TELEGRAM_REQUEST_ERRORS);
     Lazy::force(&TELEGRAM_REQUEST_DURATION);
     Lazy::force(&TELEGRAM_THROTTLE_QUEUE_FULL);
+    Lazy::force(&TELEGRAM_THROTTLE_WAIT);
 
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
@@ -1176,6 +1182,29 @@ impl TelegramRequestDuration {
     /// (e.g. `SendMessage`), a set fixed by the library, so the label stays bounded.
     pub fn record(&self, method: &str, outcome: &str, seconds: f64) {
         self.0.observe(&[method, outcome], seconds)
+    }
+}
+
+/// How long a request waited in the throttle, labeled by the kind of its chat.
+///
+/// The buckets tell no wait apart from a few hundred milliseconds, and those from seconds: a chat
+/// held back by its per-minute limit waits for up to a minute.
+pub struct TelegramThrottleWait(HistogramVec);
+
+impl TelegramThrottleWait {
+    fn new(name: &str, help: &str) -> Self {
+        Self(HistogramVec::new(name, help, &["chat_kind"],
+            &[0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0]))
+    }
+
+    pub fn record(&self, kind: ThrottledChatKind, waited: Duration) {
+        let label = match kind {
+            ThrottledChatKind::Private => "private",
+            ThrottledChatKind::Group => "group",
+            ThrottledChatKind::ChannelOrSupergroup => "supergroup",
+            _ => "other",
+        };
+        self.0.observe(&[label], waited.as_secs_f64())
     }
 }
 
