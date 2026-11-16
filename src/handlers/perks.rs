@@ -5,6 +5,7 @@ use crate::domain::primitives::Coefficient;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
+use crate::errors::flat::flat;
 use crate::handlers::utils::{days_word_ru, AdditionalChange, ChangeSource, ConfigurablePerk, Perk, PerkContext, PerkOutcome};
 use crate::config::StreakGrades;
 use crate::{config, repo};
@@ -99,7 +100,7 @@ impl Perk for LoanPayoutPerk {
         let payout = u32::try_from(payout_value)
             .map(LoanPayout::new)
             .unwrap_or_else(|e| {
-                tracing::error!(payout = payout_value, dick_id = %dick_id, error = %e, "the loan payout is invalid");
+                tracing::error!(payout = payout_value, dick_id = %dick_id, error = flat!(e), "the loan payout is invalid");
                 LoanPayout::new(0)
             });
         if payout.is_zero() {
@@ -156,7 +157,7 @@ impl Perk for StreakPerk {
         Ok(PerkOutcome {
             change: AdditionalChange(LengthChange::signed(bonus)),
             state: serde_json::to_value(state)
-                .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = %e, "couldn't serialize a streak"))
+                .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = flat!(e), "couldn't serialize a streak"))
                 .ok(),
             note: Some(PerkNote::new(note)),
         })
@@ -192,7 +193,7 @@ impl ConfigurablePerk<AnyPerk> for StreakPerk {
 /// streak starts over rather than the growth failing.
 fn parse_streak(state: &JsonValue) -> Option<StreakState> {
     serde_json::from_value(state.clone())
-        .inspect_err(|e| tracing::warn!(error = %e, "couldn't read a stored streak"))
+        .inspect_err(|e| tracing::warn!(error = flat!(e), "couldn't read a stored streak"))
         .ok()
 }
 

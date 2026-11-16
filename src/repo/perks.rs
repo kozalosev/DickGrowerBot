@@ -1,5 +1,4 @@
 use rustc_hash::FxHashMap;
-use anyhow::Context;
 use autometrics::autometrics;
 use chrono::NaiveDate;
 use domain_types::traits::SaturatingInto;
@@ -8,6 +7,8 @@ use sqlx::PgConnection;
 use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::domain::primitives::{PerkId, PerkName, UserId};
+use crate::errors::details::{DetailedContext, Details};
+use crate::errors::flat::flat;
 use crate::repository;
 
 /// What the perks of one dick know before it changes: each perk's own state, and the day the
@@ -31,26 +32,28 @@ repository!(PerkStates,
     #[autometrics]
     #[tracing::instrument(skip_all)]
     pub async fn register_all(&self, names: &[PerkName]) -> anyhow::Result<FxHashMap<PerkName, PerkId>> {
-        let names: Vec<String> = names.iter()
+        let texts: Vec<String> = names.iter()
             .map(|name| name.value().to_owned())
             .collect();
         sqlx::query!(
                 "INSERT INTO Perks (name)
                     SELECT unnest($1::text[]) EXCEPT SELECT name FROM Perks
                     ON CONFLICT (name) DO NOTHING",
-                &names)
+                &texts)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't insert the perks new to this run out of {names:?}"))?;
+            .detailed_context(Details::new("couldn't insert the perks new to this run")
+                .perks(names.iter().cloned()))?;
         sqlx::query!(
                 r#"SELECT id AS "id: PerkId", name AS "name: PerkName" FROM Perks WHERE name = ANY($1::text[])"#,
-                &names)
+                &texts)
             .fetch_all(&self.pool)
             .await
             .map(|rows| rows.into_iter()
                 .map(|row| (row.name, row.id))
                 .collect())
-            .context(format!("couldn't read the ids of the perks {names:?}"))
+            .detailed_context(Details::new("couldn't read the ids of the perks")
+                .perks(names.iter().cloned()))
     },
 
     #[autometrics]
@@ -67,7 +70,7 @@ repository!(PerkStates,
                 uid as UserId, chat_id.value() as String)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't read the perk states of {uid} in {chat_id}"))?;
+            .user_context(uid, "couldn't read the perk states")?;
         Ok(PerkStatesSnapshot {
             today: row.today,
             states: row.states.map(parse_states).unwrap_or_default(),
@@ -91,7 +94,7 @@ repository!(PerkStates,
                 uid as UserId, chat_id as InternalChatId)
             .fetch_one(conn)
             .await
-            .context(format!("couldn't read the perk states of {uid} in the chat with id = {chat_id}"))?;
+            .user_context(uid, "couldn't read the perk states")?;
         Ok(PerkStatesSnapshot {
             today: row.today,
             states: row.states.map(parse_states).unwrap_or_default(),
@@ -125,7 +128,7 @@ repository!(PerkStates,
                 chat_id as InternalChatId, uid as UserId, &perk_ids, &values)
             .execute(conn)
             .await
-            .context(format!("couldn't write the perk states of {uid} in the chat with id = {chat_id}"))?;
+            .user_context(uid, "couldn't write the perk states")?;
         Ok(())
     }
 );
@@ -138,9 +141,9 @@ fn parse_states(value: JsonValue) -> FxHashMap<PerkId, JsonValue> {
         return FxHashMap::default()
     };
     entries.into_iter()
-        .filter_map(|(key, state)| key.parse()
-            .inspect_err(|e| tracing::warn!(key = %key, error = %e, "a perk state is keyed by something that is not an id"))
+        .filter_map(|(key, state)| key.parse::<u16>()
+            .inspect_err(|e| tracing::warn!(key = %key, error = flat!(e), "a perk state is keyed by something that is not an id"))
             .ok()
-            .map(|id: u16| (PerkId::new(id), state)))
+            .map(|id| (PerkId::new(id), state)))
         .collect()
 }

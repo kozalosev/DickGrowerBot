@@ -14,6 +14,7 @@ use crate::config::MessageGroup;
 use domain_types::traits::ApproxInto;
 use crate::cache::Cache;
 use crate::cleanup::CleanupPolicy;
+use crate::errors::flat::flat;
 use crate::handlers::rights;
 use crate::handlers::utils::resolve_inline_message_id;
 use crate::domain::objects::ChatCleanupSettings;
@@ -167,7 +168,7 @@ impl Cleaner<'_> {
             },
         };
         if let Err(e) = result {
-            tracing::error!(id = %id, error = format!("{e:#}"), "couldn't record the outcome of a self-destruction");
+            tracing::error!(id = %id, error = flat!(e), "couldn't record the outcome of a self-destruction");
         }
     }
 
@@ -295,7 +296,7 @@ impl Cleaner<'_> {
 
         // A message that is already gone is the outcome we were after, reached by someone else.
         if is_gone(&error) {
-            tracing::debug!(kind = %deletion.kind, error = %error, "the message was already gone");
+            tracing::debug!(kind = %deletion.kind, error = flat!(error), "the message was already gone");
             return Outcome::RemovedBefore
         }
 
@@ -307,11 +308,11 @@ impl Cleaner<'_> {
             }
         }
         if is_final(&error) {
-            tracing::warn!(kind = %deletion.kind, error = %error, "the message can't be removed at all");
+            tracing::warn!(kind = %deletion.kind, error = flat!(error), "the message can't be removed at all");
             return Outcome::Failed
         }
 
-        tracing::warn!(kind = %deletion.kind, error = %error, "couldn't remove the self-destructing message");
+        tracing::warn!(kind = %deletion.kind, error = flat!(error), "couldn't remove the self-destructing message");
         Outcome::Retry
     }
 }
@@ -320,7 +321,7 @@ impl Cleaner<'_> {
 /// supergroup's does.
 fn resolve_inline(inline_message_id: &InlineMessageId) -> Option<(ChatId, MessageId)> {
     let info = resolve_inline_message_id(inline_message_id.value())
-        .inspect_err(|e| tracing::warn!(error = %e, "couldn't resolve the inline_message_id"))
+        .inspect_err(|e| tracing::warn!(error = flat!(e), "couldn't resolve the inline_message_id"))
         .ok()?;
     info.chat_id.map(|chat_id| (ChatId::from(chat_id), info.message_id))
 }
@@ -335,10 +336,10 @@ fn outcome_of_inline_deletion(result: Result<(), RequestError>) -> Option<Outcom
         return Some(Outcome::RemovedBefore)
     }
     if is_final(&error) {
-        tracing::debug!(error = %error, "the inline message can't be deleted, so it is shrunk instead");
+        tracing::debug!(error = flat!(error), "the inline message can't be deleted, so it is shrunk instead");
         return None
     }
-    tracing::warn!(error = %error, "couldn't delete the self-destructing inline message");
+    tracing::warn!(error = flat!(error), "couldn't delete the self-destructing inline message");
     Some(Outcome::Retry)
 }
 
@@ -356,7 +357,7 @@ fn outcome_of_warning(result: Result<(), RequestError>, id: ScheduledDeletionId)
         tracing::debug!(id = %id, "the message was gone before its warning");
         return Outcome::RemovedBefore
     }
-    tracing::warn!(id = %id, error = %error, "couldn't edit the message with the warning");
+    tracing::warn!(id = %id, error = flat!(error), "couldn't edit the message with the warning");
     Outcome::Warned
 }
 

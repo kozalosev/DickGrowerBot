@@ -215,8 +215,8 @@ pub async fn answer_and_edit_page(
             ).await
         }
     };
-    answered.context(format!("failed to answer a callback query {q:?}"))?;
-    edited.context(format!("failed to edit the message of {params:?}"))?;
+    answered.context("failed to answer the callback query")?;
+    edited.context("failed to edit the message")?;
     Ok(())
 }
 

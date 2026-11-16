@@ -3,7 +3,8 @@ use std::time::Duration;
 use teloxide::observer::{RequestBody, RequestObservation, RequestObserver};
 use teloxide::{ApiError, RequestError};
 use tracing::Span;
-use crate::error_handler::classify;
+use crate::errors::flat::flat;
+use crate::errors::handler::classify;
 use crate::metrics::{TELEGRAM_REQUEST_DURATION, TELEGRAM_REQUEST_ERRORS};
 use crate::telegram_backoff::TelegramBackoff;
 
@@ -71,7 +72,7 @@ impl RequestObservation for PendingRequest {
                 .map(String::from_utf8_lossy)
                 .unwrap_or(Cow::Borrowed("<multipart>"));
             self.span.in_scope(|| tracing::error!(method = %self.method, payload = %payload,
-                error = %err, "the Telegram API rejected the request"));
+                error = flat!(err), "the Telegram API rejected the request"));
         }
     }
 }

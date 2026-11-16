@@ -2,6 +2,7 @@ use std::time::Duration;
 use autometrics::autometrics;
 use crate::config::AppConfig;
 use crate::domain::primitives::Limit;
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::repo::{BroadcastState, Repositories, ShrinkBatchOutcome};
 
@@ -44,7 +45,7 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
             // those chats have lost the day — an error, not a warning.
             Err(e) => {
                 failed_batches += 1;
-                tracing::error!(chats = batch.len(), error = format!("{e:#}"), "a batch of the daily shrink failed");
+                tracing::error!(chats = batch.len(), error = flat!(e), "a batch of the daily shrink failed");
             },
             Ok(outcome) => total += outcome,
         }

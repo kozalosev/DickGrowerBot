@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::UserId;
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::repo::Users;
 
@@ -52,7 +53,7 @@ impl BanList {
         let banned = match self.users.get_banned().await {
             Ok(banned) => banned,
             Err(e) => {
-                tracing::warn!(error = format!("{e:#}"), "couldn't refresh the ban list, keeping the previous one");
+                tracing::warn!(error = flat!(e), "couldn't refresh the ban list, keeping the previous one");
                 return
             }
         };
@@ -74,7 +75,7 @@ impl BanList {
             loop {
                 match subscribe(&pool).await {
                     Ok(listener) => consume(&list, listener).await,
-                    Err(e) => tracing::error!(error = %e, "couldn't listen for changes to the ban list"),
+                    Err(e) => tracing::error!(error = flat!(e), "couldn't listen for changes to the ban list"),
                 }
                 tokio::time::sleep(RECONNECT_DELAY).await;
             }
@@ -121,7 +122,7 @@ async fn consume(list: &BanList, mut listener: PgListener) {
                 tracing::info!(uid = notification.payload(), "a user's ban status has changed");
                 list.refresh().await;
             }
-            Err(e) => return tracing::error!(error = %e, "the ban listener has stopped"),
+            Err(e) => return tracing::error!(error = flat!(e), "the ban listener has stopped"),
         }
     }
 }

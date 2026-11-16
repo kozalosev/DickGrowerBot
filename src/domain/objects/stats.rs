@@ -1,4 +1,5 @@
 use crate::domain::primitives::{BattlesCount, Length, Percentage, WinStreak};
+use crate::errors::flat::flat;
 use domain_types::literal;
 
 pub struct UserStats {
@@ -55,7 +56,7 @@ fn win_rate_percentage(battles_won: BattlesCount, battles_total: BattlesCount) -
         Ok(ratio) => Percentage::from(ratio),
         Err(e) => {
             // battles_won > battles_total can only mean corrupted stats; don't crash the handler
-            tracing::error!(battles_won = %battles_won, battles_total = %battles_total, error = %e, "an invalid win rate");
+            tracing::error!(battles_won = %battles_won, battles_total = %battles_total, error = flat!(e), "an invalid win rate");
             literal!(Percentage = 100)
         }
     }

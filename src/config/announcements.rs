@@ -6,6 +6,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use crate::config::env::get_env_value_or_default;
 use crate::domain::primitives::{Counter, TextHash, LanguageCode, SupportedLanguage};
+use crate::errors::flat::flat;
 
 #[derive(Clone, Default)]
 pub struct AnnouncementsConfig {
@@ -37,12 +38,12 @@ impl AnnouncementsConfig {
                 return Self::default()
             }
             Err(e) => {
-                tracing::warn!(path = %path, error = %e, "couldn't read the announcements file");
+                tracing::warn!(path = %path, error = flat!(e), "couldn't read the announcements file");
                 return Self::default()
             }
         };
         let file: AnnouncementsFile = serde_saphyr::from_str(&content)
-            .inspect_err(|e| tracing::warn!(path = %path, error = %e, "couldn't parse the announcements file"))
+            .inspect_err(|e| tracing::warn!(path = %path, error = flat!(e), "couldn't parse the announcements file"))
             .unwrap_or_default();
         let base: FxHashMap<SupportedLanguage, Announcement> = file.texts.into_iter()
             .filter_map(|(code, text)| SupportedLanguage::from_str(&code)

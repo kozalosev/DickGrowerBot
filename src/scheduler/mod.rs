@@ -11,6 +11,7 @@ use crate::cache::Cache;
 use crate::cleanup::CleanupPolicy;
 use crate::config::{get_env_value_or_default, AppConfig, ThrottledBot};
 use crate::domain::primitives::AttemptsCount;
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::telegram_backoff::TelegramBackoff;
 use crate::repo::Repositories;
@@ -53,7 +54,7 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
         let run = || async {
             run_daily_shrink(repos.clone(), config.clone())
                 .await
-                .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
+                .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the daily shrink run failed"))
         };
         // Puts the feature into effect at once instead of hours later. Re-running the same day is
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and
@@ -116,7 +117,7 @@ pub fn spawn_broadcast_worker(
                     topics: &topics, cache: &cache, config: &config,
                 };
                 if let Err(e) = run_pending_broadcasts(deps).await {
-                    tracing::error!(error = format!("{e:#}"), "a shrink broadcast run failed");
+                    tracing::error!(error = flat!(e), "a shrink broadcast run failed");
                 }
             }).await;
         }
@@ -146,7 +147,7 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
 
             resilient(async {
                 clean_finished_broadcasts(&repos, retention).await
-                    .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished shrink summaries failed"));
+                    .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the cleaning of the finished shrink summaries failed"));
             }).await;
         }
     }));
@@ -195,7 +196,7 @@ pub fn spawn_deletion_worker(
             // picks them up. Only the count is skipped, as it comes from the same database.
             resilient(async {
                 if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &cleanup, &self_destruction, bot_admin_ttl).await {
-                    tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
+                    tracing::error!(error = flat!(e), "a self-destruction run failed");
                 }
             }).await;
         }
@@ -225,7 +226,7 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 
             resilient(async {
                 clean_finished_deletions(&repos, retention).await
-                    .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished self-destructions failed"));
+                    .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the cleaning of the finished self-destructions failed"));
             }).await;
         }
     }));
@@ -310,7 +311,7 @@ fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
 async fn report_queues(repos: &Repositories, config: &AppConfig) {
     match repos.broadcasts.count_pending().await {
         Ok(pending) => metrics::DAILY_SHRINK_BROADCAST_PENDING.set(pending.saturating_into()),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending shrink summaries"),
+        Err(e) => tracing::warn!(error = flat!(e), "couldn't count the pending shrink summaries"),
     }
     match repos.shrinks.get_last_shrink_timestamp().await {
         Ok(Some(at)) => {
@@ -318,11 +319,11 @@ async fn report_queues(repos: &Repositories, config: &AppConfig) {
             metrics::DAILY_SHRINK_LAST_RUN_TIMESTAMP.set(scheduled_at.timestamp())
         },
         Ok(None) => {},
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the time of the last shrink"),
+        Err(e) => tracing::warn!(error = flat!(e), "couldn't read the time of the last shrink"),
     }
     match repos.deletions.count_pending().await {
         Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending.saturating_into()),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending self-destructions"),
+        Err(e) => tracing::warn!(error = flat!(e), "couldn't count the pending self-destructions"),
     }
 }
 

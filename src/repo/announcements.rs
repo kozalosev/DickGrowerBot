@@ -1,12 +1,12 @@
 use autometrics::autometrics;
 use std::sync::{Arc, RwLock};
-use anyhow::Context;
 use sqlx::{Pool, Postgres};
 use crate::repo::{ensure_only_one_row_updated, ChatIdKind};
 use crate::config;
 use crate::domain::objects::Announcement;
 use crate::domain::primitives::{Counter, LanguageCode, SupportedLanguage, TextHash};
 use crate::domain::primitives::chat::InternalChatId;
+use crate::errors::details::{DetailedContext, Details};
 
 #[derive(Clone)]
 pub struct Announcements {
@@ -95,7 +95,8 @@ impl Announcements {
                     chat_id_kind.value() as String, lang_code.to_supported_language() as SupportedLanguage)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get the announcement for {chat_id_kind}, {lang_code:?}"))
+            .detailed_context(Details::new("couldn't get the announcement")
+                .lang_code(lang_code.to_supported_language()))
     }
 
     #[autometrics]
@@ -110,7 +111,9 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
-            .context(format!("couldn't create the announcement for {chat_id_kind}, {lang_code:?}, {hash:?}"))
+            .detailed_context(Details::new("couldn't create the announcement")
+                .lang_code(lang_code.to_supported_language())
+                .hash(hash))
     }
 
     #[autometrics]
@@ -122,7 +125,8 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
-            .context(format!("couldn't increment shown times for {chat_id:?}, {lang_code:?}"))
+            .detailed_context(Details::new("couldn't increment the times the announcement was shown")
+                .lang_code(lang_code.to_supported_language()))
     }
 
     #[autometrics]
@@ -134,6 +138,8 @@ impl Announcements {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
-            .context(format!("couldn't update announcement for {chat_id:?}, {lang_code:?}, {hash:?}"))
+            .detailed_context(Details::new("couldn't update the announcement")
+                .lang_code(lang_code.to_supported_language())
+                .hash(hash))
     }
 }

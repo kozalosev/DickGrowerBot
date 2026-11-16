@@ -5,6 +5,7 @@ use itertools::Itertools;
 use crate::config::MessageGroup;
 use crate::domain::primitives::{AttemptsCount, Count, LanguageCode, Limit, ScheduledDeletionId};
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
+use crate::errors::flat::flat;
 use crate::repository;
 
 /// What the row is about: the bot's own answer, the command that caused it, or an inline message.
@@ -227,7 +228,7 @@ repository!(ScheduledDeletions,
                 // on would come back with every tick for ever.
                 tracing::error!(id = %row.id, "a scheduled deletion points at no message, giving up on it");
                 self.finish(row.id, DeletionState::Failed).await
-                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = format!("{e:#}"),
+                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = flat!(e),
                         "couldn't give up on the unusable scheduled deletion"));
                 continue
             };

@@ -5,6 +5,7 @@
 
 use teloxide::types::{Chat, ChatMemberUpdated, Me, Message};
 use crate::domain::primitives::chat::{ChatTitle, TelegramChatId};
+use crate::errors::flat::flat;
 use crate::handlers::checks::is_our_command;
 use crate::repo::Repositories;
 
@@ -30,7 +31,7 @@ async fn store(repos: &Repositories, chat_id: TelegramChatId, title: ChatTitle) 
     match repos.chats.set_title(&chat_id, &title).await {
         Ok(true) => tracing::debug!("the chat's title changed"),
         Ok(false) => {},
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't store the chat's title"),
+        Err(e) => tracing::warn!(error = flat!(e), "couldn't store the chat's title"),
     }
 }
 

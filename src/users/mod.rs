@@ -17,6 +17,7 @@ use crate::config::IntegrationsConfig;
 use domain_types::traits::{ApproxInto, SaturatingInto};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
+use crate::errors::flat::flat;
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::metrics;
 use crate::repo::Chats;
@@ -122,7 +123,7 @@ impl UserServiceClientGrpc {
     async fn cached(&self, uid: UserId) -> Option<Option<User>> {
         let bytes = self.cache.get_bytes(UserKey(uid)).await?;
         decode_user(&bytes)
-            .inspect_err(|e| tracing::warn!(uid = uid.0, error = %e, "couldn't read a user out of the cache"))
+            .inspect_err(|e| tracing::warn!(uid = uid.0, error = flat!(e), "couldn't read a user out of the cache"))
             .ok()
     }
 
@@ -342,7 +343,7 @@ impl<C: UserServiceClient> LanguageService<C> {
     pub async fn popular_language(&self, uids: &[UserId]) -> Option<SupportedLanguage> {
         let UserService::Connected(client) = &self.users else { return None };
         let langs = client.get_user_languages(uids).await
-            .inspect_err(|status| tracing::warn!(error = %status, "couldn't batch-fetch the user languages for the tally"))
+            .inspect_err(|status| tracing::warn!(error = flat!(status), "couldn't batch-fetch the user languages for the tally"))
             .ok()?;
         most_popular_language(langs.values())
     }
@@ -364,7 +365,7 @@ impl<C: UserServiceClient> LanguageService<C> {
         self.cache.read_through(key, self.chat_ttl, &metrics::CHAT_LANGUAGE, || async {
             self.chats.get_chat_language(chat_id).await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(error = format!("{e:#}"), "couldn't fetch the language of the chat");
+                    tracing::warn!(error = flat!(e), "couldn't fetch the language of the chat");
                     None
                 })
         }).await
@@ -399,7 +400,7 @@ async fn connect_user_service(
             UserService::Connected(client)
         }
         Err(e) => {
-            tracing::error!(error = format!("{e:#}"), "couldn't connect to the user-service");
+            tracing::error!(error = flat!(e), "couldn't connect to the user-service");
             UserService::Disabled
         }
     }
@@ -463,7 +464,7 @@ pub(crate) async fn resolve_language_for<C: UserServiceClient>(
                 }
             }
             Ok(None) => {}
-            Err(status) => tracing::warn!(uid = user.id.0, error = %status, "couldn't fetch the language of the user"),
+            Err(status) => tracing::warn!(uid = user.id.0, error = flat!(status), "couldn't fetch the language of the user"),
         }
     }
     LanguageCode::from_maybe_user(user)

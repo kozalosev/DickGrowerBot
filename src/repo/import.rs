@@ -2,7 +2,8 @@ use autometrics::autometrics;
 use anyhow::Context;
 use teloxide::types::ChatId;
 use crate::domain::objects::ExternalUser;
-use crate::domain::primitives::{Length, UserId};
+use crate::domain::primitives::{Count, Length, UserId};
+use crate::errors::details::{DetailedContext, Details};
 use crate::repository;
 
 repository!(Import,
@@ -14,7 +15,7 @@ repository!(Import,
                 chat_id.0 as i64)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't get imported users of {chat_id}"))
+            .context("couldn't get the imported users of the chat")
     }
 ,
     #[autometrics]
@@ -34,7 +35,8 @@ repository!(Import,
                 chat_id.0, &uids as &[UserId], &lengths as &[Length])
             .execute(&self.pool)
             .await
-            .context(format!("couldn't import {users:?} into the chat with id = {chat_id}"))?;
+            .detailed_context(Details::new("couldn't import the users")
+                .count(Count::<ExternalUser>::new(u64::try_from(users.len())?)))?;
         Ok(())
     }
 );

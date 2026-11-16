@@ -3,6 +3,7 @@ use chrono::Utc;
 use teloxide::prelude::Requester;
 use teloxide::types::{ChatId, Message, MessageId, UserId as TeloxideUserId};
 use crate::config::{MessageGroup, SelfDestructionConfig, ThrottledBot, MAX_DELAY};
+use crate::errors::flat::flat;
 use crate::handlers::rights;
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::domain::primitives::{CharCount, LanguageCode};
@@ -108,7 +109,7 @@ impl SelfDestructionService {
 
         tracing::debug!(delay = ?delay, with_command = %with_command, "scheduling the self-destruction of a message");
         self.deletions.schedule(&rows).await
-            .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't schedule the self-destruction"));
+            .unwrap_or_else(|e| tracing::error!(error = flat!(e), "couldn't schedule the self-destruction"));
     }
 
     /// Schedules an inline message to self-destruct on the terms of the chat it went to.
@@ -154,7 +155,7 @@ impl SelfDestructionService {
         };
         tracing::debug!(delay = ?delay, deletable = %deletable, "scheduling the self-destruction of an inline message");
         self.deletions.schedule(&[row]).await
-            .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't schedule the self-destruction"));
+            .unwrap_or_else(|e| tracing::error!(error = flat!(e), "couldn't schedule the self-destruction"));
     }
 
     /// Calls off the self-destruction of an inline message that has become worth keeping — an
@@ -182,7 +183,7 @@ impl SelfDestructionService {
 
     async fn cancel(&self, target: DeletionTarget) {
         self.deletions.cancel(&target).await
-            .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "couldn't cancel a self-destruction"));
+            .unwrap_or_else(|e| tracing::error!(error = flat!(e), "couldn't cancel a self-destruction"));
     }
 
     /// Whether the bot may delete other members' messages in this chat.
@@ -226,7 +227,7 @@ impl SelfDestructionService {
         let is_admin = match bot.get_chat_member(chat_id, self.bot_id).await {
             Ok(member) => member.can_delete_messages(),
             Err(e) => {
-                tracing::warn!(error = %e, "couldn't ask Telegram about the bot's rights in the chat");
+                tracing::warn!(error = flat!(e), "couldn't ask Telegram about the bot's rights in the chat");
                 return false
             }
         };

@@ -17,6 +17,7 @@ use crate::domain::objects::Loan;
 use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, PayoutRatio, UserId as DomainUserId};
 use domain_types::literal;
 use crate::domain::primitives::chat::{ChatIdPartiality, InlineMessageId};
+use crate::errors::flat::flat;
 use crate::handlers::{CallbackButton, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::handlers::utils::callbacks;
@@ -179,7 +180,7 @@ pub async fn loan_callback_handler(
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let unable_to_delete_message = bot.delete_message(chat_id, message_id).await
-                        .inspect_err(|e| tracing::error!(error = %e, "couldn't delete the loan request message"))
+                        .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't delete the loan request message"))
                         .is_err();
                     if unable_to_delete_message {
                         bot.edit_message_text(chat_id, message_id, updated_text).await?;

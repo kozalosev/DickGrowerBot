@@ -1,6 +1,7 @@
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use domain_types::traits::SaturatingInto;
+use crate::errors::flat::flat;
 use crate::metrics::RejectionReason;
 use crate::domain::primitives::Coefficient;
 use futures::join;
@@ -155,12 +156,12 @@ pub async fn pvp_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: Han
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
-    let mut answer = bot.answer_inline_query(query.id.clone(), vec![res.clone()])
+    let mut answer = bot.answer_inline_query(query.id.clone(), vec![res])
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await.context(format!("couldn't answer a callback query {query:?} with {res:?}"))?;
+    answer.await.context("couldn't answer the inline query")?;
     Ok(())
 }
 
@@ -226,7 +227,7 @@ pub async fn pvp_callback_handler(
             .then_some(query.inline_message_id.as_ref())
             .flatten()
             .and_then(|msg_id| utils::resolve_inline_message_id(msg_id)
-                .inspect_err(|e| tracing::error!(error = %e, "couldn't resolve the inline_message_id"))
+                .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't resolve the inline_message_id"))
                 .ok()
             )
             .and_then(|info| info.chat_id)
@@ -353,7 +354,7 @@ async fn pvp_impl_attack(
         let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
 
         let battle_stats = p.repos.pvp_stats.send_battle_result(&p.chat_id.kind(), winner, loser, bet).await
-            .inspect_err(|e| tracing::error!(winner = %winner, loser = %loser, error = %e, "couldn't send the battle statistics"))
+            .inspect_err(|e| tracing::error!(winner = %winner, loser = %loser, error = flat!(e), "couldn't send the battle statistics"))
             .ok()
             .filter(|_| p.features.show_stats)
             .map(|BattleStats { winner: winner_stats, loser: loser_stats }| {
@@ -372,7 +373,7 @@ async fn pvp_impl_attack(
             .unwrap_or_default();
         
         let (winner_res, withheld_part) = pay_for_loan_if_needed(&p, winner, bet).await
-            .inspect_err(|e| tracing::error!(error = %e, "couldn't pay for a loan from a battle award"))
+            .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't pay for a loan from a battle award"))
             .ok().flatten()
             .filter(|(_, withheld)| *withheld > 0)
             .map(|(res, withheld)| {

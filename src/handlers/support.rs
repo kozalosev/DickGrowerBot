@@ -13,6 +13,7 @@ use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
 use teloxide::RequestError;
+use crate::errors::flat::flat;
 use crate::metrics::{RejectableOutcome, RejectionReason};
 use crate::dialogue::CachedDialogueStorage;
 use teloxide::macros::BotCommands;
@@ -287,7 +288,7 @@ pub async fn support_reply_handler(bot: ThrottledBot, msg: Message, recipient: S
         .reply_markup(keyboard)
         .await;
     if let Err(error) = copied {
-        tracing::warn!(recipient = chat_id.0, error = %error, "couldn't deliver support reply");
+        tracing::warn!(recipient = chat_id.0, error = flat!(error), "couldn't deliver support reply");
         bot.send_message(msg.chat.id, format!("Не удалось доставить ответ пользователю: {error}"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;

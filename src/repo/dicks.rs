@@ -1,5 +1,5 @@
 use autometrics::autometrics;
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use futures::TryFutureExt;
 use domain_types::traits::SaturatingInto;
 use sqlx::{Acquire, Executor, PgConnection, Pool, Postgres, Transaction};
@@ -7,6 +7,7 @@ use crate::config::FeatureToggles;
 use crate::domain::objects::{Dick, DickOfDayResult, GrowthResult};
 use crate::domain::primitives::{Bet, DaysCount, LengthChange, Limit, Offset, UserId, Position, Length, Username};
 use crate::domain::primitives::chat::{ChatIdPartiality, ChatIdKind, InternalChatId};
+use crate::errors::details::{DetailedContext, Details};
 use super::Chats;
 
 /// The database projection of a [`Dick`]. `position` is a `ROW_NUMBER()` (a plain `int8`),
@@ -106,7 +107,7 @@ impl Dicks {
             .fetch_optional(conn)
             .await
             .map(|maybe_length| maybe_length.map(Length::new).unwrap_or_default())
-            .context(format!("couldn't fetch the length of {uid} in {chat_id}"))
+            .user_context(uid, "couldn't fetch the length")
     }
 
     #[autometrics]
@@ -120,7 +121,7 @@ impl Dicks {
             .fetch_optional(&self.pool)
             .await
             .map(|maybe_length| maybe_length.map(Length::new).unwrap_or_default())
-            .context(format!("couldn't fetch length for {chat_id} and {uid}"))
+            .user_context(uid, "couldn't fetch the length")
     }
 
     #[autometrics]
@@ -139,7 +140,7 @@ impl Dicks {
             .fetch_optional(&self.pool)
             .await
             .map(|maybe_dick| maybe_dick.map(Dick::from))
-            .context(format!("couldn't fetch dick for {chat_id} and {uid}"))
+            .user_context(uid, "couldn't fetch the dick")
     }
 
     /// The uids of up to `limit` of the chat's players, longest dick first.
@@ -157,7 +158,7 @@ impl Dicks {
                 chat_id as InternalChatId, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't fetch a sample of player uids for {chat_id}"))
+            .context("couldn't fetch a sample of player uids")
     }
 
     #[autometrics]
@@ -184,7 +185,9 @@ impl Dicks {
             .fetch_all(&self.pool)
             .await
             .map(|dicks| dicks.into_iter().map(Dick::from).collect())
-            .context(format!("couldn't get the top of {chat_id} with offset = {offset} and limit = {limit}"))
+            .detailed_context(Details::new("couldn't get the top")
+                .offset(offset)
+                .limit(limit))
     }
 
     /// Starts the election of the Dick of the Day.
@@ -228,7 +231,9 @@ impl Dicks {
             .fetch_optional(&self.pool)
             .map_ok(|opt| opt.unwrap_or(false))
             .await
-            .context(format!("couldn't check the dick {chat_id}, {user_id} to have at least {length} cm"))
+            .detailed_context(Details::new("couldn't check the dick to have enough length")
+                .subject_uid(user_id)
+                .bet(length))
     }
 
     #[autometrics]
@@ -275,7 +280,9 @@ impl Dicks {
             .fetch_one(&mut **tx)
             .await
             .map(Length::new)
-            .context(format!("couldn't update the length by {change} for {chat_id_internal}, {user_id}"))
+            .detailed_context(Details::new("couldn't update the length")
+                .subject_uid(user_id)
+                .length_change(change))
     }
 
     #[autometrics]
@@ -313,7 +320,7 @@ impl Dicks {
             .fetch_one(executor)
             .await
             .map(|pos| Some(Position::new(pos.saturating_into())))
-            .context(format!("couldn't get the top for {chat_id_internal} and {uid}"))
+            .user_context(uid, "couldn't get the position in the top")
     }
     
     #[autometrics]
@@ -327,7 +334,8 @@ impl Dicks {
         let chat_internal_id = self.chats.get_internal_id(chat_id).await?;
 
         let new_length = Self::grow_no_attempts_check_internal(&self.pool, chat_internal_id, user_id, change).await?
-            .ok_or(anyhow!("couldn't find a dick of ({chat_id}, {user_id}) for some reason"))?;
+            .ok_or_else(|| Details::new("couldn't find the dick")
+                .subject_uid(user_id))?;
         let pos_in_top = self.get_position_in_top(chat_internal_id, user_id).await?;
         
         Ok(GrowthResult { new_length, pos_in_top })
@@ -351,7 +359,9 @@ impl Dicks {
             .fetch_optional(executor)
             .await
             .map(|maybe_length| maybe_length.map(Length::new))
-            .context(format!("couldn't grow the dick without attempts check for {chat_id_internal} and {user_id} by {bonus}"))
+            .detailed_context(Details::new("couldn't grow the dick without the attempts check")
+                .subject_uid(user_id)
+                .length_change(bonus))
     }
 
     /// Locks the dick's row, if there is one. Taken first in every transaction that also locks the
@@ -366,7 +376,7 @@ impl Dicks {
             .fetch_optional(conn)
             .await
             .map(|_| ())
-            .context(format!("couldn't lock the dick of {uid} in {chat_id}"))
+            .user_context(uid, "couldn't lock the dick")
     }
 
     /// Crowns `user_id`, unless the chat already has a winner today — which is what `false` means.
@@ -384,7 +394,7 @@ impl Dicks {
             .execute(&mut **tx)
             .await
             .map(|result| result.rows_affected() > 0)
-            .context(format!("couldn't insert to DOD table for {chat_id_internal} and {user_id}"))
+            .user_context(user_id, "couldn't claim the day")
     }
 
     /// The name of the chat's winner of today, read after an election has lost the day to them.
@@ -402,7 +412,7 @@ impl Dicks {
                 chat_id_internal as InternalChatId)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't fetch the dick of the day of {chat_id_internal}"))
+            .context("couldn't fetch the dick of the day")
     }
 }
 
@@ -456,7 +466,9 @@ impl GrowthTx {
                 uid as UserId, chat_id as InternalChatId, increment.value())
             .fetch_optional(&mut *self.tx)
             .await
-            .context(format!("couldn't upsert the dick of {uid} in {chat_id} with increment of {increment}"))?;
+            .detailed_context(Details::new("couldn't upsert the dick")
+                .subject_uid(uid)
+                .length_change(increment))?;
         let Some(new_length) = new_length else {
             self.rollback().await?;
             return Ok(None)

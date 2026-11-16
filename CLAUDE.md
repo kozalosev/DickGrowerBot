@@ -1099,8 +1099,8 @@ to the exporter explicitly; left to itself it would fall back to the traces one 
 to the tracing backend.
 
 Spans are exported over OTLP/gRPC (batch) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the
-service name is the crate name (`dick-grower-bot`). A trace of an update is rooted at the handler
-that processes it; outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context
+service name is the crate name (`dick-grower-bot`). A trace of an update is rooted at its
+`update` span (see below), and the handler that processes it is a child of that; outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context
 propagates to the user-service.
 
 The HTTP server has **no** OpenTelemetry layer, on purpose: its only two routes are the webhook and
@@ -1127,14 +1127,64 @@ VictoriaLogs. Every field is taken rather than a named few — a span's fields a
 hand at each `#[tracing::instrument]`, and an allowlist would be a second list to keep in step.
 
 **A span decorates only what is logged while it is entered**, which is the catch for an error that
-travels. A repository returns its errors instead of logging them, so by the time
-`ContextLoggingErrorHandler` writes the record — in the dispatcher's task — both the repo's span
-and the handler's have closed, and nothing is left to carry the ids. So the two cases part ways:
+travels. A repository returns its errors instead of logging them, and teloxide's `ErrorHandler`
+runs after the handler's span has closed and is given the error alone. So the whole tree is
+wrapped in `errors::handler::trace_updates`, which runs every update inside an `update` span with
+`update_id`, `chat_id`, `uid`, `chat_instance`, `inline_message_id` and `callback_data` read off the
+`Update`, and logs a failed update in that span before it gets any further — `an update failed` —
+passing nothing on to the dispatcher. One record per failure, the same fields whichever handler
+failed. What it can't recover is the finer fields of the repo's own span (`topic_id`, a loan's id).
 
-* an error **handled where it is created** — the read-through caches, the schedulers,
-  `handlers::rights` — is logged inside the caller's span, and its context may be a constant;
-* an error that **escapes to the dispatcher's error handler** keeps its ids in the text of its
-  `.context(…)`, because nothing else will carry them there.
+**The `update` span is what ties the records of one update together.** It is the root of the
+trace, so every record written while the update is handled carries its fields and its trace id —
+including the 90% of traces the sampler drops: a dropped span is still given a trace id, it is
+only not exported. So the whole path of an update is `trace_id:=…` in VictoriaLogs whether or not
+Jaeger has the trace, and everything a user did is `uid:=…`. The console has no trace ids, which is
+what `update_id` is for.
+
+**A plain group message — one that isn't our command — gets no span up front**, because a group the
+bot reads in full sends plenty and most of them reach no handler. A branch that does act on them
+(a title rename, a migration, a support reply) chains `errors::handler::open_update_span()` right
+after its filter, so the span opens only once that branch has taken the update, and the handler's
+spans sit under it like any other. `trace_updates` and the node share the span through a slot in
+the dependencies, so a failure lands in the same trace. A branch that forgets the node still works:
+its handler's spans become roots of their own, and a failure gets a span opened afterwards for the
+failure record alone.
+
+So **the text of an error is a constant too**, like a log message, and no value goes into it:
+
+* **the chat a handler or a scheduler works in is never named at all** — the update's fields carry
+  it, or the span of the scheduler that logs the failure (`send_and_record`, the cache reads). An
+  internal id is that same chat in another form;
+* **every other value goes through `.detailed_context(…)`** (`errors::details`):
+  `Details::new("couldn't pay for the loan").subject_uid(uid).payout(value)`, or
+  `.user_context(uid, "…")` for the user alone. A root error is `Details::new("…").count(x).into()` in place of `anyhow!` or
+  `bail!` with a value. `trace_updates` collects the values from the whole cause chain, the
+  outermost winning, and logs each as a field of its own name. The user is `subject_uid`: the
+  update names only its sender, and a repository method is as often called for somebody else —
+  the Dick of the Day's winner, the other side of a battle.
+
+The names are a closed list, `error_fields!` in `errors::details`, because a `tracing` field's name
+is fixed where it is written. One entry there is the field, its `Details` method and its place in
+the record. A value that fits no name already on the list gets a new one, named for what it is
+(`old_chat_id`, `merged_chat_id`), rather than squeezed into a near one. Every entry takes the
+domain type of what it names, so a setter can't be handed the wrong kind of value — which is also
+why a bet, a debt, a payout and a length change are fields of their own rather than one "amount".
+`count` takes a `Count<T>` of anything and keeps the number. A list is logged joined by commas.
+
+The values ride in an error of their own, `DetailedError`, because a handler's error has become a
+`Box<dyn Error>` by the time it is logged and only an error in the chain can be downcast there.
+**It is never the outermost one**: anyhow turns an `anyhow::Error` into a box of its own private
+type, so the outermost error can't be downcast at all. So the message is an ordinary anyhow context
+on top, the `DetailedError` sits under it with no text of its own, and `flat!` leaves out the links
+that have none.
+
+A failure handled in a span of its own doesn't go through `trace_updates`, so its user is
+whatever that span or the log line names — `pvp` logs the winner and the loser beside a failed
+battle result, for one.
+
+An inline query and a chosen inline result carry no chat, so a failure there keeps the chat only
+through `inline_message_id`, which encodes it in a supergroup.
 
 `docker-compose.yml` bundles an **optional** observability stack — Jaeger for the spans,
 VictoriaLogs for the records — gated behind the `tracing` Compose profile. The `infra`/`infra:full`
@@ -1185,7 +1235,7 @@ Each request produces three things:
   are measured too, so a timeout (the slowest case there is) is in the histogram rather than
   missing from it. `outcome` is `ok` or one of the kinds `telegram_request_errors_total` uses.
 * `telegram_request_errors_total{kind}` — the failures of that same call, from that same
-  `error_handler::classify`. One classification feeds both, so the two can't disagree. It is
+  `errors::handler::classify`. One classification feeds both, so the two can't disagree. It is
   counted **here** rather than at the dispatcher's error handler, which is the only place that sees
   requests at all: the schedulers never reach a dispatcher, so a broadcast-wide outage left the
   counter flat. The observer sits under every adaptor, so it sees them and polling's `getUpdates`
@@ -1730,21 +1780,25 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 - **A log message is a constant; the values are fields.** Use `tracing::{debug,info,warn,error}!`
   (never `log::*`) and keep the message text free of interpolated values, so that repeated events
   group together in the log database. Messages are lower-case and have no trailing dots. Pass the
-  error of a failed operation as an `error` field — `tracing-opentelemetry` turns it into an
-  exception event on the span, which is how a failure becomes visible in the trace. Don't repeat
-  what the span already carries: an instrumented function's `chat_id`/`uid`/`lang_code` are printed
-  with every line anyway.
+  error of a failed operation as `error = flat!(e)` (`errors::flat`). Don't repeat what the span
+  already carries: an instrumented function's `chat_id`/`uid`/`lang_code` are printed with every
+  line anyway.
 
   ```rust
   // ❌ the values are baked into the text, the message is unique every time
   tracing::warn!("daily shrink: couldn't notify chat {chat_id}: {err:#}");
 
   // ✅ constant message, values as fields (chat_id comes from the span)
-  tracing::warn!(error = format!("{err:#}"), "couldn't notify the chat about the shrinks");
+  tracing::warn!(error = flat!(err), "couldn't notify the chat about the shrinks");
   ```
 
-  Use `%value` for `Display`, `?value` for `Debug`, and `format!("{e:#}")` for an `anyhow` error
-  whose whole chain is worth keeping on one line.
+  `flat!` records the error *as an error*, a `&dyn Error`, which a string can't be: the exporter
+  writes it as `exception.message`, and `tracing-opentelemetry` adds an exception to the span. The
+  exporter writes only the error's `Display` and never walks `source()`, so `flat!` first joins the
+  whole cause chain into that `Display`, on one line — the log database stores a record per line.
+  It takes any `Error`, and an `anyhow::Error` through its `Deref`.
+
+  Use `%value` for `Display` and `?value` for `Debug` for everything that isn't an error.
 
 - **A comment describes the code, never the change.** Write comments in short, plain English: what
   the code does, and why if that isn't obvious. Never mention a change, a diff, an issue number, or

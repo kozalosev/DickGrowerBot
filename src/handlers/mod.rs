@@ -46,9 +46,11 @@ pub use cleanup::CleanupCommands;
 pub use mentions::MentionsCommands;
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::primitives::LanguageCode;
+use crate::errors::flat::flat;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::disabled_link_preview;
 use crate::handlers::utils::SelfDestructionService;
+use crate::repo;
 use crate::repo::Repositories;
 use crate::users::LanguageResolver;
 
@@ -102,7 +104,7 @@ impl CallbackResult {
                     edit_req.reply_markup = keyboard;
 
                     edit_req.await
-                        .inspect_err(|err| tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = %err,
+                        .inspect_err(|err| tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = flat!(err),
                             "couldn't edit the message"))?;
                 } else if let Some(inline_message_id) = callback_query.inline_message_id {
                     let mut edit_req = bot.edit_message_text_inline(&inline_message_id, text)
@@ -111,7 +113,7 @@ impl CallbackResult {
                     edit_req.reply_markup = keyboard;
 
                     edit_req.await
-                        .inspect_err(|err| tracing::error!(inline_message_id = %inline_message_id, error = %err,
+                        .inspect_err(|err| tracing::error!(inline_message_id = %inline_message_id, error = flat!(err),
                             "couldn't edit the inline message"))?;
                 };
                 answer_req.await?;
@@ -185,11 +187,11 @@ macro_rules! reply_html {
         #[allow(unused_mut)]
         let mut request = reply_html(&$bot, &$msg, $answer);
         $( ::teloxide::requests::HasPayload::payload_mut(&mut request).$field = ::core::convert::Into::into($value); )*
-        // The error handler runs outside the handler's span, so the ids of the message being
-        // answered survive only in this context.
+        // A failed update is logged with its chat but not with its message, so the id of the
+        // message being answered survives only in this context.
         anyhow::Context::context(
             request.await,
-            format!("failed to answer message {} in chat {}", $msg.id.0, $msg.chat.id.0)
+            format!("failed to answer message {}", $msg.id.0)
         )?
     }};
 }
@@ -244,10 +246,9 @@ pub(crate) async fn answer_callback_feature_disabled(
 }
 
 pub(crate) fn banned_until_of(e: &anyhow::Error) -> Option<String> {
-    e.downcast_ref::<sqlx::Error>()
-     .and_then(sqlx::Error::as_database_error)
-     .filter(|e| e.code().is_some_and(|code| code == BANNED_SQL_CODE))
-     .map(|e| e.message().to_owned())
+    repo::database_errors(e)
+        .find(|e| e.code().is_some_and(|code| code == BANNED_SQL_CODE))
+        .map(|e| e.message().to_owned())
 }
 
 pub mod checks {
@@ -265,6 +266,7 @@ pub mod checks {
     use crate::config::{MessageGroup, ThrottledBot};
     use crate::domain::primitives::{LanguageCode, UserId};
     use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
+    use crate::errors::flat::flat;
     use crate::handlers::HandlerDeps;
     use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
     use crate::handlers::utils::is_forum;
@@ -335,7 +337,7 @@ pub mod checks {
         }
         repos.chats.is_anchored(&TelegramChatId::from(msg.chat.id))
             .await
-            .inspect_err(|e| tracing::error!(error = %e, "couldn't check whether the chat is anchored"))
+            .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't check whether the chat is anchored"))
             .map(bool::not)
             // on a DB error, let the command through rather than locking the chat out
             .unwrap_or(false)
@@ -369,8 +371,8 @@ pub mod checks {
     ///
     /// `/topics` is *not* exempted here. It is a branch of its own above this gate, so its messages
     /// never reach the predicate.
-    fn is_gated_by_topic(msg: &Message, me: &Me) -> bool {
-        is_forum(&msg.chat) && is_our_command(msg, me)
+    pub fn is_gated_by_topic(msg: Message, me: Me) -> bool {
+        is_forum(&msg.chat) && is_our_command(&msg, &me)
     }
 
     /// Whether the message is one of our commands: by name, and by the `@username` when Telegram's
@@ -391,9 +393,8 @@ pub mod checks {
     }
 
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, topic_id = %TopicId::from(msg.thread_id)))]
-    pub async fn is_forbidden_topic(msg: Message, me: Me, topics: TopicPolicy) -> bool {
-        is_gated_by_topic(&msg, &me)
-            && !topics.allows(&msg.chat.id.into(), msg.thread_id.into()).await
+    pub async fn is_forbidden_topic(msg: Message, topics: TopicPolicy) -> bool {
+        !topics.allows(&msg.chat.id.into(), msg.thread_id.into()).await
     }
 
     #[autometrics]
@@ -616,43 +617,43 @@ pub mod checks {
 
         #[test]
         fn test_our_command_in_a_forum_is_gated() {
-            assert!(is_gated_by_topic(&message("/grow", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/grow", true, Some(42)), me()));
             // the General topic carries no thread id of its own
-            assert!(is_gated_by_topic(&message("/grow", true, None), &me()));
-            assert!(is_gated_by_topic(&message("/grow@DickGrowerBot arg", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/grow", true, None), me()));
+            assert!(is_gated_by_topic(message("/grow@DickGrowerBot arg", true, Some(42)), me()));
             // Telegram's menu is not consistent about the case of the username it appends
-            assert!(is_gated_by_topic(&message("/grow@dickgrowerbot", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/grow@dickgrowerbot", true, Some(42)), me()));
         }
 
         /// A group usually holds several bots. Answering for a command aimed at one of them would
         /// be noise from a bot that was just told to be quieter, so the addressee is checked.
         #[test]
         fn test_another_bots_command_is_not_gated() {
-            assert!(!is_gated_by_topic(&message("/grow@SomeOtherBot", true, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("/start@SomeOtherBot", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(message("/grow@SomeOtherBot", true, Some(42)), me()));
+            assert!(!is_gated_by_topic(message("/start@SomeOtherBot", true, Some(42)), me()));
         }
 
         /// Same reasoning for a bare command we simply don't have: it belongs to someone else.
         #[test]
         fn test_a_command_we_dont_have_is_not_gated() {
-            assert!(!is_gated_by_topic(&message("/roll 2d6", true, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("/", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(message("/roll 2d6", true, Some(42)), me()));
+            assert!(!is_gated_by_topic(message("/", true, Some(42)), me()));
         }
 
         /// Every message of a forbidden topic would otherwise get a notice, which is noisier than
         /// the bot the setting was meant to quiet.
         #[test]
         fn test_an_ordinary_message_is_not_gated() {
-            assert!(!is_gated_by_topic(&message("hello", true, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("not a /grow", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(message("hello", true, Some(42)), me()));
+            assert!(!is_gated_by_topic(message("not a /grow", true, Some(42)), me()));
         }
 
         /// A supergroup linked to a channel puts a thread id on discussion-thread messages too,
         /// and those aren't topics.
         #[test]
         fn test_a_non_forum_is_never_gated() {
-            assert!(!is_gated_by_topic(&message("/grow", false, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("/grow", false, None), &me()));
+            assert!(!is_gated_by_topic(message("/grow", false, Some(42)), me()));
+            assert!(!is_gated_by_topic(message("/grow", false, None), me()));
         }
 
         /// `/topics` is not exempted here: it is a branch of its own above this gate, so a
@@ -660,7 +661,7 @@ pub mod checks {
         /// branch is ever moved below the gate, the reminder is right here.
         #[test]
         fn test_the_topics_command_is_exempted_by_the_branch_order_only() {
-            assert!(is_gated_by_topic(&message("/topics", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/topics", true, Some(42)), me()));
         }
 
         /// The rate limiter counts the commands in every chat, a forum or not.

@@ -3,6 +3,7 @@ use anyhow::Context;
 use chrono::{DateTime, NaiveDate, Utc};
 use crate::domain::primitives::{AttemptsCount, Count, Limit, ScheduledBroadcastId, SupportedLanguage};
 use crate::domain::primitives::chat::{InternalChatId, TelegramChatId};
+use crate::errors::flat::flat;
 use crate::repository;
 
 /// How far a summary got. `Created` is the only actionable one; the rest are terminal and stay in
@@ -119,7 +120,7 @@ repository!(ScheduledBroadcasts,
             let Some(chat_id) = row.chat_id else {
                 tracing::error!(id = %row.id, "a queued shrink summary points at a chat with no Telegram id, giving up on it");
                 self.finish(row.id, BroadcastState::Failed, None).await
-                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = format!("{e:#}"),
+                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = flat!(e),
                         "couldn't give up on the unusable shrink summary"));
                 continue
             };

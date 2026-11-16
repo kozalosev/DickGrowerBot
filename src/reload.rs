@@ -16,13 +16,14 @@ use crate::repo::Announcements;
 pub fn spawn_reload_on_sighup(announcements: Announcements, bans: BanList) {
     use tokio::signal::unix::{signal, SignalKind};
     use crate::config::AnnouncementsConfig;
+    use crate::errors::flat::flat;
 
     let path = AnnouncementsConfig::file_path();
     tokio::spawn(async move {
         let mut hangups = match signal(SignalKind::hangup()) {
             Ok(hangups) => hangups,
             Err(e) => {
-                tracing::error!(error = %e, "couldn't listen for SIGHUP, the announcements and the ban list will only change on a restart");
+                tracing::error!(error = flat!(e), "couldn't listen for SIGHUP, the announcements and the ban list will only change on a restart");
                 return
             }
         };

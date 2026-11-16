@@ -5,6 +5,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use byteorder::{LittleEndian, ReadBytesExt};
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::chat::TelegramChatId;
+use crate::errors::flat::flat;
 
 impl TryFrom<&str> for InlineMessageIdInfo {
     type Error = InvalidIDFormat;
@@ -29,7 +30,7 @@ pub fn resolve_inline_message_id(inline_message_id: &str) -> anyhow::Result<Inli
 /// channels encode it (see [`fix_chat_id`]). Errors are logged and reported as "unknown".
 pub fn try_resolve_chat_id(msg_id: &str) -> Option<TelegramChatId> {
     resolve_inline_message_id(msg_id)
-        .inspect_err(|e| tracing::error!(error = %e, "couldn't resolve the inline_message_id"))
+        .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't resolve the inline_message_id"))
         .ok()
         .and_then(|info| info.chat_id)
 }

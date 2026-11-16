@@ -1,9 +1,11 @@
-use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
+use sqlx::error::DatabaseError;
 use sqlx::postgres::{PgConnectOptions, PgQueryResult};
 use crate::config;
 use crate::config::DatabaseConfig;
+use crate::domain::primitives::AffectedRows;
 use crate::domain::primitives::chat::ChatIdKind;
+use crate::errors::details::Details;
 use crate::pub_use_modules;
 
 pub_use_modules!(
@@ -167,9 +169,23 @@ macro_rules! repository {
     };
 }
 
+/// The errors Postgres returned, wherever they sit in the chain.
+pub(crate) fn database_errors(err: &anyhow::Error) -> impl Iterator<Item = &(dyn DatabaseError + 'static)> {
+    err.chain()
+        .filter_map(|e| e.downcast_ref::<sqlx::Error>())
+        .filter_map(sqlx::Error::as_database_error)
+}
+
+/// Whether the statement was refused by the given constraint.
+fn violates(err: &anyhow::Error, constraint: &str) -> bool {
+    database_errors(err)
+        .any(|e| e.constraint() == Some(constraint))
+}
+
 fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<(), anyhow::Error> {
     match res.rows_affected() {
         1 => Ok(res),
-        x => Err(anyhow!("not only one row was updated but {x}"))
+        x => Err(Details::new("not only one row was updated")
+            .affected_rows(AffectedRows::new(x)).into())
     }.map(|_| ())
 }

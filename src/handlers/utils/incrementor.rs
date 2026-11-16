@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use std::ops::RangeInclusive;
 use domain_types::traits::SaturatingInto;
 use std::sync::Arc;
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use chrono::NaiveDate;
 use derive_more::Display;
 use enum_dispatch::enum_dispatch;
@@ -12,11 +12,13 @@ use rand::RngExt;
 use rust_i18n::t;
 use sqlx::types::JsonValue;
 use sqlx::PgConnection;
+use crate::errors::flat::flat;
 use crate::repo::{self, GrowthTx};
 use crate::config::IncrementorConfig;
 use crate::domain::objects::PerkStateUpdate;
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
 use crate::domain::primitives::{DaysCount, LanguageCode, Length, LengthChange, PerkId, PerkName, PerkNote, Ratio, SignedLengthChange, UserId};
+use crate::errors::details::Details;
 use crate::handlers::perks::AnyPerk;
 use domain_types::literal;
 
@@ -166,7 +168,8 @@ impl<P: Perk> Incrementor<P> {
                 let name = perk.name();
                 let id = ids.get(&name)
                     .copied()
-                    .ok_or_else(|| anyhow!("the perk {name} was not given an id"))?;
+                    .ok_or_else(|| Details::new("the perk was not given an id")
+                        .perks([name.clone()]))?;
                 Ok(RegisteredPerk { id, perk })
             })
             .collect::<anyhow::Result<Arc<[_]>>>()?;
@@ -195,7 +198,7 @@ impl<P: Perk> Incrementor<P> {
             return Vec::default()
         }
         let Ok(snapshot) = self.perk_states.read(dick.0, &dick.1).await
-            .inspect_err(|e| tracing::error!(dick = %dick, error = %e, "couldn't read the perk states for the statistics"))
+            .inspect_err(|e| tracing::error!(dick = %dick, error = flat!(e), "couldn't read the perk states for the statistics"))
         else {
             return Vec::default()
         };
@@ -256,7 +259,7 @@ impl<P: Perk> Incrementor<P> {
                 Ok(Some(increment)) => return increment,
                 Ok(None) => tracing::debug!(%dick, "perks cancelled the increment, rerolling the base"),
                 Err(e) => {
-                    tracing::error!(%dick, error = format!("{e:#}"), "couldn't apply the perks");
+                    tracing::error!(%dick, error = flat!(e), "couldn't apply the perks");
                     break
                 },
             }

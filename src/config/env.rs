@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::domain::primitives::Ratio;
+use crate::errors::flat::flat;
 
 pub(super) fn get_env_mandatory_value<T, E>(key: &str) -> anyhow::Result<T>
 where
@@ -196,6 +197,8 @@ pub(super) enum InvalidDuration {
     Number(std::num::ParseIntError),
 }
 
+impl Error for InvalidDuration {}
+
 /// The items of a comma-separated list, trimmed, with the empty ones left out.
 pub(super) fn list_items(raw: &str) -> impl Iterator<Item = &str> {
     raw.split(',')
@@ -261,7 +264,7 @@ pub(super) fn get_optional_env_duration(key: &str) -> Option<Duration> {
             None
         })?;
     parse_duration(&raw)
-        .inspect_err(|e| tracing::warn!(key = %key, value = raw, error = %e,
+        .inspect_err(|e| tracing::warn!(key = %key, value = raw, error = flat!(e),
             "couldn't read a duration, so it counts as unset"))
         .ok()
 }
@@ -278,7 +281,7 @@ pub(super) fn get_optional_chat_id(key: &str) -> Option<TelegramChatId> {
         .ok()
         .filter(|id| !id.is_empty())
         .and_then(|id| id.parse::<i64>()
-             .inspect_err(|e| tracing::warn!(key = %key, error = %e, "chat_id is not a number"))
+             .inspect_err(|e| tracing::warn!(key = %key, error = flat!(e), "chat_id is not a number"))
              .ok())
         .map(TelegramChatId::new)
 }

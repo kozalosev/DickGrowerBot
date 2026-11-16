@@ -2,11 +2,11 @@
 macro_rules! error {
     ($name:ident) => {
         #[derive(Debug, derive_more::Error, derive_more::Display)]
-        pub struct $name(#[error(not(source))] String);
-        
+        pub struct $name(#[error(not(source))] &'static str);
+
         impl $name {
-            pub fn message(msg: impl ToString) -> Self {
-                Self(msg.to_string())
+            pub const fn message(msg: &'static str) -> Self {
+                Self(msg)
             }
         }
     };

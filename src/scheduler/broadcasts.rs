@@ -13,6 +13,7 @@ use crate::cache::{Cache, CacheKey};
 use crate::config::{AppConfig, ThrottledBot};
 use crate::domain::primitives::{LanguageCode, Page, ScheduledBroadcastId, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
+use crate::errors::flat::flat;
 use crate::handlers::shrink::{build_shrink_keyboard, shrinks_page_for_internal_chat, ShrinkView};
 use crate::metrics;
 use crate::repo::{BroadcastState, Repositories, ScheduledBroadcast};
@@ -129,7 +130,7 @@ async fn send_and_record(deps: BroadcastDeps<'_>, broadcast: ScheduledBroadcast)
         },
     };
     if let Err(e) = result {
-        tracing::error!(error = format!("{e:#}"), "couldn't record the outcome of a shrink summary");
+        tracing::error!(error = flat!(e), "couldn't record the outcome of a shrink summary");
     }
 }
 
@@ -213,18 +214,18 @@ async fn outcome_of(
 
     if !is_chat_unreachable(&error) {
         if is_final(&error) {
-            tracing::warn!(error = %error, "the shrink summary can't be sent to this chat at all");
+            tracing::warn!(error = flat!(error), "the shrink summary can't be sent to this chat at all");
             return Outcome::Failed
         }
-        tracing::warn!(error = %error, "couldn't notify the chat about the shrinks");
+        tracing::warn!(error = flat!(error), "couldn't notify the chat about the shrinks");
         return Outcome::Retry
     }
 
     // Marking is best-effort: a chat that stays unmarked is merely queued again tomorrow.
-    tracing::info!(error = %error, "the chat is unreachable, skipping it from now on");
+    tracing::info!(error = flat!(error), "the chat is unreachable, skipping it from now on");
     repos.chats.mark_unreachable(&broadcast.chat_id)
         .await
-        .unwrap_or_else(|e| tracing::warn!(error = format!("{e:#}"), "couldn't mark the chat as unreachable"));
+        .unwrap_or_else(|e| tracing::warn!(error = flat!(e), "couldn't mark the chat as unreachable"));
     Outcome::Unreachable
 }
 
@@ -322,7 +323,7 @@ async fn tallied_language(
     cache.read_through(key, ttl, &metrics::BROADCAST_LANGUAGE_TALLY, || async {
         let uids: Vec<TeloxideUserId> = repos.dicks
             .get_player_uids_sample(internal_chat_id, config.daily_shrink.broadcast.language_sample).await
-            .inspect_err(|e| tracing::warn!(error = format!("{e:#}"), "couldn't list the players of the chat"))
+            .inspect_err(|e| tracing::warn!(error = flat!(e), "couldn't list the players of the chat"))
             .unwrap_or_default()
             .into_iter()
             .map(Into::into)

@@ -7,6 +7,7 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{CallbackQuery, Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, ReplyMarkup, User};
 use crate::config::ThrottledBot;
+use crate::errors::flat::flat;
 use crate::metrics::{RejectableOutcome, RejectionReason};
 use crate::dialogue::CachedDialogueStorage;
 use crate::handlers::{CallbackButton, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
@@ -238,7 +239,7 @@ async fn parse_and_try_activate(
     match PromoCode::new(code) {
         Ok(code) => try_activate(promo_repo, limiter, user, code, lang_code).await,
         Err(e) => {
-            tracing::info!(error = %e, "the promo code doesn't fit the format");
+            tracing::info!(error = flat!(e), "the promo code doesn't fit the format");
             record_attempt(ActivationOutcome::InvalidFormat);
             metrics::CMD_PROMO_REJECTED.rejected(RejectionReason::InvalidArgument);
             let text = t!("commands.promo.errors.invalid_format", locale = lang_code).into_owned();

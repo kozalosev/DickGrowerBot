@@ -4,7 +4,7 @@
 #![recursion_limit = "256"]
 
 mod domain;
-mod error_handler;
+mod errors;
 mod handlers;
 mod repo;
 mod help;
@@ -31,6 +31,7 @@ mod test_containers;
 mod fake_telegram;
 
 use std::net::SocketAddr;
+use anyhow::Context;
 use futures::future::join_all;
 use teloxide::dispatching::DpHandlerDescription;
 use teloxide::prelude::*;
@@ -42,12 +43,12 @@ use config::AppConfig;
 use dialogue::CachedDialogueStorage;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
+use crate::errors::handler::ContextLoggingErrorHandler;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
 use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, MentionsCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 use crate::handlers::utils::locks::BattleLocks;
-use crate::error_handler::ContextLoggingErrorHandler;
 use crate::repo::Repositories;
 use crate::users::LanguageService;
 
@@ -91,16 +92,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(dptree::filter_map_async(checks::rate_limit_exceeded).endpoint(checks::handle_rate_limited))
         // No endpoint: the message goes on to the branches below. It writes only the chat's row,
         // never a user's, so it may sit above the ban gate.
-        .branch(Update::filter_message().filter_map(handlers::titles::title_to_remember).inspect_async(handlers::titles::remember_chat_title))
-        .branch(Update::filter_message().filter(handlers::setup::migration_filter).endpoint(handlers::setup::migration_handler))
-        .branch(Update::filter_message().filter_map(handlers::support_reply_recipient).endpoint(handlers::support_reply_handler))
+        .branch(Update::filter_message().filter_map(handlers::titles::title_to_remember)
+            .chain(errors::handler::open_update_span())
+            .inspect_async(handlers::titles::remember_chat_title))
+        .branch(Update::filter_message().filter(handlers::setup::migration_filter)
+            .chain(errors::handler::open_update_span())
+            .endpoint(handlers::setup::migration_handler))
+        .branch(Update::filter_message().filter_map(handlers::support_reply_recipient)
+            .chain(errors::handler::open_update_span())
+            .endpoint(handlers::support_reply_handler))
         // /topics goes above the gate it configures, or a chat could lock itself out of its own
         // setting. Being a branch of its own, it needs no exemption inside the gate: this one
         // matches first, and only what falls through reaches the gate below.
         .branch(Update::filter_message().filter_command::<TopicsCommands>().endpoint(handlers::topics::topics_cmd_handler))
         // Above everything a forum chat may have been told to keep out of its other topics, and
         // safe to put there for the same reason the ban gate is where it is: it writes nothing.
-        .branch(Update::filter_message().filter(checks::is_group_chat).filter_async(checks::is_forbidden_topic).endpoint(checks::handle_forbidden_topic))
+        .branch(Update::filter_message().filter(checks::is_gated_by_topic).filter_async(checks::is_forbidden_topic).endpoint(checks::handle_forbidden_topic))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
         .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
@@ -159,6 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_callback_query().filter(handlers::support_callback_filter).enter_dialogue::<CallbackQuery, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .endpoint(handlers::support_callback_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::inline_callback_handler));
+    let handler = errors::handler::trace_updates(handler);
 
     let raw_bot = config::BotConfig::build_bot(telegram_backoff.clone())?;
     let bot = config::ThrottleConfig::from_env().wrap(raw_bot.clone());
@@ -184,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .into_iter()
         .collect::<Result<(), _>>()
-        .map_err(|err| format!("couldn't set the bot's commands: {err}"))?;
+        .context("couldn't set the bot's commands")?;
 
     let perks = handlers::perks::all(&app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),

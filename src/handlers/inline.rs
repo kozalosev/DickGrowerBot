@@ -16,6 +16,8 @@ use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{CharCount, LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, InlineMessageId, TelegramChatInstanceId};
+use crate::errors::details::{DetailedContext, Details};
+use crate::errors::flat::flat;
 use crate::handlers::{banned_until_of, dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
@@ -207,12 +209,12 @@ pub async fn inline_handler(
         results.push(builder(&query, &lang_code, &app_config, &name))
     }
 
-    let mut answer = bot.answer_inline_query(query.id.clone(), results.clone())
+    let mut answer = bot.answer_inline_query(query.id.clone(), results)
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await.context(format!("couldn't answer inline query {query:?} with results {results:?}"))?;
+    answer.await.context("couldn't answer the inline query")?;
     Ok(())
 }
 
@@ -243,7 +245,8 @@ pub async fn inline_chosen_handler(
             tracing::debug!(chat = ?chat, uid = result.from.id.0, "handling a chosen inline result");
 
             let cmd = InlineCommand::from_str(&result.result_id)
-                .context(format!("couldn't parse inline command '{}'", result.result_id))?;
+                .detailed_context(Details::new("couldn't parse the inline command")
+                    .inline_result_id(&result.result_id))?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs, &lang_code).await?;
@@ -288,7 +291,7 @@ pub async fn inline_callback_handler(
                 }.to_partiality(ChatIdSource::InlineQuery),
                 Ok(InlineMessageIdInfo { chat_id: None, .. }) => query.chat_instance.clone().into(),
                 Err(err) => {
-                    tracing::error!(error = %err, "couldn't resolve the inline_message_id");
+                    tracing::error!(error = flat!(err), "couldn't resolve the inline_message_id");
                     query.chat_instance.clone().into()
                 }
             })
@@ -316,7 +319,7 @@ pub async fn inline_callback_handler(
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",
                 Ok(CallbackDataParseResult::Invalid) => "invalid_data",
                 Err(e) => {
-                    tracing::error!(error = %e, "unknown callback data");
+                    tracing::error!(error = flat!(e), "unknown callback data");
                     "unknown_data"
                 }
                 Ok(CallbackDataParseResult::Ok(_)) => panic!("unexpected CallbackDataParseResult::Ok(_)")
@@ -332,7 +335,7 @@ pub async fn inline_callback_handler(
         answer.show_alert.replace(true);
     };
 
-    answer.await.context(format!("couldn't answer a callback query {query:?}"))?;
+    answer.await.context("couldn't answer the callback query")?;
     Ok(())
 }
 
@@ -348,7 +351,7 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             if uid == user_id.0.to_string() {
                 InlineCommand::from_str(data)
                     .map(CallbackDataParseResult::Ok)
-                    .inspect_err(|err| tracing::error!(data = %data, error = %err, "couldn't parse the callback data"))
+                    .inspect_err(|err| tracing::error!(data = %data, error = flat!(err), "couldn't parse the callback data"))
             } else {
                 Ok(CallbackDataParseResult::AnotherUser)
             }

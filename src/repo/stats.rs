@@ -1,8 +1,8 @@
 use autometrics::autometrics;
-use anyhow::Context;
 use num_traits::ToPrimitive;
 use sqlx::FromRow;
 use crate::domain::primitives::{Length, UserId};
+use crate::errors::details::DetailedContext;
 use crate::repository;
 
 #[derive(FromRow)]
@@ -41,6 +41,6 @@ repository!(PersonalStatsRepo,
             .fetch_one(&self.pool)
             .await
             .map(PersonalStats::from)
-            .context(format!("couldn't get the personal stats of {user_id}"))
+            .user_context(user_id, "couldn't get the personal stats")
     }
 );

@@ -14,6 +14,7 @@ use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
+use crate::errors::details::Details;
 use crate::handlers::{answer_callback_feature_disabled, banned_until_of, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, days_word_ru, Incrementor};
 
@@ -86,7 +87,8 @@ pub(crate) async fn grow_impl(
     let days_since_registration = Utc::now() - user.created_at;
     let days_since_registration = days_since_registration.num_days().to_u32()
         .map(DaysCount::new)
-        .ok_or_else(|| anyhow!("days since registration are too much: {days_since_registration}"))?;
+        .ok_or_else(|| Details::new("couldn't count the days since the registration")
+            .registered_at(user.created_at))?;
     let mut growth_tx = repos.dicks.begin_growth(uid, chat_id).await?;
     let increment = incr.growth_increment(&mut growth_tx, days_since_registration, lang_code).await;
     let grow_result = growth_tx.commit_growth(increment.total).await?;
@@ -222,12 +224,10 @@ pub async fn page_callback_handler(
     let page = q.data.as_ref()
         .ok_or(InvalidPage::message("no data"))
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
-            .map(str::to_owned)
-            .ok_or(InvalidPage::for_value(d, "invalid prefix")))
+            .ok_or(InvalidPage::message("invalid prefix")))
         .and_then(|r| r.parse::<u16>()
             .map(Page::new)
-            .map_err(|e| InvalidPage::for_value(&r, e)))
-        .map_err(|e| anyhow!(e))?;
+            .map_err(|_| InvalidPage::message("not a page number")))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
     let from_refs = FromRefs(&q.from, &chat_id_partiality);

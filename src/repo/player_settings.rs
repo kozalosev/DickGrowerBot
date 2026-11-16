@@ -1,7 +1,7 @@
 use autometrics::autometrics;
-use anyhow::Context;
 use crate::domain::primitives::UserId;
 use crate::domain::primitives::chat::ChatIdKind;
+use crate::errors::details::DetailedContext;
 use crate::repository;
 
 repository!(PlayerSettings,
@@ -27,6 +27,6 @@ repository!(PlayerSettings,
                 chat_id.value() as String, user_id as UserId)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't toggle the mentions of the user {user_id} in the chat {chat_id}"))
+            .user_context(user_id, "couldn't toggle the mentions of the user")
     }
 );
