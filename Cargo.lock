@@ -3250,7 +3250,7 @@ checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "getrandom 0.3.4",
  "granit-parser 0.0.7",
@@ -3857,7 +3857,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 [[package]]
 name = "teloxide"
 version = "0.17.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=feature%2Frequest-observer#7d117f5cb1f6061802a1afe621168e2bc28fcb10"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#b120b78a79c39bacfbdf136ecd2af2be4a26a2f2"
 dependencies = [
  "aquamarine",
  "axum",
@@ -3886,7 +3886,7 @@ dependencies = [
 [[package]]
 name = "teloxide-core"
 version = "0.13.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=feature%2Frequest-observer#7d117f5cb1f6061802a1afe621168e2bc28fcb10"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#b120b78a79c39bacfbdf136ecd2af2be4a26a2f2"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -3919,7 +3919,7 @@ dependencies = [
 [[package]]
 name = "teloxide-macros"
 version = "0.10.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=feature%2Frequest-observer#7d117f5cb1f6061802a1afe621168e2bc28fcb10"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#b120b78a79c39bacfbdf136ecd2af2be4a26a2f2"
 dependencies = [
  "heck",
  "proc-macro2",

@@ -1226,8 +1226,10 @@ half-updated: the state that matters lives in the database and Redis, outside th
 
 The outgoing requests are watched by `TelegramObserver` (`src/telegram_observer.rs`), attached to
 the bot in `config/bot.rs`. It implements `RequestObserver`, a hook **our teloxide fork** adds to
-`Bot` (branch `feature/request-observer`, `crates/teloxide-core/src/observer.rs`) — the `teloxide`
-dependency in `Cargo.toml` points at that branch, and the hook is meant to be contributed upstream.
+`Bot` (`crates/teloxide-core/src/observer.rs`), and the hook is meant to be contributed upstream.
+The `teloxide` dependency in `Cargo.toml` points at the fork's `forked-master`: upstream's `master`
+plus what the bot needs before upstream has it, merged in from `feature/request-observer` and from
+upstream pull requests that are still open.
 
 Each request produces three things:
 
