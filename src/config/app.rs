@@ -68,6 +68,7 @@ impl AppConfig {
             batch_size: env_value!("DAILY_SHRINK_BATCH_SIZE": Limit, or = 100, at_least = 1),
             batch_delay: env_duration!("DAILY_SHRINK_BATCH_DELAY"),
             expiry_batch_size: env_value!("DAILY_SHRINK_EXPIRY_BATCH_SIZE": Limit, or = 5000, at_least = 1),
+            refresh_totals: get_env_value_or_default("DAILY_SHRINK_REFRESH_TOTALS", true),
             broadcast: BroadcastConfig {
                 poll_interval: env_duration!("DAILY_SHRINK_BROADCAST_POLL", or = secs(5), at_least = secs(1)),
                 batch_size: env_value!("DAILY_SHRINK_BROADCAST_BATCH_SIZE": Limit, or = 200, at_least = 1),

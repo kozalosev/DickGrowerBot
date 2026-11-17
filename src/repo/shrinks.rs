@@ -291,5 +291,34 @@ repository!(Shrinks,
             .await
             .context("couldn't fetch the newer shrink date")?;
         Ok(AdjacentDates { older, newer })
+    },
+
+    /// Recomputes `Shrink_Daily_Totals` from the whole log. A full scan, so the statement timeout
+    /// is lifted for it. `CONCURRENTLY` keeps the view readable meanwhile, but refuses a view that
+    /// was never filled, so the first refresh is a plain one.
+    #[autometrics]
+    #[tracing::instrument(skip_all)]
+    pub async fn refresh_daily_totals(&self) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query!("SET LOCAL statement_timeout = 0")
+            .execute(&mut *tx)
+            .await
+            .context("couldn't lift the statement timeout")?;
+        let populated = sqlx::query_scalar!(
+            r#"SELECT ispopulated AS "populated!" FROM pg_matviews WHERE matviewname = 'shrink_daily_totals'"#)
+            .fetch_one(&mut *tx)
+            .await
+            .context("couldn't check whether the daily totals are populated")?;
+        let refresh = if populated {
+            sqlx::query!("REFRESH MATERIALIZED VIEW CONCURRENTLY Shrink_Daily_Totals")
+        } else {
+            sqlx::query!("REFRESH MATERIALIZED VIEW Shrink_Daily_Totals")
+        };
+        refresh.execute(&mut *tx)
+            .await
+            .context("couldn't refresh the daily totals")?;
+        tx.commit()
+            .await
+            .context("couldn't commit the refresh of the daily totals")
     }
 );

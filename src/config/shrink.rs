@@ -26,6 +26,8 @@ pub struct DailyShrinkConfig {
     /// bounds the rows that statement locks and the time it may spend inside `statement_timeout`,
     /// not how much gets cleared: the cleanup repeats until the queue is empty.
     pub expiry_batch_size: Limit,
+    /// Whether a run ends by refreshing `Shrink_Daily_Totals`, a full scan of the shrink log.
+    pub refresh_totals: bool,
     pub broadcast: BroadcastConfig,
 }
 

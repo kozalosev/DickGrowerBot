@@ -879,6 +879,7 @@ DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting 
 DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
 DAILY_SHRINK_BATCH_DELAY=0s            # rest between two batches; 0 => back to back
 DAILY_SHRINK_EXPIRY_BATCH_SIZE=5000    # rows one statement of the nightly cleanup expires
+DAILY_SHRINK_REFRESH_TOTALS=true       # refresh Shrink_Daily_Totals after a run; false => it goes stale
 DAILY_SHRINK_BROADCAST_POLL=5s
 DAILY_SHRINK_BROADCAST_BATCH_SIZE=200  # summaries one run claims
 DAILY_SHRINK_BROADCAST_CONCURRENCY=16  # how many it sends at once — the throughput knob
@@ -905,6 +906,16 @@ schedule. A run takes off what a daily one would; the ramp-up and the grace peri
 days of staleness, not in runs, so neither changes meaning. `DAILY_SHRINK_RUN_ON_STARTUP` ignores the
 period. The summaries of a run stay deliverable until the next one, since `expire_superseded` only
 runs when a run does.
+
+**`Shrink_Daily_Totals` is a stopgap, to be removed by #210.** It is a materialized view with
+the per-day sums of `Stale_Dick_Shrinks` (migration 53), so the total length the shrink ever took
+away is a sum over a few hundred rows rather than a scan of the whole log. Today's figure needs no
+view: the `created_at` index answers it from the log itself. The scheduler refreshes the view after
+every run, a failed one included (`scheduler::shrink::refresh_daily_totals`). The refresh is still
+the full scan, so it lifts `statement_timeout` for itself, uses `CONCURRENTLY` once the view has
+been filled and a plain refresh before that, and is switched off by `DAILY_SHRINK_REFRESH_TOTALS`
+when the database can't afford it. Those numbers belong in stats-service, and #210 lists everything
+to remove once they are there.
 
 **A player may refuse to be mentioned, and stays on the list.** The summary links each name to the
 user, which is what pings them; a player who refused is printed as plain text instead. The choice is

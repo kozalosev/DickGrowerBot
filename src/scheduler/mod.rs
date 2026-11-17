@@ -17,7 +17,7 @@ use crate::telegram_backoff::TelegramBackoff;
 use crate::repo::Repositories;
 use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
-use shrink::run_daily_shrink;
+use shrink::{refresh_daily_totals, run_daily_shrink};
 use deletions::{clean_finished_deletions, run_pending_deletions};
 use broadcasts::{clean_finished_broadcasts, run_pending_broadcasts, BroadcastDeps};
 
@@ -54,7 +54,8 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
         let run = || async {
             run_daily_shrink(repos.clone(), config.clone())
                 .await
-                .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the daily shrink run failed"))
+                .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the daily shrink run failed"));
+            refresh_daily_totals(&repos, &config).await
         };
         // Puts the feature into effect at once instead of hours later. Re-running the same day is
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and

@@ -82,6 +82,19 @@ pub async fn run_daily_shrink(repos: Repositories, config: AppConfig) -> anyhow:
     Ok(())
 }
 
+/// Brings `Shrink_Daily_Totals` up to date with the run that just ended, a failed one included: the
+/// batches that went through are in the log all the same. A failure costs a stale total until the
+/// next run and nothing else.
+pub async fn refresh_daily_totals(repos: &Repositories, config: &AppConfig) {
+    if !config.daily_shrink.refresh_totals {
+        tracing::debug!("refreshing the daily totals of the shrink is switched off");
+        return
+    }
+    if let Err(e) = repos.shrinks.refresh_daily_totals().await {
+        tracing::warn!(error = flat!(e), "couldn't refresh the daily totals of the shrink");
+    }
+}
+
 /// Finishes every summary left over from an earlier day, in batches, before this run queues its own.
 ///
 /// Once today's list is ready, yesterday's is not owed: both would arrive together. A failure gives

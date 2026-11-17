@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ispopulated AS \"populated!\" FROM pg_matviews WHERE matviewname = 'shrink_daily_totals'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "populated!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "pg_matviews",
+            "name": "ispopulated"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "eab70746254c2049f92ef8d24d41afe904614807016d2c597495e45fe9225fe0"
+}

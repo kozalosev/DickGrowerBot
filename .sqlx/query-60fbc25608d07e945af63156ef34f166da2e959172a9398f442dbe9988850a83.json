@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "REFRESH MATERIALIZED VIEW Shrink_Daily_Totals",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "60fbc25608d07e945af63156ef34f166da2e959172a9398f442dbe9988850a83"
+}

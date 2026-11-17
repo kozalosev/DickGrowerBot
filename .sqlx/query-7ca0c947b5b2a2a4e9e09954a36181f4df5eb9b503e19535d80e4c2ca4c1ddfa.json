@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT current_date - shrink_date AS \"days_ago!\", lost_length AS \"lost_length!\", victims AS \"victims!\"\n            FROM Shrink_Daily_Totals ORDER BY shrink_date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "days_ago!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "lost_length!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "shrink_daily_totals",
+            "name": "lost_length"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "victims!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "shrink_daily_totals",
+            "name": "victims"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "7ca0c947b5b2a2a4e9e09954a36181f4df5eb9b503e19535d80e4c2ca4c1ddfa"
+}

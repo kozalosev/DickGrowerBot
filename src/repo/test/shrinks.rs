@@ -2,7 +2,7 @@ use sqlx::{Pool, Postgres};
 use crate::domain::primitives::{DaysCount, LengthChange, Limit, Offset, Ratio};
 use crate::domain::primitives::chat::{InternalChatId, TelegramChatId};
 use crate::repo;
-use crate::repo::test::{bonus_attempts_of, fresh_db, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
+use crate::repo::test::{bonus_attempts_of, create_chat, fresh_db, internal_chat_id, repos, seed_aged_dick, user_id, CHAT_ID, CHAT_ID_KIND, NAME, UID, USER_ID};
 use domain_types::literal;
 
 const GRACE_DAYS: DaysCount = DaysCount::new(7);
@@ -580,4 +580,43 @@ async fn every_chat_is_reached_across_the_batches() {
     let mut expected: Vec<i64> = seeded.into_iter().map(|(chat_id, _)| chat_id).collect();
     expected.sort_unstable();
     assert_eq!(queued, expected);
+}
+
+/// The first refresh fills an empty view, which `CONCURRENTLY` refuses; the second one takes that
+/// path and must pick up what was logged in between.
+#[tokio::test]
+async fn the_daily_totals_follow_the_log() {
+    let db = fresh_db().await;
+    let repo::Repositories { shrinks, users, .. } = repos(&db);
+    let first_chat = create_chat(&db, -2001).await;
+    let second_chat = create_chat(&db, -2002).await;
+    for uid in [UID, UID + 1] {
+        users.create_or_update(user_id(uid), NAME)
+            .await.expect("couldn't create the user");
+    }
+    seed_old_shrink(&db, first_chat, UID, 5, 1).await;
+    seed_old_shrink(&db, second_chat, UID + 1, 7, 1).await;
+    seed_old_shrink(&db, first_chat, UID, 3, 2).await;
+
+    shrinks.refresh_daily_totals()
+        .await.expect("couldn't fill the daily totals");
+    assert_eq!(daily_totals(&db).await, vec![(2, 3, 1), (1, 12, 2)]);
+
+    seed_old_shrink(&db, first_chat, UID + 1, 4, 2).await;
+    shrinks.refresh_daily_totals()
+        .await.expect("couldn't refresh the daily totals");
+    assert_eq!(daily_totals(&db).await, vec![(2, 7, 2), (1, 12, 2)]);
+}
+
+/// `(days ago, lost length, victims)`, oldest first.
+async fn daily_totals(db: &Pool<Postgres>) -> Vec<(i32, i64, i64)> {
+    sqlx::query!(
+        r#"SELECT current_date - shrink_date AS "days_ago!", lost_length AS "lost_length!", victims AS "victims!"
+            FROM Shrink_Daily_Totals ORDER BY shrink_date"#)
+        .fetch_all(db)
+        .await
+        .expect("couldn't read the daily totals")
+        .into_iter()
+        .map(|row| (row.days_ago, row.lost_length, row.victims))
+        .collect()
 }
