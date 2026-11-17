@@ -69,20 +69,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "aquamarine"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f50776554130342de4836ba542aa85a4ddb361690d7e8df13774d7284c3d5c2"
-dependencies = [
- "include_dir",
- "itertools 0.10.5",
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "ar_archive_writer"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1682,25 +1668,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "include_dir"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
-dependencies = [
- "include_dir_macros",
-]
-
-[[package]]
-name = "include_dir_macros"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1727,15 +1694,6 @@ name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
-
-[[package]]
-name = "itertools"
-version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "itertools"
@@ -2453,27 +2411,6 @@ checksum = "6837b9e10d61f45f987d50808f83d1ee3d206c66acf650c3e4ae2e1f6ddedf55"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
-dependencies = [
- "proc-macro-error-attr2",
- "proc-macro2",
- "quote",
 ]
 
 [[package]]
@@ -3857,9 +3794,8 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 [[package]]
 name = "teloxide"
 version = "0.17.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#12d0b1ebdfa9a1e3a5f833edb92bb5d5ced08b3c"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#d49e0a8d7a8247f2323a9acc33bf9e1d33d2d818"
 dependencies = [
- "aquamarine",
  "axum",
  "bytes",
  "derive_more",
@@ -3886,7 +3822,7 @@ dependencies = [
 [[package]]
 name = "teloxide-core"
 version = "0.13.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#12d0b1ebdfa9a1e3a5f833edb92bb5d5ced08b3c"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#d49e0a8d7a8247f2323a9acc33bf9e1d33d2d818"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -3918,7 +3854,7 @@ dependencies = [
 [[package]]
 name = "teloxide-macros"
 version = "0.10.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#12d0b1ebdfa9a1e3a5f833edb92bb5d5ced08b3c"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#d49e0a8d7a8247f2323a9acc33bf9e1d33d2d818"
 dependencies = [
  "heck",
  "proc-macro2",
