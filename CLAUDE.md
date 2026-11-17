@@ -1848,6 +1848,17 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   A domain number answers `is_zero()`, so a comparison against zero is spelled with it rather than
   through `.value()`.
 
+  **Booleans and `chrono` types stay bare.** A wrapper is worth it when the bare type doesn't say
+  what it holds, so two values can be swapped unnoticed. A `bool` field is named at every
+  construction, and `DateTime<Utc>` already carries its unit, epoch and timezone. A `NaiveDate` is
+  named by its parameter, and no signature takes two dates of different meanings. Where two do meet,
+  name them, as `AdjacentDates` does, before reaching for a type. Most uses are chrono arithmetic or a
+  sqlx bind, so a wrapper would be unwrapped at nearly every call site.
+
+  A bool that needs more than a name becomes an **enum**, not a newtype. That applies when two bools
+  meet in one signature, or when the two states have names of their own (`DickOfDaySelectionMode`,
+  `ChangeSource`). `Foo(true)` reads no better at a call site than `true`.
+
 - **A number changing type says which conversion it is.** `as` is denied
   (`[workspace.lints.clippy]` in the root `Cargo.toml`), because one token means three different
   things and a reader can't tell them apart without knowing both types. Name it instead:
