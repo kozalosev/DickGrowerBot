@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use domain_types::traits::SaturatingInto;
@@ -8,11 +9,13 @@ use futures::join;
 use rand::RngExt;
 use rust_i18n::t;
 use teloxide::macros::BotCommands;
-use teloxide::payloads::AnswerInlineQuerySetters;
+use teloxide::payloads::{AnswerInlineQuerySetters, EditMessageTextInlineSetters};
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery,
+                      InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText,
+                      Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
-use crate::config::ThrottledBot;
+use crate::config::{AppConfig, FeatureToggles, ThrottledBot};
 use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackButton, CallbackResult, HandlerDeps,
     HandlerImplResult, HandlerResult};
 use crate::{metrics, reply_html, reply_html_ephemeral, repo};
@@ -21,6 +24,7 @@ use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
 use crate::domain::primitives::{Bet, CharCount, LanguageCode, LengthChange, LoanPayout, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, InlineMessageId, TelegramChatId};
 use crate::handlers::utils::callbacks;
+use crate::handlers::utils::SelfDestructionService;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::BattleLocks;
 use crate::repo::Repositories;
@@ -32,10 +36,10 @@ const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
 #[command(rename_rule = "lowercase")]
 pub enum BattleCommands {
     #[command(description = "pvp")]
-    Pvp(u16),
-    Battle(u16),
-    Attack(u16),
-    Fight(u16),
+    Pvp(u32),
+    Battle(u32),
+    Attack(u32),
+    Fight(u32),
 }
 
 #[derive(BotCommands, Clone)]
@@ -48,7 +52,7 @@ pub enum BattleCommandsNoArgs {
 }
 
 impl BattleCommands {
-    fn bet(&self) -> u16 {
+    fn bet(&self) -> u32 {
         match *self {
             Self::Battle(bet) => bet,
             Self::Pvp(bet) => bet,
@@ -115,7 +119,7 @@ pub async fn pvp_cmd_handler(
         chat_id: msg.chat.id.into(),
         lang_code: lang_code.clone(),
     };
-    let bet = Bet::new(cmd.bet().into());
+    let bet = Bet::new(cmd.bet());
     let answer = pvp_impl_start(params, user, bet).await?;
 
     reply_html_ephemeral!(bot, msg, answer.text(), self_destruction, MessageGroup::Application, lang_code,
@@ -173,35 +177,43 @@ pub(super) fn build_inline_keyboard_article_result(
 ) -> InlineQueryResult {
     tracing::debug!(uid = %uid, bet = %bet, "building an inline PvP offer");
 
-    let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
-    let text = t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet);
-    let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
-    let btn_label = t!("commands.pvp.button", locale = lang_code);
+    let texts = OfferTexts::new(lang_code, name, bet);
+    let content = InputMessageContent::Text(InputMessageContentText::new(texts.text).parse_mode(ParseMode::Html));
     let btn_data = BattleCallbackData::new(uid, bet).to_data_string();
-    InlineQueryResultArticle::new("pvp", title, content)
+    InlineQueryResultArticle::new("pvp", texts.title, content)
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-            InlineKeyboardButton::callback(btn_label, btn_data)
+            InlineKeyboardButton::callback(texts.button, btn_data)
         ]]))
         .into()
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn pvp_inline_chosen_handler(result: ChosenInlineResult, deps: HandlerDeps) -> HandlerResult {
-    let HandlerDeps { self_destruction, lang_resolver, config, .. } = deps;
+pub async fn pvp_inline_chosen_handler(
+    bot: ThrottledBot,
+    result: ChosenInlineResult,
+    deps: HandlerDeps,
+) -> HandlerResult {
+    let HandlerDeps { repos, self_destruction, lang_resolver, config } = deps;
     metrics::INLINE_COUNTER.finished();
 
-    // The offer is built by Telegram out of the article, so this is the first (and only) moment the
-    // bot learns which message carries it — and the only thing it knows about the chat is whatever
-    // the id encodes. The text is Telegram's too, hence no reading time: the offer is one line.
-    if let Some(inline_message_id) = result.inline_message_id {
-        let lang_code = lang_resolver.execute().await;
-        let chat = config.features.chats_merging
-            .then(|| utils::try_resolve_chat_id(&inline_message_id))
-            .flatten()
-            .map(ChatIdKind::from);
-        self_destruction.schedule_inline(InlineMessageId::new(inline_message_id), chat,
-            MessageGroup::Application, CharCount::new(0), &lang_code).await;
+    // Telegram posts the offer out of the article, so this is the first (and only) moment the bot
+    // learns which message carries it — and the only thing it knows about the chat is whatever the
+    // id encodes. The text isn't handed back, so it is built again for the reading time.
+    let Some(inline_message_id) = result.inline_message_id.map(InlineMessageId::new) else {
+        return Ok(())
+    };
+    let AppConfig { features, .. } = config;
+    let lang_code = lang_resolver.execute().await;
+    let chat = determine_offer_chat(features, &inline_message_id);
+    let bet = Bet::new(result.query.parse()?);
+    let name = utils::get_full_name(&result.from);
+    let texts = OfferTexts::new(&lang_code, &name, bet);
+
+    if can_afford(&repos, features.pvp, &chat, result.from.id.into(), bet).await? {
+        schedule_offer(&self_destruction, inline_message_id, chat, &texts).await;
+    } else {
+        refuse_offer(&bot, &self_destruction, inline_message_id, chat, &texts).await?;
     }
     Ok(())
 }
@@ -447,6 +459,86 @@ async fn pay_for_loan_if_needed(
     Ok(Some((growth_res, payout)))
 }
 
-pub fn new_short_timestamp() -> NewLayoutValue<i64> {
+fn new_short_timestamp() -> NewLayoutValue<i64> {
     NewLayoutValue::Some(chrono::Utc::now().timestamp_millis() - TIMESTAMP_MILLIS_SINCE_2024)
+}
+
+/// The chat an inline offer was posted in, when its id encodes one.
+fn determine_offer_chat(features: FeatureToggles, inline_message_id: &InlineMessageId) -> Option<ChatIdKind> {
+    features.chats_merging
+        .then(|| utils::try_resolve_chat_id(inline_message_id))
+        .flatten()
+        .map(ChatIdKind::from)
+}
+
+/// Whether the initiator's dick covers the bet. With no chat to look in, nobody can tell, so it does.
+async fn can_afford(
+    repos: &Repositories,
+    features: BattlesFeatureToggles,
+    chat: &Option<ChatIdKind>,
+    uid: UserId,
+    bet: Bet,
+) -> anyhow::Result<bool> {
+    match chat {
+        Some(chat) if features.check_inline_offer => repos.dicks.check_dick(chat, uid, bet).await,
+        _ => Ok(true),
+    }
+}
+
+async fn schedule_offer(
+    self_destruction: &SelfDestructionService,
+    inline_message_id: InlineMessageId,
+    chat: Option<ChatIdKind>,
+    texts: &OfferTexts<'_>,
+) {
+    let char_count = CharCount::of(&texts.text);
+    self_destruction.schedule_inline(inline_message_id, chat,
+        MessageGroup::Application, char_count, texts.lang_code).await;
+}
+
+/// Turns the posted offer into a notice that the initiator is short of the bet, which also takes its
+/// button away.
+async fn refuse_offer(
+    bot: &ThrottledBot,
+    self_destruction: &SelfDestructionService,
+    inline_message_id: InlineMessageId,
+    chat: Option<ChatIdKind>,
+    texts: &OfferTexts<'_>,
+) -> anyhow::Result<()> {
+    metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
+    let text = texts.not_enough();
+    let char_count = CharCount::of(&text);
+    bot.edit_message_text_inline(inline_message_id.value(), text)
+        .parse_mode(ParseMode::Html)
+        .await
+        .context("couldn't refuse the inline PvP offer")?;
+    self_destruction.schedule_inline(inline_message_id, chat,
+        MessageGroup::Notice, char_count, texts.lang_code).await;
+    Ok(())
+}
+
+/// What an inline offer says: its entry in the list of results, the message posted and its button.
+struct OfferTexts<'a> {
+    title: Cow<'a, str>,
+    text: Cow<'a, str>,
+    button: Cow<'a, str>,
+
+    lang_code: &'a LanguageCode,
+}
+
+impl<'a> OfferTexts<'a> {
+    fn new(lang_code: &'a LanguageCode, name: &Username, bet: Bet) -> Self {
+        Self {
+            title: t!("inline.results.titles.pvp", locale = lang_code, bet = bet),
+            text:  t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet),
+            button: t!("commands.pvp.button", locale = lang_code),
+
+            lang_code,
+        }
+    }
+
+    /// What the offer turns into when the initiator is short of the bet. Only a refusal needs it.
+    fn not_enough(&self) -> Cow<'a, str> {
+        t!("commands.pvp.errors.not_enough.initiator", locale = self.lang_code)
+    }
 }

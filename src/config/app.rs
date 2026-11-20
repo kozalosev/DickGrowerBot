@@ -55,6 +55,7 @@ impl AppConfig {
         let multiple_loans = get_env_value_or_default("MULTIPLE_LOANS_ENABLED", false);
         let pvp_default_bet = env_value!("PVP_DEFAULT_BET": Bet, or = 1);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
+        let check_inline_offer = get_env_value_or_default("PVP_CHECK_INLINE_OFFER", true);
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
         let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
         let most_popular_language_enabled = get_env_value_or_default("MOST_POPULAR_LANGUAGE_ENABLED", true);
@@ -112,6 +113,7 @@ impl AppConfig {
                 dod_selection_mode,
                 pvp: BattlesFeatureToggles {
                     check_acceptor_length,
+                    check_inline_offer,
                     show_stats,
                     show_stats_notice,
                 },

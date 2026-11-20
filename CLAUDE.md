@@ -131,6 +131,25 @@ tinytemplate reads the context through `Serialize`, never through `Display` — 
 into a `serde_json::Value` before any formatter sees it. So a `Username` that must be shown with its
 `@` is marked `#[serde_as(as = "DisplayFromStr")]`; the derived `Serialize` writes the bare name.
 
+### Optional: checking an inline PvP offer when it is posted
+
+```
+PVP_CHECK_INLINE_OFFER=true  # false => the initiator is checked only when the button is pressed
+```
+
+`/pvp` checks the initiator's length before it offers anything. An inline offer is built by
+Telegram, so the earliest the bot can check it is `pvp_inline_chosen_handler`: if the initiator is
+short of the bet, the posted message is edited into the `not_enough.initiator` notice, its button
+goes, and it is scheduled as a `Notice` rather than an `Application`.
+
+That is only possible where the chat can be decoded from the `inline_message_id` — a supergroup,
+with `CHATS_MERGING_ENABLED` on. With merging off the battle itself keys the chat by
+`chat_instance`, a different `Dicks` row than the decoded id names, so the check would look at the
+wrong dick. Everywhere else the offer is posted unchecked, as before.
+
+The check is one query per posted offer. Under high load, `false` drops it and leaves the check at
+the press, which runs in every case anyway.
+
 ### Optional: /support and user bans
 
 ```
@@ -582,9 +601,9 @@ none of that yields a chat — a legacy group without an anchor, an id that enco
 own settings apply, which is the half of issue #76 that `/topics` runs into as well.
 
 Inline messages are stretched by the reading time now, the same as the others: `schedule_inline`
-takes the character count from the text the handler is about to send. The battle offer is the
-exception and passes zero — Telegram builds that text out of the `InlineQueryResultArticle`, so the
-bot never sees it, and it is one line long anyway.
+takes the character count from the text the handler is about to send. A posted battle offer comes
+back without its text, so `pvp_inline_chosen_handler` builds it again from the same name, bet and
+language.
 
 **Everything goes through the database**, short-lived groups included: `SelfDestructionService`
 (`handlers/utils/self_destruction.rs`) only writes rows into `Scheduled_Message_Deletions`
