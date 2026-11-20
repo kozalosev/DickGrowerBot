@@ -27,6 +27,14 @@ pub static CMD_PRIVACY_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_privacy_usage_total", "count of /privacy invocations"));
 pub static CMD_SUPPORT_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_support_usage_total", "count of /support invocations"));
+pub static CMD_VOUCHER_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_voucher_usage_total", "count of /voucher invocations, its aliases included"));
+pub static CMD_RESET_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_reset_usage_total", "count of /reset invocations"));
+pub static CMD_BUY_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_buy_usage_total", "count of /buy invocations, its aliases included"));
+pub static CMD_DONATE_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_donate_usage_total", "count of /donate invocations"));
 pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
     Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
 pub static RATE_LIMITED_UPDATES: Lazy<Counter> = Lazy::new(||
@@ -259,6 +267,10 @@ fn force_registration() {
     Lazy::force(&CMD_HELP_COUNTER);
     Lazy::force(&CMD_PRIVACY_COUNTER);
     Lazy::force(&CMD_SUPPORT_COUNTER);
+    Lazy::force(&CMD_VOUCHER_COUNTER);
+    Lazy::force(&CMD_RESET_COUNTER);
+    Lazy::force(&CMD_BUY_COUNTER);
+    Lazy::force(&CMD_DONATE_COUNTER);
     Lazy::force(&BANNED_UPDATES_BLOCKED);
     Lazy::force(&RATE_LIMITED_UPDATES);
     Lazy::force(&START_SPAM_LIMITED);

@@ -72,6 +72,18 @@ commands:
     group_hint: "要让我在本群不再提到你，请按缩水提醒下方的 🔕。要更改所有群的设置，请在私聊中给我发送 /mentions。"
   privacy:
     description: "存储数据说明详见隐私政策，"
+  voucher:
+    description: "转让厘米"
+  reset:
+    description: "重置排行榜"
+  buy:
+    description: "购买厘米"
+    text: "🛒 <b>厘米可以在拍卖中买到</b>\n促销码会在 %{bot} 中拍卖：用 Telegram Stars 出价，只有胜出者付款，被超过出价的人会拿回自己的星星。使用 /promo 指令激活促销码。"
+    button: "🔨 去拍卖"
+  donate:
+    description: "支持开发者"
+    text: "❤️ <b>支持开发者</b>\n我们利用业余时间开发这个机器人，几乎得不到任何回报，只换来了一个个不眠之夜。如果你喜欢这个游戏，可以在这里感谢我们。"
+    button: "❤️ 支持我们"
   support:
     description: "联系机器人主人"
     request: "请写下你的留言，我会转交给我的主人。发送任意命令即可取消。"

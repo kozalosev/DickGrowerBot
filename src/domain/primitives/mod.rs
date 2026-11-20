@@ -17,4 +17,5 @@ pub_use_modules!(
     pagination,
     promo,
     perk,
-    count);
+    count,
+    deeplink);

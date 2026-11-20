@@ -7,7 +7,7 @@ use crate::config::self_destruction::*;
 use crate::config::shrink::{BroadcastConfig, DailyShrinkConfig};
 use crate::config::incrementor::IncrementorConfig;
 use crate::config::rate_limit::RateLimitConfig;
-use crate::domain::primitives::{AttemptsCount, Bet, BonusPercent, DaysCount, Limit, PayoutRatio, RateLimit, Ratio};
+use crate::domain::primitives::{AttemptsCount, Bet, BonusPercent, DaysCount, Limit, PayoutRatio, RateLimit, Ratio, StartParameter, Username};
 use crate::domain::primitives::chat::TelegramChatId;
 
 #[derive(Clone)]
@@ -26,6 +26,12 @@ pub struct AppConfig {
     pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
     pub support_chat_id: Option<TelegramChatId>,
+    /// The bot that auctions promo codes; `None` when there is no auction to point to.
+    pub auction_bot: Option<Username>,
+    /// What the link to the auction bot passes as `start`; `None` leaves the link bare.
+    pub auction_start_parameter: Option<StartParameter>,
+    /// Where `/donate` leads; `None` when donations aren't accepted.
+    pub donate_url: Option<Url>,
     pub caches: CachesConfig,
     pub rate_limit: RateLimitConfig,
 }
@@ -132,6 +138,9 @@ impl AppConfig {
             self_destruction,
             command_toggles: Default::default(),
             support_chat_id,
+            auction_bot: get_optional_env("HELP_AUCTION_BOT"),
+            auction_start_parameter: get_optional_env("HELP_AUCTION_START_PARAMETER"),
+            donate_url: get_optional_env("DONATE_URL"),
             caches: CachesConfig::from_env(),
             rate_limit: RateLimitConfig::from_env(),
         }

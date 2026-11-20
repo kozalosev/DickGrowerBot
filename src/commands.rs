@@ -7,7 +7,7 @@ use teloxide::requests::Requester;
 use teloxide::types::{BotCommand, BotCommandScope};
 use teloxide::utils::command::BotCommands;
 use crate::config::{CachedEnvToggles, ThrottledBot};
-use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, LanguageCommands, LoanCommands, MentionsCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
+use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, HelpCommands, ImportCommands, InfoCommands, LanguageCommands, LoanCommands, MentionsCommands, PrivacyCommands, PromoCommands, StartCommands, SupportCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
 
@@ -15,8 +15,8 @@ use crate::handlers::stats::StatsCommands;
 /// aliases hidden from the menu included, since the bot answers those too.
 ///
 /// Built from the same `bot_commands()` the menu is built from, so a command added there is
-/// covered here as well. It exists for the topic gate: in a group with several bots most `/…`
-/// messages are addressed to someone else, and a gate that judged them all would answer for them.
+/// covered here as well. In a group with several bots most `/…` messages are addressed to someone
+/// else, and this is how the bot tells its own apart.
 pub static COMMAND_NAMES: Lazy<FxHashSet<String>> = Lazy::new(|| {
     [
         StartCommands::bot_commands(),
@@ -35,6 +35,7 @@ pub static COMMAND_NAMES: Lazy<FxHashSet<String>> = Lazy::new(|| {
         BattleCommandsNoArgs::bot_commands(),
         LoanCommands::bot_commands(),
         ImportCommands::bot_commands(),
+        InfoCommands::bot_commands(),
     ].concat()
         .into_iter()
         .map(|cmd| cmd.command.trim_start_matches('/').to_lowercase())
@@ -58,6 +59,34 @@ pub struct CommandToggles {
     pub cleanup_enabled: bool,
     /// Whether `/mentions` is in the menu.
     pub mentions_enabled: bool,
+    /// Whether `/buy` is in the menu — with no auction bot there is nothing to buy.
+    pub auction_enabled: bool,
+    /// Whether `/donate` is in the menu — with no link there is nowhere to donate.
+    pub donate_enabled: bool,
+}
+
+/// The menu a command is published in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MenuScope {
+    Private,
+    Group,
+    /// What the administrators of a group get on top of the group menu.
+    Admins,
+}
+
+/// A set of commands that decides, command by command, which of them go into a menu.
+pub trait PublishedCommands: BotCommands {
+    /// Whether this command is in the menu of this scope under these toggles.
+    fn is_published(&self, scope: MenuScope, toggles: &CommandToggles) -> bool;
+
+    /// The menu entries of the commands published in this scope.
+    fn published_commands(scope: MenuScope, toggles: &CommandToggles) -> Vec<BotCommand> {
+        Self::bot_commands()
+            .into_iter()
+            .filter(|cmd| Self::parse(&cmd.command, "")
+                .is_ok_and(|parsed| parsed.is_published(scope, toggles)))
+            .collect()
+    }
 }
 
 pub async fn set_my_commands(
@@ -77,9 +106,10 @@ pub async fn set_my_commands(
         PrivacyCommands::bot_commands(),
         PromoCommands::bot_commands(),
         StatsCommands::bot_commands(),
-        if toggles.mentions_enabled { MentionsCommands::bot_commands() } else { Vec::new() },
-        if toggles.personal_language_enabled { LanguageCommands::bot_commands() } else { Vec::new() },
-        if toggles.support_enabled { SupportCommands::bot_commands() } else { Vec::new() },
+        MentionsCommands::published_commands(MenuScope::Private, toggles),
+        LanguageCommands::published_commands(MenuScope::Private, toggles),
+        SupportCommands::published_commands(MenuScope::Private, toggles),
+        InfoCommands::published_commands(MenuScope::Private, toggles),
     ];
     let group_commands = vec![
         HelpCommands::bot_commands(),
@@ -88,14 +118,15 @@ pub async fn set_my_commands(
         BattleCommands::bot_commands(),
         LoanCommands::bot_commands(),
         StatsCommands::bot_commands(),
+        InfoCommands::published_commands(MenuScope::Group, toggles),
     ];
     // The chat-wide /language, /topics and /cleanup are admin-only, so they live in the admin
     // scope, not the group one.
     let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),
-        LanguageCommands::bot_commands(),
+        LanguageCommands::published_commands(MenuScope::Admins, toggles),
         TopicsCommands::bot_commands(),
-        if toggles.cleanup_enabled { CleanupCommands::bot_commands() } else { Vec::new() },
+        CleanupCommands::published_commands(MenuScope::Admins, toggles),
     ]].concat();
 
     let requests = vec![
@@ -137,4 +168,60 @@ async fn set_commands(
     request.scope.replace(scope);
     request.await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crate::handlers::{CleanupCommands, InfoCommands, LanguageCommands, MentionsCommands, SupportCommands};
+    use super::{CommandToggles, PublishedCommands};
+    use super::MenuScope::{Admins, Group, Private};
+
+    const NOTHING: [&str; 0] = [];
+
+    #[test]
+    fn switched_commands_follow_their_toggles() {
+        let on = toggles(true);
+        assert_eq!(names(MentionsCommands::published_commands(Private, &on)), ["/mentions"]);
+        assert_eq!(names(SupportCommands::published_commands(Private, &on)), ["/support"]);
+        assert_eq!(names(CleanupCommands::published_commands(Admins, &on)), ["/cleanup"]);
+        assert_eq!(names(LanguageCommands::published_commands(Private, &on)), ["/language"]);
+        assert_eq!(names(InfoCommands::published_commands(Private, &on)), ["/buy", "/donate"]);
+
+        let off = toggles(false);
+        assert_eq!(names(MentionsCommands::published_commands(Private, &off)), NOTHING);
+        assert_eq!(names(SupportCommands::published_commands(Private, &off)), NOTHING);
+        assert_eq!(names(CleanupCommands::published_commands(Admins, &off)), NOTHING);
+        assert_eq!(names(LanguageCommands::published_commands(Private, &off)), NOTHING);
+        assert_eq!(names(LanguageCommands::published_commands(Admins, &off)), ["/language"]);
+        assert_eq!(names(InfoCommands::published_commands(Private, &off)), NOTHING);
+    }
+
+    #[test]
+    fn info_commands_are_published_where_they_make_sense() {
+        let on = toggles(true);
+        let private = names(InfoCommands::published_commands(Private, &on));
+        let group = names(InfoCommands::published_commands(Group, &on));
+        assert_eq!(private, ["/buy", "/donate"]);
+        assert_eq!(group, ["/voucher", "/reset", "/buy", "/donate"]);
+    }
+
+    fn toggles(enabled: bool) -> CommandToggles {
+        CommandToggles {
+            env: Default::default(),
+            personal_language_enabled: enabled,
+            support_enabled: enabled,
+            cleanup_enabled: enabled,
+            mentions_enabled: enabled,
+            auction_enabled: enabled,
+            donate_enabled: enabled,
+        }
+    }
+
+    /// The commands as the menu shows them: `set_commands` drops the undescribed aliases.
+    fn names(commands: Vec<teloxide::types::BotCommand>) -> Vec<String> {
+        commands.into_iter()
+            .filter(|cmd| !cmd.description.is_empty())
+            .map(|cmd| cmd.command)
+            .collect()
+    }
 }

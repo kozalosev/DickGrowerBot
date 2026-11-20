@@ -13,9 +13,6 @@ use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
 use teloxide::RequestError;
-use crate::errors::flat::flat;
-use crate::metrics::{RejectableOutcome, RejectionReason};
-use crate::dialogue::CachedDialogueStorage;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::{CopyMessageSetters, SendMessageSetters};
 use teloxide::prelude::{Dialogue, Requester};
@@ -24,14 +21,17 @@ use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboar
                       Message, MessageEntityKind, MessageEntityRef, MessageId, ParseMode, ReplyParameters,
                       User as TelegramUser, UserId as TelegramUserId};
 use teloxide::utils::html;
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::config::ThrottledBot;
+use crate::dialogue::CachedDialogueStorage;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::primitives::chat::TelegramChatId;
+use crate::errors::flat::flat;
 use crate::handlers::{HandlerDeps, HandlerResult, reply_html, rights};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::handlers::utils::get_full_name;
 use crate::{metrics, reply_html};
-use crate::metrics::StartupCheck;
+use crate::metrics::{RejectableOutcome, RejectionReason, StartupCheck};
 
 /// One request per user per minute. A `const` rather than an environment variable: the knob is too
 /// small to be worth a line in every deployment file.
@@ -43,6 +43,12 @@ const TICKET_PREFIX: &str = "🆘 ";
 pub enum SupportCommands {
     #[command(description = "support")]
     Support(String),
+}
+
+impl PublishedCommands for SupportCommands {
+    fn is_published(&self, _scope: MenuScope, toggles: &CommandToggles) -> bool {
+        toggles.support_enabled
+    }
 }
 
 #[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]

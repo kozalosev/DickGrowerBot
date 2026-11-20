@@ -10,6 +10,7 @@ use teloxide::RequestError;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html, reply_html_ephemeral};
 use crate::cleanup::CleanupPolicy;
@@ -30,6 +31,12 @@ const DELAYS_PER_ROW: usize = 3;
 pub enum CleanupCommands {
     #[command(description = "cleanup")]
     Cleanup,
+}
+
+impl PublishedCommands for CleanupCommands {
+    fn is_published(&self, _scope: MenuScope, toggles: &CommandToggles) -> bool {
+        toggles.cleanup_enabled
+    }
 }
 
 #[autometrics]

@@ -117,6 +117,8 @@ is close to plain alternation.
 
 ```
 HELP_AUCTION_BOT=DickAuctionBot  # the bot auctioning promo codes; unset or empty => not mentioned
+HELP_AUCTION_START_PARAMETER=utm-dgb  # the `start` of the link to it; unset or empty => a bare link
+DONATE_URL=https://team.sadbot.dev/donate?utm_source=DickGrowerBot  # unset or empty => no /donate
 ```
 
 The help is rendered once, at startup, from `help::Context`. A paragraph about something that may
@@ -130,6 +132,38 @@ is set.
 tinytemplate reads the context through `Serialize`, never through `Display` — `render` turns it
 into a `serde_json::Value` before any formatter sees it. So a `Username` that must be shown with its
 `@` is marked `#[serde_as(as = "DisplayFromStr")]`; the derived `Serialize` writes the bare name.
+
+### Commands that only inform
+
+`/voucher`, `/reset`, `/buy` and `/donate` answer with a fixed text and at most one URL button
+(`handlers::info`). They exist so that questions asked every day get their answer from the bot. A
+new command of the kind is one more variant of `InfoCommands` and an arm of `InfoResponse::build`.
+
+A short text, a title and a line above a button, is an ordinary translation
+(`commands.<key>.text`). A paragraph or more is an embedded HTML file per language, like the
+privacy policy, under `handlers/info/<key>/`.
+
+**An alias is a variant without a description**, never teloxide's `#[command(aliases = …)]`.
+`bot_commands()` leaves `aliases` out, so `COMMAND_NAMES` would not know them and the topic gate
+would let them through in a forbidden topic. An undescribed variant has an empty description,
+which keeps it out of the menu. `InfoCommands::key` maps it to its main command, and the
+translations, the counter and the switch all go by that key.
+
+Which menu shows which command is `commands::PublishedCommands`, decided per `MenuScope`. `/voucher`
+and `/reset` are about a chat's leaderboard, so only the group menus list them; the bot still
+answers them in a private chat. `DISABLE_CMD_<KEY>` hides one of them from the menu and also stops
+the bot answering it, aliases included. `/buy` also leaves the menu when `HELP_AUCTION_BOT` is
+unset, and `/donate` without `DONATE_URL`; both then answer with the standard
+`errors.feature_disabled`. A `DONATE_URL` that isn't a URL, and a
+`HELP_AUCTION_START_PARAMETER` that breaks Telegram's rule for it (`StartParameter`: 1 to 64 Latin
+letters, digits, `_` or `-`), is logged and counts as unset.
+
+**Clicks on the buttons are not counted here, because they can't be.** Telegram never tells a bot
+that a URL button was pressed. The links say where the click came from instead: the `start` of the
+link to the auction bot is `HELP_AUCTION_START_PARAMETER` (`utm-dgb` in production), and
+`DONATE_URL` carries `?utm_source=DickGrowerBot` to `team.sadbot.dev/donate`, a Cloudflare Worker
+that counts its visits. The bot counts invocations only,
+`command_<key>_usage_total`.
 
 ### Optional: checking an inline PvP offer when it is posted
 
@@ -1704,9 +1738,9 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Code Style
 
-- **`new` builds a domain value; `literal!` is for the validated types only.** Five types validate
-  anything: `Ratio`, `Percentage`, `FloatPercentage` (`ratio.rs`), `PromoCode` (`promo.rs`) and
-  `PerkName` (`perk.rs`).
+- **`new` builds a domain value; `literal!` is for the validated types only.** Six types validate
+  anything: `Ratio`, `Percentage`, `FloatPercentage` (`ratio.rs`), `PromoCode` (`promo.rs`),
+  `PerkName` (`perk.rs`) and `StartParameter` (`deeplink.rs`).
   They alone have the `check_literal`/`from_literal` pair, and
   `literal!(Ratio = 0.5)` is what makes the `assert!` run while the code is compiled; a bare
   `Ratio::from_literal(0.5)` skips the `const` block, and with it the check.

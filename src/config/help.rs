@@ -1,6 +1,6 @@
 use teloxide::types::Me;
 use crate::commands::CommandToggles;
-use crate::config::env::{get_env_mandatory_value, get_optional_env_string};
+use crate::config::env::get_env_mandatory_value;
 use crate::domain::primitives::{Percentage, Username};
 use crate::handlers::perks::{HelpPussiesPerk, StreakPerk};
 use crate::handlers::utils::Incrementor;
@@ -12,6 +12,7 @@ pub fn build_context_for_help_messages(
     incr: &Incrementor,
     competitor_bots: &[&str],
     toggles: &CommandToggles,
+    auction_bot: &Option<Username>,
 ) -> anyhow::Result<help::Context> {
     let other_bots = competitor_bots
         .iter()
@@ -33,7 +34,7 @@ pub fn build_context_for_help_messages(
         support_enabled: toggles.support_enabled,
         cleanup_enabled: toggles.cleanup_enabled,
         shrink_enabled: toggles.mentions_enabled,
-        auction_bot: get_optional_env_string("HELP_AUCTION_BOT").map(Username::new),
+        auction_bot: auction_bot.clone(),
         help_pussies_percentage: incr.find_perk_config::<HelpPussiesPerk>()
             .map(Percentage::from)
             .unwrap_or(literal!(Percentage = 0)),

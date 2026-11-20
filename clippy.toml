@@ -17,6 +17,7 @@ disallowed-methods = [
     { path = "dick_grower_bot::domain::primitives::perk::PerkName::from_literal", reason = "use literal!(PerkName = …)" },
     { path = "dick_grower_bot::domain::primitives::promo::PromoCode::from_literal", reason = "use literal!(PromoCode = …)" },
     { path = "dick_grower_bot::domain::primitives::ratio::Ratio::from_literal", reason = "use literal!(Ratio = …)" },
+    { path = "dick_grower_bot::domain::primitives::deeplink::StartParameter::from_literal", reason = "use literal!(StartParameter = …)" },
 ]
 
 # Every map picks its hasher: `Fx*` (rustc-hash) where the keys are ours, Telegram ids or enums,

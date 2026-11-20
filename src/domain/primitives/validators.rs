@@ -11,6 +11,7 @@
 const PROMO_CODE_MIN_LENGTH: usize = 3;
 const PROMO_CODE_MAX_LENGTH: usize = 16;
 const PERK_NAME_MAX_LENGTH: usize = 32;
+const START_PARAMETER_MAX_LENGTH: usize = 64;
 
 pub const fn ratio_range_validator(x: &f64) -> bool {
     *x >= 0.0 && *x <= 1.0
@@ -47,6 +48,21 @@ pub const fn promo_code_validator(code: &str) -> bool {
 pub const fn perk_name_validator(name: &str) -> bool {
     let length = name.len();
     length > 0 && length <= PERK_NAME_MAX_LENGTH && name.is_ascii()
+}
+
+/// Telegram's rule for the `start` of a link: 1 to 64 characters, each a Latin letter, a digit, `_`
+/// or `-`. A link that breaks it opens the bot without passing anything.
+pub const fn start_parameter_validator(parameter: &str) -> bool {
+    let bytes = parameter.as_bytes();
+    !bytes.is_empty() && bytes.len() <= START_PARAMETER_MAX_LENGTH && all_start_parameter_bytes(bytes)
+}
+
+/// Iterators aren't const, so the walk is a recursion over the slice.
+const fn all_start_parameter_bytes(bytes: &[u8]) -> bool {
+    match bytes {
+        [] => true,
+        [c, rest @ ..] => (c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-')) && all_start_parameter_bytes(rest),
+    }
 }
 
 const fn is_promo_code_char(c: char) -> bool {
@@ -129,6 +145,18 @@ mod test {
         assert!(promo_code_validator("абв"), "3 letters is the minimum");
         assert!(!promo_code_validator("аб"), "2 is below it");
         assert!(!promo_code_validator(""));
+    }
+
+    #[test]
+    fn a_start_parameter_follows_telegrams_rule() {
+        assert!(start_parameter_validator("utm-dgb"));
+        assert!(start_parameter_validator("Promo_2026"));
+        assert!(start_parameter_validator(&"a".repeat(64)), "64 characters is the limit");
+        assert!(!start_parameter_validator(&"a".repeat(65)), "65 is past it");
+        assert!(!start_parameter_validator(""), "an empty one passes nothing");
+        for parameter in ["utm:dgb", "utm dgb", "utm=dgb", "промо"] {
+            assert!(!start_parameter_validator(parameter), "{parameter} breaks the rule");
+        }
     }
 
 }

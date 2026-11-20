@@ -1115,6 +1115,16 @@ fn generate_validated_domain_string_impls(info: &TypeInfo) -> TokenStream {
                 Self::new(value).map_err(::serde::de::Error::custom)
             }
         }
+
+        // Through `new` for the same reason: parsing must not bypass the validator either.
+        #[automatically_derived]
+        impl ::std::str::FromStr for #name {
+            type Err = ::domain_types::errors::DomainAssertionError<String>;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Self::new(s.to_owned())
+            }
+        }
     }
 }
 

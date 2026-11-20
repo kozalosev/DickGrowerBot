@@ -44,7 +44,7 @@ use dialogue::CachedDialogueStorage;
 use handlers::SupportService;
 use handlers::utils::SelfDestructionService;
 use crate::errors::handler::ContextLoggingErrorHandler;
-use crate::handlers::{checks, HandlerDeps, HelpCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
+use crate::handlers::{checks, HandlerDeps, HelpCommands, InfoCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
 use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, MentionsCommands, PromoCommands, TopicsCommands};
 use crate::handlers::pvp::{BattleCommands, BattleCommandsNoArgs};
 use crate::handlers::stats::StatsCommands;
@@ -110,6 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter(checks::is_gated_by_topic).filter_async(checks::is_forbidden_topic).endpoint(checks::handle_forbidden_topic))
         .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
+        .branch(Update::filter_message().filter_command::<InfoCommands>().filter(handlers::info::is_enabled).endpoint(handlers::info::info_cmd_handler))
         .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
         .branch(Update::filter_message().filter_map(handlers::support_answered_ticket).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
@@ -183,6 +184,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         support_enabled: support_chat_id.is_some(),
         cleanup_enabled: app_config.self_destruction.configurable(),
         mentions_enabled: app_config.daily_shrink.enabled(),
+        auction_enabled: app_config.auction_bot.is_some(),
+        donate_enabled: app_config.donate_url.is_some(),
     };
     let locales = _rust_i18n_available_locales();
     let set_my_commands_requests = locales
@@ -198,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
                                                         &repos.perk_states, perks).await?;
     let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES,
-                                                               &command_toggles)?;
+                                                               &command_toggles, &app_config.auction_bot)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = BattleLocks::new(&cache, app_config.caches.pvp_lock);
     let self_destruction = SelfDestructionService::new(app_config.self_destruction.clone(),

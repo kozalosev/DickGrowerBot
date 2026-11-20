@@ -72,6 +72,18 @@ commands:
     group_hint: "To stop me tagging you in this chat, press 🔕 under a shrink reminder. To change it for every chat, send me /mentions in a private chat."
   privacy:
     description: "Privacy Policy detailing what data we store"
+  voucher:
+    description: "Transfer centimetres"
+  reset:
+    description: "Reset the leaderboard"
+  buy:
+    description: "Buy centimetres"
+    text: "🛒 <b>Centimetres are sold at auctions</b>\nPromo codes are auctioned in %{bot}: you bid Telegram Stars, only the winner pays, and everyone who was outbid gets their Stars back. Activate a code with /promo."
+    button: "🔨 Go to the auction"
+  donate:
+    description: "Support the developers"
+    text: "❤️ <b>Support the developers</b>\nWe make the bot in our spare time and get almost nothing in return but sleepless nights. If you enjoy the game, you can thank us here."
+    button: "❤️ Support us"
   support:
     description: "Write to the bot's owner"
     request: "Write your message and I'll pass it to my owner. Send any command to cancel."

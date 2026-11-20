@@ -20,6 +20,7 @@ pub mod cleanup;
 pub mod mentions;
 pub mod rights;
 pub mod titles;
+pub mod info;
 
 use derive_more::Constructor;
 use rust_i18n::t;
@@ -28,7 +29,6 @@ use teloxide::requests::Requester;
 use teloxide::sugar::request::RequestLinkPreviewExt;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters};
 use teloxide::types::ParseMode::Html;
-use crate::config::ThrottledBot;
 
 pub use dick::*;
 pub use help::*;
@@ -44,7 +44,9 @@ pub use loan::LoanCommands;
 pub use topics::TopicsCommands;
 pub use cleanup::CleanupCommands;
 pub use mentions::MentionsCommands;
-use crate::config::{AppConfig, MessageGroup};
+pub use info::InfoCommands;
+
+use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::primitives::LanguageCode;
 use crate::errors::flat::flat;
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;

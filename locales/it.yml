@@ -72,6 +72,18 @@ commands:
     group_hint: "Per non essere più taggato in questa chat, premi 🔕 sotto un promemoria sull'accorciamento. Per cambiarlo in tutte le chat, mandami /mentions in privato."
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
+  voucher:
+    description: "Trasferire centimetri"
+  reset:
+    description: "Azzerare la classifica"
+  buy:
+    description: "Comprare centimetri"
+    text: "🛒 <b>I centimetri si comprano all'asta</b>\nI codici promozionali vengono messi all'asta in %{bot}: si offre in Telegram Stars, paga solo il vincitore e chi viene superato riceve indietro le sue stelle. Un codice si attiva con il comando /promo."
+    button: "🔨 All'asta"
+  donate:
+    description: "Sostenere gli sviluppatori"
+    text: "❤️ <b>Sostieni gli sviluppatori</b>\nSviluppiamo il bot nel tempo libero e non riceviamo quasi nulla in cambio, a parte notti insonni. Se il gioco ti piace, puoi ringraziarci qui."
+    button: "❤️ Sostienici"
   support:
     description: "Scrivi al proprietario del bot"
     request: "Scrivi il tuo messaggio e lo passerò al mio proprietario. Per annullare, invia un comando qualsiasi."

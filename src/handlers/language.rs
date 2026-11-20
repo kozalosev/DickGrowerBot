@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
@@ -23,6 +24,19 @@ pub enum LanguageCommands {
     #[command(description = "language")]
     Language(String),
     Lang(String),
+}
+
+impl PublishedCommands for LanguageCommands {
+    /// In a private chat it sets the user's own language, kept by the user-service, so it needs
+    /// that integration. For a group's administrators it sets the chat's language, kept in the
+    /// bot's own database, so it is always available.
+    fn is_published(&self, scope: MenuScope, toggles: &CommandToggles) -> bool {
+        match scope {
+            MenuScope::Private => toggles.personal_language_enabled,
+            MenuScope::Group => false,
+            MenuScope::Admins => true,
+        }
+    }
 }
 
 impl LanguageCommands {

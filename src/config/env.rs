@@ -51,6 +51,19 @@ pub(super) fn get_optional_env_string(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|value| !value.is_empty())
 }
 
+/// [`get_optional_env_string`] parsed into `T`. A value that doesn't parse is logged and counts as
+/// unset.
+pub(super) fn get_optional_env<T>(key: &str) -> Option<T>
+where
+    T: FromStr,
+    <T as FromStr>::Err: Error,
+{
+    get_optional_env_string(key)?
+        .parse::<T>()
+        .inspect_err(|e| tracing::warn!(error = flat!(e), %key, "invalid value of an environment variable, ignoring it"))
+        .ok()
+}
+
 /// Reads a domain value from an environment variable, with a fallback and a lower bound written as
 /// the plain numbers they are.
 ///

@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::{CallbackQuery, Message, Requester};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
 use crate::config::MessageGroup::Notice;
@@ -21,6 +22,12 @@ use crate::{metrics, reply_html, reply_html_ephemeral};
 pub enum MentionsCommands {
     #[command(description = "mentions")]
     Mentions,
+}
+
+impl PublishedCommands for MentionsCommands {
+    fn is_published(&self, _scope: MenuScope, toggles: &CommandToggles) -> bool {
+        toggles.mentions_enabled
+    }
 }
 
 /// In a private chat, shows the user's mention setting for every chat with a button to flip it.
