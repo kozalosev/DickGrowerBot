@@ -167,4 +167,16 @@ mod tests {
 
         assert_samples("SendMessage", "api", 1);
     }
+
+    #[test]
+    fn counts_an_over_long_text_apart_from_the_other_api_errors() {
+        let err = RequestError::Api(ApiError::MessageIsTooLong);
+        let before = errors_of("too_long");
+
+        let guard = TelegramObserver(TelegramBackoff::default()).on_request("SendVenue", RequestBody::Json(b"{}"));
+        guard.on_response(Duration::from_millis(20), Err(&err));
+
+        assert_samples("SendVenue", "too_long", 1);
+        assert!(errors_of("too_long") > before, "the over-long text wasn't counted as too_long");
+    }
 }

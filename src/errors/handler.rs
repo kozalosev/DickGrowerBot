@@ -3,7 +3,7 @@ use std::error::Error;
 use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};
 use futures::future::BoxFuture;
-use teloxide::RequestError;
+use teloxide::{ApiError, RequestError};
 use teloxide::dispatching::{DpHandlerDescription, UpdateHandler};
 use teloxide::dptree::{HandlerDescription, HandlerSignature};
 use teloxide::dptree::di::DependencyMap;
@@ -115,6 +115,9 @@ pub fn classify(error: &RequestError) -> &'static str {
         // Telegram says the bot sends too fast. Kept apart from the other API answers, because it
         // is the one that says the limits are too high rather than that the request was wrong.
         RequestError::RetryAfter(_) => "rate_limited",
+        // A text over Telegram's 4096 characters. The bot never splits an answer, so this is
+        // what says one has grown too long.
+        RequestError::Api(ApiError::MessageIsTooLong | ApiError::EditedMessageIsTooLong) => "too_long",
         RequestError::Api(_) | RequestError::MigrateToChatId(_) => "api",
         _ => "other",
     }

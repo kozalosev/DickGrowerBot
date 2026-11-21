@@ -183,7 +183,6 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
 }
 
 pub fn reply_html<T: Into<String>>(bot: &ThrottledBot, msg: &Message, answer: T) -> <ThrottledBot as Requester>::SendMessage {
-    // TODO: split to several messages if the answer is too long
     let mut answer = bot.send_message(msg.chat.id, answer)
         .parse_mode(Html)
         .disable_link_preview(true);
