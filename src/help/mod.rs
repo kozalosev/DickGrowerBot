@@ -40,7 +40,6 @@ impl HelpContainer {
 #[serde_as]
 #[derive(Serialize, Clone)]
 pub struct Context {
-    pub bot_name: Username,
     pub grow_min: String,
     pub grow_max: String,
     pub other_bots: String,
@@ -86,7 +85,6 @@ mod test {
 
     fn context() -> Context {
         Context {
-            bot_name: Username::from("DickGrowerBot"),
             grow_min: "-5".to_owned(),
             grow_max: "10".to_owned(),
             other_bots: String::new(),

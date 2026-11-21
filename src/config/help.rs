@@ -1,4 +1,3 @@
-use teloxide::types::Me;
 use crate::commands::CommandToggles;
 use crate::config::env::get_env_mandatory_value;
 use crate::domain::primitives::{Percentage, Username};
@@ -8,7 +7,6 @@ use crate::help;
 use domain_types::literal;
 
 pub fn build_context_for_help_messages(
-    me: &Me,
     incr: &Incrementor,
     competitor_bots: &[&str],
     toggles: &CommandToggles,
@@ -22,7 +20,6 @@ pub fn build_context_for_help_messages(
     let incr_cfg = incr.get_config();
 
     Ok(help::Context {
-        bot_name: Username::from(me.username()),
         grow_min: incr_cfg.growth_range_min().to_string(),
         grow_max: incr_cfg.growth_range_max().to_string(),
         other_bots,

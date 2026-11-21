@@ -201,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let perks = handlers::perks::all(&app_config);
     let incrementor = handlers::utils::Incrementor::new(app_config.incrementor.clone(),
                                                         &repos.perk_states, perks).await?;
-    let help_context = config::build_context_for_help_messages(&me, &incrementor, &handlers::ORIGINAL_BOT_USERNAMES,
+    let help_context = config::build_context_for_help_messages(&incrementor, &handlers::ORIGINAL_BOT_USERNAMES,
                                                                &command_toggles, &app_config.auction_bot)?;
     let help_container = help::render_help_messages(help_context)?;
     let battle_locker = BattleLocks::new(&cache, app_config.caches.pvp_lock);
