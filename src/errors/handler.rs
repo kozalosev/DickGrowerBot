@@ -8,11 +8,12 @@ use teloxide::dispatching::{DpHandlerDescription, UpdateHandler};
 use teloxide::dptree::{HandlerDescription, HandlerSignature};
 use teloxide::dptree::di::DependencyMap;
 use teloxide::error_handlers::ErrorHandler;
-use teloxide::types::{Me, Update, UpdateKind};
+use teloxide::types::{Update, UpdateKind};
 use tracing::{Instrument, Span};
 use crate::errors::details::ErrorFields;
 use crate::errors::flat::flat;
 use crate::handlers::checks::is_our_command;
+use crate::domain::objects::BotNames;
 
 type HandlerError = Box<dyn Error + Send + Sync>;
 
@@ -33,10 +34,10 @@ pub fn trace_updates(handler: UpdateHandler<HandlerError>) -> UpdateHandler<Hand
     teloxide::dptree::from_fn_with_description(description, move |mut deps: DependencyMap, cont| {
         let handler = handler.clone();
         let update = deps.try_get::<Update>();
-        let me = deps.try_get::<Me>();
+        let names = deps.try_get::<BotNames>();
         let slot = UpdateSpan::default();
         let ignored = update.as_deref()
-            .is_some_and(|update| is_ignored_group_message(update, me.as_deref()));
+            .is_some_and(|update| is_ignored_group_message(update, names.as_deref()));
         let span = if ignored { Span::none() } else { slot.open(update.as_deref()) };
         deps.insert(slot.clone());
         async move {
@@ -119,14 +120,14 @@ pub fn classify(error: &RequestError) -> &'static str {
     }
 }
 
-/// A message in a group that isn't one of our commands. Without the bot's own user, no command can
+/// A message in a group that isn't one of our commands. Without the bot's names, no command can
 /// be told apart, so nothing is ignored.
-fn is_ignored_group_message(update: &Update, me: Option<&Me>) -> bool {
+fn is_ignored_group_message(update: &Update, names: Option<&BotNames>) -> bool {
     let UpdateKind::Message(msg) = &update.kind else {
         return false
     };
     let in_group = msg.chat.is_group() || msg.chat.is_supergroup();
-    in_group && me.is_some_and(|me| !is_our_command(msg, me))
+    in_group && names.is_some_and(|names| !is_our_command(msg, names))
 }
 
 /// The `update` span of the update being handled, once something has opened it.
@@ -167,8 +168,9 @@ mod test {
     use tracing_subscriber::Layer;
     use tracing_subscriber::layer::{Context, SubscriberExt};
     use teloxide::dptree;
-    use teloxide::types::{Me, Update, UpdateKind};
-    use crate::domain::primitives::{LengthChange, UserId};
+    use teloxide::types::{Update, UpdateKind};
+    use crate::domain::primitives::{LengthChange, UserId, Username};
+    use crate::domain::objects::BotNames;
     use crate::errors::details::{DetailedContext, Details};
     use super::HandlerError;
 
@@ -335,7 +337,7 @@ mod test {
             .build().expect("couldn't build a runtime");
 
         let result = tracing::subscriber::with_default(subscriber, || {
-            runtime.block_on(handler.dispatch(dptree::deps![update(text), me()]))
+            runtime.block_on(handler.dispatch(dptree::deps![update(text), names()]))
         });
         let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).expect("the logs are not UTF-8");
         (result.map_continue(|_| ()), logs, spans.0.load(Ordering::SeqCst))
@@ -357,14 +359,8 @@ mod test {
         update
     }
 
-    fn me() -> Me {
-        let json = r#"{
-            "id": 1, "is_bot": true, "first_name": "Dick Grower", "username": "DickGrowerBot",
-            "can_join_groups": true, "can_read_all_group_messages": true,
-            "supports_inline_queries": true, "can_connect_to_business_account": false,
-            "has_main_web_app": false
-        }"#;
-        serde_json::from_str(json).expect("couldn't build the bot's own user")
+    fn names() -> BotNames {
+        BotNames::new(Username::from("DickGrowerBot"), [])
     }
 
     #[derive(Clone, Default)]

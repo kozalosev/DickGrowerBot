@@ -3794,7 +3794,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 [[package]]
 name = "teloxide"
 version = "0.17.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#d49e0a8d7a8247f2323a9acc33bf9e1d33d2d818"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#f292668a7422bdf1ad7ef2f8b4cb32aa2375528f"
 dependencies = [
  "axum",
  "bytes",
@@ -3822,7 +3822,7 @@ dependencies = [
 [[package]]
 name = "teloxide-core"
 version = "0.13.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#d49e0a8d7a8247f2323a9acc33bf9e1d33d2d818"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#f292668a7422bdf1ad7ef2f8b4cb32aa2375528f"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -3854,7 +3854,7 @@ dependencies = [
 [[package]]
 name = "teloxide-macros"
 version = "0.10.0"
-source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#d49e0a8d7a8247f2323a9acc33bf9e1d33d2d818"
+source = "git+https://github.com/kozalosev/teloxide.git?branch=forked-master#f292668a7422bdf1ad7ef2f8b4cb32aa2375528f"
 dependencies = [
  "heck",
  "proc-macro2",

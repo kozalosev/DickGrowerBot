@@ -475,6 +475,20 @@ neither does `/language`, which writes to user-service. The gate is an `Update`-
 than a `Message` one because the inline handler upserts a `Users` row too, and that upsert would
 restore an erased name.
 
+### The bot's usernames
+
+A bot may hold several usernames (`@DickGrowerBot`, `@DickGrowerGame`, …), and a command addressed
+to any of them is ours. `getMe` returns only the first, so `handlers::utils::fetch_bot_names` asks
+`getChat` about the bot itself, whose `active_usernames` lists them all. It does so once, at
+startup: a username added later starts working after a restart. If the call fails, the bot answers
+to `getMe`'s name alone and logs a warning.
+
+`domain::objects::BotNames` is a dependency of the dispatcher, and both places that tell our commands apart use it:
+the command branches, through `filter_bot_command`, and `checks::is_our_command`, which serves the
+rate limiter, the topics gate, the title keeper and the span-skipping in `trace_updates`. teloxide's
+own `filter_command` passes `getMe`'s name to the parser, so it would refuse the others;
+`clippy.toml` forbids it.
+
 ### Optional: restricting the bot to forum topics
 
 A forum's admins can confine the bot to chosen topics with `/topics` (issue #102), which answers
@@ -498,15 +512,15 @@ write nothing for the sender — the property the ban gate's ordering depends on
 
 `/topics` is registered *above* the gate, so a chat can't lock itself out of its own setting. That
 placement is the whole exemption: the gate needs no special case for it, and the branch matches
-every form of the command (`@username` suffix included) because `filter_command` knows the bot's
-real name. Moving the branch below the gate would silently break this — `checks::test` pins it
+every form of the command (`@username` suffix included) because `filter_bot_command` knows the
+bot's names. Moving the branch below the gate would silently break this — `checks::test` pins it
 down.
 
 Four things keep the gate narrow: only real forums (`utils::is_forum` — a supergroup linked to a
 channel puts a `message_thread_id` on discussion-thread messages too); only commands, not every
 message (a notice on each one would be noisier than the bot the setting was meant to quiet); only
 **our** commands, matched by name against `commands::COMMAND_NAMES` and by the `@username` Telegram's
-menu appends — a group usually holds several bots, and answering for another one's command is the
+menu appends, which has to be one of the bot's names — a group usually holds several bots, and answering for another one's command is the
 noise this feature exists to remove; and fail-open on a database error.
 
 Two limits are Telegram's, not ours, and both shape the design:

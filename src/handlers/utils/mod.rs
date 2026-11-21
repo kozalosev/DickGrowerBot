@@ -1,9 +1,11 @@
 pub mod callbacks;
 pub mod locks;
+mod command_filter;
 mod tghack;
 mod incrementor;
 mod self_destruction;
 
+pub use command_filter::*;
 pub use tghack::*;
 pub use incrementor::*;
 pub use self_destruction::*;

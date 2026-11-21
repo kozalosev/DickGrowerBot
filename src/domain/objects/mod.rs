@@ -10,4 +10,5 @@ pub_use_modules!(
     topics,
     cleanup,
     perk,
-    import);
+    import,
+    bot_names);

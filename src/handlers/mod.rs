@@ -258,10 +258,10 @@ pub mod checks {
     use std::ops::Not;
     use chrono::{DateTime, Utc};
     use rust_i18n::t;
-    use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
+    use teloxide::dispatching::{UpdateFilterExt, UpdateHandler};
     use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
     use teloxide::requests::Requester;
-    use teloxide::types::{CallbackQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Me, Message, Update, UpdateKind};
+    use teloxide::types::{CallbackQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, Update, UpdateKind};
     use teloxide::utils::command::BotCommands;
     use crate::bans::BanList;
     use crate::commands::COMMAND_NAMES;
@@ -271,7 +271,8 @@ pub mod checks {
     use crate::errors::flat::flat;
     use crate::handlers::HandlerDeps;
     use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
-    use crate::handlers::utils::is_forum;
+    use crate::domain::objects::BotNames;
+    use crate::handlers::utils::{is_forum, BotCommandFilterExt};
     use crate::metrics;
     use crate::rate_limit::{Exceeded, RateLimiter};
     use crate::topics::TopicPolicy;
@@ -373,13 +374,13 @@ pub mod checks {
     ///
     /// `/topics` is *not* exempted here. It is a branch of its own above this gate, so its messages
     /// never reach the predicate.
-    pub fn is_gated_by_topic(msg: Message, me: Me) -> bool {
-        is_forum(&msg.chat) && is_our_command(&msg, &me)
+    pub fn is_gated_by_topic(msg: Message, names: BotNames) -> bool {
+        is_forum(&msg.chat) && is_our_command(&msg, &names)
     }
 
     /// Whether the message is one of our commands: by name, and by the `@username` when Telegram's
     /// menu appended one, since a group tends to hold several bots.
-    pub(crate) fn is_our_command(msg: &Message, me: &Me) -> bool {
+    pub(crate) fn is_our_command(msg: &Message, names: &BotNames) -> bool {
         let Some(command) = msg.text().or_else(|| msg.caption())
             .and_then(|text| text.split_whitespace().next())
             .and_then(|word| word.strip_prefix('/'))
@@ -388,7 +389,7 @@ pub mod checks {
         };
         let (name, addressee) = command.split_once('@')
             .map_or((command, None), |(name, at)| (name, Some(at)));
-        if addressee.is_some_and(|at| !at.eq_ignore_ascii_case(me.username())) {
+        if addressee.is_some_and(|at| !names.is_ours(at)) {
             return false
         }
         COMMAND_NAMES.contains(&name.to_lowercase())
@@ -460,9 +461,9 @@ pub mod checks {
     /// The verdict on a request that went over a limit, or `None` for one that may go on. Only
     /// what the bot would answer is counted: our commands, the buttons and the inline queries.
     /// Chatter in a group the bot reads in full, and the second step of a dialogue, are left alone.
-    pub async fn rate_limit_exceeded(upd: Update, me: Me, limiter: RateLimiter) -> Option<Exceeded> {
+    pub async fn rate_limit_exceeded(upd: Update, names: BotNames, limiter: RateLimiter) -> Option<Exceeded> {
         let (uid, chat): (_, Option<ChatIdKind>) = match &upd.kind {
-            UpdateKind::Message(msg) if is_our_command(msg, &me) => (msg.from.as_ref(), Some(msg.chat.id.into())),
+            UpdateKind::Message(msg) if is_our_command(msg, &names) => (msg.from.as_ref(), Some(msg.chat.id.into())),
             UpdateKind::CallbackQuery(query) => {
                 let chat = query.message.as_ref()
                     .map_or_else(|| query.chat_instance.clone().into(), |msg| msg.chat().id.into());
@@ -576,7 +577,7 @@ pub mod checks {
     where
         C: BotCommands + Send + Sync + 'static
     {
-        Update::filter_message().filter_command::<C>()
+        Update::filter_message().filter_bot_command::<C>()
             .filter(is_group_chat)
             .branch(reject_group_accounts())
             .branch(require_anchored_group())
@@ -613,49 +614,52 @@ pub mod checks {
 
     #[cfg(test)]
     mod test {
-        use teloxide::types::{CallbackQuery, Me, Message};
+        use teloxide::types::{CallbackQuery, Message};
+        use crate::domain::primitives::Username;
+        use crate::domain::objects::BotNames;
         use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
         use super::{callback_topic, is_gated_by_topic, is_our_command};
 
         #[test]
         fn test_our_command_in_a_forum_is_gated() {
-            assert!(is_gated_by_topic(message("/grow", true, Some(42)), me()));
+            assert!(is_gated_by_topic(message("/grow", true, Some(42)), names()));
             // the General topic carries no thread id of its own
-            assert!(is_gated_by_topic(message("/grow", true, None), me()));
-            assert!(is_gated_by_topic(message("/grow@DickGrowerBot arg", true, Some(42)), me()));
+            assert!(is_gated_by_topic(message("/grow", true, None), names()));
+            assert!(is_gated_by_topic(message("/grow@DickGrowerBot arg", true, Some(42)), names()));
             // Telegram's menu is not consistent about the case of the username it appends
-            assert!(is_gated_by_topic(message("/grow@dickgrowerbot", true, Some(42)), me()));
+            assert!(is_gated_by_topic(message("/grow@dickgrowerbot", true, Some(42)), names()));
+            assert!(is_gated_by_topic(message("/grow@DickGrowerGame", true, Some(42)), names()));
         }
 
         /// A group usually holds several bots. Answering for a command aimed at one of them would
         /// be noise from a bot that was just told to be quieter, so the addressee is checked.
         #[test]
         fn test_another_bots_command_is_not_gated() {
-            assert!(!is_gated_by_topic(message("/grow@SomeOtherBot", true, Some(42)), me()));
-            assert!(!is_gated_by_topic(message("/start@SomeOtherBot", true, Some(42)), me()));
+            assert!(!is_gated_by_topic(message("/grow@SomeOtherBot", true, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("/start@SomeOtherBot", true, Some(42)), names()));
         }
 
         /// Same reasoning for a bare command we simply don't have: it belongs to someone else.
         #[test]
         fn test_a_command_we_dont_have_is_not_gated() {
-            assert!(!is_gated_by_topic(message("/roll 2d6", true, Some(42)), me()));
-            assert!(!is_gated_by_topic(message("/", true, Some(42)), me()));
+            assert!(!is_gated_by_topic(message("/roll 2d6", true, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("/", true, Some(42)), names()));
         }
 
         /// Every message of a forbidden topic would otherwise get a notice, which is noisier than
         /// the bot the setting was meant to quiet.
         #[test]
         fn test_an_ordinary_message_is_not_gated() {
-            assert!(!is_gated_by_topic(message("hello", true, Some(42)), me()));
-            assert!(!is_gated_by_topic(message("not a /grow", true, Some(42)), me()));
+            assert!(!is_gated_by_topic(message("hello", true, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("not a /grow", true, Some(42)), names()));
         }
 
         /// A supergroup linked to a channel puts a thread id on discussion-thread messages too,
         /// and those aren't topics.
         #[test]
         fn test_a_non_forum_is_never_gated() {
-            assert!(!is_gated_by_topic(message("/grow", false, Some(42)), me()));
-            assert!(!is_gated_by_topic(message("/grow", false, None), me()));
+            assert!(!is_gated_by_topic(message("/grow", false, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("/grow", false, None), names()));
         }
 
         /// `/topics` is not exempted here: it is a branch of its own above this gate, so a
@@ -663,16 +667,17 @@ pub mod checks {
         /// branch is ever moved below the gate, the reminder is right here.
         #[test]
         fn test_the_topics_command_is_exempted_by_the_branch_order_only() {
-            assert!(is_gated_by_topic(message("/topics", true, Some(42)), me()));
+            assert!(is_gated_by_topic(message("/topics", true, Some(42)), names()));
         }
 
         /// The rate limiter counts the commands in every chat, a forum or not.
         #[test]
         fn test_our_commands_are_recognized_outside_forums_too() {
-            assert!(is_our_command(&message("/help", false, None), &me()));
-            assert!(is_our_command(&message("/help@DickGrowerBot", false, None), &me()));
-            assert!(!is_our_command(&message("/help@SomeOtherBot", false, None), &me()));
-            assert!(!is_our_command(&message("help me", false, None), &me()));
+            assert!(is_our_command(&message("/help", false, None), &names()));
+            assert!(is_our_command(&message("/help@DickGrowerBot", false, None), &names()));
+            assert!(is_our_command(&message("/help@dickgrowergame", false, None), &names()));
+            assert!(!is_our_command(&message("/help@SomeOtherBot", false, None), &names()));
+            assert!(!is_our_command(&message("help me", false, None), &names()));
         }
 
         #[test]
@@ -726,14 +731,8 @@ pub mod checks {
         }
 
         /// The bot the commands are addressed to in the tests below.
-        fn me() -> Me {
-            let json = r#"{
-                "id": 42, "is_bot": true, "first_name": "Dick Grower", "username": "DickGrowerBot",
-                "can_join_groups": true, "can_read_all_group_messages": false,
-                "supports_inline_queries": true, "can_connect_to_business_account": false,
-                "has_main_web_app": false
-            }"#;
-            serde_json::from_str(json).expect("couldn't build the bot's own user")
+        fn names() -> BotNames {
+            BotNames::new(Username::from("DickGrowerBot"), [Username::from("DickGrowerGame")])
         }
 
         fn callback(data: &str, message: Option<Message>) -> CallbackQuery {

@@ -42,7 +42,7 @@ use cache::Cache;
 use config::AppConfig;
 use dialogue::CachedDialogueStorage;
 use handlers::SupportService;
-use handlers::utils::SelfDestructionService;
+use handlers::utils::{fetch_bot_names, BotCommandFilterExt, SelfDestructionService};
 use crate::errors::handler::ContextLoggingErrorHandler;
 use crate::handlers::{checks, HandlerDeps, HelpCommands, InfoCommands, LanguageCommands, LoanCommands, PrivacyCommands, PromoCommandState, StartCommands, SupportCommandState, SupportCommands};
 use crate::handlers::{CleanupCommands, DickCommands, DickOfDayCommands, ImportCommands, MentionsCommands, PromoCommands, TopicsCommands};
@@ -104,14 +104,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // /topics goes above the gate it configures, or a chat could lock itself out of its own
         // setting. Being a branch of its own, it needs no exemption inside the gate: this one
         // matches first, and only what falls through reaches the gate below.
-        .branch(Update::filter_message().filter_command::<TopicsCommands>().endpoint(handlers::topics::topics_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<TopicsCommands>().endpoint(handlers::topics::topics_cmd_handler))
         // Above everything a forum chat may have been told to keep out of its other topics, and
         // safe to put there for the same reason the ban gate is where it is: it writes nothing.
         .branch(Update::filter_message().filter(checks::is_gated_by_topic).filter_async(checks::is_forbidden_topic).endpoint(checks::handle_forbidden_topic))
-        .branch(Update::filter_message().filter_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
-        .branch(Update::filter_message().filter_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
-        .branch(Update::filter_message().filter_command::<InfoCommands>().filter(handlers::info::is_enabled).endpoint(handlers::info::info_cmd_handler))
-        .branch(Update::filter_message().filter_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
+        .branch(Update::filter_message().filter_bot_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<InfoCommands>().filter(handlers::info::is_enabled).endpoint(handlers::info::info_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
         .branch(Update::filter_message().filter_map(handlers::support_answered_ticket).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .endpoint(handlers::support_follow_up_handler))
@@ -122,9 +122,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // may still read the policy and reach the owner, but must not come back into the database.
         // /start writes too — it activates a promo code from a deeplink — so it goes below.
         .branch(dptree::filter(checks::is_banned).endpoint(checks::handle_banned))
-        .branch(Update::filter_message().filter_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
-        .branch(Update::filter_message().filter_command::<LanguageCommands>().endpoint(handlers::language::language_cmd_handler))
-        .branch(Update::filter_message().filter_command::<MentionsCommands>().endpoint(handlers::mentions::mentions_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<StartCommands>().endpoint(handlers::start_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<LanguageCommands>().endpoint(handlers::language::language_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<MentionsCommands>().endpoint(handlers::mentions::mentions_cmd_handler))
         .branch(checks::group_command::<DickCommands>().endpoint(handlers::dick_cmd_handler))
         .branch(checks::group_command::<DickOfDayCommands>().endpoint(handlers::dod_cmd_handler))
         .branch(checks::group_command::<BattleCommands>().endpoint(handlers::pvp::pvp_cmd_handler))
@@ -132,8 +132,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(checks::group_command::<LoanCommands>().endpoint(handlers::loan::loan_cmd_handler))
         .branch(checks::group_command::<ImportCommands>().endpoint(handlers::import_cmd_handler))
         .branch(checks::group_command::<CleanupCommands>().endpoint(handlers::cleanup::cleanup_cmd_handler))
-        .branch(Update::filter_message().filter_command::<StatsCommands>().branch(checks::require_anchored_group()).endpoint(handlers::stats::stats_cmd_handler))
-        .branch(Update::filter_message().filter_command::<PromoCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<PromoCommandState>, PromoCommandState>()
+        .branch(Update::filter_message().filter_bot_command::<StatsCommands>().branch(checks::require_anchored_group()).endpoint(handlers::stats::stats_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<PromoCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<PromoCommandState>, PromoCommandState>()
             .branch(dptree::case![PromoCommandState::Start].endpoint(handlers::promo_cmd_handler)))
         .branch(Update::filter_message().enter_dialogue::<Message, CachedDialogueStorage<PromoCommandState>, PromoCommandState>()
             .branch(dptree::case![PromoCommandState::Requested].endpoint(handlers::promo_requested_handler)))
@@ -174,6 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     bot.delete_webhook().await?;
 
     let me = bot.get_me().await?;
+    let bot_names = fetch_bot_names(&bot, &me).await;
     let support_chat_id = handlers::check_support_chat(&bot, app_config.support_chat_id, &me).await;
 
     // The personal /language relies on the user-service; when it's unavailable, hide /language from
@@ -232,6 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let support_dialogues = CachedDialogueStorage::<SupportCommandState>::new(&cache, "support", app_config.caches.dialogue);
     let deps = deps![
         me,
+        bot_names,
         repos,
         incrementor,
         app_config,

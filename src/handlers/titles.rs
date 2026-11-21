@@ -3,15 +3,16 @@
 //! A title is taken from our own commands and from the service message of a rename, so a group
 //! where the bot reads every message costs nothing for the messages it ignores.
 
-use teloxide::types::{Chat, ChatMemberUpdated, Me, Message};
+use teloxide::types::{Chat, ChatMemberUpdated, Message};
 use crate::domain::primitives::chat::{ChatTitle, TelegramChatId};
 use crate::errors::flat::flat;
 use crate::handlers::checks::is_our_command;
+use crate::domain::objects::BotNames;
 use crate::repo::Repositories;
 
 /// The chat and its title, when the message is worth taking the title from.
-pub fn title_to_remember(msg: Message, me: Me) -> Option<(TelegramChatId, ChatTitle)> {
-    (msg.new_chat_title().is_some() || is_our_command(&msg, &me))
+pub fn title_to_remember(msg: Message, names: BotNames) -> Option<(TelegramChatId, ChatTitle)> {
+    (msg.new_chat_title().is_some() || is_our_command(&msg, &names))
         .then(|| group_title(&msg.chat))
         .flatten()
 }
@@ -48,7 +49,9 @@ mod test {
     use serde_json::json;
     use teloxide::dptree;
     use teloxide::dptree::description::Unspecified;
-    use teloxide::types::{Me, Message};
+    use teloxide::types::Message;
+    use crate::domain::primitives::Username;
+    use crate::domain::objects::BotNames;
     use crate::domain::primitives::chat::{ChatTitle, TelegramChatId};
     use super::title_to_remember;
 
@@ -56,24 +59,24 @@ mod test {
 
     #[test]
     fn our_command_in_a_group_gives_the_title() {
-        let title = title_to_remember(group_message("text", "/grow"), me());
+        let title = title_to_remember(group_message("text", "/grow"), names());
         assert_eq!(title, Some(expected("chat")));
 
-        let title = title_to_remember(group_message("text", "/top@DickGrowerBot"), me());
+        let title = title_to_remember(group_message("text", "/top@DickGrowerBot"), names());
         assert_eq!(title, Some(expected("chat")));
     }
 
     #[test]
     fn a_rename_gives_the_new_title() {
-        let title = title_to_remember(group_message("new_chat_title", "chat"), me());
+        let title = title_to_remember(group_message("new_chat_title", "chat"), names());
         assert_eq!(title, Some(expected("chat")));
     }
 
     #[test]
     fn other_messages_give_nothing() {
-        assert_eq!(title_to_remember(group_message("text", "hello"), me()), None);
-        assert_eq!(title_to_remember(group_message("text", "/grow@SomeOtherBot"), me()), None);
-        assert_eq!(title_to_remember(group_message("text", "/roll 2d6"), me()), None);
+        assert_eq!(title_to_remember(group_message("text", "hello"), names()), None);
+        assert_eq!(title_to_remember(group_message("text", "/grow@SomeOtherBot"), names()), None);
+        assert_eq!(title_to_remember(group_message("text", "/roll 2d6"), names()), None);
     }
 
     /// The branch in `main.rs` has no endpoint of its own, and the command still has to reach the
@@ -96,7 +99,7 @@ mod test {
             "message_id": 5,
             "text": "/grow",
         })).expect("couldn't build the message");
-        assert_eq!(title_to_remember(msg, me()), None);
+        assert_eq!(title_to_remember(msg, names()), None);
     }
 
     fn expected(title: &str) -> (TelegramChatId, ChatTitle) {
@@ -115,12 +118,7 @@ mod test {
         serde_json::from_value(json).expect("couldn't build the message")
     }
 
-    fn me() -> Me {
-        serde_json::from_value(json!({
-            "id": 42, "is_bot": true, "first_name": "Dick Grower", "username": "DickGrowerBot",
-            "can_join_groups": true, "can_read_all_group_messages": false,
-            "supports_inline_queries": true, "can_connect_to_business_account": false,
-            "has_main_web_app": false,
-        })).expect("couldn't build the bot's own user")
+    fn names() -> BotNames {
+        BotNames::new(Username::from("DickGrowerBot"), [])
     }
 }
