@@ -813,6 +813,7 @@ dependencies = [
  "enum_dispatch",
  "futures",
  "itertools 0.15.0",
+ "linkify",
  "num-traits",
  "once_cell",
  "opentelemetry 0.33.1",
@@ -1829,6 +1830,15 @@ checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "linkify"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19ddb16a872aaef460efdefe77da5f20e12226d220580952710c4a9d60e1aa7c"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -3187,7 +3197,7 @@ checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
- "base64 0.21.7",
+ "base64 0.22.1",
  "encoding_rs_io",
  "getrandom 0.3.4",
  "granit-parser 0.0.7",
