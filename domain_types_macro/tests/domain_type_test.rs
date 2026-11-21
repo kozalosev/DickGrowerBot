@@ -7,6 +7,7 @@
 //! since-removed `not_database_type` flag.
 
 use std::str::FromStr;
+use domain_types::errors::{DivisionByZero, DomainArithmeticError};
 use domain_types::literal;
 use domain_types_macro::domain_type;
 
@@ -44,7 +45,7 @@ struct Positive(i32);
 struct Ratio(f64);
 
 #[domain_type(number, division_result(Ratio))]
-struct Wins(i64);
+struct Wins(i32);
 
 // A validated ID/value type: no `number`, so no arithmetic surface is generated,
 // unlike `Positive` above.
@@ -60,7 +61,7 @@ struct PositiveId(i64);
 struct RatioValue(f64);
 
 #[domain_type(number, division_result(Speed))]
-struct Meters(i64);
+struct Meters(u32);
 
 #[domain_type]
 struct Login(String);
@@ -192,15 +193,30 @@ mod validated_integer_arithmetic {
         assert_eq!((p + literal!(Positive = 3)).unwrap(), 5);
         assert_eq!((p * 4).unwrap(), 8);
         // Subtraction below zero violates the invariant
-        assert!((p - 5).is_err());
+        let below_zero = p - 5;
+        assert!(matches!(below_zero, Err(DomainArithmeticError::AssertionFailed(_))));
     }
 
     #[test]
     fn overflow_becomes_an_error() {
         let max = literal!(Positive = i32::MAX);
-        assert!(max.overflowing_add_primitive(1).is_err());
+        let overflown = max.overflowing_add_primitive(1);
+        assert!(matches!(overflown, Err(DomainArithmeticError::Overflow(_))));
         // The saturating flavor clamps to a still-valid value
         assert_eq!(max.saturating_add_primitive(1).unwrap(), i32::MAX);
+    }
+
+    #[test]
+    fn a_zero_divisor_is_refused_rather_than_panicking() {
+        let p = literal!(Positive = 6);
+        assert_eq!(p.saturating_div_primitive(3).unwrap(), 2);
+
+        let quotient = p.saturating_div_primitive(0);
+        assert!(matches!(quotient, Err(DomainArithmeticError::ByZero)));
+        let quotient = p.overflowing_div_primitive(0);
+        assert!(matches!(quotient, Err(DomainArithmeticError::ByZero)));
+        let remainder = p.overflowing_rem_primitive(0);
+        assert!(matches!(remainder, Err(DomainArithmeticError::ByZero)));
     }
 
     #[test]
@@ -281,6 +297,17 @@ mod float_types {
         assert_eq!((half + 0.25).unwrap(), 0.75);
         assert_eq!((half + half).unwrap(), 1.0);
         assert!((half + 0.75).is_err());
+    }
+
+    #[test]
+    fn a_validated_float_refuses_a_zero_divisor() {
+        let half = literal!(Ratio = 0.5);
+        assert_eq!((half / 2.0).unwrap(), 0.25);
+
+        let quotient = half / 0.0;
+        assert!(matches!(quotient, Err(DomainArithmeticError::ByZero)));
+        let remainder = half % 0.0;
+        assert!(matches!(remainder, Err(DomainArithmeticError::ByZero)));
     }
 
     #[test]
@@ -407,24 +434,33 @@ mod division_result {
         let ratio = (Wins::new(1) / Wins::new(2)).unwrap();
         assert_eq!(ratio, 0.5);
 
-        let ratio = (Wins::new(3) / 4i64).unwrap();
+        let ratio = (Wins::new(3) / 4i32).unwrap();
         assert_eq!(ratio, 0.75);
     }
 
     #[test]
-    fn division_by_zero_fails_validation() {
-        assert!((Wins::new(1) / Wins::new(0)).is_err());
+    fn a_zero_divisor_is_told_apart_from_a_failed_validation() {
+        let quotient = Wins::new(1) / Wins::new(0);
+        assert!(matches!(quotient, Err(DomainArithmeticError::ByZero)));
+        assert_eq!(quotient.unwrap_err().to_string(), "division by zero");
     }
 
     #[test]
     fn out_of_range_quotient_fails_validation() {
-        assert!((Wins::new(5) / Wins::new(2)).is_err());
+        let quotient = Wins::new(5) / Wins::new(2);
+        assert!(matches!(quotient, Err(DomainArithmeticError::AssertionFailed(_))));
     }
 
     #[test]
     fn division_produces_unvalidated_float_domain_type() {
-        let speed: Speed = Meters::new(10) / Meters::new(4);
+        let speed = (Meters::new(10) / Meters::new(4)).unwrap();
         assert_eq!(speed, 2.5);
+    }
+
+    #[test]
+    fn an_unvalidated_type_refuses_a_zero_divisor_too() {
+        let speed: Result<Speed, _> = Meters::new(10) / 0u32;
+        assert_eq!(speed, Err(DivisionByZero));
     }
 }
 

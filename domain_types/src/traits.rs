@@ -98,16 +98,17 @@ where T: Float +
 /// A float domain type that may be produced by dividing integer domain numbers.
 ///
 /// Implemented automatically by the `#[domain_type]` macro for float-based domain types:
-/// * unvalidated ones construct the value directly (`Output = Self`);
-/// * validated ones run their validator (`Output = Result<Self, DomainAssertionError<T>>`),
-///   which also catches division by zero (IEEE `inf`/`NaN` fail range validators).
+/// * unvalidated ones fail only on a zero divisor (`Output = Result<Self, DivisionByZero>`);
+/// * validated ones also run their validator (`Output = Result<Self, DomainArithmeticError<T>>`).
 ///
 /// Integer domain numbers annotated with `division_result(SomeFloatType)` generate `Div` impls
-/// whose `Output` is `<SomeFloatType as DivisionResult>::Output`.
+/// whose `Output` is `<SomeFloatType as DivisionResult>::Output`. The divisor is checked before
+/// dividing, so neither kind ever holds an `inf` or a `NaN`.
 pub trait DivisionResult {
     type Output;
 
     fn from_division(value: f64) -> Self::Output;
+    fn division_by_zero() -> Self::Output;
 }
 
 /// A conversion between number types that can't fail: a value outside the target's range stops at
