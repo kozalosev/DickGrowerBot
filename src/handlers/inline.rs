@@ -194,7 +194,7 @@ pub async fn inline_handler(
     match repos.users.create_or_update(DomainUserId::from(&query.from), &name).await {
         Ok(_) => {},
         Err(e) if banned_until_of(&e).is_some() => {
-            bot.answer_inline_query(query.id, vec![])
+            bot.answer_inline_query(query.id, [])
                 .is_personal(true)
                 .cache_time(1)
                 .await?;
@@ -224,7 +224,7 @@ pub async fn inline_handler(
             let mut article = InlineQueryResultArticle::new(
                 key.clone(), title, content
             );
-            let buttons = vec![vec![
+            let buttons = [[
                 InlineKeyboardButton::callback(btn_label.clone(), format!("{uid}:{key}"))
             ]];
             article.reply_markup.replace(InlineKeyboardMarkup::new(buttons));

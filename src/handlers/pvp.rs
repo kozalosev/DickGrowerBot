@@ -160,7 +160,7 @@ pub async fn pvp_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: Han
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
-    let mut answer = bot.answer_inline_query(query.id.clone(), vec![res])
+    let mut answer = bot.answer_inline_query(query.id.clone(), [res])
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
@@ -181,7 +181,7 @@ pub(super) fn build_inline_keyboard_article_result(
     let content = InputMessageContent::Text(InputMessageContentText::new(texts.text).parse_mode(ParseMode::Html));
     let btn_data = BattleCallbackData::new(uid, bet).to_data_string();
     InlineQueryResultArticle::new("pvp", texts.title, content)
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+        .reply_markup(InlineKeyboardMarkup::new([[
             InlineKeyboardButton::callback(texts.button, btn_data)
         ]]))
         .into()

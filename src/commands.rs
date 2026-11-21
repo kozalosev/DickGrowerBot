@@ -130,7 +130,7 @@ pub async fn set_my_commands(
         InfoCommands::published_commands(MenuScope::Admins, toggles),
     ]].concat();
 
-    let requests = vec![
+    let requests = [
         set_commands(bot, personal_commands, BotCommandScope::AllPrivateChats, lang_code, &toggles.env),
         set_commands(bot, group_commands, BotCommandScope::AllGroupChats, lang_code, &toggles.env),
         set_commands(bot, admin_commands, BotCommandScope::AllChatAdministrators, lang_code, &toggles.env),

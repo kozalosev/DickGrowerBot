@@ -248,5 +248,5 @@ pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> Inl
         let next_page = page + 1;
         buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
-    InlineKeyboardMarkup::new(vec![buttons])
+    InlineKeyboardMarkup::new([buttons])
 }

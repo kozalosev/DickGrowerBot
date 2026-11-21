@@ -525,7 +525,7 @@ pub mod checks {
                 let title = t!("errors.rate_limited_inline_title", locale = &lang_code);
                 let content = InputMessageContent::Text(InputMessageContentText::new(answer));
                 let article = InlineQueryResultArticle::new("rate_limited", title, content);
-                bot.answer_inline_query(query.id, vec![article.into()])
+                bot.answer_inline_query(query.id, [article.into()])
                     .is_personal(true)
                     .cache_time(cache_time)
                     .await?;
@@ -572,7 +572,7 @@ pub mod checks {
                 let title = t!("errors.banned_inline_title", locale = &lang_code);
                 let content = InputMessageContent::Text(InputMessageContentText::new(answer));
                 let article = InlineQueryResultArticle::new("banned", title, content);
-                bot.answer_inline_query(query.id, vec![article.into()])
+                bot.answer_inline_query(query.id, [article.into()])
                     .is_personal(true)
                     .cache_time(1)
                     .await?;
@@ -620,7 +620,7 @@ pub mod checks {
         #[autometrics]
         #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
         pub async fn handle_not_group_chat_inline(bot: ThrottledBot, query: InlineQuery) -> HandlerResult {
-            bot.answer_inline_query(query.id, vec![])
+            bot.answer_inline_query(query.id, [])
                 .is_personal(true)
                 .cache_time(1)
                 .await?;

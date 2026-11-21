@@ -62,7 +62,7 @@ impl TryFrom<String> for SetupCallbackData {
 /// `chat_instance` is chat-level, so a tap by *any* member yields the same pairing.
 pub async fn send_setup_message(bot: &ThrottledBot, chat_id: ChatId, lang_code: &LanguageCode) -> anyhow::Result<()> {
     let btn_label = t!("setup.button", locale = lang_code);
-    let keyboard = InlineKeyboardMarkup::new(vec![vec![
+    let keyboard = InlineKeyboardMarkup::new([[
         InlineKeyboardButton::callback(btn_label, SetupCallbackData.to_data_string())
     ]]);
     bot.send_message(chat_id, t!("setup.text", locale = lang_code))
