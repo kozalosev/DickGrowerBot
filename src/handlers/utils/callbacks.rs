@@ -109,6 +109,30 @@ pub trait CallbackDataWithPrefix<E = InvalidCallbackData>: TryFrom<String, Error
     }
 }
 
+/// The callback data of a result that has no callback buttons. It has no values, so no button can
+/// ever carry it.
+pub enum NoCallbackData {}
+
+impl std::fmt::Display for NoCallbackData {
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+impl TryFrom<String> for NoCallbackData {
+    type Error = InvalidCallbackData;
+
+    fn try_from(_: String) -> Result<Self, Self::Error> {
+        Err(InvalidCallbackData::NoData)
+    }
+}
+
+impl CallbackDataWithPrefix for NoCallbackData {
+    fn prefix() -> &'static str {
+        "none"
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum EditMessageReqParamsKind {
     Chat(ChatId, MessageId),

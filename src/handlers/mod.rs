@@ -23,6 +23,7 @@ pub mod titles;
 pub mod info;
 
 use derive_more::Constructor;
+use reqwest::Url;
 use rust_i18n::t;
 use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextInlineSetters, EditMessageTextSetters, SendMessageSetters};
 use teloxide::requests::Requester;
@@ -49,7 +50,7 @@ pub use info::InfoCommands;
 use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::primitives::LanguageCode;
 use crate::errors::flat::flat;
-use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
+use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, NoCallbackData};
 use crate::handlers::utils::disabled_link_preview;
 use crate::handlers::utils::SelfDestructionService;
 use crate::repo;
@@ -131,10 +132,14 @@ impl CallbackResult {
     }
 }
 
-pub enum HandlerImplResult<D: CallbackDataWithPrefix> {
+pub enum HandlerImplResult<D: CallbackDataWithPrefix = NoCallbackData> {
     WithKeyboard {
         text: String,
         buttons: Vec<CallbackButton<D>>
+    },
+    WithLink {
+        text: String,
+        button: LinkButton,
     },
     OnlyText(String)
 }
@@ -145,10 +150,17 @@ pub struct CallbackButton<D: CallbackDataWithPrefix> {
     data: D,
 }
 
+#[derive(Constructor)]
+pub struct LinkButton {
+    title: String,
+    url: Url,
+}
+
 impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
     pub fn text(&self) -> String {
         match self {
             HandlerImplResult::WithKeyboard { text, .. } => text,
+            HandlerImplResult::WithLink { text, .. } => text,
             HandlerImplResult::OnlyText(text) => text
         }.clone()
     }
@@ -158,8 +170,12 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
             HandlerImplResult::WithKeyboard { buttons, .. } => {
                 let buttons = buttons.iter()
                     .map(|btn| InlineKeyboardButton::callback(btn.title.clone(), btn.data.to_data_string()));
-                let keyboard = InlineKeyboardMarkup::new(vec![buttons]);
+                let keyboard = InlineKeyboardMarkup::new([buttons]);
                 Some(keyboard)
+            }
+            HandlerImplResult::WithLink { button, .. } => {
+                let button = InlineKeyboardButton::url(button.title.clone(), button.url.clone());
+                Some(InlineKeyboardMarkup::new([[button]]))
             }
             HandlerImplResult::OnlyText(_) => None
         }

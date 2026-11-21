@@ -229,6 +229,9 @@ inline:
       stats: "胜利统计"
       loan: "负数？申请贷款！"
       shrinks: "查看最近的缩水"
+      voucher: "转让厘米"
+      buy: "购买厘米"
+      donate: "支持开发者"
   callback:
     errors:
       another_user: "此消息由其他人发送。"

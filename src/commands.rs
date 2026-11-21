@@ -120,13 +120,14 @@ pub async fn set_my_commands(
         StatsCommands::bot_commands(),
         InfoCommands::published_commands(MenuScope::Group, toggles),
     ];
-    // The chat-wide /language, /topics and /cleanup are admin-only, so they live in the admin
-    // scope, not the group one.
+    // The chat-wide /language, /topics, /cleanup and /reset are admin-only, so they live in the
+    // admin scope, not the group one.
     let admin_commands = [group_commands.clone(), vec![
         ImportCommands::bot_commands(),
         LanguageCommands::published_commands(MenuScope::Admins, toggles),
         TopicsCommands::bot_commands(),
         CleanupCommands::published_commands(MenuScope::Admins, toggles),
+        InfoCommands::published_commands(MenuScope::Admins, toggles),
     ]].concat();
 
     let requests = vec![
@@ -201,8 +202,10 @@ mod test {
         let on = toggles(true);
         let private = names(InfoCommands::published_commands(Private, &on));
         let group = names(InfoCommands::published_commands(Group, &on));
+        let admins = names(InfoCommands::published_commands(Admins, &on));
         assert_eq!(private, ["/buy", "/donate"]);
-        assert_eq!(group, ["/voucher", "/reset", "/buy", "/donate"]);
+        assert_eq!(group, ["/voucher", "/buy", "/donate"]);
+        assert_eq!(admins, ["/reset"]);
     }
 
     fn toggles(enabled: bool) -> CommandToggles {

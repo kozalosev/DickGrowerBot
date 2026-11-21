@@ -139,6 +139,13 @@ into a `serde_json::Value` before any formatter sees it. So a `Username` that mu
 (`handlers::info`). They exist so that questions asked every day get their answer from the bot. A
 new command of the kind is one more variant of `InfoCommands` and an arm of `InfoResponse::build`.
 
+Inline mode offers `voucher`, `buy` and `donate` too, as the last variants of `InlineCommand`,
+posting the same answer as a `Notice`. Only the main commands are there, not the aliases. `buy` and
+`donate` are left out of the list while their link isn't configured (`InlineCommand::is_available`),
+and `DISABLE_CMD_<KEY>` removes a command from it as it does from the menu. `reset` isn't offered:
+the real command will be for a chat's administrators, and an inline query carries no chat to check
+them in.
+
 A short text, a title and a line above a button, is an ordinary translation
 (`commands.<key>.text`). A paragraph or more is an embedded HTML file per language, like the
 privacy policy, under `handlers/info/<key>/`.
@@ -150,8 +157,9 @@ which keeps it out of the menu. `InfoCommands::key` maps it to its main command,
 translations, the counter and the switch all go by that key.
 
 Which menu shows which command is `commands::PublishedCommands`, decided per `MenuScope`. `/voucher`
-and `/reset` are about a chat's leaderboard, so only the group menus list them; the bot still
-answers them in a private chat. `DISABLE_CMD_<KEY>` hides one of them from the menu and also stops
+and `/reset` are about a chat's leaderboard, so only the group menus list them, and `/reset` only
+the administrators' one, since resetting a chat is theirs to decide. The bot still answers both
+anywhere and to anybody: for now they only inform. `DISABLE_CMD_<KEY>` hides one of them from the menu and also stops
 the bot answering it, aliases included. `/buy` also leaves the menu when `HELP_AUCTION_BOT` is
 unset, and `/donate` without `DONATE_URL`; both then answer with the standard
 `errors.feature_disabled`. A `DONATE_URL` that isn't a URL, and a

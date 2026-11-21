@@ -216,6 +216,9 @@ inline:
       stats: "勝利統計"
       loan: "負數？申請貸款！"
       shrinks: "查看最近的縮水"
+      voucher: "轉讓公分"
+      buy: "購買公分"
+      donate: "支持開發者"
   callback:
     errors:
       another_user: "此訊息由其他人發送。"

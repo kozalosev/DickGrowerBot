@@ -229,6 +229,9 @@ inline:
       stats: "Win statistics"
       loan: "Minus? Take a loan!"
       shrinks: "See recent shrinks"
+      voucher: "Transfer centimetres"
+      buy: "Buy centimetres"
+      donate: "Support the developers"
   callback:
     errors:
       another_user: "This message was sent by another person."

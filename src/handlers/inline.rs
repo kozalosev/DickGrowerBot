@@ -19,6 +19,7 @@ use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, InlineMessageId,
 use crate::errors::details::{DetailedContext, Details};
 use crate::errors::flat::flat;
 use crate::handlers::{banned_until_of, dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
+use crate::handlers::info::{self, InfoCommands};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -33,6 +34,9 @@ enum InlineCommand {
     Loan,
     Stats,
     Shrinks,
+    Voucher,
+    Buy,
+    Donate,
 }
 
 struct InlineResult {
@@ -62,6 +66,16 @@ impl InlineResult {
 }
 
 impl InlineCommand {
+    /// Whether the command has anything to offer under this config.
+    fn is_available(&self, config: &AppConfig) -> bool {
+        match self {
+            InlineCommand::Shrinks => config.daily_shrink.enabled(),
+            InlineCommand::Buy => config.auction_bot.is_some(),
+            InlineCommand::Donate => config.donate_url.is_some(),
+            _ => true,
+        }
+    }
+
     async fn execute(
         &self,
         repos: &Repositories,
@@ -116,6 +130,19 @@ impl InlineCommand {
                         res
                     })
             },
+            InlineCommand::Voucher | InlineCommand::Buy | InlineCommand::Donate => self.info_command()
+                .map(|cmd| InlineResult::with_keyboard(info::info_impl(cmd, &config, lang_code), MessageGroup::Notice))
+                .ok_or_else(|| anyhow!("not an informational command")),
+        }
+    }
+
+    /// The informational command this one posts, if it is one.
+    fn info_command(&self) -> Option<InfoCommands> {
+        match self {
+            InlineCommand::Voucher => Some(InfoCommands::Voucher),
+            InlineCommand::Buy => Some(InfoCommands::Buy),
+            InlineCommand::Donate => Some(InfoCommands::Donate),
+            _ => None,
         }
     }
 }
@@ -186,8 +213,7 @@ pub async fn inline_handler(
         _ => "inline.results.text",
     };
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
-        // The `shrinks` command only makes sense when the daily shrink feature is on.
-        .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.daily_shrink.enabled())
+        .filter(|cmd| cmd.is_available(&app_config))
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {

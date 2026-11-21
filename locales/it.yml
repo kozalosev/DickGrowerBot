@@ -229,6 +229,9 @@ inline:
       stats: "Statistiche"
       loan: "Sei in debito? Chiedi un prestito!"
       shrinks: "Vedi gli accorciamenti recenti"
+      voucher: "Trasferire centimetri"
+      buy: "Comprare centimetri"
+      donate: "Sostenere gli sviluppatori"
   callback:
     errors:
       another_user: "Questo messaggio è stato inviato da un'altra persona."
