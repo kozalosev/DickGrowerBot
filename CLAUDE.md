@@ -67,8 +67,10 @@ through an explicit list. Every new variable goes into **all** of these:
 5. the topic's file in `.claude/rules/` (see below) — what it does and what happens when it is
    unset. **Not `README.md`**: it is the
    project's index, and a variable's name, default or tuning advice is not what belongs there;
-6. the server-configs repo — `DickGrowerBot/docker-compose.yml` (the same `environment:` list) and
-   `DickGrowerBot/.env.sops` (the value itself, through `make secret-edit`).
+6. the server-configs repo — a note in `PENDING-PROD-CHANGES.md` with the line for
+   `DickGrowerBot/.env.sops`. **That file lists every variable the bot reads**, a default value
+   included; one whose mere presence changes something (a `DISABLE_*` switch) goes in commented
+   out. Its compose file takes the whole `.env` through `env_file`, so it needs no change.
 
 ### Required environment variables (`.env`)
 
