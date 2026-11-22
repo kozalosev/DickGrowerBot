@@ -21,8 +21,8 @@ use crate::domain::objects::ChatCleanupSettings;
 use crate::domain::primitives::ScheduledDeletionId;
 use crate::domain::primitives::chat::InlineMessageId;
 use crate::metrics;
-use crate::repo::{DeletionState, DeletionTarget, MessageKind, Repositories, ScheduledDeletion};
-use super::backoff;
+use crate::repo::{DeletionState, DeletionTarget, MessageKind, Repositories, ScheduledDeletion, Unanswered};
+use super::{backoff, never_reached_telegram};
 
 /// The age at which Telegram stops letting a bot delete a message. This is the real limit;
 /// [`crate::config::MAX_DELAY`] caps the delays an hour below it. Nothing is scheduled this late,
@@ -37,10 +37,15 @@ enum Outcome {
     Removed,
     /// It was already gone when its turn came.
     RemovedBefore,
+    /// It was gone, or already carried its placeholder, after an earlier request of ours timed out.
+    RemovedOnRetry,
     /// The message now carries the warning; it comes back at the end of the grace period.
     Warned,
     /// Something transient went wrong; the row is tried again later.
     Retry,
+    /// Telegram couldn't be reached, or didn't answer; the row is tried again later without spending
+    /// an attempt.
+    Offline(Unanswered),
     /// The message grew too old for Telegram to delete while it waited.
     Expired,
     /// It won't work, now or later: the bot may not touch that message, or the chat is gone.
@@ -152,6 +157,7 @@ impl Cleaner<'_> {
         let result = match outcome {
             Outcome::Removed => finish_as(DeletionState::Removed).await,
             Outcome::RemovedBefore => finish_as(DeletionState::RemovedBefore).await,
+            Outcome::RemovedOnRetry => finish_as(DeletionState::RemovedOnRetry).await,
             Outcome::Expired => finish_as(DeletionState::Expired).await,
             Outcome::Failed => finish_as(DeletionState::Failed).await,
             Outcome::Warned => self.repos.deletions.mark_warned(id, Utc::now() + config.warning).await,
@@ -165,6 +171,10 @@ impl Cleaner<'_> {
                     },
                     other => other.map(|_| ()),
                 }
+            },
+            Outcome::Offline(why) => {
+                metrics::SELF_DESTRUCTION_RETRIES.record(group, kind);
+                self.repos.deletions.defer(id, Utc::now() + config.retry_delay, why).await
             },
         };
         if let Err(e) = result {
@@ -228,7 +238,7 @@ impl Cleaner<'_> {
                     return self.warn_inline(&deletion, inline_message_id).await
                 }
                 let result = self.bot.delete_message(chat, message).await.map(|_| ());
-                if let Some(outcome) = outcome_of_inline_deletion(result) {
+                if let Some(outcome) = outcome_of_inline_deletion(result, &deletion) {
                     return outcome
                 }
                 rights::remember_deletion_right(self.cache, chat, false, self.bot_admin_ttl).await;
@@ -294,10 +304,14 @@ impl Cleaner<'_> {
             Err(e) => e,
         };
 
-        // A message that is already gone is the outcome we were after, reached by someone else.
         if is_gone(&error) {
             tracing::debug!(kind = %deletion.kind, error = flat!(error), "the message was already gone");
-            return Outcome::RemovedBefore
+            return found_gone(deletion)
+        }
+
+        // Only the placeholder is an edit here, so the message already carries it.
+        if matches!(error, RequestError::Api(ApiError::MessageNotModified)) {
+            return if deletion.timed_out { Outcome::RemovedOnRetry } else { Outcome::Removed }
         }
 
         if is_refused(&error) && deletion.kind == MessageKind::Command {
@@ -306,6 +320,10 @@ impl Cleaner<'_> {
             if let DeletionTarget::ChatMessage { chat_id, .. } = deletion.target {
                 rights::remember_deletion_right(self.cache, ChatId::from(chat_id), false, self.bot_admin_ttl).await;
             }
+        }
+        if let Some(why) = unanswered(&error) {
+            tracing::warn!(kind = %deletion.kind, error = flat!(error), "couldn't reach Telegram to remove the message");
+            return Outcome::Offline(why)
         }
         if is_final(&error) {
             tracing::warn!(kind = %deletion.kind, error = flat!(error), "the message can't be removed at all");
@@ -326,12 +344,16 @@ fn resolve_inline(inline_message_id: &InlineMessageId) -> Option<(ChatId, Messag
 
 /// What the deletion of an inline message means for the row, or `None` when the bot can't delete
 /// it and the message is to be shrunk instead.
-fn outcome_of_inline_deletion(result: Result<(), RequestError>) -> Option<Outcome> {
+fn outcome_of_inline_deletion(result: Result<(), RequestError>, deletion: &ScheduledDeletion) -> Option<Outcome> {
     let Err(error) = result else {
         return Some(Outcome::Removed)
     };
     if is_gone(&error) {
-        return Some(Outcome::RemovedBefore)
+        return Some(found_gone(deletion))
+    }
+    if let Some(why) = unanswered(&error) {
+        tracing::warn!(error = flat!(error), "couldn't reach Telegram to delete the inline message");
+        return Some(Outcome::Offline(why))
     }
     if is_final(&error) {
         tracing::debug!(error = flat!(error), "the inline message can't be deleted, so it is shrunk instead");
@@ -344,8 +366,11 @@ fn outcome_of_inline_deletion(result: Result<(), RequestError>) -> Option<Outcom
 /// What the warning attempt means for the row.
 ///
 /// A message that is already gone will not come back, so the row ends here rather than a grace
-/// period and a certain-to-fail deletion later. Any other failure carries on: a message that could
-/// not be warned is still worth deleting on time, and the notice is the part worth losing.
+/// period and a certain-to-fail deletion later. Nothing before a warning can have deleted it, so
+/// somebody else did. A warning that never reached Telegram is tried again
+/// with the row, since the deletion couldn't get through either. Any other failure carries on: a
+/// message that could not be warned is still worth deleting on time, and the notice is the part
+/// worth losing.
 fn outcome_of_warning(result: Result<(), RequestError>, id: ScheduledDeletionId) -> Outcome {
     let error = match result {
         Ok(()) => return Outcome::Warned,
@@ -354,6 +379,10 @@ fn outcome_of_warning(result: Result<(), RequestError>, id: ScheduledDeletionId)
     if is_gone(&error) {
         tracing::debug!(id = %id, "the message was gone before its warning");
         return Outcome::RemovedBefore
+    }
+    if let Some(why) = unanswered(&error) {
+        tracing::warn!(id = %id, error = flat!(error), "couldn't reach Telegram to warn about the deletion");
+        return Outcome::Offline(why)
     }
     tracing::warn!(id = %id, error = flat!(error), "couldn't edit the message with the warning");
     Outcome::Warned
@@ -377,7 +406,24 @@ fn is_refused(error: &RequestError) -> bool {
     }
 }
 
-/// Whether the message is already gone — the outcome we were after, reached by someone else.
+/// Why Telegram gave no answer, if it gave none. Neither reason says anything about the message,
+/// and every request here can be repeated harmlessly — a second deletion finds the message gone, a
+/// second edit finds it unchanged — so the row waits for the network instead of spending its
+/// attempts.
+fn unanswered(error: &RequestError) -> Option<Unanswered> {
+    if never_reached_telegram(error) {
+        return Some(Unanswered::Unreached)
+    }
+    matches!(error, RequestError::Network(e) if e.is_timeout()).then_some(Unanswered::TimedOut)
+}
+
+/// A message found gone was most likely deleted by our own request if the last one timed out, and
+/// by somebody else otherwise.
+fn found_gone(deletion: &ScheduledDeletion) -> Outcome {
+    if deletion.timed_out { Outcome::RemovedOnRetry } else { Outcome::RemovedBefore }
+}
+
+/// Whether the message is already gone — the outcome we were after.
 fn is_gone(error: &RequestError) -> bool {
     matches!(error, RequestError::Api(
         ApiError::MessageToDeleteNotFound | ApiError::MessageToEditNotFound | ApiError::MessageIdInvalid))
@@ -443,17 +489,29 @@ mod tests {
     /// Only a refusal hands the message over to the placeholder; a transient failure is retried.
     #[test]
     fn only_a_refused_inline_deletion_falls_back() {
-        assert_eq!(outcome_of_inline_deletion(Ok(())), Some(Outcome::Removed));
+        let deletion = inline_deletion(inline_message_id_of(CHAT_ID), DeletionState::Warned);
+        assert_eq!(outcome_of_inline_deletion(Ok(()), &deletion), Some(Outcome::Removed));
 
         let gone = RequestError::Api(ApiError::MessageToDeleteNotFound);
-        assert_eq!(outcome_of_inline_deletion(Err(gone)), Some(Outcome::RemovedBefore));
+        assert_eq!(outcome_of_inline_deletion(Err(gone), &deletion), Some(Outcome::RemovedBefore));
 
         for refused in [ApiError::MessageCantBeDeleted, ApiError::ChatNotFound, ApiError::BotKickedFromSupergroup] {
-            assert_eq!(outcome_of_inline_deletion(Err(RequestError::Api(refused))), None);
+            assert_eq!(outcome_of_inline_deletion(Err(RequestError::Api(refused)), &deletion), None);
         }
 
         let transient = RequestError::Api(ApiError::Unknown("Bad Gateway".to_owned()));
-        assert_eq!(outcome_of_inline_deletion(Err(transient)), Some(Outcome::Retry));
+        assert_eq!(outcome_of_inline_deletion(Err(transient), &deletion), Some(Outcome::Retry));
+    }
+
+    /// A message found gone after our own request timed out was most likely deleted by it.
+    #[test]
+    fn a_message_gone_after_a_timeout_was_removed_on_retry() {
+        let deletion = ScheduledDeletion {
+            timed_out: true,
+            ..inline_deletion(inline_message_id_of(CHAT_ID), DeletionState::Warned)
+        };
+        let gone = RequestError::Api(ApiError::MessageToDeleteNotFound);
+        assert_eq!(outcome_of_inline_deletion(Err(gone), &deletion), Some(Outcome::RemovedOnRetry));
     }
 
     #[test]
@@ -513,6 +571,29 @@ mod tests {
         assert_eq!(known, Some(false));
     }
 
+    /// An earlier attempt timed out after putting the placeholder there, so Telegram finds nothing
+    /// to change the second time.
+    #[tokio::test]
+    async fn a_placeholder_put_in_place_by_a_timed_out_request_is_removed_on_retry() {
+        let deletion = ScheduledDeletion {
+            timed_out: true,
+            ..inline_deletion(inline_message_id_of(CHAT_ID), DeletionState::Warned)
+        };
+        let (outcome, api, _) = act_on_inline_answered(deletion, "report", not_modified()).await;
+
+        assert_eq!(outcome, Outcome::RemovedOnRetry);
+        assert_eq!(api.methods(), ["DeleteMessage", "EditMessageText"]);
+    }
+
+    /// With no timeout behind it, the placeholder can only have been there already.
+    #[tokio::test]
+    async fn a_placeholder_already_in_place_is_a_success() {
+        let deletion = inline_deletion(inline_message_id_of(CHAT_ID), DeletionState::Warned);
+        let (outcome, _, _) = act_on_inline_answered(deletion, "report", not_modified()).await;
+
+        assert_eq!(outcome, Outcome::Removed);
+    }
+
     /// A group the placeholder is not allowed for keeps its message when the deletion is refused.
     #[tokio::test]
     async fn an_inline_message_that_may_not_be_shrunk_is_left_alone() {
@@ -552,13 +633,23 @@ mod tests {
         inline_groups: &str,
         state: DeletionState,
     ) -> (Outcome, FakeApi, Cache) {
-        let api = FakeApi::start(|method| match method {
+        let deletion = inline_deletion(inline_message_id, state);
+        act_on_inline_answered(deletion, inline_groups, json!({ "ok": true, "result": true })).await
+    }
+
+    /// The same, with `edit` as Telegram's answer to every edit.
+    async fn act_on_inline_answered(
+        deletion: ScheduledDeletion,
+        inline_groups: &str,
+        edit: serde_json::Value,
+    ) -> (Outcome, FakeApi, Cache) {
+        let api = FakeApi::start(move |method| match method {
             "DeleteMessage" => json!({
                 "ok": false,
                 "error_code": 400,
                 "description": "Bad Request: message can't be deleted"
             }),
-            _ => json!({ "ok": true, "result": true }),
+            _ => edit.clone(),
         }).await;
         let db = fresh_db().await;
         let repos = repos(&db);
@@ -576,8 +667,16 @@ mod tests {
             bot_admin_ttl: Duration::from_hours(1),
         };
 
-        let outcome = cleaner.act(inline_deletion(inline_message_id, state)).await;
+        let outcome = cleaner.act(deletion).await;
         (outcome, api, cache)
+    }
+
+    fn not_modified() -> serde_json::Value {
+        json!({
+            "ok": false,
+            "error_code": 400,
+            "description": "Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message"
+        })
     }
 
     fn inline_deletion(inline_message_id: String, state: DeletionState) -> ScheduledDeletion {
@@ -590,6 +689,7 @@ mod tests {
             state,
             created_at: Utc::now(),
             attempts: AttemptsCount::new(0),
+            timed_out: false,
         }
     }
 

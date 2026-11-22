@@ -719,10 +719,34 @@ overhead.
 |---|---|
 | the message was deleted or replaced | `removed` |
 | it was already gone (someone got there first) | `removed_before` |
+| it was gone, or already replaced, after a request of ours timed out | `removed_on_retry` |
 | it outlived Telegram's 48 hours while it waited | `expired` |
 | the bot may not touch it, or the chat is gone | `failed` |
 | every attempt failed for a reason that looked transient | `failed`, after `MAX_ATTEMPTS` |
+| Telegram couldn't be reached or didn't answer in time | unchanged; postponed by `RETRY_DELAY`, `attempts` untouched |
 | anything else | unchanged; postponed by the back-off, `attempts` + 1 |
+
+**An outage spends no attempts.** A failed connection or a timeout says nothing about the message,
+and a forty-minute outage — or DPI that lets connections hang — would otherwise turn every message
+due during it into `failed` within minutes. The row is simply tried again every `RETRY_DELAY` until
+the network is back; a long enough outage ends it as `expired` at 48 hours. A timeout is safe to
+repeat here because every request the worker makes is: a second deletion finds the message gone, a
+second edit finds it unchanged (`MessageNotModified`).
+
+**A timed-out request is remembered, so that its success is not credited to somebody else.** The
+row's `timed_out` flag is set by a deferral after a timeout, kept through a failed connection after
+it, and cleared when the message is warned — a warning is an edit, so nothing before it can have
+deleted the message. A message found gone, or a placeholder found already in place, with the flag
+set ends as `removed_on_retry`: our own request most likely did it and only its answer was lost.
+That keeps `removed_before` meaning someone else, and makes a run of `removed_on_retry` the sign
+that the network to Telegram drops answers. A message deleted by somebody during the minute the row
+waited is counted as ours; that is rare enough not to matter.
+
+**The shrink broadcast exempts only the failed connection**, with
+`DAILY_SHRINK_BROADCAST_RETRY_DELAY`, and its rows end at the next run, as `expired`. A timed-out
+`sendMessage` may have been delivered, and repeating it posts the summary again; exempting it would
+let a request whose answers keep getting lost post one every minute for a day. So a timeout there
+still counts towards `DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS`.
 
 **The counter counts endings, one per message.** `self_destruction_total{group,kind,outcome}` grows
 only when a row reaches a terminal state, and the `outcome` values are those states — a rate, where

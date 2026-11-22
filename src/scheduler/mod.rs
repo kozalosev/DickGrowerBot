@@ -6,6 +6,7 @@ use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 use futures::FutureExt;
+use teloxide::RequestError;
 use domain_types::traits::SaturatingInto;
 use crate::cache::Cache;
 use crate::cleanup::CleanupPolicy;
@@ -295,6 +296,15 @@ fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
     base.saturating_mul(factor).min(max)
 }
 
+/// Whether the request failed before reaching Telegram. That says nothing about the request
+/// itself, so trying it again costs no attempt.
+///
+/// Only a failed connection qualifies: a request that timed out may have been carried out, and one
+/// that keeps doing so must still run out of attempts.
+fn never_reached_telegram(error: &RequestError) -> bool {
+    matches!(error, RequestError::Network(e) if e.is_connect())
+}
+
 /// Publishes what the alerts read: the depth of both queues, and when the last shrink was.
 ///
 /// Only these, and only because vmalert reads Prometheus and cannot ask the database itself.
@@ -348,5 +358,40 @@ mod tests {
         assert_eq!(backoff(base, AttemptsCount::new(30), MAX), MAX);
         // The shift that would overflow must give the cap, not a wrapped-around delay of nothing.
         assert_eq!(backoff(base, AttemptsCount::new(u32::MAX), MAX), MAX);
+    }
+
+    #[tokio::test]
+    async fn a_refused_connection_never_reached_telegram() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("couldn't bind a port");
+        let address = listener.local_addr().expect("couldn't read the address");
+        drop(listener);
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build().expect("couldn't build the client");
+
+        let error = client.get(format!("http://{address}")).send().await.expect_err("nothing listens there");
+        assert!(never_reached_telegram(&RequestError::Network(error.into())));
+    }
+
+    /// A request that timed out may have been carried out, so it still counts as an attempt.
+    #[tokio::test]
+    async fn a_timed_out_request_may_have_reached_telegram() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("couldn't bind a port");
+        let address = listener.local_addr().expect("couldn't read the address");
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_millis(100))
+            .build().expect("couldn't build the client");
+
+        let error = client.get(format!("http://{address}")).send().await.expect_err("nothing ever answers");
+        assert!(!never_reached_telegram(&RequestError::Network(error.into())));
+        drop(listener);
+    }
+
+    #[test]
+    fn an_answer_from_telegram_is_not_a_connection_failure() {
+        let api = RequestError::Api(teloxide::ApiError::MessageToDeleteNotFound);
+        assert!(!never_reached_telegram(&api));
     }
 }

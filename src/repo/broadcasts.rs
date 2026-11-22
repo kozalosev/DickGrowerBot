@@ -175,6 +175,26 @@ repository!(ScheduledBroadcasts,
         Ok(attempts)
     },
 
+    /// Pushes the row back to `retry_after` without counting an attempt. `lang` behaves as in
+    /// [`Self::postpone`].
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(id = %id))]
+    pub async fn defer(
+        &self,
+        id: ScheduledBroadcastId,
+        retry_after: DateTime<Utc>,
+        lang: Option<SupportedLanguage>,
+    ) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE Scheduled_Shrink_Broadcasts SET fire_after = $2, lang_code = COALESCE($3, lang_code)
+                    WHERE id = $1",
+                id as ScheduledBroadcastId, retry_after, lang as Option<SupportedLanguage>)
+            .execute(&self.pool)
+            .await
+            .context("couldn't defer the shrink summary")?;
+        Ok(())
+    },
+
     /// Leaves the row behind in a terminal state instead of dropping it, so that what the worker
     /// did — and what it couldn't do — can be read out of the table until the cleaning process
     /// takes it away. `lang` behaves as in [`Self::postpone`].

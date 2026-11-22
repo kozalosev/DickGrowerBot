@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE Scheduled_Message_Deletions SET fire_after = $2\n                WHERE id IN (\n                    SELECT id FROM Scheduled_Message_Deletions\n                    WHERE fire_after <= current_timestamp AND finished_at IS NULL\n                    ORDER BY fire_after\n                    LIMIT $1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING id AS \"id: ScheduledDeletionId\", chat_id AS \"chat_id: TelegramChatId\",\n                          message_id AS \"message_id: TelegramMessageId\",\n                          inline_message_id AS \"inline_message_id: InlineMessageId\",\n                          message_kind AS \"kind: MessageKind\", message_group AS \"group: MessageGroup\",\n                          lang_code AS \"lang_code: LanguageCode\", state AS \"state: DeletionState\",\n                          created_at, attempts AS \"attempts!: AttemptsCount\"",
+  "query": "UPDATE Scheduled_Message_Deletions SET fire_after = $2\n                WHERE id IN (\n                    SELECT id FROM Scheduled_Message_Deletions\n                    WHERE fire_after <= current_timestamp AND finished_at IS NULL\n                    ORDER BY fire_after\n                    LIMIT $1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING id AS \"id: ScheduledDeletionId\", chat_id AS \"chat_id: TelegramChatId\",\n                          message_id AS \"message_id: TelegramMessageId\",\n                          inline_message_id AS \"inline_message_id: InlineMessageId\",\n                          message_kind AS \"kind: MessageKind\", message_group AS \"group: MessageGroup\",\n                          lang_code AS \"lang_code: LanguageCode\", state AS \"state: DeletionState\",\n                          created_at, attempts AS \"attempts!: AttemptsCount\", timed_out",
   "describe": {
     "columns": [
       {
@@ -115,6 +115,7 @@
                 "warned",
                 "removed",
                 "removed_before",
+                "removed_on_retry",
                 "expired",
                 "failed"
               ]
@@ -149,6 +150,17 @@
             "name": "attempts"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "timed_out",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "scheduled_message_deletions",
+            "name": "timed_out"
+          }
+        }
       }
     ],
     "parameters": {
@@ -167,8 +179,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "9bcb67f1cb68ef1a5ec3321327a68a2dc6ecba545e1d94ce0bccfeac49485173"
+  "hash": "aba27a159124a3b3ef17bf7764296ccf5c9d090a1c51bb5edbe13a384216d476"
 }

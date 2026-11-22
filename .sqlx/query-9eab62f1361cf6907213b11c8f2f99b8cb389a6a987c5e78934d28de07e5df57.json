@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Scheduled_Message_Deletions SET state = 'warned', fire_after = $2, timed_out = false\n                    WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9eab62f1361cf6907213b11c8f2f99b8cb389a6a987c5e78934d28de07e5df57"
+}

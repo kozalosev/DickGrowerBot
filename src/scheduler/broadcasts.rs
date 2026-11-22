@@ -17,7 +17,7 @@ use crate::errors::flat::flat;
 use crate::handlers::shrink::{build_shrink_keyboard, shrinks_page_for_internal_chat, ShrinkView};
 use crate::metrics;
 use crate::repo::{BroadcastState, Repositories, ScheduledBroadcast};
-use super::backoff;
+use super::{backoff, never_reached_telegram};
 use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
 
@@ -46,6 +46,8 @@ enum Outcome {
     Sent,
     /// Something transient went wrong; the row is tried again later.
     Retry,
+    /// Telegram couldn't be reached; the row is tried again later without spending an attempt.
+    Offline,
     /// The bot can't post to that chat at all, which marks the chat too.
     Unreachable,
     /// It won't work, now or later, for a reason that says nothing about the chat.
@@ -127,6 +129,10 @@ async fn send_and_record(deps: BroadcastDeps<'_>, broadcast: ScheduledBroadcast)
                 },
                 other => other.map(|_| ()),
             }
+        },
+        Outcome::Offline => {
+            metrics::DAILY_SHRINK.broadcast_retried();
+            deps.repos.broadcasts.defer(id, Utc::now() + config.retry_delay, lang).await
         },
     };
     if let Err(e) = result {
@@ -212,6 +218,10 @@ async fn outcome_of(
         Err(e) => e,
     };
 
+    if never_reached_telegram(&error) {
+        tracing::warn!(error = flat!(error), "couldn't reach Telegram to notify the chat about the shrinks");
+        return Outcome::Offline
+    }
     if !is_chat_unreachable(&error) {
         if is_final(&error) {
             tracing::warn!(error = flat!(error), "the shrink summary can't be sent to this chat at all");
