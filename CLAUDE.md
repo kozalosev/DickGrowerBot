@@ -1375,6 +1375,27 @@ body to log; it is still measured.
 Changing any of this means updating the Grafana dashboard in the server-configs repo, next to the
 "Telegram API request errors by kind" panel.
 
+### A failure that leaves nothing to do
+
+Some of Telegram's refusals mean the request is already moot, and `errors::moot::Moot` names them:
+
+| `kind` | Telegram says | Which is |
+|---|---|---|
+| `stale_query` | the callback or inline query is too old | a press answered after the client stopped waiting — an outage's backlog, a slow handler |
+| `not_modified` | the edit changes nothing | a button pressed twice |
+| `message_gone` | the message to edit or delete is not there | deleted by somebody, or by its own self-destruction, while a button on it was pressed |
+
+**A handler carries on past them**: every answer to a query and every edit or deletion in
+`handlers/` awaits through `IgnoreMoot::ignore_moot`, which turns them into `None` and logs at
+`debug`. Without it the first of them ended the handler — an edit of a deleted message left the
+query unanswered and its button spinning, and the update was logged as a failure. A new request of
+those kinds goes through it too; a `send_message` does not, since none of the three can come back
+from one.
+
+They are still counted, as kinds of `telegram_request_errors_total` of their own rather than as
+`api`, which therefore stays the count of requests that were really wrong. A few of them are normal;
+a burst of `stale_query` says updates arrive late.
+
 ### An id of an unexpected shape
 
 The chat of an inline message is read out of its `inline_message_id` (`handlers/utils/tghack.rs`),

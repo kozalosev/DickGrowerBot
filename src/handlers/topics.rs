@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
 use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
@@ -93,7 +94,7 @@ pub async fn topics_callback_handler(
     let keyboard = build_keyboard(&allowed, current, data.uid, &lang_code);
     callbacks::edit_message_text_with_keyboard(&bot, edit_msg_params,
         render_state(&allowed, current, &lang_code), Some(keyboard)).await?;
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 

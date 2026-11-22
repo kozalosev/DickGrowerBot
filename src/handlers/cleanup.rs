@@ -10,6 +10,7 @@ use teloxide::RequestError;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
 use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html, reply_html_ephemeral};
@@ -105,7 +106,7 @@ pub async fn cleanup_callback_handler(
     // Opening the delay list changes nothing yet, so it never touches the database.
     if let CleanupAction::Pick(group) = data.action {
         delays(&config, group, &button).edit(&bot, edit_msg_params).await?;
-        answer.await?;
+        answer.await.ignore_moot()?;
         return Ok(());
     }
 
@@ -118,7 +119,7 @@ pub async fn cleanup_callback_handler(
         && !self_destruction.may_delete_here(&bot, chat).await
     {
         warning(&config, group, minutes, &button).edit(&bot, edit_msg_params).await?;
-        answer.await?;
+        answer.await.ignore_moot()?;
         return Ok(());
     }
 
@@ -135,7 +136,7 @@ pub async fn cleanup_callback_handler(
     }
 
     overview(&config, &settings, &button).edit(&bot, edit_msg_params).await?;
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 

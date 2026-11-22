@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::{CallbackQuery, Message, Requester};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
 use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
@@ -96,7 +97,7 @@ pub async fn mentions_callback_handler(bot: ThrottledBot, query: CallbackQuery, 
             bot.answer_callback_query(query.id)
                 .show_alert(not_playing)
                 .text(t!(key, locale = &lang_code))
-                .await?;
+                .await.ignore_moot()?;
         },
     }
     Ok(())

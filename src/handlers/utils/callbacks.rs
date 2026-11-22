@@ -10,6 +10,7 @@ use teloxide::payloads::{EditMessageTextInlineSetters, EditMessageTextSetters};
 use teloxide::prelude::ChatId;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, InlineKeyboardMarkup, MessageId, ParseMode, UserId};
+use crate::errors::moot::IgnoreMoot;
 use crate::config::ThrottledBot;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::LanguageCode;
@@ -171,12 +172,12 @@ pub async fn edit_message_text(
         EditMessageReqParamsKind::Chat(chat_id, message_id) => {
             bot.edit_message_text(chat_id, message_id, text)
                 .link_preview_options(disabled_link_preview())
-                .await?;
+                .await.ignore_moot()?;
         }
         EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
             bot.edit_message_text_inline(inline_message_id, text)
                 .disable_web_page_preview(true)
-                .await?;
+                .await.ignore_moot()?;
         }
     }
     Ok(())
@@ -197,14 +198,14 @@ pub async fn edit_message_text_with_keyboard(
                 .parse_mode(Html)
                 .link_preview_options(disabled_link_preview());
             req.reply_markup = keyboard;
-            req.await?;
+            req.await.ignore_moot()?;
         }
         EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
             let mut req = bot.edit_message_text_inline(inline_message_id, text)
                 .parse_mode(Html)
                 .disable_web_page_preview(true);
             req.reply_markup = keyboard;
-            req.await?;
+            req.await.ignore_moot()?;
         }
     }
     Ok(())
@@ -239,8 +240,8 @@ pub async fn answer_and_edit_page(
             ).await
         }
     };
-    answered.context("failed to answer the callback query")?;
-    edited.context("failed to edit the message")?;
+    answered.ignore_moot().context("failed to answer the callback query")?;
+    edited.ignore_moot().context("failed to edit the message")?;
     Ok(())
 }
 
@@ -260,7 +261,7 @@ pub async fn prepare_callback_answer_params(
     let res = if query.from.id != user_id {
         answer.show_alert.replace(true);
         answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code).into_owned());
-        answer.await?;
+        answer.await.ignore_moot()?;
         CallbackAnswerParams::AnotherUser
     } else {
         CallbackAnswerParams::Answer(Box::new(answer))

@@ -25,6 +25,7 @@ use rust_i18n::t;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
 use teloxide::types::{ChatMemberUpdated, ChatMigration, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+use crate::errors::moot::IgnoreMoot;
 use crate::config::ThrottledBot;
 
 use crate::config::AppConfig;
@@ -171,7 +172,7 @@ pub async fn setup_callback_handler(bot: ThrottledBot, query: CallbackQuery, dep
 
     bot.edit_message_text(message.chat().id, message.id(),
             t!("setup.activated", locale = &lang_code))
-        .await?;
-    bot.answer_callback_query(query.id).await?;
+        .await.ignore_moot()?;
+    bot.answer_callback_query(query.id).await.ignore_moot()?;
     Ok(())
 }

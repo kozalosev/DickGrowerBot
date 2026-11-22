@@ -47,6 +47,7 @@ pub use cleanup::CleanupCommands;
 pub use mentions::MentionsCommands;
 pub use info::InfoCommands;
 
+use crate::errors::moot::IgnoreMoot;
 use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::primitives::LanguageCode;
 use crate::errors::flat::flat;
@@ -107,6 +108,7 @@ impl CallbackResult {
                     edit_req.reply_markup = keyboard;
 
                     edit_req.await
+                        .ignore_moot()
                         .inspect_err(|err| tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = flat!(err),
                             "couldn't edit the message"))?;
                 } else if let Some(inline_message_id) = callback_query.inline_message_id {
@@ -116,10 +118,11 @@ impl CallbackResult {
                     edit_req.reply_markup = keyboard;
 
                     edit_req.await
+                        .ignore_moot()
                         .inspect_err(|err| tracing::error!(inline_message_id = %inline_message_id, error = flat!(err),
                             "couldn't edit the inline message"))?;
                 };
-                answer_req.await?;
+                answer_req.await.ignore_moot()?;
             },
             CallbackResult::ShowError(err) => {
                 answer_req
@@ -233,7 +236,7 @@ pub async fn send_error_callback_answer(bot: ThrottledBot, query: CallbackQuery,
     bot.answer_callback_query(query.id)
         .show_alert(true)
         .text(t!(tr_key, locale = &lang_code))
-        .await?;
+        .await.ignore_moot()?;
     Ok(())
 }
 
@@ -249,15 +252,15 @@ pub(crate) async fn answer_callback_feature_disabled(
     let mut answer = bot.answer_callback_query(q.id.clone());
     answer.show_alert.replace(true);
     answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).into_owned());
-    answer.await?;
+    answer.await.ignore_moot()?;
 
     match edit_msg_req_params {
         utils::callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
             bot.edit_message_reply_markup(chat_id, message_id)
-                .await.map(|_| ())?,
+                .await.ignore_moot()?,
         utils::callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
             bot.edit_message_reply_markup_inline(inline_message_id)
-                .await.map(|_| ())?
+                .await.ignore_moot()?
     };
     Ok(())
 }
@@ -278,6 +281,7 @@ pub mod checks {
     use teloxide::requests::Requester;
     use teloxide::types::{CallbackQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, Update, UpdateKind};
     use teloxide::utils::command::BotCommands;
+    use crate::errors::moot::IgnoreMoot;
     use crate::bans::BanList;
     use crate::commands::COMMAND_NAMES;
     use crate::config::{MessageGroup, ThrottledBot};
@@ -469,7 +473,7 @@ pub mod checks {
         bot.answer_callback_query(query.id)
             .show_alert(true)
             .text(t!("errors.forbidden_topic_callback", locale = &lang_code))
-            .await?;
+            .await.ignore_moot()?;
         Ok(())
     }
 
@@ -518,7 +522,7 @@ pub mod checks {
                     .show_alert(true)
                     .text(answer)
                     .cache_time(cache_time)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             UpdateKind::InlineQuery(query) => {
                 let title = t!("errors.rate_limited_inline_title", locale = &lang_code);
@@ -527,7 +531,7 @@ pub mod checks {
                 bot.answer_inline_query(query.id, [article.into()])
                     .is_personal(true)
                     .cache_time(cache_time)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             _ => {}
         }
@@ -565,7 +569,7 @@ pub mod checks {
                 bot.answer_callback_query(query.id)
                     .show_alert(true)
                     .text(answer)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             UpdateKind::InlineQuery(query) => {
                 let title = t!("errors.banned_inline_title", locale = &lang_code);
@@ -574,7 +578,7 @@ pub mod checks {
                 bot.answer_inline_query(query.id, [article.into()])
                     .is_personal(true)
                     .cache_time(1)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             // a chosen inline result has nothing to answer to
             _ => {}
@@ -604,6 +608,7 @@ pub mod checks {
         use teloxide::prelude::{InlineQuery, Requester};
         use teloxide::types::ChatType;
         use crate::config::ThrottledBot;
+        use crate::errors::moot::IgnoreMoot;
         use super::HandlerResult;
 
         pub fn is_group_chat(query: InlineQuery) -> bool {
@@ -622,7 +627,7 @@ pub mod checks {
             bot.answer_inline_query(query.id, [])
                 .is_personal(true)
                 .cache_time(1)
-                .await?;
+                .await.ignore_moot()?;
             Ok(())
         }
     }

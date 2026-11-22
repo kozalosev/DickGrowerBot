@@ -11,6 +11,7 @@ use domain_types::traits::SaturatingInto;
 use crate::config::MessageGroup;
 use crate::domain::objects::OriginalBotKind;
 use crate::domain::primitives::SupportedLanguage;
+use crate::errors::moot::Moot;
 use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind};
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
@@ -194,7 +195,7 @@ pub static DAILY_SHRINK_BROADCAST_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
 pub static DAILY_SHRINK_BROADCAST_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_broadcast_batch_limit", "the value of DAILY_SHRINK_BROADCAST_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
 pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
-    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/rate_limited/too_long/other). A spike of connect/timeout is the DPI-stalling signal; rate_limited means Telegram asked the bot to slow down, so the THROTTLE_* limits are set too high; too_long means a text went over Telegram's 4096 characters"));
+    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/rate_limited/too_long/stale_query/not_modified/message_gone/other). A spike of connect/timeout is the DPI-stalling signal; rate_limited means Telegram asked the bot to slow down, so the THROTTLE_* limits are set too high; too_long means a text went over Telegram's 4096 characters"));
 pub static TELEGRAM_REQUEST_DURATION: Lazy<TelegramRequestDuration> = Lazy::new(||
     TelegramRequestDuration::new("telegram_request_duration_seconds",
         "how long a request to the Telegram Bot API took, by method and outcome — the failed ones are measured too, so that a timeout (the slowest case there is) is not missing from the histogram"));
@@ -1163,15 +1164,18 @@ impl DailyShrinkCounters {
 /// * `api` (a legitimate Telegram API error — the network was fine),
 /// * `rate_limited` (Telegram asked the bot to slow down),
 /// * `too_long` (a text over Telegram's limit on a message's length),
+/// * `stale_query`, `not_modified`, `message_gone` (Telegram answered, but there was nothing left to
+///   do — see [`Moot`]),
 /// * `other` (anything else).
 pub struct TelegramRequestErrorCounters(CounterVec);
 
 impl TelegramRequestErrorCounters {
     fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["kind"]);
-        for kind in ["connect", "timeout", "network", "api", "rate_limited", "too_long", "other"] {
-            vec.counter(&[kind]);
-        }
+        let moot = <Moot as strum::VariantArray>::VARIANTS.iter().map(|moot| moot.label());
+        ["connect", "timeout", "network", "api", "rate_limited", "too_long", "other"].into_iter()
+            .chain(moot)
+            .for_each(|kind| { vec.counter(&[kind]); });
         Self(vec)
     }
 

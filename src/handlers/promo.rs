@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{CallbackQuery, Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, ReplyMarkup, User};
+use crate::errors::moot::IgnoreMoot;
 use crate::config::ThrottledBot;
 use crate::errors::flat::flat;
 use crate::metrics::{RejectableOutcome, RejectionReason};
@@ -181,7 +182,7 @@ pub async fn promo_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: H
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 
@@ -199,7 +200,7 @@ pub async fn promo_callback_handler(bot: ThrottledBot, query: CallbackQuery, dep
         PromoCallbackData::Cancel => t!("commands.promo.confirmation.cancelled", locale = &lang_code).into_owned(),
     };
     let params = callbacks::get_params_for_message_edit(&query)?;
-    bot.answer_callback_query(query.id).await?;
+    bot.answer_callback_query(query.id).await.ignore_moot()?;
     callbacks::edit_message_text_with_keyboard(&bot, params, text, None).await?;
     Ok(())
 }

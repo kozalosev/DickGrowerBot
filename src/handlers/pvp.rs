@@ -2,9 +2,6 @@ use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use domain_types::traits::SaturatingInto;
-use crate::errors::flat::flat;
-use crate::metrics::RejectionReason;
-use crate::domain::primitives::Coefficient;
 use futures::join;
 use rand::RngExt;
 use rust_i18n::t;
@@ -15,7 +12,9 @@ use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, I
                       InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText,
                       Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
+
 use crate::config::{AppConfig, FeatureToggles, ThrottledBot};
+use crate::domain::primitives::Coefficient;
 use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackButton, CallbackResult, HandlerDeps,
     HandlerImplResult, HandlerResult};
 use crate::{metrics, reply_html, reply_html_ephemeral, repo};
@@ -23,10 +22,13 @@ use crate::config::{BattlesFeatureToggles, MessageGroup};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
 use crate::domain::primitives::{Bet, CharCount, LanguageCode, LengthChange, LoanPayout, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, InlineMessageId, TelegramChatId};
+use crate::errors::moot::IgnoreMoot;
+use crate::errors::flat::flat;
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::SelfDestructionService;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::BattleLocks;
+use crate::metrics::RejectionReason;
 use crate::repo::Repositories;
 
 // let's calculate time offsets from 22.06.2024
@@ -165,7 +167,7 @@ pub async fn pvp_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: Han
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await.context("couldn't answer the inline query")?;
+    answer.await.ignore_moot().context("couldn't answer the inline query")?;
     Ok(())
 }
 
@@ -507,6 +509,7 @@ async fn refuse_offer(
     bot.edit_message_text_inline(inline_message_id.value(), text)
         .parse_mode(ParseMode::Html)
         .await
+        .ignore_moot()
         .context("couldn't refuse the inline PvP offer")?;
     self_destruction.schedule_inline(inline_message_id, chat,
         MessageGroup::Notice, char_count, texts.lang_code).await;

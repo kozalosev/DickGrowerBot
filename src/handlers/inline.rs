@@ -12,6 +12,7 @@ use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
+use crate::errors::moot::IgnoreMoot;
 use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{CharCount, LanguageCode, Page, UserId as DomainUserId, Username};
@@ -197,7 +198,7 @@ pub async fn inline_handler(
             bot.answer_inline_query(query.id, [])
                 .is_personal(true)
                 .cache_time(1)
-                .await?;
+                .await.ignore_moot()?;
             return Ok(())
         },
         Err(e) => return Err(e.into()),
@@ -240,7 +241,7 @@ pub async fn inline_handler(
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await.context("couldn't answer the inline query")?;
+    answer.await.ignore_moot().context("couldn't answer the inline query")?;
     Ok(())
 }
 
@@ -285,7 +286,7 @@ pub async fn inline_chosen_handler(
             request.reply_markup = inline_result.keyboard;
             request.parse_mode.replace(Html);
             request.disable_web_page_preview.replace(true);
-            request.await?;
+            request.await.ignore_moot()?;
 
             self_destruction.schedule_inline(inline_message_id, Some(chat_id.kind()),
                 inline_result.group, char_count, &lang_code).await;
@@ -329,7 +330,7 @@ pub async fn inline_callback_handler(
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
             edit.disable_web_page_preview.replace(true);
-            edit.await?;
+            edit.await.ignore_moot()?;
 
             // Legacy groups send no chosen result. For them this is the first place the bot sees
             // the id. If the message is already scheduled, the insert does nothing, so paging does
@@ -357,7 +358,7 @@ pub async fn inline_callback_handler(
         answer.show_alert.replace(true);
     };
 
-    answer.await.context("couldn't answer the callback query")?;
+    answer.await.ignore_moot().context("couldn't answer the callback query")?;
     Ok(())
 }
 

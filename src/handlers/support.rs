@@ -21,6 +21,7 @@ use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboar
                       Message, MessageEntityKind, MessageEntityRef, MessageId, ParseMode, ReplyParameters,
                       User as TelegramUser, UserId as TelegramUserId};
 use teloxide::utils::html;
+use crate::errors::moot::IgnoreMoot;
 use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::config::ThrottledBot;
 use crate::dialogue::CachedDialogueStorage;
@@ -313,7 +314,7 @@ pub async fn support_callback_handler(
     let ticket = SupportTicket::parse(&query)?;
     let lang_code = deps.lang_resolver.execute().await;
     dialogue.update(SupportCommandState::Replying(ticket)).await?;
-    bot.answer_callback_query(query.id).await?;
+    bot.answer_callback_query(query.id).await.ignore_moot()?;
     bot.send_message(dialogue.chat_id(), t!("commands.support.request", locale = &lang_code))
         .await?;
     Ok(())

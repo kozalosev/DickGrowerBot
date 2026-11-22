@@ -6,6 +6,7 @@ use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
 use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
 use crate::config::ThrottledBot;
 use crate::metrics::RejectionReason;
@@ -178,7 +179,7 @@ pub async fn language_callback_handler(
     };
 
     callbacks::edit_message_text(&bot, edit_msg_params, text).await?;
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 

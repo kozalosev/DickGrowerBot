@@ -8,6 +8,7 @@ use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::requests::Requester;
 use teloxide::types::ReplyMarkup;
 use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
+use crate::errors::moot::IgnoreMoot;
 use crate::config::ThrottledBot;
 
 use crate::metrics::RejectionReason;
@@ -149,7 +150,8 @@ pub async fn loan_callback_handler(
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.into(), debt).await?;
                     let updated_text = borrow_result_to_text(borrow_result, &lang_code);
-                    bot.edit_message_text(chat_id, message_id, updated_text).await?;
+                    bot.edit_message_text(chat_id, message_id, updated_text)
+                        .await.ignore_moot()?;
                 }
                 EditMessageReqParamsKind::Inline { chat_instance, inline_message_id } => {
                     let maybe_chat_id = try_resolve_chat_id(&inline_message_id)
@@ -166,7 +168,8 @@ pub async fn loan_callback_handler(
 
                     let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.kind(), debt).await?;
                     let updated_text = borrow_result_to_text(borrow_result, &lang_code);
-                    bot.edit_message_text_inline(inline_message_id, updated_text).await?;
+                    bot.edit_message_text_inline(inline_message_id, updated_text)
+                        .await.ignore_moot()?;
                 }
             }
         }
@@ -180,20 +183,23 @@ pub async fn loan_callback_handler(
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let unable_to_delete_message = bot.delete_message(chat_id, message_id).await
+                        .ignore_moot()
                         .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't delete the loan request message"))
                         .is_err();
                     if unable_to_delete_message {
-                        bot.edit_message_text(chat_id, message_id, updated_text).await?;
+                        bot.edit_message_text(chat_id, message_id, updated_text)
+                            .await.ignore_moot()?;
                     }
                 }
                 EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-                    bot.edit_message_text_inline(inline_message_id, updated_text).await?;
+                    bot.edit_message_text_inline(inline_message_id, updated_text)
+                        .await.ignore_moot()?;
                 }
             }
         }
     }
 
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 

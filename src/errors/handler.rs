@@ -12,6 +12,7 @@ use teloxide::types::{Update, UpdateKind};
 use tracing::{Instrument, Span};
 use crate::errors::details::ErrorFields;
 use crate::errors::flat::flat;
+use crate::errors::moot::Moot;
 use crate::handlers::checks::is_our_command;
 use crate::domain::objects::BotNames;
 
@@ -118,6 +119,9 @@ pub fn classify(error: &RequestError) -> &'static str {
         // A text over Telegram's 4096 characters. The bot never splits an answer, so this is
         // what says one has grown too long.
         RequestError::Api(ApiError::MessageIsTooLong | ApiError::EditedMessageIsTooLong) => "too_long",
+        // Telegram answered, but there was nothing left to do. Kept apart so that `api` stays the
+        // count of requests that were really wrong.
+        RequestError::Api(_) if let Some(moot) = Moot::of(error) => moot.label(),
         RequestError::Api(_) | RequestError::MigrateToChatId(_) => "api",
         _ => "other",
     }
@@ -176,6 +180,23 @@ mod test {
     use crate::domain::objects::BotNames;
     use crate::errors::details::{DetailedContext, Details};
     use super::HandlerError;
+
+    /// An answer that leaves nothing to do is counted apart from the requests that were wrong.
+    #[test]
+    fn a_moot_answer_is_not_counted_as_an_api_error() {
+        use teloxide::{ApiError, RequestError};
+        use super::classify;
+
+        let cases = [
+            (ApiError::InvalidQueryId, "stale_query"),
+            (ApiError::MessageNotModified, "not_modified"),
+            (ApiError::MessageToDeleteNotFound, "message_gone"),
+            (ApiError::MessageCantBeEdited, "api"),
+        ];
+        for (api, kind) in cases {
+            assert_eq!(classify(&RequestError::Api(api)), kind);
+        }
+    }
 
     #[test]
     fn a_failed_update_is_logged_with_its_ids() {
