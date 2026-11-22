@@ -187,7 +187,7 @@ pub fn reply_html<T: Into<String>>(bot: &ThrottledBot, msg: &Message, answer: T)
         .parse_mode(Html)
         .disable_link_preview(true);
     if msg.chat.is_group() || msg.chat.is_supergroup() {
-        answer = answer.reply_parameters(ReplyParameters::new(msg.id));
+        answer = answer.reply_parameters(ReplyParameters::new(msg.id).allow_sending_without_reply());
     }
     answer
 }
