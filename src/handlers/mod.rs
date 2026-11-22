@@ -274,6 +274,7 @@ pub(crate) fn banned_until_of(e: &anyhow::Error) -> Option<String> {
 pub mod checks {
     use autometrics::autometrics;
     use std::ops::Not;
+    use std::time::Duration;
     use chrono::{DateTime, Utc};
     use rust_i18n::t;
     use teloxide::dispatching::{UpdateFilterExt, UpdateHandler};
@@ -284,7 +285,7 @@ pub mod checks {
     use crate::errors::moot::IgnoreMoot;
     use crate::bans::BanList;
     use crate::commands::COMMAND_NAMES;
-    use crate::config::{MessageGroup, ThrottledBot};
+    use crate::config::{AppConfig, MessageGroup, ThrottledBot};
     use crate::domain::primitives::{LanguageCode, UserId};
     use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
     use crate::errors::flat::flat;
@@ -477,6 +478,21 @@ pub mod checks {
         Ok(())
     }
 
+    /// Whether the message is one of our commands that took longer than `COMMAND_MAX_AGE` to
+    /// arrive. Its sender has most likely sent it again by now.
+    pub fn is_stale_command(msg: Message, names: BotNames, config: AppConfig) -> bool {
+        is_stale(msg.date, config.command_max_age, Utc::now()) && is_our_command(&msg, &names)
+    }
+
+    pub async fn drop_stale_command() -> HandlerResult {
+        metrics::STALE_COMMANDS.inc();
+        Ok(())
+    }
+
+    fn is_stale(sent: DateTime<Utc>, max_age: Duration, now: DateTime<Utc>) -> bool {
+        !max_age.is_zero() && (now - sent).to_std().is_ok_and(|age| age > max_age)
+    }
+
     /// The verdict on a request that went over a limit, or `None` for one that may go on. Only
     /// what the bot would answer is counted: our commands, the buttons and the inline queries.
     /// Chatter in a group the bot reads in full, and the second step of a dialogue, are left alone.
@@ -638,7 +654,9 @@ pub mod checks {
         use crate::domain::primitives::Username;
         use crate::domain::objects::BotNames;
         use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
-        use super::{callback_topic, is_gated_by_topic, is_our_command};
+        use std::time::Duration;
+        use chrono::{DateTime, TimeDelta, Utc};
+        use super::{callback_topic, is_gated_by_topic, is_our_command, is_stale};
 
         #[test]
         fn test_our_command_in_a_forum_is_gated() {
@@ -732,6 +750,27 @@ pub mod checks {
         fn test_a_button_without_a_message_is_never_judged() {
             let query = callback("pvp:1:2", None);
             assert_eq!(callback_topic(&query), None);
+        }
+
+        #[test]
+        fn a_command_older_than_the_limit_is_stale() {
+            let now = Utc::now();
+            let max_age = Duration::from_mins(10);
+            assert!(is_stale(now - TimeDelta::minutes(11), max_age, now));
+            assert!(!is_stale(now - TimeDelta::minutes(9), max_age, now));
+        }
+
+        #[test]
+        fn a_zero_limit_keeps_every_command() {
+            let now = Utc::now();
+            assert!(!is_stale(DateTime::UNIX_EPOCH, Duration::ZERO, now));
+        }
+
+        /// A clock behind Telegram's makes a fresh message look as if it came from the future.
+        #[test]
+        fn a_message_from_the_future_is_not_stale() {
+            let now = Utc::now();
+            assert!(!is_stale(now + TimeDelta::minutes(30), Duration::from_mins(10), now));
         }
 
         /// A message of the given text, in a supergroup that either is a forum or isn't. Built

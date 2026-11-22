@@ -34,6 +34,9 @@ pub struct AppConfig {
     pub donate_url: Option<Url>,
     pub caches: CachesConfig,
     pub rate_limit: RateLimitConfig,
+    /// How long a command may wait to reach the bot before it is dropped unanswered; zero keeps
+    /// every one.
+    pub command_max_age: Duration,
 }
 
 #[derive(Clone)]
@@ -143,6 +146,7 @@ impl AppConfig {
             donate_url: get_optional_env("DONATE_URL"),
             caches: CachesConfig::from_env(),
             rate_limit: RateLimitConfig::from_env(),
+            command_max_age: env_duration!("COMMAND_MAX_AGE", or = mins(10)),
         }
     }
 }

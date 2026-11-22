@@ -315,9 +315,30 @@ distinct people that is belongs to the logs. A limit of 0 switches its counter o
 with it, so to measure before choosing, set the limit far above the last threshold rather than
 to 0.
 
-It is the **first** branch of the dispatcher tree, above the setup message and `/topics`. A flood
+It comes right after the stale-command filter, above the setup message and `/topics`. A flood
 has to be stopped before it costs a query, and it may sit there because it writes nothing for the
 sender, which is the property the ban gate's ordering depends on.
+
+### Optional: commands that arrive too late
+
+```
+COMMAND_MAX_AGE=10m  # how long a command may take to reach the bot; 0 => every one is answered
+```
+
+When the bot can't be reached, Telegram keeps the updates and delivers them all at once when it
+can be reached again. A command that waited longer than this is dropped without a reply and counted
+in `stale_commands_total`: during an outage people send a command several times, so answering the
+backlog posts the same answer again and again, and a command dozens of minutes old is no longer
+what anybody is waiting for. A blip of a minute or two stays under the limit and is answered late.
+
+The age is `now − message.date`, so only messages are judged, and only our commands
+(`checks::is_our_command`). A support reply, a dialogue step or a title change goes through
+whatever its age, because nobody repeats those. A button press and an inline query carry no time
+they were sent. A stale inline query is refused by Telegram anyway (`stale_query`), and a stale
+press still does what it was pressed for.
+
+It is the first branch of the dispatcher tree, above the rate limiter, so a backlog that is
+dropped counts against nobody's window.
 
 ### How many guesses a promo code takes
 

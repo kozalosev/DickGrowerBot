@@ -40,6 +40,8 @@ pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
     Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
 pub static RATE_LIMITED_UPDATES: Lazy<Counter> = Lazy::new(||
     Counter::new("rate_limited_updates_total", "count of updates dropped because their sender or their chat went over RATE_LIMIT_USER_REQUESTS or RATE_LIMIT_CHAT_REQUESTS; only the first RATE_LIMIT_WARNINGS of them in a window are answered"));
+pub static STALE_COMMANDS: Lazy<Counter> = Lazy::new(||
+    Counter::new("stale_commands_total", "count of commands dropped without an answer because they reached the bot more than COMMAND_MAX_AGE after they were sent"));
 pub static START_SPAM_LIMITED: Lazy<Counter> = Lazy::new(||
     Counter::new("start_spam_limited_total", "count of bare /start commands dropped without an answer because their chat went over SPAM_LIMIT_START_REQUESTS in SPAM_LIMIT_START_WINDOW"));
 pub static RATE_LIMIT_USER_WINDOWS: Lazy<ThresholdCurve> = Lazy::new(||
@@ -276,6 +278,7 @@ fn force_registration() {
     Lazy::force(&CMD_DONATE_COUNTER);
     Lazy::force(&BANNED_UPDATES_BLOCKED);
     Lazy::force(&RATE_LIMITED_UPDATES);
+    Lazy::force(&STALE_COMMANDS);
     Lazy::force(&START_SPAM_LIMITED);
     Lazy::force(&RATE_LIMIT_USER_WINDOWS);
     Lazy::force(&RATE_LIMIT_CHAT_WINDOWS);

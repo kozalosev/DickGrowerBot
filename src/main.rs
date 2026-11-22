@@ -88,7 +88,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let lang_resolver = ls.defer(upd);
             HandlerDeps { repos, config, self_destruction, lang_resolver }
         })
-        // First of all: a flood must be stopped before it costs anything, and this writes nothing.
+        // A command that waited out an outage costs nothing, and isn't counted against any limit.
+        .branch(Update::filter_message().filter(checks::is_stale_command).endpoint(checks::drop_stale_command))
+        // A flood must be stopped before it costs anything, and this writes nothing.
         .branch(dptree::filter_map_async(checks::rate_limit_exceeded).endpoint(checks::handle_rate_limited))
         // No endpoint: the message goes on to the branches below. It writes only the chat's row,
         // never a user's, so it may sit above the ban gate.
