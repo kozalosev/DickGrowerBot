@@ -814,6 +814,7 @@ dependencies = [
  "futures",
  "itertools 0.15.0",
  "linkify",
+ "log",
  "num-traits",
  "once_cell",
  "opentelemetry 0.33.1",

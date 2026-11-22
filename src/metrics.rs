@@ -215,6 +215,10 @@ pub static DB_POOL_IDLE_SECONDS: Lazy<Histogram> = Lazy::new(||
     Histogram::new("db_pool_connection_idle_seconds",
         "how long a connection sat idle in the pool before being handed out to a caller",
         &[0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0]));
+pub static DB_POOL_ACQUIRE_SECONDS: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("db_pool_acquire_seconds",
+        "how long a query waited for a connection from the sqlx pool. A wait means the pool was empty; an acquire that ran out DATABASE_ACQUIRE_TIMEOUT failed and is not here",
+        &[0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]));
 pub static DB_POOL_CONNECTION_AGE_SECONDS: Lazy<Histogram> = Lazy::new(||
     Histogram::new("db_pool_connection_age_seconds",
         "how old a connection was (time since it was first opened) when it was returned to the pool",
@@ -335,6 +339,7 @@ fn force_registration() {
 
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
+    Lazy::force(&DB_POOL_ACQUIRE_SECONDS);
     Lazy::force(&DB_POOL_CONNECTION_AGE_SECONDS);
 }
 
@@ -581,6 +586,11 @@ impl Histogram {
 
     pub fn observe(&self, value: f64) {
         self.0.observe(value)
+    }
+
+    #[cfg(test)]
+    pub fn sample_count(&self) -> u64 {
+        self.0.get_sample_count()
     }
 }
 

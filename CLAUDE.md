@@ -457,6 +457,19 @@ itself; the shorter value is opted into, and is what keeps a handler's worst cas
 `PVP_LOCK_TIME`. Refusals under load mean `DATABASE_MAX_CONNECTIONS` is too small, not that
 this is too short.
 
+**How long a query waited is `db_pool_acquire_seconds`.** The pool's size and its idle
+connections only show that it was full, not who waited and for how long. sqlx says it in one
+place only: with `acquire_time_level` set, it writes a `trace` event per acquire, target
+`sqlx::pool::acquire`, carrying `acquired_after_secs`. `observability::pool_acquire_layer` reads
+that event into the histogram. The layer has a filter of its own, so the event costs the console and
+the export nothing. Those two names are sqlx's, not a stable API. `an_acquire_from_the_pool_is_measured`
+fails if an upgrade renames them, and without it the histogram would just go flat.
+
+An acquire that ran out the timeout returns `PoolTimedOut` and writes no event, so it is not in the
+histogram. An acquire over two seconds is also logged at `warn` by sqlx itself ("acquired
+connection, but time to acquire exceeded slow threshold"), which is where to look for the waits of
+the time before this metric.
+
 ### How long one statement may run
 
 The bot has no variable for this: it is Postgres's own setting, and `DATABASE_URL` already has a

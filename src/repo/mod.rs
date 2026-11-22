@@ -6,6 +6,7 @@ use crate::config::DatabaseConfig;
 use crate::domain::primitives::AffectedRows;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::errors::details::Details;
+use crate::observability::POOL_ACQUIRE_LEVEL;
 use crate::pub_use_modules;
 
 pub_use_modules!(
@@ -94,6 +95,7 @@ pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Po
         .max_connections(config.max_connections + LISTENER_CONNECTIONS)
         .min_connections(config.min_connections)
         .acquire_timeout(config.acquire_timeout)
+        .acquire_time_level(POOL_ACQUIRE_LEVEL)
         .connect(config.url.as_str()).await?;
     Ok(pool)
 }

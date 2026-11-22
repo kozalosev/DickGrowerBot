@@ -43,6 +43,7 @@ tokio-metrics-collector = "0.3.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
 tracing-opentelemetry = "0.34.0"
+log = "0.4.33"  # only for sqlx's pool options, which take its LevelFilter
 opentelemetry = "0.33.1"
 opentelemetry_sdk = { version = "0.33.1", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.33.1", features = ["grpc-tonic", "gzip-tonic"] }
