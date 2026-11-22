@@ -1351,6 +1351,24 @@ body to log; it is still measured.
 Changing any of this means updating the Grafana dashboard in the server-configs repo, next to the
 "Telegram API request errors by kind" panel.
 
+### An id of an unexpected shape
+
+The chat of an inline message is read out of its `inline_message_id` (`handlers/utils/tghack.rs`),
+a format Telegram never documented. **A change to it has to be noticed the day it happens**, so
+anything that doesn't decode is refused, logged at `error!` with the raw id, and counted in
+`unexpected_telegram_ids_total{source="inline_message_id"}`; `DickGrowerBotUnexpectedTelegramId`
+in server-configs fires on the first one. That includes a peer id no channel can have (past
+10¹² − 2³¹): it means the bytes aren't laid out the way they are read, so nothing decoded from them
+is trusted, the message id included. `resolve_inline_message_id` is the one place that logs it; its
+callers fall back without logging again.
+
+The throttle is the backstop. teloxide's `ChatId::to_bare` panics on an id outside every range
+Telegram assigns, and the throttle's worker used to call it for each request it sent: one such id
+killed the worker, the requests waiting in it panicked, and the bot went on sending unthrottled
+until a restart. The fork now throttles such a request like a private chat, logs
+`Malformed chat id …`, and reports it as `ThrottledChatKind::Malformed`, which the bot counts as
+`source="outgoing_chat_id"` under the same alert.
+
 ### The store of short-lived values
 
 Everything the bot keeps briefly lives in `src/cache.rs`, which is the one place that keeps

@@ -315,11 +315,7 @@ pub async fn inline_callback_handler(
                     id,
                     instance: TelegramChatInstanceId::new(query.chat_instance.clone()),
                 }.to_partiality(ChatIdSource::InlineQuery),
-                Ok(InlineMessageIdInfo { chat_id: None, .. }) => query.chat_instance.clone().into(),
-                Err(err) => {
-                    tracing::error!(error = flat!(err), "couldn't resolve the inline_message_id");
-                    query.chat_instance.clone().into()
-                }
+                Ok(InlineMessageIdInfo { chat_id: None, .. }) | Err(_) => query.chat_instance.clone().into(),
             })
             .unwrap_or(query.chat_instance.clone().into());
         tracing::debug!(chat_id = ?chat_id, uid = query.from.id.0, "handling a callback query");

@@ -238,11 +238,7 @@ pub async fn pvp_callback_handler(
         .or_else(|| config.features.chats_merging
             .then_some(query.inline_message_id.as_ref())
             .flatten()
-            .and_then(|msg_id| utils::resolve_inline_message_id(msg_id)
-                .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't resolve the inline_message_id"))
-                .ok()
-            )
-            .and_then(|info| info.chat_id)
+            .and_then(|msg_id| utils::try_resolve_chat_id(msg_id))
         )
         .map(ChatIdPartiality::from)
         .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));

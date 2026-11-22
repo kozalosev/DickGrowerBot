@@ -202,7 +202,9 @@ pub static TELEGRAM_THROTTLE_QUEUE_FULL: Lazy<Counter> = Lazy::new(||
     Counter::new("telegram_throttle_queue_full_total", "how many times requests that their chats' limits allowed were still waiting because THROTTLE_MESSAGES_PER_SEC_OVERALL was used up, which means the bot asks for more than the overall limit allows. Teloxide reports this at most once every 4 seconds, so this counts moments, not requests"));
 pub static TELEGRAM_THROTTLE_WAIT: Lazy<TelegramThrottleWait> = Lazy::new(||
     TelegramThrottleWait::new("telegram_throttle_wait_seconds",
-        "how long a request waited in the throttle before it was let through to Telegram, by the kind of its chat (private/group/supergroup)"));
+        "how long a request waited in the throttle before it was let through to Telegram, by the kind of its chat (private/group/supergroup, or malformed for an id outside every range Telegram assigns)"));
+pub static UNEXPECTED_TELEGRAM_IDS: Lazy<UnexpectedTelegramIds> = Lazy::new(||
+    UnexpectedTelegramIds::new("unexpected_telegram_ids_total", "count of ids that don't have the shape the bot expects, by source: inline_message_id (an id that doesn't decode) or outgoing_chat_id (a request to a chat id outside every range Telegram assigns). Either may mean Telegram changed a format; the logs carry the id itself"));
 
 pub static DB_POOL_CONNECTIONS_OPENED: Lazy<Counter> = Lazy::new(||
     Counter::new("db_pool_connections_opened_total", "count of new physical connections opened by the sqlx pool"));
@@ -325,6 +327,7 @@ fn force_registration() {
     Lazy::force(&TELEGRAM_REQUEST_DURATION);
     Lazy::force(&TELEGRAM_THROTTLE_QUEUE_FULL);
     Lazy::force(&TELEGRAM_THROTTLE_WAIT);
+    Lazy::force(&UNEXPECTED_TELEGRAM_IDS);
 
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
@@ -1216,9 +1219,36 @@ impl TelegramThrottleWait {
             ThrottledChatKind::Private => "private",
             ThrottledChatKind::Group => "group",
             ThrottledChatKind::ChannelOrSupergroup => "supergroup",
+            ThrottledChatKind::Malformed => "malformed",
             _ => "other",
         };
         self.0.observe(&[label], waited.as_secs_f64())
+    }
+}
+
+/// Ids from Telegram that don't have the shape the bot expects, by where they were found:
+/// an `inline_message_id` that doesn't decode, or a chat id outside every range Telegram assigns
+/// on its way out through the throttle. Either is a sign that Telegram changed a format.
+pub struct UnexpectedTelegramIds(CounterVec);
+
+impl UnexpectedTelegramIds {
+    const INLINE_MESSAGE_ID: &str = "inline_message_id";
+    const OUTGOING_CHAT_ID: &str = "outgoing_chat_id";
+
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        for source in [Self::INLINE_MESSAGE_ID, Self::OUTGOING_CHAT_ID] {
+            vec.counter(&[source]);
+        }
+        Self(vec)
+    }
+
+    pub fn inline_message_id(&self) {
+        self.0.counter(&[Self::INLINE_MESSAGE_ID]).inc()
+    }
+
+    pub fn outgoing_chat_id(&self) {
+        self.0.counter(&[Self::OUTGOING_CHAT_ID]).inc()
     }
 }
 

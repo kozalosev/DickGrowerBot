@@ -320,9 +320,7 @@ impl Cleaner<'_> {
 /// The chat and the message an inline message was posted as, when its id names them: only a
 /// supergroup's does.
 fn resolve_inline(inline_message_id: &InlineMessageId) -> Option<(ChatId, MessageId)> {
-    let info = resolve_inline_message_id(inline_message_id.value())
-        .inspect_err(|e| tracing::warn!(error = flat!(e), "couldn't resolve the inline_message_id"))
-        .ok()?;
+    let info = resolve_inline_message_id(inline_message_id.value()).ok()?;
     info.chat_id.map(|chat_id| (ChatId::from(chat_id), info.message_id))
 }
 

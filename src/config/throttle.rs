@@ -1,5 +1,5 @@
 use teloxide::Bot;
-use teloxide::adaptors::throttle::{Limits, Settings, Throttle};
+use teloxide::adaptors::throttle::{Limits, Settings, Throttle, ThrottledChatKind};
 use crate::config::env::env_value;
 use crate::domain::primitives::RateLimit;
 use crate::metrics;
@@ -39,7 +39,12 @@ impl ThrottleConfig {
                 metrics::TELEGRAM_THROTTLE_QUEUE_FULL.inc();
                 tracing::warn!(pending, "the throttle queue is full, requests are waiting for their turn");
             })
-            .on_wait(|kind, waited| metrics::TELEGRAM_THROTTLE_WAIT.record(kind, waited));
+            .on_wait(|kind, waited| {
+                if kind == ThrottledChatKind::Malformed {
+                    metrics::UNEXPECTED_TELEGRAM_IDS.outgoing_chat_id();
+                }
+                metrics::TELEGRAM_THROTTLE_WAIT.record(kind, waited)
+            });
         Throttle::spawn_with_settings(bot, settings)
     }
 }
