@@ -21,7 +21,8 @@ BAN_LIST_REFRESH=15m       # the backstop behind the notification, see below
 **The chat is checked once, at startup.** `check_support_chat` asks `getChat`, and in a group
 `getChatMember` about the bot itself. A chat Telegram doesn't know, a group that was upgraded to a
 supergroup, or a group where the bot may not post is treated as an unset id: `/support` is hidden
-from the menu and the help, and the relay is off. The `error!` says why, with the new id after a
+from the menu and the help, and the relay is off. Typed anyway, the command answers
+`errors.feature_disabled` at once, rather than asking for a message it will refuse. The `error!` says why, with the new id after a
 migration. The outcome is `startup_verification_error{kind="support_chat_unusable"}`, which the
 `DickGrowerBotStartupVerificationFailed` alert in server-configs watches. It is a gauge rather than
 a log rule because the state lasts until a restart, while a log rule would resolve a minute after

@@ -102,6 +102,10 @@ impl SupportService {
         Self { chat_id, last_sent: Default::default() }
     }
 
+    fn is_enabled(&self) -> bool {
+        self.chat_id.is_some()
+    }
+
     fn extract_reply_recipient(&self, msg: &Message, bot_id: TelegramUserId) -> Option<SupportRecipient> {
         Checks::new("support reply", msg)
             .ensure(|msg| self.chat_id == Some(msg.chat.id.into()), "not the support chat")
@@ -335,7 +339,11 @@ pub async fn support_cmd_handler(
     metrics::CMD_SUPPORT_COUNTER.inc();
 
     let SupportCommands::Support(text) = cmd;
-    let answer = if text.trim().is_empty() {
+    let answer = if !support.is_enabled() {
+        let refused = Relayed::Disabled;
+        metrics::CMD_SUPPORT_REJECTED.count(&refused);
+        t!(refused.tr_key(), locale = &lang_code)
+    } else if text.trim().is_empty() {
         dialogue.update(SupportCommandState::Requested).await?;
         t!("commands.support.request", locale = &lang_code)
     } else {
