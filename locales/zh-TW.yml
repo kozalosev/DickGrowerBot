@@ -17,6 +17,8 @@ commands:
     description: "轉讓公分"
   reset:
     description: "重置排行榜"
+    errors:
+      admins_only: "只有群組管理員才能重置排行榜。"
   buy:
     description: "購買公分"
     text: "🛒 <b>公分可以在拍賣中買到</b>\n促銷碼會在 %{bot} 中拍賣：用 Telegram Stars 出價，只有勝出者付款，被超過出價的人會拿回自己的星星。使用 /promo 指令啟用促銷碼。"

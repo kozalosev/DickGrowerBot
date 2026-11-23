@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use autometrics::autometrics;
 use reqwest::Url;
 use rust_i18n::t;
@@ -10,7 +11,9 @@ use crate::config::MessageGroup::Notice;
 use crate::domain::primitives::{LanguageCode, StartParameter, Username};
 use crate::domain::primitives::SupportedLanguage::{EN, RU, IT, FA, ZH};
 use crate::errors::flat::flat;
-use crate::handlers::{HandlerDeps, HandlerImplResult, HandlerResult, LinkButton, reply_html};
+use crate::handlers::{checks, HandlerDeps, HandlerImplResult, HandlerResult, LinkButton, reply_html};
+use crate::handlers::utils::is_chat_admin;
+use crate::metrics::RejectionReason;
 use crate::{metrics, reply_html_ephemeral};
 
 static VOUCHER: Embedded = Embedded {
@@ -59,25 +62,59 @@ impl InfoCommands {
             Self::Donate => "donate",
         }
     }
-}
 
-impl PublishedCommands for InfoCommands {
-    /// `/voucher` and `/reset` are about a chat's leaderboard, so they are in the group menus only,
-    /// and resetting one is for its administrators. `/buy` needs an auction bot to point to, and
-    /// `/donate` a page. The administrators' menu adds to the group one, so nothing but `/reset` is
-    /// repeated there.
-    fn is_published(&self, scope: MenuScope, toggles: &CommandToggles) -> bool {
+    /// Whether the command is about a chat's leaderboard, and so means something in a group only.
+    pub fn is_for_groups(self) -> bool {
+        self.allowed() != Allowed::Everywhere
+    }
+
+    fn allowed(self) -> Allowed {
         match self {
-            Self::Voucher | Self::Send | Self::Transfer | Self::Giveaway => scope == MenuScope::Group,
-            Self::Reset => scope == MenuScope::Admins,
-            Self::Buy | Self::Auctions => scope != MenuScope::Admins && toggles.auction_enabled,
-            Self::Donate => scope != MenuScope::Admins && toggles.donate_enabled,
+            Self::Voucher | Self::Send | Self::Transfer | Self::Giveaway => Allowed::InGroups,
+            Self::Reset => Allowed::ByGroupAdmins,
+            Self::Buy | Self::Auctions | Self::Donate => Allowed::Everywhere,
+        }
+    }
+
+    /// Whether what the command points to exists: `/buy` needs an auction bot, `/donate` a page.
+    fn is_configured(self, toggles: &CommandToggles) -> bool {
+        match self {
+            Self::Buy | Self::Auctions => toggles.auction_enabled,
+            Self::Donate => toggles.donate_enabled,
+            _ => true,
         }
     }
 }
 
+impl PublishedCommands for InfoCommands {
+    /// The administrators' menu adds to the group one, so a command for everybody isn't repeated
+    /// there.
+    fn is_published(&self, scope: MenuScope, toggles: &CommandToggles) -> bool {
+        match self.allowed() {
+            Allowed::Everywhere => scope != MenuScope::Admins && self.is_configured(toggles),
+            Allowed::InGroups => scope == MenuScope::Group,
+            Allowed::ByGroupAdmins => scope == MenuScope::Admins,
+        }
+    }
+}
+
+/// Where a command means something.
+#[derive(Clone, Copy, PartialEq)]
+enum Allowed {
+    /// Private chats and groups alike.
+    Everywhere,
+    /// Groups only, for every member.
+    InGroups,
+    /// Groups only, for their administrators.
+    ByGroupAdmins,
+}
+
 pub fn is_enabled(cmd: InfoCommands, config: AppConfig) -> bool {
     config.command_toggles.enabled(cmd.key())
+}
+
+pub fn is_answerable_here(cmd: InfoCommands, msg: Message) -> bool {
+    !cmd.is_for_groups() || checks::is_group_chat(msg)
 }
 
 #[autometrics]
@@ -90,6 +127,17 @@ pub async fn info_cmd_handler(
 ) -> HandlerResult {
     let HandlerDeps { config, self_destruction, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
+    if cmd.allowed() == Allowed::ByGroupAdmins {
+        let from_id = msg.from.as_ref().map(|user| user.id)
+            .ok_or(anyhow!("unexpected absence of a FROM field"))?;
+        if !is_chat_admin(&bot, &msg, from_id).await? {
+            count(cmd);
+            metrics::CMD_RESET_REJECTED.rejected(RejectionReason::AdminsOnly);
+            let key = format!("commands.{}.errors.admins_only", cmd.key());
+            reply_html_ephemeral!(bot, msg, t!(&key, locale = &lang_code), self_destruction, Notice, lang_code);
+            return Ok(());
+        }
+    }
     let response = info_impl(cmd, &config, &lang_code);
     let keyboard = response.keyboard().map(ReplyMarkup::InlineKeyboard);
     reply_html_ephemeral!(bot, msg, response.text(), self_destruction, Notice, lang_code,
@@ -210,6 +258,24 @@ mod test {
     }
 
     #[test]
+    fn only_the_leaderboard_commands_are_for_groups() {
+        let for_groups = [
+            InfoCommands::Voucher,
+            InfoCommands::Send,
+            InfoCommands::Transfer,
+            InfoCommands::Giveaway,
+            InfoCommands::Reset,
+        ];
+        let anywhere = [InfoCommands::Buy, InfoCommands::Auctions, InfoCommands::Donate];
+        for cmd in for_groups {
+            assert!(cmd.is_for_groups(), "{cmd:?}");
+        }
+        for cmd in anywhere {
+            assert!(!cmd.is_for_groups(), "{cmd:?}");
+        }
+    }
+
+    #[test]
     fn embedded_texts_exist_in_every_language() {
         for lang in LANGUAGES {
             let lang_code = language(lang);
@@ -223,6 +289,7 @@ mod test {
         let keys = [
             "commands.voucher.description",
             "commands.reset.description",
+            "commands.reset.errors.admins_only",
             "commands.buy.description",
             "commands.buy.text",
             "commands.buy.button",

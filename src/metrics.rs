@@ -106,6 +106,8 @@ pub static CMD_TOPICS_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
     RejectionCounter::new("topics", &[
         RejectionReason::NotAForum, RejectionReason::AdminsOnly, RejectionReason::AnotherUser,
     ]));
+pub static CMD_RESET_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("reset", &[RejectionReason::AdminsOnly]));
 pub static CMD_CLEANUP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
     RejectionCounter::new("cleanup", &[
         RejectionReason::FeatureDisabled, RejectionReason::AdminsOnly, RejectionReason::AnotherUser,
@@ -303,6 +305,7 @@ fn force_registration() {
     Lazy::force(&CMD_PROMO_REJECTED);
     Lazy::force(&CMD_LANGUAGE_REJECTED);
     Lazy::force(&CMD_TOPICS_REJECTED);
+    Lazy::force(&CMD_RESET_REJECTED);
     Lazy::force(&CMD_CLEANUP_REJECTED);
     Lazy::force(&CMD_MENTIONS_REJECTED);
     Lazy::force(&CMD_SUPPORT_REJECTED);

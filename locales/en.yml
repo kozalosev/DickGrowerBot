@@ -75,7 +75,9 @@ commands:
   voucher:
     description: "Transfer centimetres"
   reset:
-    description: "Reset the leaderboard"
+    description: "Reset the top"
+    errors:
+      admins_only: "Only chat administrators can reset the top."
   buy:
     description: "Buy centimetres"
     text: "🛒 <b>Centimetres are sold at auctions</b>\nPromo codes are auctioned in %{bot}: you bid Telegram Stars, only the winner pays, and everyone who was outbid gets their Stars back. Activate a code with /promo."

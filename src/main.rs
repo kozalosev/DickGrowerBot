@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .branch(Update::filter_message().filter(checks::is_gated_by_topic).filter_async(checks::is_forbidden_topic).endpoint(checks::handle_forbidden_topic))
         .branch(Update::filter_message().filter_bot_command::<HelpCommands>().endpoint(handlers::help_cmd_handler))
         .branch(Update::filter_message().filter_bot_command::<PrivacyCommands>().endpoint(handlers::privacy_cmd_handler))
-        .branch(Update::filter_message().filter_bot_command::<InfoCommands>().filter(handlers::info::is_enabled).endpoint(handlers::info::info_cmd_handler))
+        .branch(Update::filter_message().filter_bot_command::<InfoCommands>().filter(handlers::info::is_enabled).filter(handlers::info::is_answerable_here).endpoint(handlers::info::info_cmd_handler))
         .branch(Update::filter_message().filter_bot_command::<SupportCommands>().filter(checks::is_not_group_chat).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()
             .branch(dptree::case![SupportCommandState::Start].endpoint(handlers::support_cmd_handler)))
         .branch(Update::filter_message().filter_map(handlers::support_answered_ticket).enter_dialogue::<Message, CachedDialogueStorage<SupportCommandState>, SupportCommandState>()

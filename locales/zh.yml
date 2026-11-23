@@ -76,6 +76,8 @@ commands:
     description: "转让厘米"
   reset:
     description: "重置排行榜"
+    errors:
+      admins_only: "只有群管理员才能重置排行榜。"
   buy:
     description: "购买厘米"
     text: "🛒 <b>厘米可以在拍卖中买到</b>\n促销码会在 %{bot} 中拍卖：用 Telegram Stars 出价，只有胜出者付款，被超过出价的人会拿回自己的星星。使用 /promo 指令激活促销码。"

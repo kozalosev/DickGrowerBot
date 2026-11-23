@@ -38,8 +38,11 @@ translations, the counter and the switch all go by that key.
 
 Which menu shows which command is `commands::PublishedCommands`, decided per `MenuScope`. `/voucher`
 and `/reset` are about a chat's leaderboard, so only the group menus list them, and `/reset` only
-the administrators' one, since resetting a chat is theirs to decide. The bot still answers both
-anywhere and to anybody: for now they only inform. `DISABLE_CMD_<KEY>` hides one of them from the menu and also stops
+the administrators' one, since resetting a chat is theirs to decide. In a private chat both, aliases
+included, get the standard `errors.not_group_chat`, the same as the game commands:
+`InfoCommands::is_for_groups` makes their branch let them through to that gate. In a group,
+`/reset` answers its administrators only and tells everybody else so, counted as
+`command_rejected_total{command="reset",reason="admins_only"}`. `DISABLE_CMD_<KEY>` hides one of them from the menu and also stops
 the bot answering it, aliases included. `/buy` also leaves the menu when `HELP_AUCTION_BOT` is
 unset, and `/donate` without `DONATE_URL`; both then answer with the standard
 `errors.feature_disabled`. A `DONATE_URL` that isn't a URL, and a
