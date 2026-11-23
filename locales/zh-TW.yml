@@ -255,6 +255,7 @@ errors:
   not_group_chat: "此機器人僅在群聊中執行任務！"
   group_account: "不能以群組或頻道的身份遊玩——請關閉匿名模式後重試！"
   feature_disabled: "此功能當前暫時禁用。"
+  internal: "我這邊出了點問題，請過幾分鐘再試。"
   banned: "你在 %{date} 之前無法遊玩。如果你認為這是誤判，請用 /support 聯絡我們。"
   banned_inline_title: "你已被封鎖"
   rate_limited: "請求過多！請稍作休息，一分鐘後再試。"

@@ -9,7 +9,11 @@ use teloxide::dptree::{HandlerDescription, HandlerSignature};
 use teloxide::dptree::di::DependencyMap;
 use teloxide::error_handlers::ErrorHandler;
 use teloxide::types::{Update, UpdateKind};
+use rust_i18n::t;
 use tracing::{Instrument, Span};
+use crate::config::ThrottledBot;
+use crate::domain::primitives::LanguageCode;
+use crate::handlers::{HandlerResult, reply_html, send_error_callback_answer};
 use crate::errors::details::ErrorFields;
 use crate::errors::flat::flat;
 use crate::errors::moot::Moot;
@@ -28,7 +32,8 @@ type HandlerError = Box<dyn Error + Send + Sync>;
 /// filter, and the span is opened there. Should handling fail with no span opened, one is opened
 /// afterwards for the failure alone.
 ///
-/// The error is logged here and not passed on, so the dispatcher's handler sees none of them.
+/// The error is logged here and not passed on, so the dispatcher's handler sees none of them. The
+/// sender is told that something went wrong, unless the update was a group message the bot ignores.
 pub fn trace_updates(handler: UpdateHandler<HandlerError>) -> UpdateHandler<HandlerError> {
     let description = handler.description().clone();
     let signature = handler.sig().clone();
@@ -36,6 +41,7 @@ pub fn trace_updates(handler: UpdateHandler<HandlerError>) -> UpdateHandler<Hand
         let handler = handler.clone();
         let update = deps.try_get::<Update>();
         let names = deps.try_get::<BotNames>();
+        let bot = deps.try_get::<ThrottledBot>();
         let slot = UpdateSpan::default();
         let ignored = update.as_deref()
             .is_some_and(|update| is_ignored_group_message(update, names.as_deref()));
@@ -46,6 +52,9 @@ pub fn trace_updates(handler: UpdateHandler<HandlerError>) -> UpdateHandler<Hand
                 ControlFlow::Break(Err(error)) => {
                     let span = slot.open(update.as_deref());
                     span.in_scope(|| ErrorFields::of(error.as_ref()).log_failed_update(error.as_ref()));
+                    if let (Some(bot), Some(update)) = (bot, update) && !ignored {
+                        apologize(&bot, &update).instrument(span).await;
+                    }
                     ControlFlow::Break(Ok(()))
                 }
                 other => other,
@@ -137,6 +146,26 @@ fn is_ignored_group_message(update: &Update, names: Option<&BotNames>) -> bool {
     in_group && names.is_some_and(|names| !is_our_command(msg, names))
 }
 
+/// Tells the sender that their update failed: a command would otherwise get no answer, and a
+/// button would spin until Telegram gave up on it. An inline query is left unanswered.
+async fn apologize(bot: &ThrottledBot, update: &Update) {
+    const TR_KEY: &str = "errors.internal";
+    let sent: HandlerResult = match &update.kind {
+        UpdateKind::Message(msg) => {
+            let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
+            reply_html(bot, msg, t!(TR_KEY, locale = &lang_code))
+                .await
+                .map(drop)
+                .map_err(Into::into)
+        }
+        UpdateKind::CallbackQuery(query) => send_error_callback_answer(bot.clone(), query.clone(), TR_KEY).await,
+        _ => return,
+    };
+    if let Err(error) = sent {
+        tracing::debug!(error = flat!(error), "couldn't tell the user that the update failed");
+    }
+}
+
 /// The `update` span of the update being handled, once something has opened it.
 #[derive(Clone, Default)]
 struct UpdateSpan(Arc<OnceLock<Span>>);
@@ -167,6 +196,8 @@ fn update_span(update: Option<&Update>) -> Span {
 mod test {
     use std::io::Write;
     use std::ops::ControlFlow;
+    use serde_json::json;
+    use crate::fake_telegram::FakeApi;
     use std::sync::{Arc, Mutex};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use teloxide::dispatching::UpdateHandler;
@@ -335,6 +366,78 @@ mod test {
 
         assert!(matches!(result, ControlFlow::Break(Ok(()))));
         assert!(logs.is_empty(), "{logs}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_command_is_answered() {
+        let api = fake_api().await;
+
+        let _ = failing().dispatch(dptree::deps![update("/grow"), names(), api.bot.clone()]).await;
+
+        let calls = api.calls();
+        assert_eq!(api.methods(), ["SendMessage"]);
+        let (_, body) = &calls[0];
+        assert_eq!(body["chat_id"], -1001234567890_i64);
+        assert_eq!(body["reply_parameters"]["message_id"], 1);
+        assert_eq!(body["text"], "Something went wrong on my side. Try again in a few minutes.");
+    }
+
+    #[tokio::test]
+    async fn a_failed_button_press_stops_the_button_spinning() {
+        let api = fake_api().await;
+
+        let _ = failing().dispatch(dptree::deps![callback(), names(), api.bot.clone()]).await;
+
+        let calls = api.calls();
+        assert_eq!(api.methods(), ["AnswerCallbackQuery"]);
+        let (_, body) = &calls[0];
+        assert_eq!(body["callback_query_id"], "7");
+        assert_eq!(body["text"], "У меня что-то сломалось. Попробуйте ещё раз через несколько минут.");
+    }
+
+    #[tokio::test]
+    async fn a_failed_plain_group_message_is_not_answered() {
+        let api = fake_api().await;
+
+        let _ = failing().dispatch(dptree::deps![update("hello"), names(), api.bot.clone()]).await;
+
+        assert!(api.calls().is_empty());
+    }
+
+    fn failing() -> UpdateHandler<HandlerError> {
+        super::trace_updates(dptree::endpoint(|| async {
+            Err::<(), HandlerError>("the inner error".into())
+        }))
+    }
+
+    async fn fake_api() -> FakeApi {
+        FakeApi::start(|method| match method {
+            "SendMessage" => json!({
+                "ok": true,
+                "result": {
+                    "message_id": 2,
+                    "date": 0,
+                    "chat": { "id": -1001234567890_i64, "type": "supergroup", "title": "Test" },
+                    "text": "sent"
+                }
+            }),
+            _ => json!({ "ok": true, "result": true }),
+        }).await
+    }
+
+    fn callback() -> Update {
+        let json = json!({
+            "update_id": 1,
+            "callback_query": {
+                "id": "7",
+                "from": { "id": 42, "is_bot": false, "first_name": "Tester", "language_code": "ru" },
+                "chat_instance": "1",
+                "data": "page:2"
+            }
+        });
+        let update: Update = serde_json::from_str(&json.to_string()).expect("couldn't build the update");
+        assert!(matches!(update.kind, UpdateKind::CallbackQuery(_)), "{:?}", update.kind);
+        update
     }
 
     fn dispatch(handler: UpdateHandler<HandlerError>) -> (ControlFlow<Result<(), HandlerError>, ()>, String) {

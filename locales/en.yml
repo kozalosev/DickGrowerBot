@@ -268,6 +268,7 @@ errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"
   feature_disabled: "This feature is currently temporarily disabled."
+  internal: "Something went wrong on my side. Try again in a few minutes."
   banned: "You can't play until %{date}. Write via /support if you think it's a mistake."
   banned_inline_title: "You are blocked"
   rate_limited: "Too many requests! Take a break and try again in a minute."

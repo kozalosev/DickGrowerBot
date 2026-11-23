@@ -98,7 +98,15 @@ wrapped in `errors::handler::trace_updates`, which runs every update inside an `
 `update_id`, `chat_id`, `uid`, `chat_instance`, `inline_message_id` and `callback_data` read off the
 `Update`, and logs a failed update in that span before it gets any further — `an update failed` —
 passing nothing on to the dispatcher. One record per failure, the same fields whichever handler
-failed. What it can't recover is the finer fields of the repo's own span (`topic_id`, a loan's id).
+failed.
+
+**The sender is told, too.** A failed message is answered with `errors.internal` as a reply, a
+failed button press with the same text on the callback, so the button stops spinning. The language
+is the one Telegram reports for the user, since resolving the chat's would need the database that
+has probably just failed. For the same reason the reply doesn't delete itself: scheduling that is a
+database write. An inline query gets nothing, and a plain group message the bot ignores gets
+nothing either. A fallback that can't be sent is logged at `debug` only, so an outage of Telegram
+itself doesn't log each update twice. What it can't recover is the finer fields of the repo's own span (`topic_id`, a loan's id).
 
 **The `update` span is what ties the records of one update together.** It is the root of the
 trace, so every record written while the update is handled carries its fields and its trace id —

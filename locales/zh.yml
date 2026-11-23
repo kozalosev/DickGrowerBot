@@ -268,6 +268,7 @@ errors:
   not_group_chat: "此机器人仅在群聊中执行任务！"
   group_account: "不能以群组或频道的身份游玩——请关闭匿名模式后重试！"
   feature_disabled: "此功能当前暂时禁用。"
+  internal: "我这边出了点问题，请过几分钟再试。"
   banned: "你在 %{date} 之前无法游玩。如果你认为这是误判，请用 /support 联系我们。"
   banned_inline_title: "你已被封禁"
   rate_limited: "请求过多！请稍作休息，一分钟后再试。"
