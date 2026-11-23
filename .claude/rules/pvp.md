@@ -4,6 +4,18 @@ paths:
   - "src/handlers/utils/locks.rs"
 ---
 
+## The bet of an inline offer
+
+An inline query asks for an offer with a number, alone (`@DickGrowerBot 100`) or after `pvp` or
+any of its aliases, in any case (`@DickGrowerBot Pvp 100`, since a phone capitalizes the first
+letter). The command alone (`@DickGrowerBot pvp`) offers `PVP_DEFAULT_BET`. The names come from
+`BattleCommands`, so a new alias works here too. `inline_bet` is the
+one parser, for the query and for the chosen result alike. An empty query lists every command, the
+offer at `PVP_DEFAULT_BET` among them.
+
+The offer's title in that list carries the bet near its start and stays short: a phone shows about
+thirty characters of it, and a bet cut off there is why people kept asking how to change it.
+
 ## Optional: checking an inline PvP offer when it is posted
 
 ```

@@ -6,6 +6,7 @@ use futures::join;
 use rand::RngExt;
 use rust_i18n::t;
 use teloxide::macros::BotCommands;
+use teloxide::utils::command::BotCommands as _;
 use teloxide::payloads::{AnswerInlineQuerySetters, EditMessageTextInlineSetters};
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery,
@@ -141,24 +142,23 @@ pub async fn pvp_cmd_handler_no_args(bot: ThrottledBot, msg: Message, deps: Hand
     Ok(())
 }
 
-pub fn inline_filter(query: InlineQuery) -> bool {
-    let maybe_bet: Result<u32, _> = query.query.parse();
-    maybe_bet.is_ok()
+pub fn inline_filter(query: InlineQuery, config: AppConfig) -> bool {
+    inline_bet(&query.query, config.pvp_default_bet).is_some()
 }
 
-pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
-    let maybe_bet: Result<u32, _> = result.query.parse();
-    maybe_bet.is_ok()
+pub fn chosen_inline_result_filter(result: ChosenInlineResult, config: AppConfig) -> bool {
+    inline_bet(&result.query, config.pvp_default_bet).is_some()
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn pvp_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
-    let HandlerDeps { lang_resolver, .. } = deps;
+    let HandlerDeps { lang_resolver, config, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
-    let bet = Bet::new(query.query.parse()?);
+    let bet = inline_bet(&query.query, config.pvp_default_bet)
+        .ok_or(anyhow!("the inline query holds no bet"))?;
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
@@ -205,10 +205,11 @@ pub async fn pvp_inline_chosen_handler(
     let Some(inline_message_id) = result.inline_message_id.map(InlineMessageId::new) else {
         return Ok(())
     };
-    let AppConfig { features, .. } = config;
+    let AppConfig { features, pvp_default_bet, .. } = config;
     let lang_code = lang_resolver.execute().await;
     let chat = determine_offer_chat(features, &inline_message_id);
-    let bet = Bet::new(result.query.parse()?);
+    let bet = inline_bet(&result.query, pvp_default_bet)
+        .ok_or(anyhow!("the chosen inline result holds no bet"))?;
     let name = utils::get_full_name(&result.from);
     let texts = OfferTexts::new(&lang_code, &name, bet);
 
@@ -539,5 +540,62 @@ impl<'a> OfferTexts<'a> {
     /// What the offer turns into when the initiator is short of the bet. Only a refusal needs it.
     fn not_enough(&self) -> Cow<'a, str> {
         t!("commands.pvp.errors.not_enough.initiator", locale = self.lang_code)
+    }
+}
+
+/// The bet an inline query names: a number, alone or after `pvp` or one of its aliases, in any case.
+/// The command without a number stands for the default bet.
+fn inline_bet(query: &str, default: Bet) -> Option<Bet> {
+    let query = query.trim();
+    let number = match query.split_once(char::is_whitespace) {
+        Some((command, rest)) if is_battle_command(command) => rest.trim_start(),
+        None if is_battle_command(query) => return Some(default),
+        _ => query,
+    };
+    number.parse().ok().map(Bet::new)
+}
+
+fn is_battle_command(word: &str) -> bool {
+    BattleCommands::bot_commands().iter()
+        .any(|cmd| cmd.command.trim_start_matches('/').eq_ignore_ascii_case(word))
+}
+
+#[cfg(test)]
+mod test {
+    use crate::domain::primitives::Bet;
+    use super::inline_bet;
+
+    const DEFAULT: Bet = Bet::new(10);
+
+    #[test]
+    fn an_inline_bet_is_a_number_alone_or_after_pvp() {
+        let accepted = [
+            ("100", 100),
+            ("pvp 100", 100),
+            ("Pvp 100", 100),
+            ("PVP   100 ", 100),
+            ("battle 100", 100),
+            ("Attack 100", 100),
+            ("fight 100", 100),
+            (" 5", 5),
+        ];
+        for (query, bet) in accepted {
+            assert_eq!(inline_bet(query, DEFAULT), Some(Bet::new(bet)), "{query:?}");
+        }
+    }
+
+    #[test]
+    fn the_command_alone_takes_the_default_bet() {
+        for query in ["pvp", "Pvp ", " FIGHT"] {
+            assert_eq!(inline_bet(query, DEFAULT), Some(DEFAULT), "{query:?}");
+        }
+    }
+
+    #[test]
+    fn anything_else_holds_no_bet() {
+        let refused = ["", "pvp100", "pvp 100 200", "pvp abc", "grow 100", "grow", "-5", "abc"];
+        for query in refused {
+            assert_eq!(inline_bet(query, DEFAULT), None, "{query:?}");
+        }
     }
 }

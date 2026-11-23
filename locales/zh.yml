@@ -227,7 +227,7 @@ inline:
       grow: "让你的丁丁变大！"
       top: "获取聊天中最大的丁丁"
       dick_of_day: "选举今日丁丁"
-      pvp: "用 %{bet} 厘米的赌注挑战其他人！"
+      pvp: "赌 %{bet} 厘米，发起挑战！"
       stats: "胜利统计"
       loan: "负数？申请贷款！"
       shrinks: "查看最近的缩水"

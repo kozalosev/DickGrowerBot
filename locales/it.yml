@@ -227,7 +227,7 @@ inline:
       grow: "Fai crescere il tuo pisello!"
       top: "Mostra i piselli più grandi del gruppo"
       dick_of_day: "Eleggi il Pisello del Giorno"
-      pvp: "Sfida gli altri con una scommessa di %{bet} cm!"
+      pvp: "Sfida per %{bet} cm!"
       stats: "Statistiche"
       loan: "Sei in debito? Chiedi un prestito!"
       shrinks: "Vedi gli accorciamenti recenti"

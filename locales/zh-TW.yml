@@ -214,7 +214,7 @@ inline:
       grow: "讓你的老二變大！"
       top: "取得聊天中最大的老二"
       dick_of_day: "選出今日老二"
-      pvp: "用 %{bet} 公分的賭注挑戰其他人！"
+      pvp: "賭 %{bet} 公分，發起挑戰！"
       stats: "勝利統計"
       loan: "負數？申請貸款！"
       shrinks: "查看最近的縮水"
