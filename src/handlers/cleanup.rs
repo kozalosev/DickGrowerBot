@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 use std::vec as row;
 use autometrics::autometrics;
@@ -5,13 +6,16 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
-use teloxide::{Bot, RequestError};
+use teloxide::RequestError;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
+use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html, reply_html_ephemeral};
 use crate::cleanup::CleanupPolicy;
-use crate::config::{DeletionMode, MessageGroup, SelfDestructionConfig};
+use crate::config::{DeletionMode, MessageGroup, SelfDestructionConfig, ThrottledBot};
 use crate::domain::objects::ChatCleanupSettings;
 use crate::domain::primitives::{DelayMinutes, LanguageCode};
 use crate::domain::primitives::chat::ChatIdPartiality;
@@ -30,10 +34,16 @@ pub enum CleanupCommands {
     Cleanup,
 }
 
+impl PublishedCommands for CleanupCommands {
+    fn is_published(&self, _scope: MenuScope, toggles: &CommandToggles) -> bool {
+        toggles.cleanup_enabled
+    }
+}
+
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn cleanup_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cleanup: CleanupPolicy,
     deps: HandlerDeps,
@@ -45,12 +55,14 @@ pub async fn cleanup_cmd_handler(
     let config = config.self_destruction;
     // Nothing self-destructs under this mode, so the refusal can't either.
     if !config.configurable() {
+        metrics::CMD_CLEANUP_REJECTED.rejected(RejectionReason::FeatureDisabled);
         reply_html!(bot, msg, t!("errors.feature_disabled", locale = &lang_code));
         return Ok(());
     }
     let from_id = msg.from.as_ref().map(|user| user.id)
         .ok_or(anyhow!("unexpected absence of a FROM field"))?;
     if !is_chat_admin(&bot, &msg, from_id).await? {
+        metrics::CMD_CLEANUP_REJECTED.rejected(RejectionReason::AdminsOnly);
         reply_html_ephemeral!(bot, msg, t!("commands.cleanup.errors.admins_only", locale = &lang_code),
             self_destruction, MessageGroup::Notice, lang_code);
         return Ok(());
@@ -72,7 +84,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn cleanup_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     cleanup: CleanupPolicy,
     deps: HandlerDeps,
@@ -80,7 +92,8 @@ pub async fn cleanup_callback_handler(
     let HandlerDeps { lang_resolver, config, self_destruction, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let data = CleanupCallbackData::parse(&query)?;
-    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid,
+        on_another_user = metrics::CMD_CLEANUP_REJECTED.rejected(RejectionReason::AnotherUser));
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
 
     let message = query.message.as_ref()
@@ -93,7 +106,7 @@ pub async fn cleanup_callback_handler(
     // Opening the delay list changes nothing yet, so it never touches the database.
     if let CleanupAction::Pick(group) = data.action {
         delays(&config, group, &button).edit(&bot, edit_msg_params).await?;
-        answer.await?;
+        answer.await.ignore_moot()?;
         return Ok(());
     }
 
@@ -106,7 +119,7 @@ pub async fn cleanup_callback_handler(
         && !self_destruction.may_delete_here(&bot, chat).await
     {
         warning(&config, group, minutes, &button).edit(&bot, edit_msg_params).await?;
-        answer.await?;
+        answer.await.ignore_moot()?;
         return Ok(());
     }
 
@@ -123,7 +136,7 @@ pub async fn cleanup_callback_handler(
     }
 
     overview(&config, &settings, &button).edit(&bot, edit_msg_params).await?;
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 
@@ -136,7 +149,7 @@ struct Screen {
 
 impl Screen {
     /// Puts the screen in place of the message a press came from.
-    async fn edit(self, bot: &Bot, params: EditMessageReqParamsKind) -> Result<(), RequestError> {
+    async fn edit(self, bot: &ThrottledBot, params: EditMessageReqParamsKind) -> Result<(), RequestError> {
         callbacks::edit_message_text_with_keyboard(bot, params, self.text, Some(self.keyboard)).await
     }
 }
@@ -202,7 +215,7 @@ fn delays(config: &SelfDestructionConfig, group: MessageGroup, button: &ButtonBu
         .collect();
     Screen {
         text: t!("commands.cleanup.pick.prompt", locale = lang_code,
-            group = group_name(group, lang_code)).to_string(),
+            group = group_name(group, lang_code)).into_owned(),
         keyboard: InlineKeyboardMarkup::new(rows),
     }
 }
@@ -223,7 +236,7 @@ fn warning(
         "commands.cleanup.warning.no_rights"
     };
     Screen {
-        text: t!(key, locale = lang_code, group = group_name(group, lang_code)).to_string(),
+        text: t!(key, locale = lang_code, group = group_name(group, lang_code)).into_owned(),
         keyboard: InlineKeyboardMarkup::new([
             row![button.of(ButtonKind::Confirm, CleanupAction::SetConfirmed(group, minutes))],
             row![button.of(ButtonKind::Back, CleanupAction::Back)],
@@ -237,32 +250,32 @@ fn state_line(name: &str, delay: Option<Duration>, lang_code: &LanguageCode) -> 
         Some(delay) => t!("commands.cleanup.state.cleaned", locale = lang_code,
             group = name, delay = format_delay(delay, lang_code)),
         None => t!("commands.cleanup.state.kept", locale = lang_code, group = name),
-    }.to_string()
+    }.into_owned()
 }
 
 /// The label of the button that opens a group's delay list: the group and what it has now.
 fn group_label(name: &str, delay: Option<Duration>, lang_code: &LanguageCode) -> String {
     let delay = match delay {
         Some(delay) => format_delay(delay, lang_code),
-        None => t!("commands.cleanup.delays.kept", locale = lang_code).to_string(),
+        None => t!("commands.cleanup.delays.kept", locale = lang_code),
     };
-    t!("commands.cleanup.buttons.group", locale = lang_code, group = name, delay = delay).to_string()
+    t!("commands.cleanup.buttons.group", locale = lang_code, group = name, delay = delay).into_owned()
 }
 
 /// A delay as an admin reads it: whole hours where it divides, minutes otherwise. The list is
 /// written in minutes, so an hour would otherwise appear on a button as "60 min".
-fn format_delay(delay: Duration, lang_code: &LanguageCode) -> String {
+fn format_delay(delay: Duration, lang_code: &LanguageCode) -> Cow<'static, str> {
     let minutes = delay.as_secs() / 60;
     if minutes >= 60 && minutes.is_multiple_of(60) {
-        t!("commands.cleanup.delays.hours", locale = lang_code, count = minutes / 60).to_string()
+        t!("commands.cleanup.delays.hours", locale = lang_code, count = minutes / 60)
     } else {
-        t!("commands.cleanup.delays.minutes", locale = lang_code, count = minutes).to_string()
+        t!("commands.cleanup.delays.minutes", locale = lang_code, count = minutes)
     }
 }
 
 fn group_name(group: MessageGroup, lang_code: &LanguageCode) -> String {
     let key = format!("commands.cleanup.groups.{group}");
-    t!(&key, locale = lang_code).to_string()
+    t!(&key, locale = lang_code).into_owned()
 }
 
 /// The buttons whose label is a fixed line of the locale file rather than something built from the

@@ -1,9 +1,12 @@
-use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
+use sqlx::error::DatabaseError;
 use sqlx::postgres::{PgConnectOptions, PgQueryResult};
 use crate::config;
 use crate::config::DatabaseConfig;
+use crate::domain::primitives::AffectedRows;
 use crate::domain::primitives::chat::ChatIdKind;
+use crate::errors::details::Details;
+use crate::observability::POOL_ACQUIRE_LEVEL;
 use crate::pub_use_modules;
 
 pub_use_modules!(
@@ -49,7 +52,11 @@ pub struct Repositories {
 }
 
 impl Repositories {
-    pub fn new(db_conn: &Pool<Postgres>, config: &config::AppConfig) -> Self {
+    pub fn new(
+        db_conn: &Pool<Postgres>,
+        config: &config::AppConfig,
+        announcements: config::AnnouncementsConfig,
+    ) -> Self {
         Self {
             users: Users::new(db_conn.clone()),
             dicks: Dicks::new(db_conn.clone(), config.features),
@@ -57,7 +64,7 @@ impl Repositories {
             import: Import::new(db_conn.clone()),
             promo: Promo::new(db_conn.clone()),
             loans: Loans::new(db_conn.clone(), config),
-            announcements: Announcements::new(db_conn.clone(), config.announcements.clone()),
+            announcements: Announcements::new(db_conn.clone(), announcements),
             pvp_stats: BattleStatsRepo::new(db_conn.clone(), config.features),
             personal_stats: PersonalStatsRepo::new(db_conn.clone()),
             shrinks: Shrinks::new(db_conn.clone()),
@@ -88,6 +95,7 @@ pub async fn establish_database_connection(config: &DatabaseConfig) -> Result<Po
         .max_connections(config.max_connections + LISTENER_CONNECTIONS)
         .min_connections(config.min_connections)
         .acquire_timeout(config.acquire_timeout)
+        .acquire_time_level(POOL_ACQUIRE_LEVEL)
         .connect(config.url.as_str()).await?;
     Ok(pool)
 }
@@ -163,9 +171,23 @@ macro_rules! repository {
     };
 }
 
+/// The errors Postgres returned, wherever they sit in the chain.
+pub(crate) fn database_errors(err: &anyhow::Error) -> impl Iterator<Item = &(dyn DatabaseError + 'static)> {
+    err.chain()
+        .filter_map(|e| e.downcast_ref::<sqlx::Error>())
+        .filter_map(sqlx::Error::as_database_error)
+}
+
+/// Whether the statement was refused by the given constraint.
+fn violates(err: &anyhow::Error, constraint: &str) -> bool {
+    database_errors(err)
+        .any(|e| e.constraint() == Some(constraint))
+}
+
 fn ensure_only_one_row_updated(res: PgQueryResult) -> Result<(), anyhow::Error> {
     match res.rows_affected() {
         1 => Ok(res),
-        x => Err(anyhow!("not only one row was updated but {x}"))
+        x => Err(Details::new("not only one row was updated")
+            .affected_rows(AffectedRows::new(x)).into())
     }.map(|_| ())
 }

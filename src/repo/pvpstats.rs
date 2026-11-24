@@ -5,6 +5,7 @@ use sqlx::FromRow;
 use crate::domain::objects::{BattleStats, LoserStats, UserStats};
 use crate::domain::primitives::{BattlesCount, Bet, Length, UserId, WinStreak};
 use crate::domain::primitives::chat::InternalChatId;
+use crate::errors::details::{DetailedContext, Details};
 use crate::repo::ChatIdKind;
 use crate::repository;
 
@@ -125,7 +126,8 @@ repository!(BattleStatsRepo, with_(chats)_(Chats),
                 chat_id as InternalChatId, winner_id as UserId, loser_id as UserId, bet as Bet)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't send the battle result: {chat_id}, winner {winner_id}, loser {loser_id}, {bet}"))?;
+            .detailed_context(Details::new("couldn't send the battle result")
+                .bet(bet))?;
 
         let winner = UserStats::try_from(&row)?;
         let loser = LoserStats::try_from(&row)?;
@@ -140,7 +142,7 @@ repository!(BattleStatsRepo, with_(chats)_(Chats),
             chat_id_kind.value() as String, user_id as UserId)
         .fetch_optional(&self.pool)
         .await
-        .context(format!("couldn't get the stats for {chat_id_kind} and {user_id}"))?
+        .user_context(user_id, "couldn't get the stats")?
         .unwrap_or_default()
         .try_into()
     }

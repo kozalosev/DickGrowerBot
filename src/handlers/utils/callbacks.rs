@@ -6,11 +6,12 @@ use futures::future::join;
 use futures::TryFutureExt;
 use ParseMode::Html;
 use rust_i18n::t;
-use teloxide::Bot;
-use teloxide::payloads::{AnswerCallbackQuery, EditMessageTextInlineSetters, EditMessageTextSetters};
+use teloxide::payloads::{EditMessageTextInlineSetters, EditMessageTextSetters};
 use teloxide::prelude::ChatId;
-use teloxide::requests::{JsonRequest, Requester};
+use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, InlineKeyboardMarkup, MessageId, ParseMode, UserId};
+use crate::errors::moot::IgnoreMoot;
+use crate::config::ThrottledBot;
 use crate::domain::primitives::chat::ChatIdKind;
 use crate::domain::primitives::LanguageCode;
 use super::disabled_link_preview;
@@ -109,6 +110,30 @@ pub trait CallbackDataWithPrefix<E = InvalidCallbackData>: TryFrom<String, Error
     }
 }
 
+/// The callback data of a result that has no callback buttons. It has no values, so no button can
+/// ever carry it.
+pub enum NoCallbackData {}
+
+impl std::fmt::Display for NoCallbackData {
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+impl TryFrom<String> for NoCallbackData {
+    type Error = InvalidCallbackData;
+
+    fn try_from(_: String) -> Result<Self, Self::Error> {
+        Err(InvalidCallbackData::NoData)
+    }
+}
+
+impl CallbackDataWithPrefix for NoCallbackData {
+    fn prefix() -> &'static str {
+        "none"
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum EditMessageReqParamsKind {
     Chat(ChatId, MessageId),
@@ -138,7 +163,7 @@ pub fn get_params_for_message_edit(q: &CallbackQuery) -> Result<EditMessageReqPa
 /// Edits the text of the message a callback query is attached to, transparently handling both
 /// regular chat messages and inline messages.
 pub async fn edit_message_text(
-    bot: &Bot,
+    bot: &ThrottledBot,
     params: EditMessageReqParamsKind,
     text: impl Into<String>,
 ) -> Result<(), teloxide::RequestError> {
@@ -147,12 +172,12 @@ pub async fn edit_message_text(
         EditMessageReqParamsKind::Chat(chat_id, message_id) => {
             bot.edit_message_text(chat_id, message_id, text)
                 .link_preview_options(disabled_link_preview())
-                .await?;
+                .await.ignore_moot()?;
         }
         EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
             bot.edit_message_text_inline(inline_message_id, text)
                 .disable_web_page_preview(true)
-                .await?;
+                .await.ignore_moot()?;
         }
     }
     Ok(())
@@ -161,7 +186,7 @@ pub async fn edit_message_text(
 /// Like [`edit_message_text`], but also replaces the keyboard and renders the text as HTML —
 /// for a message whose buttons change along with what they say.
 pub async fn edit_message_text_with_keyboard(
-    bot: &Bot,
+    bot: &ThrottledBot,
     params: EditMessageReqParamsKind,
     text: impl Into<String>,
     keyboard: Option<InlineKeyboardMarkup>,
@@ -173,24 +198,24 @@ pub async fn edit_message_text_with_keyboard(
                 .parse_mode(Html)
                 .link_preview_options(disabled_link_preview());
             req.reply_markup = keyboard;
-            req.await?;
+            req.await.ignore_moot()?;
         }
         EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
             let mut req = bot.edit_message_text_inline(inline_message_id, text)
                 .parse_mode(Html)
                 .disable_web_page_preview(true);
             req.reply_markup = keyboard;
-            req.await?;
+            req.await.ignore_moot()?;
         }
     }
     Ok(())
 }
 
 pub async fn answer_and_edit_page(
-    bot: &Bot,
+    bot: &ThrottledBot,
     q: &CallbackQuery,
     params: &EditMessageReqParamsKind,
-    text: String,
+    text: impl Into<String>,
     keyboard: InlineKeyboardMarkup,
 ) -> anyhow::Result<()> {
     let (answered, edited) = match params {
@@ -215,19 +240,19 @@ pub async fn answer_and_edit_page(
             ).await
         }
     };
-    answered.context(format!("failed to answer a callback query {q:?}"))?;
-    edited.context(format!("failed to edit the message of {params:?}"))?;
+    answered.ignore_moot().context("failed to answer the callback query")?;
+    edited.ignore_moot().context("failed to edit the message")?;
     Ok(())
 }
 
 pub enum CallbackAnswerParams {
     // boxed to keep the enum small: the request is far larger than the `AnotherUser` variant
-    Answer(Box<JsonRequest<AnswerCallbackQuery>>),
+    Answer(Box<<ThrottledBot as Requester>::AnswerCallbackQuery>),
     AnotherUser,
 }
 
 pub async fn prepare_callback_answer_params(
-    bot: &Bot,
+    bot: &ThrottledBot,
     query: &CallbackQuery,
     user_id: UserId,
 ) -> Result<CallbackAnswerParams, teloxide::RequestError> {
@@ -235,8 +260,8 @@ pub async fn prepare_callback_answer_params(
     let mut answer = bot.answer_callback_query(query.id.clone());
     let res = if query.from.id != user_id {
         answer.show_alert.replace(true);
-        answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code).to_string());
-        answer.await?;
+        answer.text.replace(t!("inline.callback.errors.another_user", locale = &lang_code).into_owned());
+        answer.await.ignore_moot()?;
         CallbackAnswerParams::AnotherUser
     } else {
         CallbackAnswerParams::Answer(Box::new(answer))
@@ -279,12 +304,15 @@ where
 
 #[macro_export]
 macro_rules! check_invoked_by_owner_and_get_answer_params {
-    ($bot:ident, $query:ident, $user_id:expr) => {
+    ($bot:ident, $query:ident, $user_id:expr, on_another_user = $rejected:expr) => {
         match $crate::handlers::utils::callbacks::prepare_callback_answer_params(&$bot, &$query, $user_id).await? {
             $crate::handlers::utils::callbacks::CallbackAnswerParams::Answer(answer) => *answer,
-            $crate::handlers::utils::callbacks::CallbackAnswerParams::AnotherUser => return Ok(()),
+            $crate::handlers::utils::callbacks::CallbackAnswerParams::AnotherUser => {
+                $rejected;
+                return Ok(())
+            },
         }
-    }
+    };
 }
 
 /// Builds a minimal [`CallbackQuery`] carrying the given callback `data`, for tests that only

@@ -72,6 +72,20 @@ commands:
     group_hint: "Per non essere più taggato in questa chat, premi 🔕 sotto un promemoria sull'accorciamento. Per cambiarlo in tutte le chat, mandami /mentions in privato."
   privacy:
     description: "Informativa sulla privacy che descrive quali dati memorizziamo"
+  voucher:
+    description: "Trasferire centimetri"
+  reset:
+    description: "Azzerare la classifica"
+    errors:
+      admins_only: "Solo gli amministratori possono azzerare la classifica."
+  buy:
+    description: "Comprare centimetri"
+    text: "🛒 <b>I centimetri si comprano all'asta</b>\nI codici promozionali vengono messi all'asta in %{bot}: si offre in Telegram Stars, paga solo il vincitore e chi viene superato riceve indietro le sue stelle. Un codice si attiva con il comando /promo."
+    button: "🔨 All'asta"
+  donate:
+    description: "Sostenere gli sviluppatori"
+    text: "❤️ <b>Sostieni gli sviluppatori</b>\nSviluppiamo il bot nel tempo libero e non riceviamo quasi nulla in cambio, a parte notti insonni. Se il gioco ti piace, puoi ringraziarci qui."
+    button: "❤️ Sostienici"
   support:
     description: "Scrivi al proprietario del bot"
     request: "Scrivi il tuo messaggio e lo passerò al mio proprietario. Per annullare, invia un comando qualsiasi."
@@ -194,6 +208,7 @@ commands:
       exhausted: "Mi dispiace, ma questo codice promozionale è già stato utilizzato il numero massimo di volte 😞"
       invalid_format: "Questo non sembra un codice promozionale 🤔 Sono lunghi da 3 a 16 caratteri: lettere, numeri, trattini e trattini bassi."
       already_activated: "Sembra che tu abbia già utilizzato questo codice promozionale 🤨"
+      too_often: "Troppi tentativi di indovinare un codice promozionale 🤚 Fai una pausa e riprova tra %{minutes} minuti."
       no_dicks: "Non hai ancora alcun pisello. 🤔 Devi aggiungermi ad un gruppo ed eseguire il comando <code>/grow</code>!"
     inline:
       switch_button: "Attiva il codice promozionale '%{code}'…"
@@ -212,10 +227,13 @@ inline:
       grow: "Fai crescere il tuo pisello!"
       top: "Mostra i piselli più grandi del gruppo"
       dick_of_day: "Eleggi il Pisello del Giorno"
-      pvp: "Sfida gli altri con una scommessa di %{bet} cm!"
+      pvp: "Sfida per %{bet} cm!"
       stats: "Statistiche"
       loan: "Sei in debito? Chiedi un prestito!"
       shrinks: "Vedi gli accorciamenti recenti"
+      voucher: "Trasferire centimetri"
+      buy: "Comprare centimetri"
+      donate: "Sostenere gli sviluppatori"
   callback:
     errors:
       another_user: "Questo messaggio è stato inviato da un'altra persona."
@@ -250,6 +268,7 @@ errors:
   not_group_chat: "Questo bot può svolgere la sua missione solo nei gruppi!"
   group_account: "Non puoi giocare per conto di un gruppo o canale — disattiva la modalità anonima e riprova!"
   feature_disabled: "Questa funzione non è al momento disponibile."
+  internal: "Qualcosa non ha funzionato da parte mia. Riprova tra qualche minuto."
   banned: "Non puoi giocare fino al %{date}. Se pensi sia un errore, scrivi con /support."
   banned_inline_title: "Sei bloccato"
   rate_limited: "Troppe richieste! Fai una pausa e riprova tra un minuto."

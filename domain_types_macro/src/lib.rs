@@ -247,6 +247,11 @@ fn exact_in_f64(ty: &Type) -> bool {
         matches!(name.as_str(), "i8" | "i16" | "i32" | "u8" | "u16" | "u32" | "f32"))
 }
 
+/// The result of arithmetic on a validated domain number.
+fn arithmetic_result(inner_type: &Type) -> TokenStream {
+    quote! { Result<Self, ::domain_types::errors::DomainArithmeticError<#inner_type>> }
+}
+
 #[proc_macro_attribute]
 pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let args = parse_macro_input!(args as DomainTypeAttr);
@@ -281,6 +286,9 @@ pub fn domain_type(args: proc_macro::TokenStream, input: proc_macro::TokenStream
     );
     if args.division_result.is_some() && !is_integer_number {
         panic!("division_result is only applicable to integer domain numbers")
+    }
+    if args.division_result.is_some() && !exact_in_f64(&inner_type) {
+        panic!("division_result needs an integer that fits an f64 exactly, 32 bits at most")
     }
 
     let sqlx_mode = match &variant {
@@ -667,6 +675,19 @@ impl ArithmeticOp {
         }
     }
 
+    /// For a validated type, refuses a zero divisor before the operation that would panic on it
+    /// (an integer) or produce an `inf`/`NaN` (a float).
+    fn zero_divisor_check(self, zero: TokenStream) -> TokenStream {
+        if !matches!(self, Self::Div | Self::Rem) {
+            return TokenStream::new()
+        }
+        quote! {
+            if rhs == #zero {
+                return Err(::domain_types::errors::DomainArithmeticError::ByZero)
+            }
+        }
+    }
+
     fn overflow_variant(self) -> TokenStream {
         let variant = match self {
             Self::Add => quote! { Addition },
@@ -681,7 +702,7 @@ impl ArithmeticOp {
 
 /// Generates `overflowing_<op>[_primitive]`, and (if `with_saturating`) `saturating_<op>[_primitive]`,
 /// for one operator. Shared between the validated and unvalidated integer paths: `validated`
-/// only changes the return type (`Self`/`(Self, bool)` vs `Result<Self, DomainAssertionError<T>>`)
+/// only changes the return type (`Self`/`(Self, bool)` vs `Result<Self, DomainArithmeticError<T>>`)
 /// and whether construction routes through the range validator.
 fn generate_integer_op_methods(inner_type: &Type, validated: bool, op: ArithmeticOp, with_saturating: bool) -> TokenStream {
     let overflowing_method = format_ident!("overflowing_{}", op.name());
@@ -689,7 +710,7 @@ fn generate_integer_op_methods(inner_type: &Type, validated: bool, op: Arithmeti
     let overflow_variant = op.overflow_variant();
 
     let overflowing_output = if validated {
-        quote! { Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> }
+        arithmetic_result(inner_type)
     } else {
         quote! { (Self, bool) }
     };
@@ -719,12 +740,17 @@ fn generate_integer_op_methods(inner_type: &Type, validated: bool, op: Arithmeti
     let saturating_method = format_ident!("saturating_{}", op.name());
     let saturating_method_primitive = format_ident!("saturating_{}_primitive", op.name());
     let output = if validated {
-        quote! { Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> }
+        arithmetic_result(inner_type)
     } else {
         quote! { Self }
     };
     let saturating_body = if validated {
-        quote! { <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.#saturating_method(rhs)) }
+        let zero_check = op.zero_divisor_check(quote! { 0 });
+        quote! {
+            #zero_check
+            <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0.#saturating_method(rhs))
+                .map_err(::domain_types::errors::DomainArithmeticError::AssertionFailed)
+        }
     } else {
         quote! { Self(self.0.#saturating_method(rhs)) }
     };
@@ -748,7 +774,7 @@ fn generate_integer_operator_impl(name: &Ident, inner_type: &Type, validated: bo
     let saturating_method_primitive = format_ident!("saturating_{}_primitive", op.name());
     let saturating_method = format_ident!("saturating_{}", op.name());
     let output = if validated {
-        quote! { Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> }
+        arithmetic_result(inner_type)
     } else {
         quote! { Self }
     };
@@ -801,6 +827,7 @@ fn generate_integer_assign_operator_impl(name: &Ident, inner_type: &Type, op: Ar
 /// operator's methods/operator impls are generated from one shared template.
 fn generate_domain_integer_number_impls(info: &TypeInfo, validated: bool) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
+    let arithmetic_result = arithmetic_result(inner_type);
 
     let perform_arithmetic_operation = if validated {
         quote! {
@@ -808,15 +835,19 @@ fn generate_domain_integer_number_impls(info: &TypeInfo, validated: bool) -> Tok
                 lhs: #inner_type, rhs: #inner_type,
                 op_enum: ::domain_types::errors::ArithmeticOperation,
                 op_func: fn(#inner_type, #inner_type) -> (#inner_type, bool)
-            ) -> Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> {
-                let (new_value, overflow) = op_func(lhs, rhs);
-                if !overflow {
-                    <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(new_value)
-                } else {
-                    let cause = ::domain_types::errors::DomainArithmeticOverflowError::new(op_enum, lhs, rhs);
-                    let cause_boxed_str = ::std::borrow::Cow::from(cause.to_string());
-                    Err(::domain_types::errors::DomainAssertionError::new(new_value, cause_boxed_str))
+            ) -> #arithmetic_result {
+                use ::domain_types::errors::{ArithmeticOperation, DomainArithmeticError, DomainArithmeticOverflowError};
+
+                let divides = matches!(op_enum, ArithmeticOperation::Division | ArithmeticOperation::Remainder);
+                if divides && rhs == 0 {
+                    return Err(DomainArithmeticError::ByZero)
                 }
+                let (new_value, overflow) = op_func(lhs, rhs);
+                if overflow {
+                    return Err(DomainArithmeticError::Overflow(DomainArithmeticOverflowError::new(op_enum, lhs, rhs)))
+                }
+                <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(new_value)
+                    .map_err(DomainArithmeticError::AssertionFailed)
             }
         }
     } else {
@@ -862,12 +893,17 @@ fn generate_float_operator_impl(name: &Ident, inner_type: &Type, validated: bool
     let method = op.method_ident();
     let token = op.token();
     let output = if validated {
-        quote! { Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>> }
+        arithmetic_result(inner_type)
     } else {
         quote! { Self }
     };
     let primitive_body = if validated {
-        quote! { <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0 #token rhs) }
+        let zero_check = op.zero_divisor_check(quote! { 0.0 });
+        quote! {
+            #zero_check
+            <Self as ::domain_types::traits::ValidatedDomainNumber<#inner_type>>::new(self.0 #token rhs)
+                .map_err(::domain_types::errors::DomainArithmeticError::AssertionFailed)
+        }
     } else {
         quote! { Self(self.0 #token rhs) }
     };
@@ -943,19 +979,12 @@ fn generate_domain_float_number_impls(info: &TypeInfo, validated: bool) -> Token
 }
 
 /// For integer domain numbers annotated with `division_result(SomeFloatDomainType)`:
-/// the `/` operator performs a float division and produces the specified float domain type
-/// (or a `Result` of it, if that type is validated — see the `DivisionResult` trait).
-// TODO: an f64 holds integers exactly only up to 2^53, so a 64-bit domain number divides at
-//       reduced precision; consider rejecting `division_result` on i64/u64 at expansion time.
+/// the `/` operator performs a float division and produces a `Result` of the specified float
+/// domain type (see the `DivisionResult` trait).
 fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
     let TypeInfo { name, inner_type, args, .. } = info;
     let Some(result_type) = &args.division_result else {
         return TokenStream::new();
-    };
-    let widen = if exact_in_f64(inner_type) {
-        quote! { f64::from }
-    } else {
-        quote! { ::domain_types::traits::ApproxInto::approx_into }
     };
     quote! {
         #[automatically_derived]
@@ -963,8 +992,11 @@ fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
             type Output = <#result_type as ::domain_types::traits::DivisionResult>::Output;
 
             fn div(self, rhs: #inner_type) -> Self::Output {
-                let dividend: f64 = #widen(self.0);
-                let divisor: f64 = #widen(rhs);
+                if rhs == 0 {
+                    return <#result_type as ::domain_types::traits::DivisionResult>::division_by_zero()
+                }
+                let dividend = f64::from(self.0);
+                let divisor = f64::from(rhs);
                 <#result_type as ::domain_types::traits::DivisionResult>::from_division(dividend / divisor)
             }
         }
@@ -983,6 +1015,7 @@ fn generate_division_operator_impls(info: &TypeInfo) -> TokenStream {
 /// Makes a float domain type usable as the target of `division_result(...)` on integer types.
 fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStream {
     let TypeInfo { name, inner_type, .. } = info;
+    let arithmetic_result = arithmetic_result(inner_type);
     // An `f64` result needs no conversion at all; only a narrower float loses anything.
     let narrow = if exact_in_f64(inner_type) {
         quote! { ::domain_types::traits::ApproxInto::approx_into(value) }
@@ -993,23 +1026,29 @@ fn generate_division_result_impl(info: &TypeInfo, validated: bool) -> TokenStrea
         quote! {
             #[automatically_derived]
             impl ::domain_types::traits::DivisionResult for #name {
-                type Output = Result<Self, ::domain_types::errors::DomainAssertionError<#inner_type>>;
+                type Output = #arithmetic_result;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self::new(#narrow)
+                    Self::new(#narrow).map_err(::domain_types::errors::DomainArithmeticError::AssertionFailed)
+                }
+
+                fn division_by_zero() -> Self::Output {
+                    Err(::domain_types::errors::DomainArithmeticError::ByZero)
                 }
             }
         }
     } else {
-        // TODO: unvalidated targets accept `inf`/`NaN` from a division by zero silently;
-        //       only validated float types (whose range validators reject them) catch that case.
         quote! {
             #[automatically_derived]
             impl ::domain_types::traits::DivisionResult for #name {
-                type Output = Self;
+                type Output = Result<Self, ::domain_types::errors::DivisionByZero>;
 
                 fn from_division(value: f64) -> Self::Output {
-                    Self(#narrow)
+                    Ok(Self(#narrow))
+                }
+
+                fn division_by_zero() -> Self::Output {
+                    Err(::domain_types::errors::DivisionByZero)
                 }
             }
         }
@@ -1113,6 +1152,16 @@ fn generate_validated_domain_string_impls(info: &TypeInfo) -> TokenStream {
             {
                 let value = <String as ::serde::Deserialize>::deserialize(deserializer)?;
                 Self::new(value).map_err(::serde::de::Error::custom)
+            }
+        }
+
+        // Through `new` for the same reason: parsing must not bypass the validator either.
+        #[automatically_derived]
+        impl ::std::str::FromStr for #name {
+            type Err = ::domain_types::errors::DomainAssertionError<String>;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Self::new(s.to_owned())
             }
         }
     }

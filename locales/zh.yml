@@ -72,6 +72,20 @@ commands:
     group_hint: "要让我在本群不再提到你，请按缩水提醒下方的 🔕。要更改所有群的设置，请在私聊中给我发送 /mentions。"
   privacy:
     description: "存储数据说明详见隐私政策，"
+  voucher:
+    description: "转让厘米"
+  reset:
+    description: "重置排行榜"
+    errors:
+      admins_only: "只有群管理员才能重置排行榜。"
+  buy:
+    description: "购买厘米"
+    text: "🛒 <b>厘米可以在拍卖中买到</b>\n促销码会在 %{bot} 中拍卖：用 Telegram Stars 出价，只有胜出者付款，被超过出价的人会拿回自己的星星。使用 /promo 指令激活促销码。"
+    button: "🔨 去拍卖"
+  donate:
+    description: "支持开发者"
+    text: "❤️ <b>支持开发者</b>\n我们利用业余时间开发这个机器人，几乎得不到任何回报，只换来了一个个不眠之夜。如果你喜欢这个游戏，可以在这里感谢我们。"
+    button: "❤️ 支持我们"
   support:
     description: "联系机器人主人"
     request: "请写下你的留言，我会转交给我的主人。发送任意命令即可取消。"
@@ -194,6 +208,7 @@ commands:
       exhausted: "这个神秘代码的名额已经用完了 😞"
       invalid_format: "这看起来不像神秘代码 🤔 它由 3 到 16 个字符组成：字母、数字、连字符和下划线。"
       already_activated: "神秘代码已经激活过了 🤨"
+      too_often: "猜神秘代码的次数太多了 🤚 休息一下，%{minutes} 分钟后再试吧。"
       no_dicks: "看起来你还没有任何丁丁。🤔 现在是时候把我加入一个聊天并执行 <code>/grow</code> 命令了！"
     inline:
       switch_button: "激活神秘代码 '%{code}'…"
@@ -212,10 +227,13 @@ inline:
       grow: "让你的丁丁变大！"
       top: "获取聊天中最大的丁丁"
       dick_of_day: "选举今日丁丁"
-      pvp: "用 %{bet} 厘米的赌注挑战其他人！"
+      pvp: "赌 %{bet} 厘米，发起挑战！"
       stats: "胜利统计"
       loan: "负数？申请贷款！"
       shrinks: "查看最近的缩水"
+      voucher: "转让厘米"
+      buy: "购买厘米"
+      donate: "支持开发者"
   callback:
     errors:
       another_user: "此消息由其他人发送。"
@@ -250,6 +268,7 @@ errors:
   not_group_chat: "此机器人仅在群聊中执行任务！"
   group_account: "不能以群组或频道的身份游玩——请关闭匿名模式后重试！"
   feature_disabled: "此功能当前暂时禁用。"
+  internal: "我这边出了点问题，请过几分钟再试。"
   banned: "你在 %{date} 之前无法游玩。如果你认为这是误判，请用 /support 联系我们。"
   banned_inline_title: "你已被封禁"
   rate_limited: "请求过多！请稍作休息，一分钟后再试。"

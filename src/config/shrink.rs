@@ -1,5 +1,5 @@
 use std::time::Duration;
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, TimeDelta, Utc};
 use crate::domain::primitives::{AttemptsCount, DaysCount, Limit, Ratio};
 use domain_types::literal;
 
@@ -12,6 +12,8 @@ pub struct DailyShrinkConfig {
     pub ramp_up_days: DaysCount,
     /// Days between two runs.
     pub period_days: DaysCount,
+    /// The time of day, in UTC, a run starts at.
+    pub start_time: NaiveTime,
     /// How many chats one shrinking statement takes on. It bounds both the rows the statement locks
     /// and the ones a failure costs, so a `/grow` sent at midnight waits behind one batch rather
     /// than behind every stale dick in the database.
@@ -75,6 +77,19 @@ impl DailyShrinkConfig {
             .checked_rem_euclid(i64::from(self.period_days.value()))
             .is_none_or(|rest| rest == 0)
     }
+
+    /// How long to wait from `now` for the next start: today's, if it is still ahead, or tomorrow's.
+    pub fn till_next_run(&self, now: DateTime<Utc>) -> Duration {
+        let today = self.scheduled_at(now.date_naive());
+        let next = if today > now { today } else { today + TimeDelta::days(1) };
+        (next - now).to_std()
+            .unwrap_or_default()
+    }
+
+    /// The moment the run of `date` is scheduled for.
+    pub fn scheduled_at(&self, date: NaiveDate) -> DateTime<Utc> {
+        date.and_time(self.start_time).and_utc()
+    }
 }
 
 impl Default for BroadcastConfig {
@@ -96,7 +111,8 @@ impl Default for BroadcastConfig {
 
 #[cfg(test)]
 mod test {
-    use chrono::{Datelike, NaiveDate};
+    use std::time::Duration;
+    use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, Utc};
     use crate::domain::primitives::DaysCount;
     use super::DailyShrinkConfig;
 
@@ -134,8 +150,47 @@ mod test {
         assert_eq!(due, 3);
     }
 
+    #[test]
+    fn a_start_still_ahead_is_today() {
+        let wait = starting_at(4, 30).till_next_run(at(1, 0));
+        assert_eq!(wait, Duration::from_mins(3 * 60 + 30));
+    }
+
+    #[test]
+    fn a_start_already_passed_is_tomorrow() {
+        let wait = starting_at(4, 30).till_next_run(at(5, 0));
+        assert_eq!(wait, Duration::from_hours(23) + Duration::from_mins(30));
+    }
+
+    #[test]
+    fn the_moment_of_the_start_waits_for_the_next_one() {
+        let wait = starting_at(4, 30).till_next_run(at(4, 30));
+        assert_eq!(wait, Duration::from_hours(24));
+    }
+
+    #[test]
+    fn the_default_start_is_midnight() {
+        let wait = DailyShrinkConfig::default().till_next_run(at(22, 15));
+        assert_eq!(wait, Duration::from_mins(105));
+    }
+
+    #[test]
+    fn a_run_is_scheduled_for_its_own_date() {
+        let scheduled = starting_at(4, 30).scheduled_at(date(2026, 10, 15));
+        assert_eq!(scheduled, at(4, 30));
+    }
+
     fn config(period: u32) -> DailyShrinkConfig {
         DailyShrinkConfig { period_days: DaysCount::new(period), ..Default::default() }
+    }
+
+    fn starting_at(hour: u32, minute: u32) -> DailyShrinkConfig {
+        let start_time = NaiveTime::from_hms_opt(hour, minute, 0).expect("a valid time");
+        DailyShrinkConfig { start_time, ..Default::default() }
+    }
+
+    fn at(hour: u32, minute: u32) -> DateTime<Utc> {
+        date(2026, 10, 15).and_hms_opt(hour, minute, 0).expect("a valid time").and_utc()
     }
 
     fn date(y: i32, m: u32, d: u32) -> NaiveDate {

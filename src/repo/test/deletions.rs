@@ -5,7 +5,7 @@ use sqlx::{Pool, Postgres};
 use crate::config::MessageGroup;
 use crate::domain::primitives::{LanguageCode, Limit};
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
-use crate::repo::{DeletionState, DeletionTarget, MessageKind, NewDeletion, ScheduledDeletions};
+use crate::repo::{DeletionState, DeletionTarget, MessageKind, NewDeletion, ScheduledDeletions, Unanswered};
 use crate::repo::test::{far_future, fresh_db};
 
 const CHAT_ID: i64 = -1001234567890;
@@ -155,6 +155,47 @@ async fn a_postponed_message_counts_its_attempts() {
     let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
     assert_eq!(claimed_again.len(), 1);
     assert_eq!(claimed_again[0].attempts, 2);
+}
+
+#[tokio::test]
+async fn a_deferred_message_keeps_its_attempts() {
+    let db = fresh_db().await;
+    let repo = ScheduledDeletions::new(db);
+    repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
+        .await.expect("couldn't schedule the deletion");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
+
+    repo.defer(claimed[0].id, Utc::now() - Duration::from_secs(1), Unanswered::Unreached)
+        .await.expect("couldn't defer the deletion");
+
+    let claimed_again = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
+    assert_eq!(claimed_again.len(), 1);
+    assert_eq!(claimed_again[0].attempts, 0);
+    assert!(!claimed_again[0].timed_out);
+}
+
+/// A timeout is remembered across a failed connection after it, since the timed-out request may
+/// still have been carried out, and forgotten once the message is warned.
+#[tokio::test]
+async fn a_timeout_is_remembered_until_the_warning() {
+    let db = fresh_db().await;
+    let repo = ScheduledDeletions::new(db);
+    repo.schedule(&[due(chat_message(1), MessageKind::Reply)])
+        .await.expect("couldn't schedule the deletion");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
+    let id = claimed[0].id;
+
+    repo.defer(id, Utc::now() - Duration::from_secs(1), Unanswered::TimedOut)
+        .await.expect("couldn't defer the deletion");
+    repo.defer(id, Utc::now() - Duration::from_secs(1), Unanswered::Unreached)
+        .await.expect("couldn't defer the deletion again");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
+    assert!(claimed[0].timed_out);
+
+    repo.mark_warned(id, Utc::now() - Duration::from_secs(1))
+        .await.expect("couldn't mark the deletion as warned");
+    let claimed = repo.claim_due(Limit::new(10), far_future()).await.expect("couldn't claim the deletions");
+    assert!(!claimed[0].timed_out);
 }
 
 /// A finished row stays in the table as the account of what happened, but is out of the

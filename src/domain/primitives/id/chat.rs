@@ -30,6 +30,10 @@ struct TelegramMessageId(u32);
 #[domain_type]
 struct InlineMessageId(String);
 
+/// The title of a group or a supergroup, as Telegram last reported it.
+#[domain_type]
+struct ChatTitle(String);
+
 // Telegram numbers messages from 1, but teloxide keeps a `MessageId` as `i32`, so converting in
 // either direction has a branch that can't be reached. Both say so rather than hide it behind a
 // cast that would turn a bad value into a plausible one.

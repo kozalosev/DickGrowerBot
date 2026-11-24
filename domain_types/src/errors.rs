@@ -39,9 +39,21 @@ pub enum ArithmeticOperation {
     Remainder
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug, derive_more::Display, derive_more::Error)]
+#[display("division by zero")]
+pub struct DivisionByZero;
+
+/// Why arithmetic on a validated domain number has no result.
 #[derive(Debug, derive_more::Display, derive_more::Error)]
-#[display("{_0}")]
 pub enum DomainArithmeticError<N: Num + Display> {
     Overflow(DomainArithmeticOverflowError<N>),
+    #[display("division by zero")]
+    ByZero,
     AssertionFailed(DomainAssertionError<N>),
+}
+
+impl<N: Num + Display> From<DomainAssertionError<N>> for DomainArithmeticError<N> {
+    fn from(error: DomainAssertionError<N>) -> Self {
+        Self::AssertionFailed(error)
+    }
 }

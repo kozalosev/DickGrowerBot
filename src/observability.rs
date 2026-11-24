@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::error::Error;
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
@@ -7,7 +6,11 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_otlp::{Compression, LogExporter, SpanExporter, WithExportConfig, WithHttpConfig, WithTonicConfig};
 use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::trace::{BatchConfigBuilder, BatchSpanProcessor, Sampler, SdkTracerProvider};
-use tracing_subscriber::filter::{filter_fn, FilterExt};
+use tracing::{Event, Level, Subscriber};
+use tracing::field::{Field, Visit};
+use tracing_subscriber::filter::{filter_fn, FilterExt, Targets};
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use domain_types::literal;
 use crate::config::{env_duration, secs};
@@ -32,6 +35,12 @@ const DEFAULT_SPAN_FILTER: &str = "info,h2=off,hyper=off,tower=off,teloxide=info
 /// Records of these crates are never exported. The exporter logs while it sends, and those records
 /// would be sent again — a loop that feeds itself. They still go to the console.
 const NEVER_EXPORTED_TARGETS: [&str; 5] = ["opentelemetry", "hyper", "h2", "tower", "reqwest"];
+
+/// The level sqlx reports every acquire of a pool connection at, under [`POOL_ACQUIRE_TARGET`].
+/// Below what any console is set to, so only [`pool_acquire_layer`] reads it.
+pub const POOL_ACQUIRE_LEVEL: log::LevelFilter = log::LevelFilter::Trace;
+const POOL_ACQUIRE_TARGET: &str = "sqlx::pool::acquire";
+const POOL_ACQUIRE_FIELD: &str = "acquired_after_secs";
 
 /// The providers to shut down before the process exits, so the last batch reaches the collector.
 pub struct Telemetry {
@@ -125,6 +134,7 @@ pub fn init_tracing() -> Result<Telemetry, Box<dyn Error>> {
         .with(telemetry_layer)
         .with(logs_layer)
         .with(fmt_layer)
+        .with(pool_acquire_layer())
         .try_init()?;
 
     // Only now is there a subscriber to write them to.
@@ -224,7 +234,8 @@ fn sampler() -> Sampler {
 ///
 /// Other backends ignore both headers.
 fn build_logger_provider(endpoint: String) -> Result<SdkLoggerProvider, Box<dyn Error>> {
-    let headers = HashMap::from([
+    #[allow(clippy::disallowed_types, reason = "the exporter takes a std map")]
+    let headers = std::collections::HashMap::from([
         ("VL-Stream-Fields".to_owned(), "service.name".to_owned()),
         ("VL-Msg-Field".to_owned(), "_msg,summary".to_owned()),
     ]);
@@ -264,12 +275,44 @@ fn resource() -> Resource {
         .build()
 }
 
+/// Feeds `db_pool_acquire_seconds` from the event sqlx writes after each acquire of a pool
+/// connection: the pool has no other way to say how long a caller waited.
+fn pool_acquire_layer<S>() -> impl Layer<S>
+where S: Subscriber + for<'span> LookupSpan<'span> {
+    PoolAcquireTimes.with_filter(Targets::new().with_target(POOL_ACQUIRE_TARGET, Level::TRACE))
+}
+
+struct PoolAcquireTimes;
+
+impl<S: Subscriber> Layer<S> for PoolAcquireTimes {
+    fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
+        let mut waited = AcquiredAfter(None);
+        event.record(&mut waited);
+        if let Some(seconds) = waited.0 {
+            crate::metrics::DB_POOL_ACQUIRE_SECONDS.observe(seconds)
+        }
+    }
+}
+
+struct AcquiredAfter(Option<f64>);
+
+impl Visit for AcquiredAfter {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        if field.name() == POOL_ACQUIRE_FIELD {
+            self.0 = Some(value)
+        }
+    }
+
+    fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use tracing_opentelemetry::OpenTelemetrySpanExt;
     use tracing_subscriber::layer::SubscriberExt;
+    use crate::repo::test::fresh_db;
     use super::*;
     use crate::test_containers::SharedContainer;
 
@@ -324,6 +367,26 @@ mod tests {
         // The service alone identifies the stream; see `build_logger_provider`.
         assert!(logs.contains(r#""_stream":"{service.name=\"dick-grower-bot\"}""#),
             "unexpected stream fields in:\n{logs}");
+    }
+
+    /// The histogram is fed by the name sqlx gives an event and one of its fields, which only this
+    /// test holds it to.
+    #[tokio::test]
+    async fn an_acquire_from_the_pool_is_measured() {
+        let db = fresh_db().await;
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_time_level(POOL_ACQUIRE_LEVEL)
+            .connect_with((*db.connect_options()).clone())
+            .await.expect("couldn't connect to the database");
+        let _subscriber = tracing::subscriber::set_default(
+            tracing_subscriber::registry().with(pool_acquire_layer()));
+
+        let before = crate::metrics::DB_POOL_ACQUIRE_SECONDS.sample_count();
+        let connection = pool.acquire().await.expect("couldn't acquire a connection");
+        drop(connection);
+        let after = crate::metrics::DB_POOL_ACQUIRE_SECONDS.sample_count();
+        assert!(after > before, "the acquire wasn't measured");
     }
 
     /// Where to reach it, once it answers.

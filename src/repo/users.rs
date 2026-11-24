@@ -2,6 +2,7 @@ use autometrics::autometrics;
 use anyhow::Context;
 use crate::domain::objects::{BannedUser, User};
 use crate::domain::primitives::{BonusPercent, DaysCount, Ratio, UserId, Username};
+use crate::errors::details::DetailedContext;
 use crate::repo::ChatIdKind;
 use crate::repository;
 use domain_types::literal;
@@ -17,7 +18,7 @@ repository!(Users,
                 user_id as UserId, name)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't upsert a user with id = {user_id}"))
+            .user_context(user_id, "couldn't upsert the user")
     }
 ,
     #[autometrics]
@@ -31,7 +32,7 @@ repository!(Users,
                 chat_id.value() as String)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't get users of the chat with id = {chat_id}"))
+            .context("couldn't get the users of the chat")
     }
 ,
     #[autometrics]
@@ -51,7 +52,7 @@ repository!(Users,
                 chat_id.value() as String, inactivity_days as DaysCount)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
+            .context("couldn't get a random active user of the chat")
     }
 ,
     #[autometrics]
@@ -79,7 +80,7 @@ repository!(Users,
                 chat_id.value() as String, wealth_borderline as Ratio, inactivity_days as DaysCount)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get a random active poor user of the chat with id = {chat_id}"))
+            .context("couldn't get a random active poor user of the chat")
     }
 ,
     /// A weighted draw among the active members. The weight grows linearly down the ranking by
@@ -131,7 +132,7 @@ repository!(Users,
                 poorest_bonus as BonusPercent, recent_wins_days as DaysCount)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get a random active user of the chat with id = {chat_id}"))
+            .context("couldn't get a random active user of the chat")
     }
 ,
     #[autometrics]
@@ -140,7 +141,7 @@ repository!(Users,
         sqlx::query_as!(User, r#"SELECT uid AS "uid: UserId", name AS "name: Username", created_at FROM Users WHERE uid = $1"#, user_id as UserId)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get a user with id = {user_id}"))
+            .user_context(user_id, "couldn't get the user")
     }
 ,
     /// Every user whose ban is still running. The list is tiny, so the bot keeps the whole of it
@@ -165,7 +166,7 @@ repository!(Users,
                 user_id as UserId)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get the mention setting of the user with id = {user_id}"))
+            .user_context(user_id, "couldn't get the mention setting of the user")
             .map(|value| value.flatten().unwrap_or(true))
     }
 ,
@@ -178,7 +179,7 @@ repository!(Users,
                 user_id as UserId, enabled)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't set the mention setting of the user with id = {user_id}"))?;
+            .user_context(user_id, "couldn't set the mention setting of the user")?;
         Ok(())
     }
 ,

@@ -64,10 +64,13 @@ through an explicit list. Every new variable goes into **all** of these:
    means the variable never reaches the container**, no matter what `.env` says;
 4. `Dockerfile` — the `ARG` list at the bottom. It changes nothing at runtime (`ARG` is build-time
    only), but the list is kept complete as the inventory of what the image understands;
-5. this file — what it does and what happens when it is unset. **Not `README.md`**: it is the
+5. the topic's file in `.claude/rules/` (see below) — what it does and what happens when it is
+   unset. **Not `README.md`**: it is the
    project's index, and a variable's name, default or tuning advice is not what belongs there;
-6. the server-configs repo — `DickGrowerBot/docker-compose.yml` (the same `environment:` list) and
-   `DickGrowerBot/.env.sops` (the value itself, through `make secret-edit`).
+6. the server-configs repo — a note in `PENDING-PROD-CHANGES.md` with the line for
+   `DickGrowerBot/.env.sops`. **That file lists every variable the bot reads**, a default value
+   included; one whose mere presence changes something (a `DISABLE_*` switch) goes in commented
+   out. Its compose file takes the whole `.env` through `env_file`, so it needs no change.
 
 ### Required environment variables (`.env`)
 
@@ -76,1260 +79,7 @@ DATABASE_URL=postgres://...
 TELOXIDE_TOKEN=...
 ```
 
-### Optional: bot HTTP-client timeouts
-
-The bot's Telegram API client (`config/bot.rs`, `BotConfig::build_bot`) has tunable timeouts so a
-stalled request (e.g. when DPI equipment lets the connection hang instead of resetting it) fails
-after a bounded time instead of blocking update processing. Both vars are optional and each
-overrides only its own knob; leaving **both** unset keeps teloxide's stock client:
-
-```
-BOT_HTTP_CONNECT_TIMEOUT=5s  # teloxide default when unset
-BOT_HTTP_TIMEOUT=17s        # total per-request timeout; teloxide default when unset
-```
-
-Standard proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are auto-detected by
-reqwest and honored either way. `TELOXIDE_PROXY` is a teloxide-specific var read only by the stock
-`Bot::from_env()` client (i.e. when both timeouts are unset).
-
-### Optional: how `WEIGHTS` picks the Dick of the Day
-
-```
-DOD_POOREST_BONUS_PERCENT=100  # α: the shortest is 1 + α times as likely to win as the longest; 0 => alike
-DOD_RECENT_WINS_DAYS=5         # N: each win of the last N days divides the weight by one more; 0 => off
-```
-
-`DOD_SELECTION_MODE=WEIGHTS` draws among the active members with the weight
-`(1 + α · (1 − percent_rank by length)) / (1 + wins in the last N days)`. The two halves pull in
-opposite directions: α concentrates the wins on the short, N spreads them out again.
-
-**The bonus is by rank, not by length**, so the ratio between the shortest and the longest is
-exactly `1 + α` in every chat. A sigmoid over the length's z-score was used before, and a z-score
-is scale-free: 948 against 1586 cm was as decisive as 522 against 5357, and the favourite took
-1.4–1.5 times the uniform share in chats of every size. The bonus a win pays (a few dozen cm) can't
-close a gap of hundreds, so nothing corrected it, and the same member won for weeks.
-
-Raise α when the short don't catch up; lower it if the wins pile up on them. Raise N if the same
-winner still repeats; lower it if the draw starts to feel like a queue — in a chat of two, a large N
-is close to plain alternation.
-
-### Optional: what the help mentions
-
-```
-HELP_AUCTION_BOT=DickAuctionBot  # the bot auctioning promo codes; unset or empty => not mentioned
-```
-
-The help is rendered once, at startup, from `help::Context`. A paragraph about something that may
-be absent sits inside `{{ if … }}`. `/support` and `/cleanup` follow `commands::CommandToggles`, the
-same switches that hide those commands from the menu; the auctions paragraph follows
-`HELP_AUCTION_BOT`; the shrink paragraph follows `DailyShrinkConfig::enabled`, the same switch that
-hides `/mentions`; and the streak paragraph follows the perk, whose grades render as an empty
-string — which `{{ if }}` takes as false — when `STREAK_BONUS_GRADES` is empty or `DISABLE_STREAK`
-is set.
-
-tinytemplate reads the context through `Serialize`, never through `Display` — `render` turns it
-into a `serde_json::Value` before any formatter sees it. So a `Username` that must be shown with its
-`@` is marked `#[serde_as(as = "DisplayFromStr")]`; the derived `Serialize` writes the bare name.
-
-### Optional: /support and user bans
-
-```
-SUPPORT_CHAT_ID=-1001234567890  # where /support relays messages; unset => command hidden and disabled
-BAN_LIST_REFRESH=15m       # the backstop behind the notification, see below
-```
-
-A reply to one of the bot's 🆘 messages in the support chat is copied to the user it names —
-`copy_message`, so the user sees the bot rather than whoever in the chat wrote it. Any participant
-may answer, and every reply is delivered, so a discussion among the staff belongs outside a reply
-to the ticket. A failed copy (the user blocked the bot, or never opened a private chat with it) is
-reported back in the support chat as a reply to the answer.
-
-The recipient is read from the **entity**, never from the text: the link right after `🆘 ` (UTF-16
-offset 3) is one only the bot can have written, because the name and the request are HTML-escaped.
-The `<code>` line with the id is for humans — a name or a request can contain newlines and a
-plausible copy of it. The branch sits at the top of the dispatcher tree, with the relay itself:
-it writes nothing for anybody, and a banned user is exactly the one who may need an answer. The
-language of the `↩️` button below is read the same way, from the text right after that `<code>`,
-falling back to English.
-
-**The user may answer back, and the thread lives in Telegram, not here.** The copy carries a button
-whose callback data is the id of the 🆘 message it answers (`support:<message id>`). Pressing it puts
-the user's dialogue into `SupportCommandState::Replying(ticket)`; replying to the copy natively works
-too, because a replied-to message comes with its keyboard, and the ticket is read off the button
-(`support_answered_ticket`). Either way the user's text is relayed as an ordinary 🆘 message, sent as
-a reply to the ticket — with `allow_sending_without_reply`, so a deleted ticket only loses the
-threading — and a reply to *that* reaches the user like the first one did. So there is no table of
-conversations: the one piece of state is a dialogue that already existed, and `erase_user` has
-nothing new to clear. A ticket never expires; the rate limit is what bounds a talkative user. The
-native reply sits above the ban gate with the rest of `/support`; the button sits with the other
-callbacks below it, so a banned user who presses it gets the ban notice and still has the native
-reply and `/support` itself.
-
-`Users.banned_until` (migration 34) holds the ban; `NULL` means the user is not banned. It is set
-only from outside the bot, with the SQL functions of migration 35 (`erase_user`, `ban_user`,
-`unban_user`) — there is no self-service delete command, and there must not be one: a deletion
-request is answered by hand. `erase_user` deletes every row the user owns but **keeps** the `Users`
-row (empty name, reset `created_at`, future `banned_until`), which is why none of the missing
-`ON DELETE CASCADE` foreign keys matter.
-
-`bans::BanList` keeps the whole (tiny) list in memory, because `banned_until` is a **sync** function
-in a dptree filter: every instance needs the list of its own whatever else exists, which is why this
-one did not move into the shared store with the rest of #155. What it needed was not another place
-to keep the list but a way to hear that it changed, and only the database can say so — nothing in
-the bot ever writes a ban.
-
-So migration 40 puts an `AFTER UPDATE OF banned_until` trigger on `Users` that notifies the `bans`
-channel, and `spawn_listen_task` reloads on it through a `PgListener`. A trigger rather than a line
-in each of the three admin functions: their bodies would have to be repeated in that migration and
-kept in step for ever, and a ban applied by a plain `UPDATE` would still go unheard. `pg_notify`
-is delivered on commit, so a rolled-back ban is never announced.
-
-The timer stays behind it as the backstop — a notification sent while the listener is reconnecting
-is heard by nobody — and so does SIGHUP. A listening connection can't serve queries and is held for
-as long as it listens, so `establish_database_connection` builds the pool
-`LISTENER_CONNECTIONS` larger and `DATABASE_MAX_CONNECTIONS` keeps meaning what an operator set it
-to.
-
-### Optional: rate limiting
-
-```
-RATE_LIMIT_USER_REQUESTS=20   # requests per window per user; 0 => off
-RATE_LIMIT_CHAT_REQUESTS=60   # requests per window per chat; 0 => off
-RATE_LIMIT_WINDOW=1m
-RATE_LIMIT_WARNINGS=3         # requests over a limit that are still told so
-SPAM_LIMIT_START_REQUESTS=1   # bare /start commands a chat is answered per window; 0 => off
-SPAM_LIMIT_START_WINDOW=10m
-```
-
-**A bare `/start` has a limit of its own, per chat.** Spam bots fire `/start` at the bot through
-Telegram's guest mode, and the general limits let each of them have the full start message — so the
-bot spammed the chat in return. Over `SPAM_LIMIT_START_REQUESTS` the command is dropped **without a
-word**, unlike the general limit: a notice would be the very message this exists to suppress. A
-promo deeplink (`/start promo-…`) is exempt, since that is how a channel's readers activate a code;
-it stays under the general limits. The check is the first thing `start_cmd_handler` does, before
-the language is resolved, and the dropped commands are counted in `start_spam_limited_total`.
-
-This protects the bot against a flood. One account sending `/help` at 150 a second used up
-Telegram's quota answering it, and every real user waited 20 seconds or got nothing.
-`rate_limit::RateLimiter` counts each request twice, against the sender and against the chat, in a
-fixed window kept in the store (`Cache::increment`: `INCR` plus an `EXPIRE` set only by the first
-hit, as one Lua script). The counter that has gone further past its limit decides.
-
-**Only what the bot would answer is counted**: our own commands (`checks::is_our_command`, the same
-name check the topics gate uses), button presses and inline queries. A group where the bot reads
-every message would otherwise use up its chatty members' allowance on messages the bot ignores. The
-second step of a `/support` or `/promo` dialogue is a plain message, so it is free too. An inline
-query has no chat, so only the user's counter applies to it.
-
-**Only the first `RATE_LIMIT_WARNINGS` requests over a limit get an answer.** Each answer is a
-request to Telegram, and a flood that is answered request by request spends the very quota the
-limit exists to protect. The rest are dropped without a reply and counted in
-`rate_limited_updates_total`. A button press or an inline query is answered with the window as its
-`cache_time`, so Telegram answers the repeats itself and they never reach the bot.
-
-**It fails open.** A store that can't be asked lets the request through. It uses
-`Cache::or_local()`, as the locks do, so `CACHE_MODE=DISABLED` doesn't switch the protection off.
-
-**The limits are read off a curve of what users do.** Each counter reports the count it has just
-reached to a `metrics::ThresholdCurve`, `rate_limit_user_windows_total{reached}` and
-`rate_limit_chat_windows_total{reached}`, so it costs no round trip beyond the one the limit already
-makes. The series are a survival curve of **windows**: `reached="1"` is every window of a user (or a
-chat) that had a counted request in it, and `reached="N"` is how many of them got to N or more. A
-limit is right when the share at its threshold is tiny. The counters keep counting past the limit,
-so what is reported above it shows how far a flood goes.
-
-It counts windows, not users: someone flooding for ten minutes is ten windows, and how many
-distinct people that is belongs to the logs. A limit of 0 switches its counter off and its curve
-with it, so to measure before choosing, set the limit far above the last threshold rather than
-to 0.
-
-It is the **first** branch of the dispatcher tree, above the setup message and `/topics`. A flood
-has to be stopped before it costs a query, and it may sit there because it writes nothing for the
-sender, which is the property the ban gate's ordering depends on.
-
-### How many guesses a promo code takes
-
-Promo codes have no limiter of their own yet, on purpose: the channel posts hints and readers guess,
-and a limit has to leave room for that. So the attempts are measured first (issue #180).
-`/promo <code>`, its dialogue step and the `/start` deeplink each count as one; the confirm button
-doesn't, since it only follows an attempt already counted.
-
-`promo_activation_attempts_total{outcome}` counts them all. `promo_attempt_users_total{reached}`
-counts a user once each time their count within an hour lands on one of its thresholds, so it is a
-survival curve: `reached="1"` is everyone who tried, the **median** is the highest threshold reached
-by at least half of them, the **max** is the highest threshold reached at all, and the **average**
-is all attempts over `reached="1"`.
-
-It is a `metrics::ThresholdCounter`, a kind of metric for any "how far does one subject get"
-question; the window and the thresholds are declared with the static, like a help text. Its series
-are a `ThresholdCurve`, which can also be fed a count the caller already holds. The count
-per subject is a fixed window in the store, like the rate limiter's, and only the threshold a hit
-lands on becomes a label — never the subject. A store that can't be asked only costs the curve a
-sample.
-
-### What each signal means
-
-| Signal | Meaning | Handled in |
-|---|---|---|
-| `SIGHUP` | reload the announcements and the ban list | `reload.rs` |
-| `SIGTERM` | stop, gracefully | `shutdown.rs` |
-| `SIGINT` | the same, from a terminal | `shutdown.rs` |
-
-**A signal cannot mean two things**, which is the whole reason this table exists. The `Dockerfile`
-carried `STOPSIGNAL SIGHUP`, so `docker stop` — every deploy — asked the bot to *reload*. Nothing
-stopped, Docker waited out its timeout and killed the process, and everything that only happens on a
-clean exit never happened: the last batch of spans and log records was dropped, and
-`BatchSpanProcessor`'s count of spans it had to drop (which is only reported at shutdown) was never
-printed. `STOPSIGNAL` is gone, so Docker's default `SIGTERM` applies.
-
-Both branches of `main` stop through the dispatcher's `ShutdownToken`, not through teloxide's
-`enable_ctrlc_handler` — that one listens for Ctrl-C alone, and a container is never stopped with
-Ctrl-C. The webhook branch had no handler at all, so production had nothing listening for anything.
-
-**Stopping the dispatcher is the only lever needed**, because it stops its update listener too, and
-that is what the webhook server's graceful shutdown waits on. So one token drains the whole thing in
-order: no new updates, then the ones in flight, then the HTTP server, then `Telemetry::shutdown`
-flushes what the exporters still hold. The polling branch has no such flag on its metrics server, so
-that one listens for the signal itself — every listener of a signal receives it, so the two do not
-compete.
-
-### How a span of time is written
-
-Every setting that names one takes a number and a unit — `250ms`, `30s`, `15m`, `1h`, `3d`. A bare
-number is seconds, so a value written before this still means what it did.
-
-`ms` is the only unit of two letters, and it ends in the same one as `s`, so `parse_duration` tries
-it before looking at the last letter. Read the other way round, `5ms` would be five *seconds* — a
-thousandfold error with nothing to show for itself, which is what `milliseconds_are_not_mistaken_for_seconds_or_minutes`
-is there to prevent.
-
-The unit is in the **value**, never in the name. A name that carried it (`BAN_LIST_REFRESH_SECONDS`)
-had to be renamed to change the unit, and gave two places for the unit to be stated and so one for
-them to disagree — `EnvDuration::minutes` on a `_SECONDS` variable compiled and was off by sixty.
-`env_duration!` and `parse_duration` in `config/env.rs` are the whole of it, and `secs`/`mins`/
-`hours`/`days` write the fallbacks beside them.
-
-The one exception is `MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES`, which keeps its suffix because it is
-not a span: it is the list of minute counts `/cleanup` offers a chat, stored as minutes in the
-`Chats.settings` jsonb and shown as minutes on the buttons. The same goes for the `*_DAYS` knobs
-that are `DaysCount` — a count of days is what they mean, not a duration.
-
-### How long a query waits for a connection
-
-```
-DATABASE_ACQUIRE_TIMEOUT=30s  # sqlx's own default; `.env.example` suggests 5s
-```
-
-A wait here is backpressure, not patience: queueing means the pool is empty, and waiting longer
-creates no connections. The default matches sqlx so that reading the variable changes nothing by
-itself; the shorter value is opted into, and is what keeps a handler's worst case comfortably inside
-`PVP_LOCK_TIME`. Refusals under load mean `DATABASE_MAX_CONNECTIONS` is too small, not that
-this is too short.
-
-### How long one statement may run
-
-The bot has no variable for this: it is Postgres's own setting, and `DATABASE_URL` already has a
-place to carry those. It writes its own unit (`5s`, `500ms`), `0` means no limit, and in a URL the
-space is `%20` and the equals sign `%3D`.
-
-```
-DATABASE_URL=postgres://…/dickgrowerbotdb?options=-c%20statement_timeout%3D5s
-```
-
-In server-configs that URL is built by Compose substitution, so the setting is one there too —
-`…?options=-c%20statement_timeout%3D${DATABASE_STATEMENT_TIMEOUT:-0}`, with the value in `.env.sops`.
-
-The pool has a limit on *waiting* and none on *running*, which is the wrong way round when a plan
-goes wrong: a query with nothing to stop it holds its connection for as long as it likes, and enough
-of them empty the pool while the bot answers nobody. That is a silent failure — the queries are
-succeeding, slowly — where a cancelled statement is an error somebody can read. Keep it under
-`DATABASE_ACQUIRE_TIMEOUT`, so a starved pool refuses at the acquire rather than after the wait.
-
-**The migrations are exempt, and that is the one thing the code has to do about any of this.**
-`repo::migrate` builds a pool of one connection, appends `statement_timeout=0` to whatever the URL
-asked for — Postgres takes the last of the repeated options — runs the migrations and closes it,
-before `establish_database_connection` builds the real pool. A `CREATE INDEX CONCURRENTLY` over
-millions of rows is meant to take minutes and cannot lift the limit for itself: it refuses to run
-inside a transaction block, which is what a multi-statement query string becomes.
-
-A timeout is a backstop, not a fix: it makes a bad plan loud, and says nothing about why the plan is
-bad. That answer is in `EXPLAIN (ANALYZE, BUFFERS)`, and usually in the statistics behind it (see
-the daily shrink below).
-
-That list is only how fast a banned user sees the polite message — **the enforcement is migration
-36**, a `BEFORE UPDATE` trigger on `Users` that refuses any statement touching a banned user's row
-unless the statement changes `banned_until` itself (which is how the three admin functions pass).
-It sits on `Users` rather than `Dicks` for three reasons: the check is free there (`banned_until` is
-on the row being updated, so there is nothing to look up), `Users` has exactly one production write
-(`create_or_update`, `src/repo/users.rs:13`) and nothing bulk, and a trigger on `Dicks` would fire
-during the chat merge's bulk insert (`src/repo/chats.rs:609`) and abort the whole merge. The error
-carries SQLSTATE `GD3E1` (`handlers::BANNED_SQL_CODE`) with the ban's end date as its message, which
-both call sites turn back into the `errors.banned` notice.
-
-`checks::reject_banned_users()` sits in the middle of the dispatcher tree in `main.rs`. The order
-there is load-bearing: **nothing above the gate may write a row for its sender.** Only `/help`,
-`/privacy` and `/support` qualify. `/start` does not — a promo deeplink activates a code — and
-neither does `/language`, which writes to user-service. The gate is an `Update`-level filter rather
-than a `Message` one because the inline handler upserts a `Users` row too, and that upsert would
-restore an erased name.
-
-### Optional: restricting the bot to forum topics
-
-A forum's admins can confine the bot to chosen topics with `/topics` (issue #102), which answers
-with an inline picker: allow or forbid the topic it was invoked in, or allow every topic again. The
-allowlist lives in the same `Chats.settings` jsonb as the chat language, under `topics` — an
-id-keyed set, `{"<topic id>": true}`, absent or empty meaning "every topic", which is the default.
-Only the keys carry meaning; an object is used rather than an array because it merges and deletes
-in one statement and dedupes for free.
-
-```
-CHAT_TOPICS_CACHE_TIME=1h     # optional TTL for the per-chat allowed-topics cache
-BOT_ADMIN_CACHE_TIME=1h       # optional TTL for what is known about the bot's rights in a chat
-```
-
-`checks::reject_forbidden_topic()` sits at the very top of the dispatcher tree, above even the ban
-gate, so **every** command is covered rather than the game ones only. Its twin,
-`reject_forbidden_topic_callback()`, does the same for the buttons, above the other callback
-branches: a keyboard outlives the message it came with, so without it the whole game could still be
-played from a forbidden topic by tapping an older message. They may sit there because they
-write nothing for the sender — the property the ban gate's ordering depends on.
-
-`/topics` is registered *above* the gate, so a chat can't lock itself out of its own setting. That
-placement is the whole exemption: the gate needs no special case for it, and the branch matches
-every form of the command (`@username` suffix included) because `filter_command` knows the bot's
-real name. Moving the branch below the gate would silently break this — `checks::test` pins it
-down.
-
-Four things keep the gate narrow: only real forums (`utils::is_forum` — a supergroup linked to a
-channel puts a `message_thread_id` on discussion-thread messages too); only commands, not every
-message (a notice on each one would be noisier than the bot the setting was meant to quiet); only
-**our** commands, matched by name against `commands::COMMAND_NAMES` and by the `@username` Telegram's
-menu appends — a group usually holds several bots, and answering for another one's command is the
-noise this feature exists to remove; and fail-open on a database error.
-
-Two limits are Telegram's, not ours, and both shape the design:
-
-* **Topics have no names here.** There is no `getForumTopics`, and a name only ever arrives on the
-  service message of a topic being created. Nothing is stored or shown for them: a list of `#42`
-  labels says less than a count. So the picker speaks only about the topic it was opened in —
-  whether the bot works there, plus how many topics it is confined to overall — and every topic is
-  allowed or forbidden from inside itself. That is also why there is no "drop that other topic"
-  button: it could not be labeled.
-* **Inline mode can't be restricted.** An `InlineQuery` carries no thread, and the
-  `inline_message_id` decoded in `handlers/utils/tghack.rs` holds only
-  `(dc_id, peer, message_id, access_hash)` — a message's topic isn't derivable from its own id.
-  That half is issue #76.
-
-Because the daily-shrink broadcast replies to nothing, it names the topic outright
-(`AllowedTopics::primary()`, the lowest allowed id — a jsonb object has no order to recover).
-That also fixes a failure that predates the feature: a forum whose General topic is closed refuses
-a message sent without a topic. The setup message needs none of this — it only ever goes to legacy
-basic groups, which can't be forums.
-
-### Optional: self-destruction of messages
-
-A busy chat drowns in the bot's own answers, so each of them may be given a lifetime and removed
-when it runs out (issue #49). Messages fall into four groups — `Notice` (help, privacy, statuses),
-`Report` (`/top`, `/stats`), `Event` (growths, DoDs, fought battles) and `Application` (offers
-waiting for an answer) — and each group has a delay of its own, zero meaning permanent. Private
-chats are never cleaned up; they aren't noisy.
-
-```
-MSG_SELFDESTRUCT_DELAY_NOTICE=2m        # 0 or unset => the group is permanent
-MSG_SELFDESTRUCT_DELAY_REPORT=5m
-MSG_SELFDESTRUCT_DELAY_EVENT=0s         # the chat's history — permanent by default
-MSG_SELFDESTRUCT_DELAY_APPLICATION=1h
-MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES=1,5,15,60,180  # the delays /cleanup offers a chat
-MSG_SELFDESTRUCT_READING_SPEED_CPM=500  # a long message lives at least as long as it takes to read
-MSG_SELFDESTRUCT_WARNING=15s    # grace period showing "will be deleted in N seconds"
-MSG_SELFDESTRUCT_MODE=ENABLED           # DISABLED | ENABLED | ONLY_WITH_COMMAND | WITHOUT_COMMAND
-MSG_SELFDESTRUCT_POLL=5s           # how often the worker looks for the due messages
-MSG_SELFDESTRUCT_BATCH_SIZE=50          # messages one run takes on
-MSG_SELFDESTRUCT_EXPIRY_BATCH_SIZE=5000 # rows one statement of the startup cleanup expires
-MSG_SELFDESTRUCT_CONCURRENCY=8          # how many of them it acts on at once
-MSG_SELFDESTRUCT_LEASE=5m          # how long a claimed batch is held out of reach
-MSG_SELFDESTRUCT_INLINE_GROUPS=         # comma-separated groups; empty => inline messages are kept
-MSG_SELFDESTRUCT_RETRY_DELAY=1m # the first wait after a failure; it doubles with each one
-MSG_SELFDESTRUCT_MAX_RETRY_DELAY=1h    # the cap that doubling stops at
-MSG_SELFDESTRUCT_MAX_ATTEMPTS=3         # attempts before the row is marked `failed` and left alone
-MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY=1d       # how long a finished row is kept; 0 => for ever
-```
-
-**Every chat may overrule all of that** with `/cleanup` (issue #128), an admins-only picker that
-switches each of the four groups on or off for that chat alone. Only on and off: the mode stays the
-operator's, because it is about the bot's rights rather than about taste.
-
-```
-CHAT_CLEANUP_CACHE_TIME=1h     # optional TTL for the per-chat cleanup-settings cache
-```
-
-The choices live in the same `Chats.settings` jsonb as the chat language and the allowed topics,
-under `cleanup` — a group-keyed object of **minutes**, `{"notice": 5}`. A group is therefore in one
-of three states, and all three are distinct: a number is the delay the chat chose, a zero is the
-chat asking for that group to be kept, and an absent key is the chat leaving the decision to the
-bot. The last two look alike until the operator changes his mind, which is exactly when they part.
-`SelfDestructionConfig::delay_for_chat` is where the three meet.
-
-The numbers on offer are `MSG_SELFDESTRUCT_DELAY_OPTIONS_MINUTES`, a sorted, deduped list parsed
-into `DelayOptions`; "keep them" and "let the bot decide" are added by the picker itself, so no list
-can leave a chat with a choice it can't take back. **A stored value that is no longer in the list
-still applies** — the list is a suggestion for the next press, not a rule about what may already be
-stored — which is also why the cap is applied on the way out and not only on the way in. The list
-counts towards `enabled()`, the worker's spawn gate, since a chat can be the only reason a row is
-ever written; with nothing offered, a chat can only ever keep messages, and the gate says so.
-
-The picker has **two levels**: the groups with their current delays, then the delays for the one
-that was pressed. A flat grid would need one row per group with nothing to label it by, and it
-would break the moment the list grew.
-
-Choosing a **non-zero** delay is the one press that asks Telegram anything: where the mode deletes
-commands, the bot may not be allowed to, and then the answers would go while the commands stay. So
-the press turns into a warning that has to be confirmed (`ONLY_WITH_COMMAND` gets a stronger one —
-there nothing at all would be deleted), carrying the chosen number through the detour, and the
-answer is written into the rights cache, which `ONLY_WITH_COMMAND` reads on every message
-afterwards. `SelfDestructionService::may_delete_here` is that unconditional check, next to the
-mode-dependent `may_delete_commands` the answering path uses. Keeping a group, or handing it back
-to the bot, takes nothing away and asks nothing.
-
-The setting is cached like the chat language and the allowed topics — the same shape, the same
-lifetime, and the same read-through (see "The store of short-lived values").
-
-**Inline messages obey the chat too, where the chat can be named.** An inline message the bot can't
-delete can only be rewritten into the placeholder, so that case gets a switch of its own in the
-picker rather than following the delays quietly — the `inline` key of the same jsonb object, a
-boolean beside the group names (a group can never be called that, so the two live together). It is a
-tri-state like the delays: absent means the chat said nothing and `MSG_SELFDESTRUCT_INLINE_GROUPS`
-decides which groups are touched, `true` means every group the chat cleans up, `false` means none.
-`SelfDestructionConfig::inline_delay_for_chat` is where the two meet, and the delay is the chat's
-either way.
-
-**An inline message the bot can delete is simply deleted**, on the ordinary delays, warning
-included, and neither the switch nor the list holds it back: nothing is left behind.
-That is possible in a supergroup only. There, the `inline_message_id` encodes the chat and the
-message's own id, which is shared by every member, so `deleteMessage` works on it as on any other
-message. A legacy group's id encodes neither.
-
-The bot also has to hold the right, and the rights cache answers that. Nothing known counts as yes
-(`rights::may_delete_inline`), the same guess `ENABLED` makes for commands. `schedule_inline` picks
-the delay by it (`SelfDestructionConfig::inline_delay`). The worker asks again when the row is due,
-so nothing about the right is stored in the row.
-
-A deletion that is refused teaches the cache, and the message falls back to the placeholder in the
-same tick. It does so only if the switch and the list would have allowed one, read from the chat's
-settings at that moment (`scheduler::deletions::Cleaner::may_shrink`); otherwise the row ends
-`failed`. A message that reaches Telegram's 48 hours takes the same fallback and ends `expired`
-instead.
-
-**Every inline message is warned first, whichever way it goes**, exactly like a reply: the worker
-settles on the ending — deletion, placeholder or none — before the warning, so a message that is
-going to stay is never told otherwise.
-
-Naming the chat is the part that isn't always possible. `inline_chosen_handler` already works only
-for anchored groups (it filters on a row holding both the id and the instance), and
-`inline_callback_handler` resolves one for the command itself — both simply pass what they hold.
-`pvp_inline_chosen_handler` has to decode the id out of the `inline_message_id`
-(`utils::try_resolve_chat_id`, under the same `CHATS_MERGING_ENABLED` its neighbours use). Where
-none of that yields a chat — a legacy group without an anchor, an id that encodes none — the bot's
-own settings apply, which is the half of issue #76 that `/topics` runs into as well.
-
-Inline messages are stretched by the reading time now, the same as the others: `schedule_inline`
-takes the character count from the text the handler is about to send. The battle offer is the
-exception and passes zero — Telegram builds that text out of the `InlineQueryResultArticle`, so the
-bot never sees it, and it is one line long anyway.
-
-**Everything goes through the database**, short-lived groups included: `SelfDestructionService`
-(`handlers/utils/self_destruction.rs`) only writes rows into `Scheduled_Message_Deletions`
-(migration 37), and the worker in `scheduler/deletions.rs` claims what is due and acts on it. The
-claim *leases* its batch — one `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING`
-that pushes `fire_after` `MSG_SELFDESTRUCT_LEASE` out. The lease, not the lock, is what makes the claim
-exclusive: the row's lock lives only as long as that statement, while the requests it leads to take
-much longer. A worker killed mid-batch leaves its messages to be claimed again once the lease runs
-out. That is what a restart between an answer and its
-deletion costs nothing, and what makes an `Application` delay of hours possible at all. The column
-is `fire_after`, not `fire_at`: the worker polls, so it acts somewhat after the moment stored.
-
-Two things are load-bearing in the schema:
-
-* the **unique indexes** on `(chat_id, message_id)` and on `inline_message_id` make scheduling
-  idempotent (`ON CONFLICT DO NOTHING`), which is why paging through a leaderboard can't push its
-  deletion off for ever, and give `cancel` an exact key;
-* the **`state`** enum carries the grace period in the same row: the message is edited into the
-  warning and rescheduled, rather than held in memory.
-
-**Whether the bot may delete the command** is not in the schema at all — it lives in the cache
-(see "The store of short-lived values" below), because the bot is *told* the answer rather than
-having to ask for it.
-`handlers::rights` writes it from every `my_chat_member` update, which Telegram sends when the bot
-is added, promoted or demoted, and `scheduler::deletions` writes `false` when a deletion is refused.
-
-Where the cache knows nothing, what happens depends on the mode, and the two differ because a wrong
-guess costs them different things:
-
-* `ENABLED` guesses "yes" and finds out by trying. A refusal costs one request, marks the row
-  `failed` and teaches the cache. Nobody sees it, so **it never asks Telegram**.
-* `ONLY_WITH_COMMAND` can't guess. The answer is deleted *before* its command, so a refusal would
-  leave the command sitting alone in the chat — the very thing the mode exists to prevent. This is
-  the only place `getChatMember` is still called, and only when nothing is known.
-
-That asymmetry is the whole reason the check survived at all: for `ENABLED` it would be pure
-overhead.
-
-**What becomes of a row** is the whole state machine, and **no ending deletes it**:
-
-| Ending | State |
-|---|---|
-| the message was deleted or replaced | `removed` |
-| it was already gone (someone got there first) | `removed_before` |
-| it outlived Telegram's 48 hours while it waited | `expired` |
-| the bot may not touch it, or the chat is gone | `failed` |
-| every attempt failed for a reason that looked transient | `failed`, after `MAX_ATTEMPTS` |
-| anything else | unchanged; postponed by the back-off, `attempts` + 1 |
-
-**The counter counts endings, one per message.** `self_destruction_total{group,kind,outcome}` grows
-only when a row reaches a terminal state, and the `outcome` values are those states — a rate, where
-the table itself answers how many rows sit in each state right now.
-`scheduler::deletions::finish` writes the row and the counter together, so they can't say different
-things.
-
-A warning is not an ending, so it is not counted: the message will be counted later, when it goes.
-A retry is not an ending either, and it has its own counter,
-`self_destruction_retries_total{group,kind}`. This is what keeps the outcomes equal to the number of
-messages. A message that was retried twice and then deleted is one `removed` plus two retries, not
-two failures and one success.
-
-A finished row is stamped with `finished_at` and left where it is, so
-`Scheduled_Message_Deletions` is the whole account of what the worker did — including the successes,
-which is what makes a failure rate readable from the table itself rather than only from Prometheus.
-`removed_before` is kept apart from `removed` on purpose: a chat where it is the usual ending
-already has a human or another bot doing the cleaning, and the delays configured here are only
-getting in their way. A message found missing at its **warning** ends there too, rather than being
-warned into the void and found missing again a grace period later — the notice is what a failed
-edit costs, but a message that is gone is not coming back.
-`SELECT state, count(*) … WHERE finished_at IS NOT NULL` is the first thing to look at when messages
-stop disappearing, and it is a Grafana panel over the table rather than a gauge — the same trade the
-broadcast queue already made. As a gauge it was published from the deletion worker's own tick, so
-that query ran every `MSG_SELFDESTRUCT_POLL` — a scan of three days of finished rows, seventeen
-thousand times a day, to answer what one query answers when somebody asks.
-`scheduler::spawn_deletion_cleaner` deletes them `MSG_SELFDESTRUCT_TABLE_CLEANING_DELAY` days
-later — a task of its own, because clearing the history must never be part of the run that wrote it.
-**A retention of 0 keeps everything for ever**: right while debugging the worker, unbounded growth
-on a busy bot.
-
-The wait between attempts is **exponential** — `MSG_SELFDESTRUCT_RETRY_DELAY` doubled once
-per failure already recorded, capped at `MSG_SELFDESTRUCT_MAX_RETRY_DELAY`
-(`scheduler::deletions::backoff`). The count comes from the claimed row's `attempts`, not from the
-`postpone` that follows: the delay has to be known before it is written. Keep the cap well under
-Telegram's 48 hours. Without a cap the doubling would push an old row past that limit, and every
-attempt after it is refused for sure.
-
-**The worker rests while Telegram is refusing us.** Every deletion and every warning is a request
-to Telegram, and under a flood they compete with the answers to users for a quota that is already
-spent. `telegram_backoff::TelegramBackoff` counts the `RetryAfter` refusals that `TelegramObserver`
-sees (it sits under every adaptor, so it sees the refusals of the answers, the broadcast and the
-worker alike).
-When `MSG_SELFDESTRUCT_PAUSE_THRESHOLD` of them arrive within a minute, the worker skips its ticks
-for `MSG_SELFDESTRUCT_PAUSE_FOR`, and `self_destruction_paused` reads 1.
-
-```
-MSG_SELFDESTRUCT_PAUSE_THRESHOLD=30  # refusals per minute; 0 => never pauses
-MSG_SELFDESTRUCT_PAUSE_FOR=10m
-```
-
-**Only the worker pauses, never the scheduling.** A late deletion is fine, but a message that stays
-for ever because it was sent during a flood is not. The rows wait with `fire_after` already past,
-and the first tick after the pause claims them, bounded by the batch size and the concurrency as
-always. If the catch-up provokes refusals again, the worker simply pauses again. The heartbeat is
-still written on the skipped ticks, since a resting worker isn't a dead one. The threshold is well
-above the occasional 429 the midnight broadcast gets, which `Throttle` retries on its own.
-
-**Only `MAX_AGE` stays a constant** (`scheduler::deletions`). 48 hours is Telegram's number, and a
-setting for it would be a knob that changes nothing. Everything else the worker uses — the batch
-size and the lease too — is an environment variable, because the right value depends on how busy
-the bot is, and finding it should not need a rebuild.
-
-**Deciding on `MSG_SELFDESTRUCT_POLL`** takes two metrics, not one, because a long tick has two
-opposite causes. `run_pending_deletions` carries `#[autometrics]`, so how long a run took is
-`function_calls_duration_seconds{function="run_pending_deletions"}` — and the default buckets
-include `5.0`, the stock interval, so "the share of runs that fit into one tick" needs no
-interpolation. How much a run had to do is `self_destruction_batch_size`, bucketed at the default
-batch limit. Read together:
-
-| duration | batch size | what it means |
-|---|---|---|
-| under the interval | any | the queue keeps up; leave it alone |
-| at or over it | hitting the limit | saturated — raise `MSG_SELFDESTRUCT_CONCURRENCY`, and the batch size with it if a run then empties the queue early; a longer interval makes it worse |
-| at or over it | well under it | Telegram is slow, not the queue — a longer interval costs nothing |
-
-**The knob for throughput is `MSG_SELFDESTRUCT_CONCURRENCY`, not the batch size.** A run gets
-through that many messages per round trip to Telegram; the batch size only bounds how much it
-claims, so raising it alone lengthens the run and drains the queue no faster. Keep the concurrency
-under `DATABASE_MAX_CONNECTIONS` — every finished message writes a row — and watch
-`telegram_request_errors_total{kind="rate_limited"}` after raising it.
-
-Changing `MSG_SELFDESTRUCT_BATCH_SIZE` needs no other change. The buckets go up to 500, well past
-any sane limit, and the limit itself is exported as `self_destruction_batch_limit`
-(`spawn_deletion_worker` sets it), so the graph draws the line to compare against instead of
-holding a copy of the number.
-
-The empty runs are measured too: an idle worker is what tells a queue that keeps up from one that is
-only being asked for less than it holds. `self_destruction_total` alone won't stand in for the batch
-size — a warned message isn't counted there, so the messages-per-run ratio comes out low. Neither
-will `TASK_SELF_DESTRUCTION`: a `TaskMonitor` sums the poll and idle time of one task, and the worker
-is a single endless loop, so every tick blends into the same number.
-
-The age is checked **before** the request, against `created_at` (the row is written right after the
-message is sent, so it is the message's age). Delays are capped below 48 hours, so only a queue that
-fell behind — a long outage, a chain of retries — can produce a message that old, and spending a
-request on a refusal that is certain teaches nothing.
-
-**A backlog of those is expired in bulk, once, before the worker's first tick.**
-`spawn_deletion_worker` runs `ScheduledDeletions::expire_stale` in batches of
-`MSG_SELFDESTRUCT_EXPIRY_BATCH_SIZE`, resting `MSG_SELFDESTRUCT_POLL` between them, each answering with a
-count per group and kind that goes to the counter and to **one** `warn!`. Claimed and expired row by
-row, an outage's worth of rows would cost a lease, a `finish` and a log line apiece — tens of
-thousands of identical warnings for a single event, every one of them already in the table.
-
-**Startup is the only moment such a backlog can have appeared**, which is why the run belongs there
-and not on every tick. Telegram's own refusals never produce one: `MSG_SELFDESTRUCT_MAX_ATTEMPTS`
-ends a row within minutes of the first failure, long before it could reach 48 hours. The only way to
-accumulate them is the worker not running — a hang, a crash loop, a bot that was down — and that is
-what a restart ends. Ordering it before the claim is what matters: `claim_due` orders by
-`fire_after`, so the dead rows sort first and would otherwise be handed out
-`MSG_SELFDESTRUCT_BATCH_SIZE` at a time, ahead of every live message. The per-row check in `act`
-stays behind it at `debug`, for the row that crosses the line while the worker is up — the hour of
-headroom under `MAX_AGE` allows for exactly that one.
-
-A worker that hangs therefore also stops the only thing that clears up after it, so
-`self_destruction_last_tick_timestamp_seconds` is what says it happened (see the gauges below).
-
-The command behind an answer is a row of its own (`message_kind = 'command'`), scheduled at
-`fire_after + warning` so that both messages disappear together — a user's message can't be edited
-into the warning the answer shows meanwhile. `ONLY_WITH_COMMAND` writes *neither* row when the bot
-may not delete the command: the point of that mode is that a lone answer is worse than both staying.
-
-Two limits are Telegram's:
-
-* **A bot can't delete a message older than 48 hours.** Two constants come out of that one limit,
-  an hour apart. Every delay is cut down to **47** (`config::MAX_DELAY`), reading-time stretch
-  included: the hour of headroom pays for the poll interval, the lease, the warning's grace period
-  and the waits between failed attempts, so a message scheduled at the cap is still deletable when
-  its request finally goes out. **48** is the real thing (`scheduler::deletions::MAX_AGE`): a
-  message that reaches it — only a queue that fell behind can bring one there — is marked `expired`
-  without spending a request on a certain refusal.
-* **An inline message can only be edited, unless the bot may delete it in a supergroup** (see
-  above). Where it can't, it is replaced with the `self_destruction.placeholder` text instead, and
-  only for the groups `MSG_SELFDESTRUCT_INLINE_GROUPS` names — whatever is put there stays in the
-  chat for good, which is worth being conservative about. The bot gets an `inline_message_id` from a
-  `ChosenInlineResult`, so that is where the scheduling sits. Legacy groups send no chosen result,
-  so `inline_callback_handler` schedules too. The second call only fills the gap: the unique index
-  on `inline_message_id` makes the insert do nothing for a message that already waits, so paging
-  through a leaderboard does not delay its placeholder.
-
-An application answered before it expires is *cancelled* (`loan.rs`, `pvp.rs`): the message has
-stopped being an offer, and its outcome is kept like any other event.
-
-### The daily shrink and its broadcast queue
-
-The shrink and the summaries it owes are **two jobs, not one** (issue #154). `run_daily_shrink`
-applies the decay and writes a row per chat; `scheduler/broadcasts.rs` sends them. Nothing is held
-in memory between the two.
-
-That split is not tidiness. At ~204k chats and ~1.3M victims a day, the old single function held
-the whole day's events in a `HashMap` and sent to each chat in turn — one `await` per chat, with a
-user-service language call inside the loop — so a run took days rather than minutes. And the loop
-around it sleeps only *after* the run returns, so a run that outlasts the day takes the next
-midnight with it: five runs were logged in the fortnight before this was fixed, with the gaps
-growing. Everything below follows from that.
-
-* **The enqueue is a CTE of the shrinking statement**, so there is no moment at which a shrink is
-  committed and its summary is not owed. `Scheduled_Shrink_Broadcasts` (migration 38) is a
-  transactional outbox, and that is the property a message broker could not provide: publishing
-  after committing is a dual write, and a crash in between loses exactly what this exists to keep.
-* **The run walks the chats in batches** of `DAILY_SHRINK_BATCH_SIZE`, read from `Chats` by keyset
-  on the primary key (`select_chats_batch`), so it holds one batch at a time however many chats
-  there are. Per chat is the right granularity because that is the granularity a summary has: each
-  batch is shrunk by one atomic statement, the locks and the memory are bounded, and a failed batch
-  costs its own chats instead of the day. A `/grow` at midnight then waits behind one batch rather
-  than behind every stale dick in the database.
-
-  It reads *every* chat rather than only the ones with something to shrink, on purpose: that
-  question needs a `DISTINCT` over about a million stale dicks, and it would exclude roughly one
-  chat in eight, because nearly every chat has a neglected dick in it. A batch whose chats have
-  nothing stale shrinks nothing and costs an index lookup.
-
-  **`DAILY_SHRINK_BATCH_DELAY` is the pace of that walk**, and zero — running the batches back to
-  back — is only right when the database has nothing else to do. It does: midnight is when the run
-  and the chats being answered compete for the same pool. Nothing waits on this job, so resting
-  between batches costs a longer run and nothing else. `200ms` over ~200k chats adds about seven
-  minutes to it.
-* **`Stale_Dick_Shrinks` is analyzed a hundred times more eagerly than the stock table**
-  (migration 47, `autovacuum_analyze_scale_factor = 0.01`). A run writes a day's rows under a date
-  the table never held, and every summary is read back by that date within minutes — so the one
-  value the planner is asked about is the one its statistics know least about. A date past the end
-  of the histogram is estimated at a single row, and the plan that follows is right for one row and
-  ruinous for a million: a nested loop per row over `Users`, `Dicks` and `Chats`, seventeen seconds
-  and eleven million buffers to answer a page of ten, sixteen of those at once until the pool is
-  empty and the bot is answering nobody. With honest statistics the same query is a seek on
-  `stale_dick_shrinks_idx_chat_created_at` and costs a fraction of a millisecond. The stock
-  threshold — 50 rows plus a tenth of the table — is what let that happen: a night's insert is a
-  smaller share of it every month the table grows, so the statistics sat days out of date. A
-  hundredth keeps one night above the line. **When a night is slow again, this is the first thing to
-  check**, with `last_autoanalyze` in `pg_stat_user_tables`: autovacuum decides when, not us, and
-  the summaries of the first batches are claimable before it has had any reason to wake.
-* **Every scheduler ticks with `MissedTickBehavior::Delay`** (`scheduler::paced`), not tokio's
-  default `Burst`. A tick that overran its period would otherwise be followed at once by as many
-  more as were missed, with no pause — and these loops overrun precisely when the database or
-  Telegram is already struggling, which is when catching up is the one thing that makes it worse.
-  Nothing is lost by it: none of them counts its ticks, each asks what is due now, so a tick that
-  never happens is a tick with nothing left to do.
-* **Nothing comes back from the statement but counts.** The shrinks are in `Stale_Dick_Shrinks` and
-  the repository already reads exactly the page a summary needs, so the worker re-reads rather than
-  carrying a payload. Page 0 therefore comes from the same `ORDER BY lost_length DESC` as pages 1+,
-  which the in-memory version did not — its "next page" button could repeat or skip people.
-  The worker uses `get_shrinks_for_internal_chat`, not the `get_shrinks_for_date` the chat commands
-  use: `claim_due` hands it the row's own `Chats` key, so the predicate is a plain equality that
-  lands on `stale_dick_shrinks_idx_chat_created_at` instead of a join to `Chats` with an `OR` across
-  `chat_id` and `chat_instance`.
-* **The worker is a copy of `scheduler/deletions.rs`**: claim-with-lease, `for_each_concurrent`,
-  exponential back-off, `finish()` writing the row and the counter together. `UNIQUE (chat_id,
-  shrink_date)` makes the enqueue idempotent, so re-running a day can't double-send. The two
-  indexes are complements — `(fire_after) WHERE finished_at IS NULL` for the claim,
-  `(finished_at) WHERE finished_at IS NOT NULL` for the cleaner — each leaving out what the other
-  is about.
-* **`DAILY_SHRINK_BROADCAST_CONCURRENCY` is the throughput knob**, not the batch size: a run gets through
-  that many messages per round trip. Keep it under `DATABASE_MAX_CONNECTIONS` — every finished
-  summary writes a row — and watch `telegram_request_errors_total{kind="rate_limited"}`.
-* **A rejection teloxide has a variant for is final** (`scheduler::broadcasts::is_final`): Telegram
-  thought about it and refused, so the same payload gets the same answer, and three attempts across
-  199k chats is an outage rather than a hiccup. `ApiError::Unknown` stays retryable — Telegram's own
-  5xx answers arrive that way — unless its text says the chat is unreachable.
-* **A summary left over from an earlier day is `expired`**, and the day is the key rather than an
-  age. The run that queues a day's summaries clears the previous ones first
-  (`scheduler::shrink::expire_superseded`, `shrink_date < current_date`), in batches of
-  `DAILY_SHRINK_EXPIRY_BATCH_SIZE` paced by `DAILY_SHRINK_BATCH_DELAY`. Yesterday's list is still news in a chat that reads once a day — but
-  not once today's is ready, because then both arrive together, and chats complained about exactly
-  that. Nothing is sent to find this out: there is no age to check in `send` and no request to spend.
-
-  **The key has to be the day, not the wall clock.** The enqueue conflicts on
-  `(chat_id, shrink_date)` and does nothing for a row that is already there, finished or not. So an
-  expiry that took today's rows with it — a restart with `DAILY_SHRINK_RUN_ON_STARTUP` while the
-  queue is still draining, or any re-run of the day — would clear the day's broadcast and have
-  nothing able to put it back. Keyed on the date, a run never touches its own rows, and re-running a
-  day stays idempotent. `a_second_run_of_the_same_day_leaves_its_own_summaries_alone` pins it.
-
-  It also means there is no knob: a summary's life is one day, because that is when the next one
-  arrives.
-
-```
-DAILY_SHRINK_RATIO=0.01                # unset or 0 => the whole feature is off, queue included
-DAILY_SHRINK_INACTIVITY_DAYS=7
-DAILY_SHRINK_RAMP_UP_DAYS=7
-DAILY_SHRINK_PERIOD_DAYS=1             # days between two runs; 7 => weekly, always on the same weekday
-DAILY_SHRINK_RUN_ON_STARTUP=false      # run once at startup instead of waiting for UTC midnight
-DAILY_SHRINK_BATCH_SIZE=100            # chats per shrinking statement
-DAILY_SHRINK_BATCH_DELAY=0s            # rest between two batches; 0 => back to back
-DAILY_SHRINK_EXPIRY_BATCH_SIZE=5000    # rows one statement of the nightly cleanup expires
-DAILY_SHRINK_BROADCAST_POLL=5s
-DAILY_SHRINK_BROADCAST_BATCH_SIZE=200  # summaries one run claims
-DAILY_SHRINK_BROADCAST_CONCURRENCY=16  # how many it sends at once — the throughput knob
-DAILY_SHRINK_BROADCAST_LEASE=5m
-DAILY_SHRINK_BROADCAST_SEND_TIMEOUT=30s # backstop for a hang BOT_HTTP_TIMEOUT doesn't cover, see below
-DAILY_SHRINK_BROADCAST_RETRY_DELAY=1m
-DAILY_SHRINK_BROADCAST_MAX_RETRY_DELAY=1h
-DAILY_SHRINK_BROADCAST_MAX_ATTEMPTS=3
-DAILY_SHRINK_BROADCAST_TABLE_CLEANING_DELAY=3d       # 0 => finished rows are kept for ever
-```
-
-**`DAILY_SHRINK_PERIOD_DAYS` makes the game milder, not the cuts deeper.** The scheduler still wakes
-at every midnight and runs only when `DailyShrinkConfig::is_due` says so — the day's number counted
-from a fixed date, modulo the period, so nothing has to be remembered and a restart can't shift the
-schedule. A run takes off what a daily one would; the ramp-up and the grace period are counted in
-days of staleness, not in runs, so neither changes meaning. `DAILY_SHRINK_RUN_ON_STARTUP` ignores the
-period. The summaries of a run stay deliverable until the next one, since `expire_superseded` only
-runs when a run does.
-
-**A player may refuse to be mentioned, and stays on the list.** The summary links each name to the
-user, which is what pings them; a player who refused is printed as plain text instead. The choice is
-made at two levels, and the nearer one wins: `Player_Settings` (migration 51, a jsonb row per
-`(chat, uid)`, flipped by the 🔕 button under every summary) over `Users.settings` (the same key, set
-with `/mentions` in a private chat — a private chat has no `Chats` row to hold it), over the default
-of mentioning. The key is `shrink_mentions_enabled` in both.
-
-It costs the broadcast nothing worth counting: a summary renders one page, and the choice arrives
-in the same query — a column of the `Users` row already joined, and a `LEFT JOIN` on the primary
-key of `Player_Settings` for the few rows of the page. Nothing walks a chat's members. What the
-choice does *not* do is decide whether a summary is sent at all: that question would need every
-victim of the chat, at the moment the shrink queues it.
-
-The button is a toggle relative to what applies now, written in one statement
-(`PlayerSettings::toggle_shrink_mentions_enabled`) — the keyboard is shared by the whole chat, so it can't
-show anybody's own state, and the answer says what the press did. `Player_Settings` is carried
-through a chat merge like `Perk_States` (the surviving chat wins key by key) and cleared by
-`erase_user`, which also empties `Users.settings`.
-
-**Whether the scheduler is alive is `daily_shrink_last_run_timestamp_seconds`**, a gauge read from
-`MAX(created_at)` in `Stale_Dick_Shrinks`, not any of the `daily_shrink_*` counters. A counter that
-moves once a day reads zero both when nothing happened and when nobody scraped it before the process
-restarted, and nothing afterwards tells the two apart — which is how a fortnight of silence went
-unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > daily_shrink_period_seconds + 2h`, and on
-`daily_shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs
-repo's `vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
-
-**`daily_shrink_broadcast_last_tick_timestamp_seconds` is a faster version of the same idea, scoped
-to one tick instead of one day.** It is set at the very top of the worker's loop, before `claim_due`
-or a single send has run, so a tick stuck inside either one stops moving it forward within a poll
-interval or two — instead of waiting for `daily_shrink_broadcast_pending` to cross the six-hour
-alert threshold. It exists because of an incident where the worker froze silently for hours: a
-single `send_message` never returned — not even into an error — because it hung *inside
-`Throttle`'s own queue*, waiting on a lock its worker never unlocked. That wait happens before the
-HTTP client is even asked to send anything, so `BOT_HTTP_TIMEOUT`/`BOT_HTTP_CONNECT_TIMEOUT` never
-saw it, and the stuck tick never returned — so `ticker.tick()` was never awaited again, and the
-whole worker stopped for good with no crash, no panic, and no log line to point at it.
-
-`DAILY_SHRINK_BROADCAST_SEND_TIMEOUT` is the fix for that specific hole: a `tokio::time::timeout`
-around `request.send()` (`scheduler::broadcasts::send`), bounding the send itself regardless of
-*where* inside it the hang is. A timeout there ends the tick with a `Retry`, logging the fact at
-`warn!` — inside the `send_and_record` span, so the log line carries the `chat_id`/`id` of whichever
-summary was in flight, without having to reach for a debugger next time.
-
-**Those three are the only gauges.** They exist because vmalert reads Prometheus and cannot query
-SQL; everything a human looks at — which chats failed and why, the states over time — is a panel over
-`Scheduled_Shrink_Broadcasts` through Grafana's Postgres datasource, which costs nothing when nobody
-is looking. A gauge over the finished rows was the opposite trade: grouping a few hundred thousand
-rows by state every five seconds so that a graph could show what one SQL query already answers.
-
-**A heartbeat is its own worker's; the two depths belong to `spawn_queue_reporter`.**
-`daily_shrink_broadcast_last_tick_timestamp_seconds` and
-`self_destruction_last_tick_timestamp_seconds` have to be written by the tick each measures, so they
-stay there. That the reporter is a task of its own is exactly why neither depth can stand in for a
-heartbeat: both keep being published while the worker they describe is dead, which is what the
-self-destruction one was added for — that queue has no backlog alert beside it, since it is never
-empty for long by design. `daily_shrink_broadcast_pending` and `self_destruction_pending` do not: counting a queue
-is a scan of its whole pending index, and hanging that off a five-second poll tied three table scans
-to the workers' cadence, day and night, whether or not either queue had anything in it. They go out
-every `scheduler::QUEUE_GAUGE_INTERVAL` (60s) from a task of their own — a constant on the same
-grounds as `SWEEP_INTERVAL`: it decides how fresh a gauge is, not whether anything works. The
-reporter runs whatever the features say, because a gauge that stops being published looks exactly
-like a worker that died, which is what the alerts are watching for.
-
-**A log line's level follows what was lost, not whether the code recovered.** A failed shrink page
-is an `error!`: those chats lost the day and nothing retries it. A failed metric publication is a
-`warn!`: one sample of a gauge is gone, the next tick replaces it, and the database problem behind
-it has already been reported by the run that hit it.
-
-`Chats.is_unreachable` keeps a chat out of the queue, and is cleared by `handlers::rights` on the
-`my_chat_member` update that says the bot may post again — re-added, or un-muted by an
-administrator. Telegram sends that update either way, so nothing polls and nobody has to type a
-command in the chat first. It is only ever *taken off* there: whether the bot lost the right is what
-a failed send finds out.
-
-### One throttle for the schedulers
-
-The daily shrink's broadcast worker and the deletion worker both reach many chats at once, and both
-hold `teloxide`'s `Throttle`. They share **one**, built by `scheduler::throttled` and cloned into
-both (`main.rs`).
-
-**It only governs the broadcast.** The adaptor throttles the message-*sending* methods and passes
-everything else through, so the deletion worker — which only deletes and edits — is not bounded by
-it at all. That is teloxide's judgement, not an oversight: the documented limits (30 a second, one
-a second per chat) are about sending, and a deletion produces no message and no notification. What
-bounds the worker is `MSG_SELFDESTRUCT_CONCURRENCY`. If that judgement is ever wrong, a 429 is not
-final — the row is postponed and tried again, and it shows as
-`telegram_request_errors_total{kind="rate_limited"}`.
-
-Sharing is not a nicety. The adaptor counts requests inside a worker task that the wrapper spawns,
-and a clone only adds a handle to that same worker. Two wrappers would be two workers with two
-separate histories, so each would allow the full 30 requests per second and 1 per second per chat.
-Together they would send twice as much, and a pause after a 429 would stop only the one that got it.
-
-The dispatcher and the handlers still use the plain `Bot`. They answer one user at a time, and their
-rate follows the users.
-
-Because those answers are **not** counted by the throttle, the schedulers are given less than
-Telegram allows. What is left over is the room the answers need.
-
-```
-THROTTLE_MESSAGES_PER_SEC_OVERALL=20      # Telegram allows 30; the rest is for the answers to users
-THROTTLE_MESSAGES_PER_SEC_CHAT=1
-THROTTLE_MESSAGES_PER_MIN_CHAT=15         # private chats and legacy groups
-THROTTLE_MESSAGES_PER_MIN_SUPERGROUP=10   # every chat whose id starts with -100
-```
-
-The last one is the interesting one, and its teloxide name
-(`messages_per_min_channel_or_supergroup`) is easy to misread. The adaptor picks it whenever
-`ChatId::is_channel_or_supergroup()` holds, and that is only a check that the id starts with -100.
-Supergroups pass it, so this limit governs most of the chats the bot serves, while
-`THROTTLE_MESSAGES_PER_MIN_CHAT` is left for private chats and the few legacy groups. The bot is
-never in a channel; the name is teloxide's.
-
-`Settings::on_queue_full` is wired to `telegram_throttle_queue_full_total`. The queue holds 30
-requests, and teloxide reports it as full at most once every 4 seconds, so the counter counts
-moments, not requests. A few of them at midnight are normal — that is the shrink broadcast. A number
-that keeps growing all day means the schedulers ask for more than Telegram allows.
-
-### Observability / tracing
-
-Logging and tracing go through `tracing` (initialized in `src/observability.rs` via
-`observability::init_tracing()` in `main.rs`). The bot logs with `tracing::{info,warn,error,debug}!`
-only; the `log::*` records of the libraries (teloxide, sqlx, reqwest) are captured by the
-`tracing-log` bridge, so everything shares one pipeline.
-
-```
-RUST_LOG=info                                      # verbosity of the console and of the log export
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # spans, OTLP/gRPC; unset => spans are not exported
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:9428/insert/opentelemetry/v1/logs  # log records, OTLP/HTTP
-OTEL_SPAN_FILTER=info,h2=off,hyper=off,tower=off,teloxide=info,reqwest=info,sqlx=off  # what becomes a span
-OTEL_TRACES_SAMPLE_RATIO=1.0                       # the share of traces kept, parent-based
-OTEL_BSP_QUEUE_SIZE=8192                           # spans held while waiting to be sent
-OTEL_BSP_BATCH_SIZE=2048                           # spans per export
-OTEL_BSP_DELAY=2s                                  # how often the queue drains
-```
-
-**`RUST_LOG` does not govern the spans.** The span layer has a filter of its own, and it used to be
-a hardcoded `trace` — so `sqlx` streamed an event per query into every span, and one broadcast tick
-turned a few hundred sends into tens of thousands of events, whatever `RUST_LOG` said. It is
-`OTEL_SPAN_FILTER` now, defaulting to `info` with `sqlx=off`, and the two verbosities are separate
-because they answer different questions: one is what a human reads, the other is how much of the
-program's shape is worth keeping.
-
-The bot's **per-item scheduler spans are written at `debug`** for the same reason
-(`send_and_record`, `resolve_broadcast_language`): a run reaches every chat that is owed a summary,
-so at `info` one midnight would be a few hundred thousand spans. `OTEL_SPAN_FILTER=debug` brings
-them back, which is what to set while looking into a worker. The run-level spans stay at `info` —
-there are only a few a minute, and they are what shows a tick as a whole.
-
-**The sampling is parent-based**, so a decision taken at the root holds for every span beneath it
-and a trace never arrives with holes. The unit being sampled is therefore a whole trace, and for a
-scheduler that trace is **one tick of its loop** — at `0.05` one tick in twenty is kept entire,
-rather than one span in twenty scattered across all of them.
-
-The batch settings exist because the SDK's stock queue of 2048 is smaller than a single broadcast
-tick, so the spans of a busy minute were dropped before the exporter thread woke up. Spans go out
-gzipped (`gzip-tonic`).
-
-**The layer is left off the subscriber entirely when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset.** It
-used to be attached regardless, building every span for a provider with no exporter behind it.
-
-The console layer is **always** on and is the fallback: `docker logs` and journald keep working, and
-it is what remains when the collector can't be reached. The two signals need two variables because
-they go to different places and speak different protocols — the spans to Jaeger/Tempo over gRPC, the
-records to VictoriaLogs over HTTP (the full URL, path included). The logs endpoint is always passed
-to the exporter explicitly; left to itself it would fall back to the traces one and post log records
-to the tracing backend.
-
-Spans are exported over OTLP/gRPC (batch) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the
-service name is the crate name (`dick-grower-bot`). A trace of an update is rooted at the handler
-that processes it; outbound user-service calls (tonic) are auto-instrumented, and W3C trace-context
-propagates to the user-service.
-
-The HTTP server has **no** OpenTelemetry layer, on purpose: its only two routes are the webhook and
-`/metrics`, and neither is worth a span. The webhook handler merely parses the update and puts it
-into the dispatcher's queue — the work happens in another task, which the HTTP span can't reach
-(teloxide passes the update through a plain channel, so the context is lost there anyway) — and
-`/metrics` is Prometheus scraping us. The rate and the latency of both come from `axum-prometheus`.
-If a route worth tracing ever appears, add `axum-tracing-opentelemetry` back for it.
-
-The exported records carry the `trace_id`/`span_id` of the span they were written in — the SDK puts
-them there, which is why the console lines have no ids: without the infrastructure there is nothing
-to match them against. Records of the exporter's own stack (`opentelemetry`, `hyper`, `h2`, `tower`,
-`reqwest`) are never exported: the exporter logs while it sends, and those records would be sent
-again. `observability::tests` covers the whole path against a VictoriaLogs container.
-
-**A record also carries the fields of every span it was written inside**, from the root down, the
-nearer span winning where two of them name the same field. That is what makes "a log message is a
-constant; the values are fields" pay off in the log database rather than only on the console: a
-message that leaves `chat_id` out of its text is still searchable by it. It takes the
-`experimental_span_attributes` feature of `opentelemetry-appender-tracing` and
-`build_logs_bridge`; without them the SDK exports the two ids and nothing else, and every
-`#[tracing::instrument(fields(…))]` in the bot is worth something to the traces and nothing to
-VictoriaLogs. Every field is taken rather than a named few — a span's fields are already chosen by
-hand at each `#[tracing::instrument]`, and an allowlist would be a second list to keep in step.
-
-**A span decorates only what is logged while it is entered**, which is the catch for an error that
-travels. A repository returns its errors instead of logging them, so by the time
-`ContextLoggingErrorHandler` writes the record — in the dispatcher's task — both the repo's span
-and the handler's have closed, and nothing is left to carry the ids. So the two cases part ways:
-
-* an error **handled where it is created** — the read-through caches, the schedulers,
-  `handlers::rights` — is logged inside the caller's span, and its context may be a constant;
-* an error that **escapes to the dispatcher's error handler** keeps its ids in the text of its
-  `.context(…)`, because nothing else will carry them there.
-
-`docker-compose.yml` bundles an **optional** observability stack — Jaeger for the spans,
-VictoriaLogs for the records — gated behind the `tracing` Compose profile. The `infra`/`infra:full`
-tasks start both (they name them, activating the profile) and `docker-compose.override.yml`
-publishes their ports to `localhost` for the local-binary flow: Jaeger UI `http://localhost:16686`,
-OTLP `localhost:4317`, VictoriaLogs UI `http://localhost:9428/select/vmui/` and ingestion on the
-same port. For `task up` (skips the override) enable it with `COMPOSE_PROFILES=tracing`; there they
-are network-internal and the in-Docker bot reaches them at `jaeger:4317` and `victoria-logs:9428`.
-(`user-service` is likewise optional, behind the `user-service` profile.)
-
-Aggregate function-level metrics (request rate / error rate / latency histograms) come from
-[`autometrics`](https://docs.rs/autometrics): handlers and query-executing repo methods carry
-`#[autometrics]` (paired with `#[tracing::instrument]`). The exporter is initialized
-in `main.rs` (`autometrics::prometheus_exporter::init()`) and its output is appended to the
-existing `/metrics` endpoint in `src/metrics.rs`, alongside the `axum-prometheus` and custom
-counters — all scraped by Prometheus from the same port `8080` `/metrics` route.
-
-**A panic is caught by a process-wide hook** (`observability::install_panic_hook`, called from
-`main.rs` right after `init_tracing`), not left to Rust's default. The default hook writes straight
-to stderr — outside `tracing` entirely, so a panic reached neither the console formatting nor the
-OTLP log export nor any metric. That gap is what let the shrink broadcast worker's freeze (a
-different failure, a hang rather than a panic) go unnoticed for hours in the first place, and it
-would have hidden a panic just as well: nothing but the process staying up with one dead task to
-show for it. The hook logs an `error!` (location, message, thread, backtrace) through the same
-subscriber as everything else, and counts it in `panics_total{location}` — low-cardinality, since a
-panic's location is a fixed point in the source, not user input. `DickGrowerBotPanicked` in
-server-configs alerts on any nonzero rate.
-
-**A scheduler tick recovers from its own panic instead of dying for good.** Every worker in
-`scheduler.rs` is a fire-and-forget `tokio::spawn` with no `JoinHandle` kept anywhere — a panic that
-unwinds past the loop ends that task silently, with nothing awaiting it to notice. `resilient()`
-wraps one tick's work in `catch_unwind` (via `AssertUnwindSafe`, since the futures here borrow
-`Repositories`/`Throttle<Bot>` across an `.await` that the compiler can't prove safe to resume) so
-the loop gets another tick instead. The panic is still logged and counted by the hook above — this
-only stops it from unwinding any further. Nothing here holds a lock that a caught panic could leave
-half-updated: the state that matters lives in the database and Redis, outside this process.
-
-### Observing the Telegram Bot API calls
-
-The outgoing requests are watched by `TelegramObserver` (`src/telegram_observer.rs`), attached to
-the bot in `config/bot.rs`. It implements `RequestObserver`, a hook **our teloxide fork** adds to
-`Bot` (branch `feature/request-observer`, `crates/teloxide-core/src/observer.rs`) — the `teloxide`
-dependency in `Cargo.toml` points at that branch, and the hook is meant to be contributed upstream.
-
-Each request produces three things:
-
-* `telegram_request_duration_seconds{method,outcome}` — how long the call took. The failed calls
-  are measured too, so a timeout (the slowest case there is) is in the histogram rather than
-  missing from it. `outcome` is `ok` or one of the kinds `telegram_request_errors_total` uses.
-* `telegram_request_errors_total{kind}` — the failures of that same call, from that same
-  `error_handler::classify`. One classification feeds both, so the two can't disagree. It is
-  counted **here** rather than at the dispatcher's error handler, which is the only place that sees
-  requests at all: the schedulers never reach a dispatcher, so a broadcast-wide outage left the
-  counter flat. The observer sits under every adaptor, so it sees them and polling's `getUpdates`
-  alike. One consequence worth knowing: `Throttle` retries after a flood wait and the observer is
-  below it, so `rate_limited` counts every rejection where the handler only ever saw the last one.
-  `ContextLoggingErrorHandler` now only logs.
-* a `telegram_request` client span, so a slow API call is a child span of the handler's trace
-  instead of an unattributed gap inside it.
-* when the API answers with `ApiError::Unknown` — its way of saying it disliked the payload without
-  saying which part — an `error` record carrying the serialized request body. That is the only way
-  to find out which entity or which over-long text was rejected.
-
-The observer sits *below* the adaptors, so the time `Throttle` holds a request back is not counted
-as request time. A multipart request (the file-uploading methods) is a stream by then and has no
-body to log; it is still measured.
-
-Changing any of this means updating the Grafana dashboard in the server-configs repo, next to the
-"Telegram API request errors by kind" panel.
-
-### The store of short-lived values
-
-Everything the bot keeps briefly lives in `src/cache.rs`, which is the one place that keeps
-anything: the three per-chat settings (`topics.rs`, `cleanup.rs`, the chat language in
-`users/mod.rs`), the users fetched from user-service, what is known about the bot's rights in a
-chat, the PVP locks (`handlers/utils/locks.rs`) and the dialogue states (`dialogue.rs`).
-
-```
-REDIS_HOST=localhost    # unset => the values are kept in this process
-REDIS_PORT=6379
-REDIS_PASSWORD=…
-CACHE_MODE=REDIS        # REDIS | LOCAL | DISABLED; unset => REDIS with a host, LOCAL without one
-```
-
-**One store, three backends, and only one of them is a choice.** `Backend::Redis` and
-`Backend::Local` hold the same keyspace — the rendered `CacheKey` — so a tenant never learns which
-it got, and the fallback exists once instead of once per feature. `Local` is what an unset or
-unreachable `REDIS_HOST` falls back to, so **the bot must start and run without a server**, which is
-the path most likely to rot and so has a test of its own. `Disabled` is only ever asked for.
-
-**The bot runs as a single instance, and `LOCAL` serves that perfectly well.** The issue's talk of
-two instances describes what `LOCAL` could not do, not something that ever went wrong: with one
-process, a map in that process is a correct cache and a correct lock. What `REDIS` buys a lone
-instance is narrower and worth naming plainly — a `/promo` or `/support` dialogue that survives a
-restart, and nothing else. Everything else it buys is insurance against a second instance that does
-not exist yet.
-
-The cost is on the other side of the same line: the topics gate runs on every command of every
-group, and under `REDIS` each miss is a round trip where `LOCAL` had a `HashMap` lookup. Choose
-accordingly, and don't read `LOCAL` as a degraded mode.
-
-**Two tenants are not caches, and the switch doesn't reach them.** A cache may be turned off because
-a miss costs a query and nothing else. A dialogue with nowhere to keep its state can never advance
-past its first step, and a lock nobody holds is no lock — answering one offer twice is what the
-guard is for, and not a thing to have a setting for. Both call `Cache::or_local()`, which turns a
-disabled store into a local one and leaves the rest alone. So the `Local` store is always built,
-whatever the mode.
-
-That is why the locking has no switch of its own any more. `PVP_CALLBACK_LOCKS_ENABLED` was one, and
-it earned its place while the lock was a `HashSet` with no expiry, where a leaked guard left a
-battle unanswerable for as long as the process lived. `SET NX EX` frees itself after
-`PVP_LOCK_TIME`, so the escape hatch guards nothing and only offers a way to put the bug
-back. `BattleLocks` is a plain struct for the same reason: with nothing to switch and a store that
-is always there, there was never a second variant to be.
-
-**`PVP_LOCK_TIME` must outlive a handler, and that is the whole of it.** The guard frees the
-lock as the handler ends, so the lifetime only bounds a process killed mid-battle. But if it runs
-out while the handler is still working, the next answer goes straight through and the same attack is
-resolved twice — which no release scheme can undo, since by then both are already running.
-
-The bound is a handler's worst case: a few Telegram requests at `BOT_HTTP_TIMEOUT` plus
-`pvp_impl_attack`'s four queries at `DATABASE_ACQUIRE_TIMEOUT` each. It is an estimate read
-off the code, not a guarantee — nothing caps a handler's total time — so the default is 180 rather
-than something snug. Generosity is cheap here: the restart after a death that leaves a lock behind
-takes longer anyway.
-
-**How long a value lives is not configured in `cache.rs`.** A lifetime belongs to the value, not to
-the store: what makes a chat's language worth keeping for an hour says nothing about a lock that is
-worth keeping for seconds. So every write takes one, and the numbers live together in `CachesConfig`
-(`config/caches.rs`) with one variable each.
-
-**Nothing there is a source of truth** (bar the two above). A miss is answered by the caller doing
-the work again, so a server that is down, slow or simply absent costs only the work it would have
-saved. Every failure is logged and swallowed: `Cache` returns no errors and never panics.
-
-**A `Backend::Redis` that starts failing falls back for real, not just to a faster miss.** The first
-failed call trips `RedisHealth::degraded` (`src/cache.rs`), and every call after that is routed by
-`Backend::route` straight to `RedisState::fallback` — a local store `Backend::Redis` always carries
-— without even attempting Redis. Only the map itself is built up front and free; its sweeper starts
-lazily, on that same first trip, so a Redis that never fails never pays for a background task that
-would spend its whole life finding an empty map. A lock taken in the fallback is a real lock, not a
-`true` handed out because the store couldn't be asked; a dialogue written there is read back, not
-lost until the outage ends. Trips on the *first* failure rather than after a few in a row:
-`ConnectionManager` already retries internally with its own growing backoff before a call returns at
-all, so waiting for several failures here would mean paying that backoff several times over, and
-there is no correctness reason to wait — `RedisState::fallback` is what a single instance of the bot
-already uses correctly under `CACHE_MODE=LOCAL`, not a degraded stand-in for `CACHE_MODE=REDIS`.
-
-Recovery is a background probe, not the data path: `spawn_redis_health_check` pings Redis every
-`REDIS_HEALTH_CHECK_INTERVAL` (a constant, on the same grounds as `SWEEP_INTERVAL` — it only decides
-how promptly the bot notices Redis is back, not whether anything works while it waits) *only* while
-degraded, and `RedisHealth::record` clears the flag on the first probe that succeeds. That same
-successful probe drains `RedisState::fallback` and writes each live entry into Redis with whatever
-is left of its original lifetime (`sync_fallback_to_redis`) — so a lock or a dialogue answered
-mid-outage doesn't vanish the instant `Backend::route` stops reading from the fallback. It is
-best-effort like everything else here: a write that fails is logged and given up on, not retried,
-which for a lock is free (the same as never having been taken) and for a dialogue reads as if a
-restart had just happened. Nothing keeps the fallback's copy once its write is attempted either way,
-which is also what makes it empty — and its sweeper idle — the moment recovery is noticed, rather
-than only once each entry's own TTL would have expired it anyway.
-
-**`cache_fallback_active` follows the most recent call to Redis, not only the one at startup.**
-`RedisHealth::record` sets it on every call that actually reaches Redis: `1` on failure, `0` on the
-next success — which, once degraded, means only the health check's own probes touch it, since the
-data path stops trying Redis entirely. `Cache::connect`'s own write is only the value it starts at.
-So the gauge, and the alert built on it (`DickGrowerBotCacheFellBack`, `for: 5m` in server-configs),
-cover a server that dies mid-session too, not only one that was never reached.
-
-**A chat-keyed value spells the kind out** — `chat:id:-100…:topics`, not `chat:-100…:topics`. A
-chat id and a chat instance are both signed 64-bit numbers, and `ChatIdKind`'s `Display` forwards to
-the value, so two different chats would share an entry. `ChatIdKind::qualified` is what the keys
-use, and `chat::test` pins it.
-
-The local store expires lazily on read **and** is swept on a timer (`TASK_CACHE_SWEEPER`): a key
-read once and never again would otherwise be kept for ever. One sweeper for every tenant, which is
-what replaced the user-service cache's own. Its size is `cache_local_entries`, and it is the number
-to watch, since it is the one that can grow without bound.
-
-The client is `redis` with `ConnectionManager`, and there is deliberately **no pool**. Redis runs
-commands one at a time, so extra connections buy no parallelism; the protocol multiplexes instead,
-letting many requests share one socket, and `ConnectionManager` adds reconnection on top. A pool
-would only add an acquire step that can fail, a size to choose, and a dead connection to retry.
-Keep it this way unless something needs a connection to itself — `BLPOP`, `SUBSCRIBE`, `WATCH`.
-
-**`MULTI`/`EXEC` is unsafe on a multiplexed connection; a Lua script is not.** An `EVAL` is one
-command to the server and runs there without interleaving, so it is exactly as safe as any other
-single command and is the way to do anything that takes more than one step. Both are in use:
-`Cache::lock` is a plain `SET NX EX`, and `Cache::unlock` is a script, because "delete this key if
-it still holds my token" cannot be one command and must not be two. A bare `DEL` would free
-whatever holds the key — after an expiry, somebody else's lock — and that lets a third caller in
-while the second is still working, which is the failure the lock exists to prevent.
-
-The container in `docker-compose.yml` runs **Valkey**, the BSD-licensed fork. The protocol is Redis,
-which is what the service, the network and the variables are named after; only the binaries differ
-(`valkey-server`, `valkey-cli`). It sits behind the `redis` Compose profile, like `user-service` and
-`tracing`.
-
-**Every key begins with `KEY_PREFIX`** (`dgb:chat:id:-1001234:language`), and `Cache` applies it
-rather than each key type, so a kind of value added later cannot be the one that forgets. A server
-may be shared, and `chat:id:-1001234:language` says nothing about whose chat that is. The database
-index in the URL isolates too; having both means neither is what everything rests on.
-
-The user-service entry is prefixed like the rest, though the data behind it is the service's rather
-than ours. Sharing it with another bot would mean agreeing on the encoding, which is a shape
-invented here and read by nothing else — the store is where a saved round trip is kept, not where
-two bots meet, and the service itself is that place. A user is stored as a tag byte and its encoded
-message; the tag is what keeps "the service has no such user" apart from a user whose every field is
-the default, which prost encodes to nothing at all.
-
-### Dialogue state
-
-`/promo` and `/support` have a second step, and their state used to sit in teloxide's
-`InMemStorage`, so every restart dropped whatever conversation was in progress. `dialogue.rs`
-implements teloxide's `Storage` over the store instead.
-
-**Not teloxide's `RedisStorage`**, though the fork does carry the feature. That one is built on
-`deadpool-redis`, which brings a second copy of the `redis` crate (0.32 beside our 1.5) and a
-connection pool next to the multiplexed connection we deliberately don't pool; it keys by the bare
-`chat_id`, which collides with anything else in a shared database; and it sets **no lifetime at
-all**, so an abandoned dialogue would be kept for ever. The trait is three methods, so ours is
-shorter than adopting that would have been, and it inherits the local fallback for free.
-
-```
-DIALOGUE_STATE_TIME=1h     # how long a half-finished command waits for its next message
-```
-
-That is not a staleness: it is how long the conversation stays open, and every answer starts it
-again. `remove_dialogue` refuses when there was nothing to remove, which is what `InMemStorage` does
-and what `Dialogue::exit` expects.
-
-### Optional: user-service integration
-
-The bot can integrate with the [user-service](https://github.com/Kozalo-Blog/user-service)
-microservice (gRPC) to read/update a user's preferred language across all of Kozalo's bots:
-
-```
-GRPC_ADDR_USER_SERVICE=host:port   # unset => integration disabled, personal /language hidden in PMs
-USER_CACHE_TIME=6m            # optional cache TTL for fetched users
-```
-
-`/language` is overloaded: in a private chat it changes the caller's personal language (via
-user-service, above); in a group it sets a chat-wide language (admins only) that applies to
-everyone and overrides each user's own preference. The chat-wide setting is stored in our own
-`Chats.settings` (jsonb) column, so it works even when user-service is disabled:
-
-```
-CHAT_LANGUAGE_CACHE_TIME=1h   # optional TTL for the per-chat language cache (we own the data)
-```
-
-**The shrink broadcast resolves a language per chat, and that is the most expensive thing a summary
-needs.** A chat with no language of its own falls back to a tally of what its players speak, which
-costs a query *and* a call to the user-service — once per chat, on every chat that is owed a
-summary. So both halves read through the store: the override goes through
-`LanguageService::chat_language` rather than the repository beneath it, and the tally is kept under
-a key of its own. Every chat is a miss the first night and a hit on the ones after, which is the
-whole point.
-
-```
-MOST_POPULAR_LANGUAGE_SAMPLE_SIZE=100  # players the tally looks at
-BROADCAST_LANGUAGE_CACHE_TIME=7d       # how long its answer is kept
-```
-
-The sample exists because a tally does not become truer for having every last member in it, while
-the full roll of a large chat is a list the user-service then has to look up in one go. The lifetime
-is far longer than the other per-chat settings because what it caches — which language a group
-speaks — changes on the scale of months, and because it is the only one whose miss costs two
-round trips instead of one. "No answer" is cached as readily as an answer: a chat whose players the
-service has never heard of is the commonest case there is.
-
-**The language is also written into the row** (`Scheduled_Shrink_Broadcasts.lang_code`, migration
-45), and a claim that finds it there skips the resolving entirely. The cache and the column are not
-the same thing: the cache is best-effort and shared, the column is durable and belongs to that one
-summary. It rides along with `finish`/`postpone` rather than travelling in a statement of its own —
-the row is being written anyway, and an extra round trip here would have spent in advance exactly
-what the column saves. A `NULL` leaves what is stored alone, so an attempt that never got as far as
-working the language out cannot erase one that did.
+### Building against the schema and the proto
 
 The proto contract is vendored as the `user-service-proto` git submodule and compiled by
 `build.rs` (via `tonic-prost-build`), so **`protoc` must be installed** and the submodule
@@ -1346,6 +96,43 @@ and `cargo check` will fail with confusing type-mismatch errors if your local DB
 hasn't had the latest migrations applied yet.** Run `cargo sqlx migrate run` first
 whenever a build fails right after pulling migration changes. Requires `sqlx-cli`
 (`cargo install sqlx-cli`).
+
+## Topics
+
+How each subsystem works, and why, lives in `.claude/rules/`, one file per topic. Each file is
+loaded only when a file matching its `paths:` is read, so this one stays small. **Read the topic
+before changing its code**, even when it didn't load on its own (when only creating a file, say),
+and update it in the same commit as the code it describes.
+
+A new topic is a new file with a `paths:` header naming the code it describes. A topic that
+applies everywhere belongs here instead. Keep cross-references by file name (`see cache.md`),
+since "below" means nothing across files.
+
+| Topic | File |
+|---|---|
+| The bot's HTTP client and its timeouts | `bot-http-client.md` |
+| Picking the Dick of the Day; one per chat per day | `dick-of-the-day.md` |
+| What counts as a growth; perks and `Perk_States` | `growth-and-perks.md` |
+| What the help mentions | `help.md` |
+| Commands that only inform (`/voucher`, `/buy`, …), aliases, menus | `info-commands.md` |
+| Checking an inline PvP offer | `pvp.md` |
+| `/support`, its replies, user bans | `support-and-bans.md` |
+| Rate limiting, `/start` spam, commands that arrive too late | `rate-limiting.md` |
+| How many guesses a promo code takes | `promo.md` |
+| How a command is counted (`usage_total`, rejections) | `command-metrics.md` |
+| What each signal means | `signals.md` |
+| How a span of time is written in a setting | `durations.md` |
+| The pool's acquire timeout, `statement_timeout` | `database-pool.md` |
+| The bot's usernames; how a player's name is shown | `bot-names-and-usernames.md` |
+| Restricting the bot to forum topics | `topics.md` |
+| Self-destruction of messages and its worker | `self-destruction.md` |
+| The daily shrink and its broadcast queue | `daily-shrink.md` |
+| The one `Throttle` | `throttle.md` |
+| Tracing, logs, errors, panics | `observability.md` |
+| Telegram API observer, moot refusals, unexpected ids | `telegram-api.md` |
+| The store of short-lived values (cache, locks), dialogue state | `cache.md` |
+| user-service integration, languages | `user-service.md` |
+| Tests against the database | `db-tests.md` |
 
 ## Architecture
 
@@ -1401,135 +188,6 @@ Each bot feature is a vertical slice: a file in `handlers/` (e.g. `dick.rs`, `pv
 by a matching file in `repo/` (`dicks.rs`, `pvpstats.rs`, `loans.rs`, …) that owns the
 SQL. When adding a feature, follow this pairing rather than mixing DB access into handlers.
 
-### What counts as a growth
-
-> `GrowthTx::commit_growth` is the growth, and the only one. It is subject to the once-a-day rule and
-> it spends a bonus attempt. Every other write to `Dicks` is not a growth: it leaves `updated_at`
-> alone and `bonus_attempts` is not its to move.
-
-**The rule lives in that one statement** (`src/repo/dicks.rs`), in the `WHERE` of its
-`ON CONFLICT DO UPDATE`: the row is rewritten only when the stored `updated_at` is of an earlier day
-or a bought attempt can pay for it, and the same statement spends the attempt — **only when one was
-needed**, so the day's first growth is free whatever the player has in store. A refusal is
-therefore not an error but an empty answer — `commit_growth` returns `Option`, like `commit_dod`
-beside it, and `handlers::dick` turns `None` into the "come back tomorrow" notice.
-
-That is a change of kind, not only of place. `trg_check_and_update_dicks_timestamp` applied the rule
-to **any** statement that set `updated_at`, so the rule held whoever wrote the row; now it holds
-only for whoever goes through `commit_growth`. A growth written by hand somewhere else would not be
-refused, and nothing in the schema would say so. What guards it instead is
-`src/repo/test/dicks.rs` — the once-a-day refusal, a bonus attempt paying for a second growth, a
-non-growth write spending none and not reopening the day — and this paragraph.
-
-The trigger was worth removing because it had grown into a tax on everything around it. Its second
-half served `bonus_attempts`, which nothing in the bot ever grants, so the chat merge
-(`src/repo/chats.rs`) carried two `+1`s whose only purpose was to cancel a decrement it never
-wanted; three tests dropped the trigger outright to be able to write what they meant; and the
-refusal travelled as SQLSTATE `GD0E1`, spelled out in the handler and unpacked from
-`sqlx::Error::Database` twelve lines at a time.
-
-Nothing about the row lock changes: `ON CONFLICT DO UPDATE` takes it before the `WHERE` is
-evaluated, so two `/grow`s racing for the same dick serialise exactly as they did.
-
-### One Dick of the Day per chat per day
-
-The same shape, one table over: `PRIMARY KEY (chat_id, created_at)` on `Dick_of_Day` **is** the
-rule, and `Dicks::begin_dod` claims that key before it grows anybody. A conflict means the day is
-already won, so the growth never happens and the winner's name is read back for the answer:
-`begin_dod` returns `DickOfDayIntentStatus` — `Vacant(growth_tx)` or `AlreadyChosen(name)` — and only a vacant day
-reaches `GrowthTx::commit_dod`, which returns `DickOfDayResult`, `Chosen` or `NoDick`.
-
-Claiming first is what makes two `/dod`s in one chat serialise: the second waits on the index and
-is told it lost. `trg_check_dod_timestamp` could not do that. Its `SELECT` for an existing winner
-read past a concurrent election under READ COMMITTED, so the loser of a race got the primary key's
-own `23505` instead of the trigger's `GD0E2`, and the chat was shown an internal error.
-
-The name is read by **a second statement**, not by a `SELECT` beside the insert in one CTE: a
-data-modifying CTE shares one snapshot with the query next to it, so the row the winning election
-committed after ours began would not be visible there at all.
-
-Two things went with the trigger (migration 49). `Dick_of_Day.created_at` is no longer forced to
-today — the column's `DEFAULT current_date` is what the bot's own insert gets, and the chat merge
-is the only caller that names a date, which is precisely what it wants; `Chats::move_dicks_of_the_day`
-therefore no longer disables a trigger, and no longer holds an `ACCESS EXCLUSIVE` lock on the table
-for the rest of the merge. And `trg_forbid_dod_updates` is gone, so the table is append-only only
-because nothing in the bot updates it.
-
-### Perks and the storage they are given
-
-A perk changes a length change: `handlers/perks.rs` holds them, `perks::all` registers them, and
-each is switched off by a `DISABLE_<NAME>` variable named after it. **A perk is a plugin**, so it
-never gets a column of its own on `Dicks`. It gets `Perk_States` instead (migration 41) — a row per
-`(chat, user, perk)` whose `state` is jsonb the perk alone understands. Nothing validates that blob:
-its shape belongs to the perk, and a `CHECK` would have to name each perk's private shape to say
-anything useful. `serde` is the schema, and a blob it can't read is treated as a fresh start rather
-than a failure, which is what lets a perk change its stored shape without a data migration. Adding a perk therefore
-needs no migration, only a row in `Perks`, and that name-to-id dictionary is read **once**, by
-`Incrementor::new` at startup, in a single statement for all of them. Nothing looks a perk up by
-name afterwards.
-
-**A growth is one transaction, and the perks write through it.** `Dicks::begin_growth` (or
-`begin_dod`) opens a `GrowthTx`, which owns the transaction; `Incrementor::growth_increment` takes it
-by `&mut`, hands the perks its connection as `PerkContext::conn`, and the caller ends it with
-`GrowthTx::commit_growth` / `commit_dod`. Dropping a `GrowthTx` rolls everything back — which is what a
-refused growth is: the once-a-day rule is the upsert in `commit_growth`, *after* the perks have
-run, and a perk that wrote something (a loan payout, its state) leaves no trace when it says no.
-The Telegram answer is sent after the commit, never inside the transaction.
-
-**Every attempt is a savepoint.** When the perks cancel a roll out to zero,
-`Incrementor::nonzero_increment` rolls its savepoint back — the perks' writes with it — and rolls
-the base again, up to `MAX_REROLLS` times; if they still cancel it, the bare base is used and the
-perks are skipped. A perk's state is written by the incrementor from `PerkOutcome::state`, inside
-the attempt; anything else a perk needs to write goes through `ctx.conn` itself, as
-`LoanPayoutPerk` does.
-
-**A perk's error ends the attempt, and the perks with it.** `apply` returns a `Result` because a
-failed statement poisons a Postgres transaction (`25P02`): nothing after it would work, so the
-attempt is rolled back and the bare base is used — as it is for an `i64` overflow of the sum.
-
-**The dick's row is locked first, the loan's second**, the same order `Loans::borrow` takes them
-in (`begin_growth` locks the dick, `LoanPayoutPerk` locks the loan with `FOR UPDATE`). The payout
-is therefore computed against the debt it will be taken from. Keep that order for any perk that
-locks something of its own.
-
-Two things a perk is handed rather than fetching itself: `ChangeSource`, because a Dick of the Day
-award is not a growth and `dod_increment` shares the perk pipeline with `growth_increment`; and
-`today`, which is the **database's** `current_date`, because that is the calendar the once-a-day
-rule compares against. A perk counting days that asked this process's clock would count different
-ones.
-
-The streak perk (issue #156) is the first user of all this. It stores
-`{"streak": …, "max": …, "last_grow": …}` and adds a centimetre for every **grade** the streak has
-reached — `STREAK_BONUS_GRADES` lists the days they start on (`StreakGrades`). Only playing on a
-*later* day advances the count — a second growth on the same day, bought with `bonus_attempts`, is
-paid the same bonus and leaves it alone.
-
-```
-STREAK_BONUS_GRADES=2,4,8,16,32  # the day each +1 cm starts on; empty => the perk is off
-```
-
-Three things about that shape are deliberate:
-
-* **The bonus is a length, not a share of the roll.** A share scales the swings together with the
-  average, so a veteran's worst day would be twice a newcomer's and luck would outweigh the streak
-  exactly as much as it did on day one. A fixed length moves the average and leaves the swings alone.
-* **It is visible from the second day.** The perks' part of the answer is printed only when their
-  change is non-zero, and a share of a small roll rounds to nothing — a bonus nobody sees teaches
-  nobody how it works. The note names the next grade (`titles.perks.streak.next_grade`) for the
-  same reason: an irregular step can't be learned by watching it.
-* **The grades lengthen as they go**, so a long streak still has a next step without the bonus
-  outgrowing the rolls.
-
-**A shrink gets the same centimetres**, so a long enough streak cancels it: with the default list
-and the default range, a month in a row outweighs the worst roll of −5. That is accepted as what a
-month of daily play earns; inactivity still costs length through the daily shrink.
-
-Unlike `help-pussies`, it is **on by default** (`PerksConfig::default`), so it works without a
-change to server-configs.
-
-`/stats` gets its line through `Perk::stats_line`, a hook with a default of `None`: the states are
-read once and handed round, so a perk with nothing to say costs nothing.
-
 ### Dependency injection
 
 Repositories are grouped in a `Repositories` struct and injected into handlers via the `deps!` macro. Handlers do not construct repos directly.
@@ -1540,9 +198,9 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
 ## Code Style
 
-- **`new` builds a domain value; `literal!` is for the validated types only.** Five types validate
-  anything: `Ratio`, `Percentage`, `FloatPercentage` (`ratio.rs`), `PromoCode` (`promo.rs`) and
-  `PerkName` (`perk.rs`).
+- **`new` builds a domain value; `literal!` is for the validated types only.** Six types validate
+  anything: `Ratio`, `Percentage`, `FloatPercentage` (`ratio.rs`), `PromoCode` (`promo.rs`),
+  `PerkName` (`perk.rs`) and `StartParameter` (`deeplink.rs`).
   They alone have the `check_literal`/`from_literal` pair, and
   `literal!(Ratio = 0.5)` is what makes the `assert!` run while the code is compiled; a bare
   `Ratio::from_literal(0.5)` skips the `const` block, and with it the check.
@@ -1617,7 +275,8 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
   The same restraint applies generally: prefer no comment to one that repeats what the code says,
   and never explain a design by describing what the alternative would have generated. If the
-  reasoning is worth keeping, it goes in this file or in the commit message.
+  reasoning is worth keeping, it goes in this file, in a topic of `.claude/rules/`, or in the
+  commit message.
 
 - **A file reads from its public surface downwards.** Constants and statics first, then the types,
   then the functions; within each group, what callers use comes before what only this file uses. A
@@ -1641,28 +300,33 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 - **A log message is a constant; the values are fields.** Use `tracing::{debug,info,warn,error}!`
   (never `log::*`) and keep the message text free of interpolated values, so that repeated events
   group together in the log database. Messages are lower-case and have no trailing dots. Pass the
-  error of a failed operation as an `error` field — `tracing-opentelemetry` turns it into an
-  exception event on the span, which is how a failure becomes visible in the trace. Don't repeat
-  what the span already carries: an instrumented function's `chat_id`/`uid`/`lang_code` are printed
-  with every line anyway.
+  error of a failed operation as `error = flat!(e)` (`errors::flat`). Don't repeat what the span
+  already carries: an instrumented function's `chat_id`/`uid`/`lang_code` are printed with every
+  line anyway.
 
   ```rust
   // ❌ the values are baked into the text, the message is unique every time
   tracing::warn!("daily shrink: couldn't notify chat {chat_id}: {err:#}");
 
   // ✅ constant message, values as fields (chat_id comes from the span)
-  tracing::warn!(error = format!("{err:#}"), "couldn't notify the chat about the shrinks");
+  tracing::warn!(error = flat!(err), "couldn't notify the chat about the shrinks");
   ```
 
-  Use `%value` for `Display`, `?value` for `Debug`, and `format!("{e:#}")` for an `anyhow` error
-  whose whole chain is worth keeping on one line.
+  `flat!` records the error *as an error*, a `&dyn Error`, which a string can't be: the exporter
+  writes it as `exception.message`, and `tracing-opentelemetry` adds an exception to the span. The
+  exporter writes only the error's `Display` and never walks `source()`, so `flat!` first joins the
+  whole cause chain into that `Display`, on one line — the log database stores a record per line.
+  It takes any `Error`, and an `anyhow::Error` through its `Deref`.
+
+  Use `%value` for `Display` and `?value` for `Debug` for everything that isn't an error.
 
 - **A comment describes the code, never the change.** Write comments in short, plain English: what
   the code does, and why if that isn't obvious. Never mention a change, a diff, an issue number, or
   the previous version ("one statement instead of a transaction", "renamed from…"). The same goes
   for what is deliberately *absent*: removed code leaves no comment behind, so no "no X here on
   purpose", "X was removed because…", "bring X back if…". All of that belongs in the commit message.
-  If the reasoning is worth keeping, put it in `CLAUDE.md` or `README.md`. When nothing non-obvious
+  If the reasoning is worth keeping, put it in `CLAUDE.md`, a topic of `.claude/rules/` or
+  `README.md`. When nothing non-obvious
   is left to say, write no comment at all.
 
   ```rust
@@ -1698,6 +362,17 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
   A domain number answers `is_zero()`, so a comparison against zero is spelled with it rather than
   through `.value()`.
+
+  **Booleans and `chrono` types stay bare.** A wrapper is worth it when the bare type doesn't say
+  what it holds, so two values can be swapped unnoticed. A `bool` field is named at every
+  construction, and `DateTime<Utc>` already carries its unit, epoch and timezone. A `NaiveDate` is
+  named by its parameter, and no signature takes two dates of different meanings. Where two do meet,
+  name them, as `AdjacentDates` does, before reaching for a type. Most uses are chrono arithmetic or a
+  sqlx bind, so a wrapper would be unwrapped at nearly every call site.
+
+  A bool that needs more than a name becomes an **enum**, not a newtype. That applies when two bools
+  meet in one signature, or when the two states have names of their own (`DickOfDaySelectionMode`,
+  `ChangeSource`). `Foo(true)` reads no better at a call site than `true`.
 
 - **A number changing type says which conversion it is.** `as` is denied
   (`[workspace.lints.clippy]` in the root `Cargo.toml`), because one token means three different
@@ -1740,6 +415,25 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
 
   A cast that is genuinely right keeps an `#[allow]` carrying the reason, on the narrowest scope
   that works — never a whole function, or it will also cover the next cast written on that line.
+
+- **Every map picks its hasher**, and std's `HashMap`/`HashSet` is not one of the choices
+  (`disallowed-types` in `clippy.toml`):
+
+  | The keys are | Use |
+  |---|---|
+  | ours, Telegram-assigned ids, enums, an operator's file | `FxHashMap` / `FxHashSet` (`rustc-hash`) |
+  | chosen by a user — usernames, free text | `AHashMap` / `AHashSet` (`ahash`) |
+
+  Fx is the fastest, but it is public and unseeded, so keys an attacker chooses can be made to
+  collide and turn every lookup into a scan. AHash is seeded at random per process, which closes
+  that, and is still faster than SipHash. The import's set of leaderboard names is the one place
+  that needs it today.
+
+  A library whose signature takes a std map (prometheus's `Desc`, the OTLP exporter's headers)
+  gets one under an `#[allow(clippy::disallowed_types, reason = "…")]` on the statement that builds
+  it. Generated code is handled the same way, on the module around it: `users::generated` for
+  prost, and `translations` in `main.rs` for `rust_i18n::i18n!`, which is why that macro sits in a
+  module of its own and is glob-imported back — an `#[allow]` on a macro call is ignored.
 
 - **ALWAYS** break a function signature onto one parameter per line when the single-line signature
   reaches **120+ characters**. Put the opening `(` at the end of the `fn` line, each parameter on
@@ -1824,43 +518,6 @@ Runtime features are gated by environment variables parsed in `config/`. Check `
   `unwrap_or_else` takes no async closure.
 
   A `match` is still the right tool for guards (`Err(e) if …`) or more than two outcomes.
-
-## Tests against the database
-
-The whole test binary shares **one** Postgres container, and every test takes a **database of its
-own** out of it:
-
-```rust
-let db = fresh_db().await;
-```
-
-That is the entire API (`src/repo/test/mod.rs`). Three things make it work, and each of them is
-load-bearing:
-
-* **A runtime of its own.** Every `#[tokio::test]` builds a runtime and tears it down when the test
-  ends, and a sqlx pool dies with the runtime that created it — sharing a pool between tests fails
-  with *"a Tokio 1.x context was found, but it is being shutdown"* as soon as the first test
-  finishes. So the container and its maintenance pool live on the runtime in
-  `src/test_containers.rs`, reached with `test_containers::spawn(...)`. Not `block_on`, which panics
-  inside a runtime. The per-test pool is built on the test's own runtime and dies with it, which is
-  fine.
-* **A template database.** The migrations run once per run into `test_template`; each test's
-  database is `CREATE DATABASE … TEMPLATE test_template`, which is far cheaper than replaying every
-  migration 54 times.
-* **A reused container.** It is marked `ReuseDirective::Always` and deliberately outlives the run,
-  so the next run finds it instead of paying the startup again. It is *only* removed by
-  `task test:clean`. Its databases are named `test_run<pid>_<n>` and the ones left by earlier runs
-  are dropped at startup — one test binary at a time is assumed, which is how `cargo test` runs.
-
-**Every shared container is one `SharedContainer`** (`src/test_containers.rs`), declared as a
-`static` next to the tests that need it — Postgres, the cache and VictoriaLogs. A reusable container
-is matched by its **labels**, which is why the service name is a constructor argument and has to
-differ: labelled alike, the second request is handed the first container and fails on a port that
-isn't there. `task test:clean` matches the label by key, so it sweeps every value.
-
-This replaced one container per test: ~35s for the suite instead of ~75s. Don't reintroduce a
-per-test or per-file container, and don't put the shared pool in a plain `static` without the
-runtime — both were tried and both fail in the ways described above.
 
 ## DB Migrations
 

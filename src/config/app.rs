@@ -3,12 +3,11 @@ use reqwest::Url;
 use crate::config::caches::CachesConfig;
 use crate::config::env::*;
 use crate::config::toggles::*;
-use crate::config::announcements::*;
 use crate::config::self_destruction::*;
 use crate::config::shrink::{BroadcastConfig, DailyShrinkConfig};
 use crate::config::incrementor::IncrementorConfig;
 use crate::config::rate_limit::RateLimitConfig;
-use crate::domain::primitives::{AttemptsCount, Bet, BonusPercent, DaysCount, Limit, PayoutRatio, RateLimit, Ratio};
+use crate::domain::primitives::{AttemptsCount, Bet, BonusPercent, DaysCount, Limit, PayoutRatio, RateLimit, Ratio, StartParameter, Username};
 use crate::domain::primitives::chat::TelegramChatId;
 
 #[derive(Clone)]
@@ -24,12 +23,20 @@ pub struct AppConfig {
     pub pvp_default_bet: Bet,
     pub incrementor: IncrementorConfig,
     pub daily_shrink: DailyShrinkConfig,
-    pub announcements: AnnouncementsConfig,
     pub self_destruction: SelfDestructionConfig,
     pub command_toggles: CachedEnvToggles,
     pub support_chat_id: Option<TelegramChatId>,
+    /// The bot that auctions promo codes; `None` when there is no auction to point to.
+    pub auction_bot: Option<Username>,
+    /// What the link to the auction bot passes as `start`; `None` leaves the link bare.
+    pub auction_start_parameter: Option<StartParameter>,
+    /// Where `/donate` leads; `None` when donations aren't accepted.
+    pub donate_url: Option<Url>,
     pub caches: CachesConfig,
     pub rate_limit: RateLimitConfig,
+    /// How long a command may wait to reach the bot before it is dropped unanswered; zero keeps
+    /// every one.
+    pub command_max_age: Duration,
 }
 
 #[derive(Clone)]
@@ -57,6 +64,7 @@ impl AppConfig {
         let multiple_loans = get_env_value_or_default("MULTIPLE_LOANS_ENABLED", false);
         let pvp_default_bet = env_value!("PVP_DEFAULT_BET": Bet, or = 1);
         let check_acceptor_length = get_env_value_or_default("PVP_CHECK_ACCEPTOR_LENGTH", false);
+        let check_inline_offer = get_env_value_or_default("PVP_CHECK_INLINE_OFFER", true);
         let show_stats = get_env_value_or_default("PVP_STATS_SHOW", true);
         let show_stats_notice = get_env_value_or_default("PVP_STATS_SHOW_NOTICE", true);
         let most_popular_language_enabled = get_env_value_or_default("MOST_POPULAR_LANGUAGE_ENABLED", true);
@@ -66,6 +74,7 @@ impl AppConfig {
             inactivity_days: env_value!("DAILY_SHRINK_INACTIVITY_DAYS": DaysCount, or = 7),
             ramp_up_days: env_value!("DAILY_SHRINK_RAMP_UP_DAYS": DaysCount, or = 7),
             period_days: env_value!("DAILY_SHRINK_PERIOD_DAYS": DaysCount, or = 1, at_least = 1),
+            start_time: get_optional_env_value("DAILY_SHRINK_TIME"),
             batch_size: env_value!("DAILY_SHRINK_BATCH_SIZE": Limit, or = 100, at_least = 1),
             batch_delay: env_duration!("DAILY_SHRINK_BATCH_DELAY"),
             expiry_batch_size: env_value!("DAILY_SHRINK_EXPIRY_BATCH_SIZE": Limit, or = 5000, at_least = 1),
@@ -82,7 +91,6 @@ impl AppConfig {
                 language_sample: env_value!("MOST_POPULAR_LANGUAGE_SAMPLE_SIZE": Limit, or = 100, at_least = 1),
             },
         };
-        let announcements_file = get_env_value_or_default("ANNOUNCEMENTS_FILE", "announcements.yml".to_string());
         let self_destruction = SelfDestructionConfig {
             notice: env_duration!("MSG_SELFDESTRUCT_DELAY_NOTICE"),
             report: env_duration!("MSG_SELFDESTRUCT_DELAY_REPORT"),
@@ -114,6 +122,7 @@ impl AppConfig {
                 dod_selection_mode,
                 pvp: BattlesFeatureToggles {
                     check_acceptor_length,
+                    check_inline_offer,
                     show_stats,
                     show_stats_notice,
                 },
@@ -129,12 +138,15 @@ impl AppConfig {
             pvp_default_bet,
             incrementor: IncrementorConfig::from_env(),
             daily_shrink,
-            announcements: AnnouncementsConfig::load(&announcements_file),
             self_destruction,
             command_toggles: Default::default(),
             support_chat_id,
+            auction_bot: get_optional_env("HELP_AUCTION_BOT"),
+            auction_start_parameter: get_optional_env("HELP_AUCTION_START_PARAMETER"),
+            donate_url: get_optional_env("DONATE_URL"),
             caches: CachesConfig::from_env(),
             rate_limit: RateLimitConfig::from_env(),
+            command_max_age: env_duration!("COMMAND_MAX_AGE", or = mins(10)),
         }
     }
 }

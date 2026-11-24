@@ -36,12 +36,6 @@ impl Page {
     }
 }
 
-impl InvalidPage {
-    pub fn for_value(value: &str, msg: impl ToString) -> Self {
-        Self(format!("{}: {value}", msg.to_string()))
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::{Limit, Offset, Page};

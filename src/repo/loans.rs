@@ -1,5 +1,4 @@
 use autometrics::autometrics;
-use anyhow::Context;
 use domain_types::traits::SaturatingInto;
 use sqlx::{PgConnection, Postgres, Transaction};
 
@@ -7,6 +6,7 @@ use crate::config;
 use crate::domain::objects::Loan;
 use crate::domain::primitives::{Debt, LengthChange, LoanId, LoanPayout, PayoutRatio, UserId};
 use crate::domain::primitives::chat::InternalChatId;
+use crate::errors::details::{DetailedContext, Details};
 use crate::repo::{ensure_only_one_row_updated, ChatIdKind, Chats, Dicks};
 
 struct LoanEntity {
@@ -55,7 +55,7 @@ impl Loans {
                 uid as UserId, chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get an active loan for {chat_id} and {uid}"))?
+            .user_context(uid, "couldn't get an active loan")?
             .map(Loan::from);
         Ok(maybe_loan)
     }
@@ -96,7 +96,9 @@ impl Loans {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
-            .context(format!("couldn't pay for a loan: {chat_id}, {uid}, {value}"))
+            .detailed_context(Details::new("couldn't pay for the loan")
+                .subject_uid(uid)
+                .payout(value))
     }
 
     #[autometrics]
@@ -114,7 +116,9 @@ impl Loans {
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
-            .context(format!("couldn't pay for a loan in the transaction: {chat_id}, {uid}, {value}"))
+            .detailed_context(Details::new("couldn't pay for the loan in the transaction")
+                .subject_uid(uid)
+                .payout(value))
     }
 
     /// The loan of the dick with its row locked, so the debt can't change under whoever pays it.
@@ -142,7 +146,7 @@ async fn fetch_length_locked(
             chat_internal_id as InternalChatId, uid as UserId)
         .fetch_optional(&mut **tx)
         .await
-        .context(format!("couldn't fetch and lock the length for internal {chat_internal_id} and {uid}"))
+        .user_context(uid, "couldn't fetch and lock the length")
 }
 
 #[autometrics]
@@ -159,7 +163,7 @@ async fn lock_active_loan_internal(
                 uid as UserId, chat_internal_id as InternalChatId)
         .fetch_optional(conn)
         .await
-        .context(format!("couldn't get an active loan for internal {chat_internal_id} and {uid}"))?;
+        .user_context(uid, "couldn't get an active loan")?;
     Ok(maybe_loan)
 }
 
@@ -177,7 +181,9 @@ async fn create_loan(
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)
-        .context(format!("couldn't create a loan for {chat_internal_id} and {uid} with value of {value}"))?
+        .detailed_context(Details::new("couldn't create a loan")
+            .subject_uid(uid)
+            .debt(value))?
 }
 
 #[autometrics]
@@ -193,5 +199,7 @@ async fn refinance_loan(
         .execute(&mut **tx)
         .await
         .map(ensure_only_one_row_updated)
-        .context(format!("couldn't update the loan with id = {id} (additional value is {value})"))?
+        .detailed_context(Details::new("couldn't refinance the loan")
+            .loan_id(id)
+            .debt(value))?
 }

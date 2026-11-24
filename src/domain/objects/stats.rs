@@ -1,4 +1,6 @@
 use crate::domain::primitives::{BattlesCount, Length, Percentage, WinStreak};
+use crate::errors::flat::flat;
+use domain_types::errors::DomainArithmeticError;
 use domain_types::literal;
 
 pub struct UserStats {
@@ -48,14 +50,12 @@ impl LoserStats {
 }
 
 fn win_rate_percentage(battles_won: BattlesCount, battles_total: BattlesCount) -> Percentage {
-    if battles_total.is_zero() {
-        return literal!(Percentage = 0)
-    }
     match battles_won / battles_total {
         Ok(ratio) => Percentage::from(ratio),
+        Err(DomainArithmeticError::ByZero) => literal!(Percentage = 0),
         Err(e) => {
             // battles_won > battles_total can only mean corrupted stats; don't crash the handler
-            tracing::error!(battles_won = %battles_won, battles_total = %battles_total, error = %e, "an invalid win rate");
+            tracing::error!(battles_won = %battles_won, battles_total = %battles_total, error = flat!(e), "an invalid win rate");
             literal!(Percentage = 100)
         }
     }

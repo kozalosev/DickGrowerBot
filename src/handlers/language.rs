@@ -1,11 +1,15 @@
+use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::anyhow;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
+use crate::config::ThrottledBot;
+use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdPartiality, ChatIdSource, TelegramChatId, TelegramChatInstanceId};
 use crate::domain::primitives::{LanguageCode, SupportedLanguage};
@@ -23,6 +27,19 @@ pub enum LanguageCommands {
     Lang(String),
 }
 
+impl PublishedCommands for LanguageCommands {
+    /// In a private chat it sets the user's own language, kept by the user-service, so it needs
+    /// that integration. For a group's administrators it sets the chat's language, kept in the
+    /// bot's own database, so it is always available.
+    fn is_published(&self, scope: MenuScope, toggles: &CommandToggles) -> bool {
+        match scope {
+            MenuScope::Private => toggles.personal_language_enabled,
+            MenuScope::Group => false,
+            MenuScope::Admins => true,
+        }
+    }
+}
+
 impl LanguageCommands {
     fn into_arg(self) -> String {
         match self {
@@ -34,7 +51,7 @@ impl LanguageCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn language_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: LanguageCommands,
     language_service: LanguageService,
@@ -59,7 +76,7 @@ pub async fn language_cmd_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = from_id.0, lang_code = %lang_code))]
 async fn handle_personal_language(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     from_id: UserId,
     arg: &str,
@@ -67,18 +84,20 @@ async fn handle_personal_language(
     lang_code: &LanguageCode,
 ) -> HandlerResult {
     if !ls.user_service_enabled() {
+        metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::FeatureDisabled);
         reply_html!(bot, msg, t!("commands.language.errors.unavailable", locale = lang_code));
         return Ok(());
     }
     if arg.trim().is_empty() {
         let keyboard = build_language_keyboard(LanguageScope::User, from_id, lang_code);
-        let mut request = reply_html(&bot, &msg, t!("commands.language.prompt", locale = lang_code));
-        request.reply_markup = Some(ReplyMarkup::InlineKeyboard(keyboard));
-        request.await?;
+        reply_html(&bot, &msg, t!("commands.language.prompt", locale = lang_code))
+            .reply_markup(ReplyMarkup::InlineKeyboard(keyboard))
+            .await?;
     } else if let Some(lang) = parse_language_arg(arg) {
-        let text = apply_user_language(&ls, from_id, lang, lang_code).await?;
+        let text = apply_user_language(&ls, from_id, lang, lang_code).await?.to_string();
         reply_html!(bot, msg, text);
     } else {
+        metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::InvalidArgument);
         reply_html!(bot, msg, t!("commands.language.errors.unsupported", locale = lang_code));
     }
     Ok(())
@@ -87,7 +106,7 @@ async fn handle_personal_language(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = from_id.0, lang_code = %lang_code))]
 async fn handle_chat_language(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     from_id: UserId,
     arg: &str,
@@ -95,6 +114,7 @@ async fn handle_chat_language(
     lang_code: &LanguageCode,
 ) -> HandlerResult {
     if !is_chat_admin(&bot, &msg, from_id).await? {
+        metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::AdminsOnly);
         reply_html!(bot, msg, t!("commands.language.errors.admins_only", locale = lang_code));
         return Ok(());
     }
@@ -108,6 +128,7 @@ async fn handle_chat_language(
         let text = apply_chat_language(&ls, &chat_id, Some(lang), lang_code).await?;
         reply_html!(bot, msg, text);
     } else {
+        metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::InvalidArgument);
         reply_html!(bot, msg, t!("commands.language.errors.unsupported", locale = lang_code));
     }
     Ok(())
@@ -120,7 +141,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn language_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     language_service: LanguageService,
     deps: HandlerDeps,
@@ -128,18 +149,23 @@ pub async fn language_callback_handler(
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let data = LanguageCallbackData::parse(&query)?;
-    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid,
+        on_another_user = metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::AnotherUser));
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
 
     let text = match data.scope {
         LanguageScope::User => match data.selection {
             LanguageSelection::Set(lang) if language_service.user_service_enabled() =>
                 apply_user_language(&language_service, data.uid, lang, &lang_code).await?,
-            LanguageSelection::Set(_) =>
-                t!("commands.language.errors.unavailable", locale = &lang_code).to_string(),
+            LanguageSelection::Set(_) => {
+                metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::FeatureDisabled);
+                t!("commands.language.errors.unavailable", locale = &lang_code)
+            },
             // The personal picker never offers "Auto"; treat a stray one as unsupported input.
-            LanguageSelection::Auto =>
-                t!("commands.language.errors.unsupported", locale = &lang_code).to_string(),
+            LanguageSelection::Auto => {
+                metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::InvalidArgument);
+                t!("commands.language.errors.unsupported", locale = &lang_code)
+            },
         },
         LanguageScope::Chat => {
             let chat_id: ChatIdPartiality = query.message.as_ref()
@@ -153,44 +179,47 @@ pub async fn language_callback_handler(
     };
 
     callbacks::edit_message_text(&bot, edit_msg_params, text).await?;
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = uid.0, lang = %lang))]
-async fn apply_user_language<C: UserServiceClient>(
+async fn apply_user_language<'a, C: UserServiceClient>(
     ls: &LanguageService<C>,
     uid: UserId,
     lang: SupportedLanguage,
     current_lang: &LanguageCode,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Cow<'a, str>> {
     let text = match ls.user(uid).await? {
         Some(_) => {
             let code = lang.to_string();
             ls.set_user_language(uid, &code).await?;
             metrics::CMD_LANGUAGE.personal().finished();
-            t!("commands.language.success", locale = &code).to_string()
+            t!("commands.language.success", locale = &code)
         }
-        None => t!("commands.language.not_registered", locale = current_lang).to_string(),
+        None => {
+            metrics::CMD_LANGUAGE_REJECTED.rejected(RejectionReason::NotRegistered);
+            t!("commands.language.not_registered", locale = current_lang)
+        },
     };
     Ok(text)
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = %chat_id, lang = ?selection))]
-async fn apply_chat_language<C: UserServiceClient>(
+async fn apply_chat_language<'a, C: UserServiceClient>(
     ls: &LanguageService<C>,
     chat_id: &ChatIdPartiality,
     selection: Option<SupportedLanguage>,
     current_lang: &LanguageCode,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Cow<'a, str>> {
     ls.set_chat_language(chat_id, selection).await?;
     metrics::CMD_LANGUAGE.chat().finished();
     let text = match selection {
-        Some(lang) => t!("commands.language.chat.success", locale = &lang.to_string()),
+        Some(lang) => t!("commands.language.chat.success", locale = &lang),
         None => t!("commands.language.chat.reset", locale = current_lang),
-    }.to_string();
+    };
     Ok(text)
 }
 
@@ -202,7 +231,7 @@ fn build_language_keyboard(scope: LanguageScope, uid: UserId, lang_code: &Langua
     }).collect();
     // Only the chat-wide picker can revert to per-user resolution.
     if scope == LanguageScope::Chat {
-        let label = t!("commands.language.chat.auto_button", locale = lang_code).to_string();
+        let label = t!("commands.language.chat.auto_button", locale = lang_code);
         let data = LanguageCallbackData { scope, uid, selection: LanguageSelection::Auto };
         rows.push(vec![InlineKeyboardButton::callback(label, data.to_data_string())]);
     }

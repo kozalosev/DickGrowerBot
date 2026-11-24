@@ -42,11 +42,23 @@ impl RateLimiter {
     /// Counts one request against each counter that applies and answers with the harsher verdict,
     /// or `None` while both are within their limits.
     pub async fn hit(&self, uid: Option<UserId>, chat: Option<ChatIdKind>) -> Option<Exceeded> {
+        let window = self.config.window;
         let (user, chat) = futures::join!(
-            self.count(uid.map(UserKey), self.config.user, &metrics::RATE_LIMIT_USER_WINDOWS),
-            self.count(chat.map(ChatKey), self.config.chat, &metrics::RATE_LIMIT_CHAT_WINDOWS),
+            self.count(uid.map(UserKey), self.config.user, window, &metrics::RATE_LIMIT_USER_WINDOWS),
+            self.count(chat.map(ChatKey), self.config.chat, window, &metrics::RATE_LIMIT_CHAT_WINDOWS),
         );
         user.max(chat)
+    }
+
+    /// Counts one promo code attempt against its user.
+    pub async fn promo_exceeded(&self, uid: UserId) -> Option<Exceeded> {
+        let CommandSpamLimit { requests: limit, window } = self.config.commands.promo;
+        self.count(Some(PromoKey(uid)), limit, window, &metrics::PROMO_ATTEMPT_USERS).await
+    }
+
+    /// How long a user waits at most once the promo limit is reached.
+    pub fn promo_window(&self) -> Duration {
+        self.config.commands.promo.window
     }
 
     /// Counts a bare `/start` against its chat and tells whether it went over the limit.
@@ -60,12 +72,18 @@ impl RateLimiter {
             .is_some_and(|count| count > u64::from(limit.value()))
     }
 
-    async fn count(&self, key: Option<impl CacheKey>, limit: RateLimit, curve: &ThresholdCurve) -> Option<Exceeded> {
+    async fn count(
+        &self,
+        key: Option<impl CacheKey>,
+        limit: RateLimit,
+        window: Duration,
+        curve: &ThresholdCurve,
+    ) -> Option<Exceeded> {
         let key = key?;
         if limit.is_zero() {
             return None
         }
-        let count = self.cache.increment(key, self.config.window).await?;
+        let count = self.cache.increment(key, window).await?;
         curve.observe(count);
         let limit = u64::from(limit.value());
         let warnings = u64::from(self.config.warnings.value());
@@ -97,9 +115,16 @@ struct StartKey(ChatIdKind);
 
 impl CacheKey for StartKey {}
 
+#[derive(Display)]
+#[display("ratelimit:promo:user:{_0}")]
+struct PromoKey(UserId);
+
+impl CacheKey for PromoKey {}
+
 #[cfg(test)]
 mod test {
     use std::time::Duration;
+    use futures::{stream, StreamExt};
     use teloxide::types::ChatId;
     use crate::cache::Cache;
     use crate::config::{CacheConfig, CacheMode, CommandSpamLimit, Commands, RateLimitConfig};
@@ -112,10 +137,10 @@ mod test {
     async fn a_user_is_warned_and_then_ignored() {
         let limiter = limiter(2, 0, 3).await;
 
-        let mut verdicts = Vec::new();
-        for _ in 0..7 {
-            verdicts.push(limiter.hit(Some(uid(1)), None).await);
-        }
+        let verdicts: Vec<_> = stream::iter(0..7)
+            .then(|_| limiter.hit(Some(uid(1)), None))
+            .collect()
+            .await;
 
         use Exceeded::*;
         assert_eq!(verdicts, [None, None, Some(Warn), Some(Warn), Some(Warn), Some(Ignore), Some(Ignore)]);
@@ -127,10 +152,10 @@ mod test {
         let limiter = limiter(10, 3, 1).await;
         let chat = || Some(ChatId(-100).into());
 
-        let mut verdicts = Vec::new();
-        for n in 0..6 {
-            verdicts.push(limiter.hit(Some(uid(n % 2)), chat()).await);
-        }
+        let verdicts: Vec<_> = stream::iter(0..6)
+            .then(|n| limiter.hit(Some(uid(n % 2)), chat()))
+            .collect()
+            .await;
 
         use Exceeded::*;
         assert_eq!(verdicts, [None, None, None, Some(Warn), Some(Ignore), Some(Ignore)]);
@@ -158,6 +183,15 @@ mod test {
         assert!(reached("rate_limit_chat_windows_total", 1) >= 1);
     }
 
+    #[tokio::test]
+    async fn every_promo_attempt_is_reported_to_its_curve() {
+        let limiter = limiter_with_promo(2, 0).await;
+
+        limiter.promo_exceeded(uid(1)).await;
+
+        assert!(reached("promo_attempt_users_total", 1) >= 1);
+    }
+
     /// A limit that is off counts nothing, so nothing may be reported for it. The threshold is one
     /// no other test gets to, since the series are shared.
     #[tokio::test]
@@ -176,10 +210,10 @@ mod test {
     async fn a_chat_gets_one_start_per_window() {
         let limiter = limiter_with_start(1).await;
 
-        let mut verdicts = Vec::new();
-        for _ in 0..3 {
-            verdicts.push(limiter.start_exceeded(ChatId(-100).into()).await);
-        }
+        let verdicts: Vec<_> = stream::iter(0..3)
+            .then(|_| limiter.start_exceeded(ChatId(-100).into()))
+            .collect()
+            .await;
         let other_chat = limiter.start_exceeded(ChatId(-200).into()).await;
 
         assert_eq!(verdicts, [false, true, true]);
@@ -196,6 +230,31 @@ mod test {
         }
     }
 
+    #[tokio::test]
+    async fn a_promo_guesser_is_warned_and_then_ignored() {
+        let limiter = limiter_with_promo(2, 1).await;
+
+        let verdicts: Vec<_> = stream::iter(0..4)
+            .then(|_| limiter.promo_exceeded(uid(1)))
+            .collect()
+            .await;
+        let other_user = limiter.promo_exceeded(uid(2)).await;
+
+        use Exceeded::*;
+        assert_eq!(verdicts, [None, None, Some(Warn), Some(Ignore)]);
+        assert_eq!(other_user, None);
+    }
+
+    #[tokio::test]
+    async fn a_zero_promo_limit_lets_every_attempt_through() {
+        let limiter = limiter_with_promo(0, 0).await;
+
+        for _ in 0..10 {
+            let verdict = limiter.promo_exceeded(uid(1)).await;
+            assert_eq!(verdict, None);
+        }
+    }
+
     fn uid(n: u64) -> UserId {
         UserId::new(n)
     }
@@ -204,6 +263,7 @@ mod test {
     fn reached(name: &str, threshold: u64) -> u64 {
         Lazy::force(&metrics::RATE_LIMIT_USER_WINDOWS);
         Lazy::force(&metrics::RATE_LIMIT_CHAT_WINDOWS);
+        Lazy::force(&metrics::PROMO_ATTEMPT_USERS);
         let series = format!("{name}{{reached=\"{threshold}\"}} ");
         render_metrics()
             .lines()
@@ -213,14 +273,18 @@ mod test {
     }
 
     async fn limiter(user: u32, chat: u32, warnings: u16) -> RateLimiter {
-        limiter_with(user, chat, warnings, 0).await
+        limiter_with(user, chat, warnings, 0, 0).await
     }
 
     async fn limiter_with_start(start: u32) -> RateLimiter {
-        limiter_with(0, 0, 0, start).await
+        limiter_with(0, 0, 0, start, 0).await
     }
 
-    async fn limiter_with(user: u32, chat: u32, warnings: u16, start: u32) -> RateLimiter {
+    async fn limiter_with_promo(promo: u32, warnings: u16) -> RateLimiter {
+        limiter_with(0, 0, warnings, 0, promo).await
+    }
+
+    async fn limiter_with(user: u32, chat: u32, warnings: u16, start: u32, promo: u32) -> RateLimiter {
         let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
         let config = RateLimitConfig {
             user: RateLimit::new(user),
@@ -231,6 +295,10 @@ mod test {
                 start: CommandSpamLimit {
                     requests: RateLimit::new(start),
                     window: Duration::from_mins(10),
+                },
+                promo: CommandSpamLimit {
+                    requests: RateLimit::new(promo),
+                    window: Duration::from_hours(1),
                 },
             },
         };

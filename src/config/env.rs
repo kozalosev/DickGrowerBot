@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use crate::domain::primitives::chat::TelegramChatId;
 use crate::domain::primitives::Ratio;
+use crate::errors::flat::flat;
 
 pub(super) fn get_env_mandatory_value<T, E>(key: &str) -> anyhow::Result<T>
 where
@@ -48,6 +49,19 @@ where
 /// than configuring it with nothing. Nothing is logged: the caller says what the absence means.
 pub(super) fn get_optional_env_string(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|value| !value.is_empty())
+}
+
+/// [`get_optional_env_string`] parsed into `T`. A value that doesn't parse is logged and counts as
+/// unset.
+pub(super) fn get_optional_env<T>(key: &str) -> Option<T>
+where
+    T: FromStr,
+    <T as FromStr>::Err: Error,
+{
+    get_optional_env_string(key)?
+        .parse::<T>()
+        .inspect_err(|e| tracing::warn!(error = flat!(e), %key, "invalid value of an environment variable, ignoring it"))
+        .ok()
 }
 
 /// Reads a domain value from an environment variable, with a fallback and a lower bound written as
@@ -196,6 +210,8 @@ pub(super) enum InvalidDuration {
     Number(std::num::ParseIntError),
 }
 
+impl Error for InvalidDuration {}
+
 /// The items of a comma-separated list, trimmed, with the empty ones left out.
 pub(super) fn list_items(raw: &str) -> impl Iterator<Item = &str> {
     raw.split(',')
@@ -261,7 +277,7 @@ pub(super) fn get_optional_env_duration(key: &str) -> Option<Duration> {
             None
         })?;
     parse_duration(&raw)
-        .inspect_err(|e| tracing::warn!(key = %key, value = raw, error = %e,
+        .inspect_err(|e| tracing::warn!(key = %key, value = raw, error = flat!(e),
             "couldn't read a duration, so it counts as unset"))
         .ok()
 }
@@ -278,7 +294,7 @@ pub(super) fn get_optional_chat_id(key: &str) -> Option<TelegramChatId> {
         .ok()
         .filter(|id| !id.is_empty())
         .and_then(|id| id.parse::<i64>()
-             .inspect_err(|e| tracing::warn!(key = %key, error = %e, "chat_id is not a number"))
+             .inspect_err(|e| tracing::warn!(key = %key, error = flat!(e), "chat_id is not a number"))
              .ok())
         .map(TelegramChatId::new)
 }

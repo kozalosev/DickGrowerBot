@@ -1,17 +1,17 @@
-use std::fmt::Display;
-use std::time::Duration;
 use axum::routing::get;
 use axum_prometheus::PrometheusMetricLayer;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, Opts, TextEncoder};
 use strum::IntoEnumIterator;
+use std::time::Duration;
+use teloxide::adaptors::throttle::ThrottledChatKind;
 use teloxide::types::UpdateKind;
 use tokio_metrics_collector::TaskMonitor;
 use domain_types::traits::SaturatingInto;
-use crate::cache::{Cache, CacheKey};
 use crate::config::MessageGroup;
 use crate::domain::objects::OriginalBotKind;
 use crate::domain::primitives::SupportedLanguage;
+use crate::errors::moot::Moot;
 use crate::repo::{BroadcastState, ChatMigrationOutcome, DeletionState, MessageKind};
 
 /// Additional metrics of our own are registered into this registry by the constructors below.
@@ -28,10 +28,20 @@ pub static CMD_PRIVACY_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_privacy_usage_total", "count of /privacy invocations"));
 pub static CMD_SUPPORT_COUNTER: Lazy<Counter> = Lazy::new(||
     Counter::new("command_support_usage_total", "count of /support invocations"));
+pub static CMD_VOUCHER_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_voucher_usage_total", "count of /voucher invocations, its aliases included"));
+pub static CMD_RESET_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_reset_usage_total", "count of /reset invocations"));
+pub static CMD_BUY_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_buy_usage_total", "count of /buy invocations, its aliases included"));
+pub static CMD_DONATE_COUNTER: Lazy<Counter> = Lazy::new(||
+    Counter::new("command_donate_usage_total", "count of /donate invocations"));
 pub static BANNED_UPDATES_BLOCKED: Lazy<Counter> = Lazy::new(||
     Counter::new("banned_updates_blocked_total", "count of updates rejected because their sender is banned"));
 pub static RATE_LIMITED_UPDATES: Lazy<Counter> = Lazy::new(||
     Counter::new("rate_limited_updates_total", "count of updates dropped because their sender or their chat went over RATE_LIMIT_USER_REQUESTS or RATE_LIMIT_CHAT_REQUESTS; only the first RATE_LIMIT_WARNINGS of them in a window are answered"));
+pub static STALE_COMMANDS: Lazy<Counter> = Lazy::new(||
+    Counter::new("stale_commands_total", "count of commands dropped without an answer because they reached the bot more than COMMAND_MAX_AGE after they were sent"));
 pub static START_SPAM_LIMITED: Lazy<Counter> = Lazy::new(||
     Counter::new("start_spam_limited_total", "count of bare /start commands dropped without an answer because their chat went over SPAM_LIMIT_START_REQUESTS in SPAM_LIMIT_START_WINDOW"));
 pub static RATE_LIMIT_USER_WINDOWS: Lazy<ThresholdCurve> = Lazy::new(||
@@ -56,14 +66,63 @@ pub static CMD_STATS: Lazy<BothModesCounters> = Lazy::new(||
     BothModesCounters::new("command_stats_usage_total", "count of /stats invocations"));
 pub static CMD_SHRINKS: Lazy<Counter> = Lazy::new(||
     Counter::new("command_shrinks_usage_total", "count of the inline shrinks command invocations"));
-pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(ImportCommandCounters::new);
+pub static CMD_IMPORT: Lazy<ImportCommandCounters> = Lazy::new(|| ImportCommandCounters::new(ImportReasons {
+    any_source: &[RejectionReason::LegacyGroup, RejectionReason::AdminsOnly, RejectionReason::BotNotAdmin,
+        RejectionReason::TooManyMembers],
+    without_source: &[RejectionReason::NotReply],
+    with_source: &[RejectionReason::NothingFound, RejectionReason::AmbiguousNames, RejectionReason::InvalidLines],
+}));
+static COMMAND_REJECTIONS: Lazy<CounterVec> = Lazy::new(||
+    CounterVec::new("command_rejected_total", "count of command invocations answered with why nothing was done, by command and reason",
+        &["command", "reason"]));
+pub static CMD_GROW_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("grow", &[RejectionReason::DoneToday, RejectionReason::Banned]));
+pub static CMD_TOP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("top", &[RejectionReason::FeatureDisabled]));
+pub static CMD_LOAN_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("loan", &[
+        RejectionReason::FeatureDisabled, RejectionReason::Debt, RejectionReason::PositiveLength,
+        RejectionReason::PayoutRatioChanged, RejectionReason::AnotherUser,
+    ]));
+pub static CMD_DOD_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("dick_of_day", &[RejectionReason::DoneToday, RejectionReason::NoCandidates]));
+pub static CMD_PVP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("pvp", &[
+        RejectionReason::MissingArgument, RejectionReason::SamePerson, RejectionReason::NotEnoughInitiator,
+        RejectionReason::NotEnoughAcceptor, RejectionReason::AlreadyInProgress,
+    ]));
+pub static CMD_PROMO_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("promo", &[
+        RejectionReason::InvalidArgument, RejectionReason::NotFound, RejectionReason::NotStarted,
+        RejectionReason::Expired, RejectionReason::Exhausted, RejectionReason::NotPlaying,
+        RejectionReason::AlreadyActivated, RejectionReason::TooOften,
+    ]));
+pub static CMD_LANGUAGE_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("language", &[
+        RejectionReason::FeatureDisabled, RejectionReason::InvalidArgument, RejectionReason::AdminsOnly,
+        RejectionReason::AnotherUser, RejectionReason::NotRegistered,
+    ]));
+pub static CMD_TOPICS_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("topics", &[
+        RejectionReason::NotAForum, RejectionReason::AdminsOnly, RejectionReason::AnotherUser,
+    ]));
+pub static CMD_RESET_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("reset", &[RejectionReason::AdminsOnly]));
+pub static CMD_CLEANUP_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("cleanup", &[
+        RejectionReason::FeatureDisabled, RejectionReason::AdminsOnly, RejectionReason::AnotherUser,
+    ]));
+pub static CMD_MENTIONS_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("mentions", &[RejectionReason::GroupHint, RejectionReason::NotPlaying]));
+pub static CMD_SUPPORT_REJECTED: Lazy<RejectionCounter> = Lazy::new(||
+    RejectionCounter::new("support", &[RejectionReason::FeatureDisabled, RejectionReason::TooOften]));
 pub static CMD_PROMO: Lazy<DeepLinkedCommandsCounters> = Lazy::new(||
     DeepLinkedCommandsCounters::new("command_promo_usage_total", "count of /promo invocations and successes"));
 pub static PROMO_ATTEMPTS: Lazy<CounterVec> = Lazy::new(||
     CounterVec::new("promo_activation_attempts_total", "count of promo code activation attempts typed or followed by a user, by what became of them: success, confirmation (asked to confirm a code that shrinks), invalid_format, or the reason the code was refused", &["outcome"]));
-pub static PROMO_ATTEMPT_USERS: Lazy<ThresholdCounter> = Lazy::new(||
-    ThresholdCounter::new("promo_attempt_users_total", "count of users who reached this many promo code attempts within an hour. reached=\"1\" is everyone who tried; the share of it at a higher threshold is the share who needed that many attempts or more",
-        Duration::from_hours(1), &[1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 50, 100]));
+pub static PROMO_ATTEMPT_USERS: Lazy<ThresholdCurve> = Lazy::new(||
+    ThresholdCurve::new("promo_attempt_users_total", "count of users who reached this many promo code attempts within SPAM_LIMIT_PROMO_WINDOW. reached=\"1\" is everyone who tried; the share of it at a higher threshold is the share who needed that many attempts or more. Nothing is counted while SPAM_LIMIT_PROMO_REQUESTS is 0",
+        &[1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 50, 100]));
 pub static USER_SERVICE: Lazy<UserServiceCounters> = Lazy::new(||
     UserServiceCounters::new("user_service_get_total", "count of user-service get() resolutions, split by whether they were served from cache or sent over gRPC"));
 pub static CMD_LANGUAGE: Lazy<LanguageCommandCounters> = Lazy::new(||
@@ -88,6 +147,8 @@ pub static CACHE_LOCAL_ENTRIES: Lazy<Gauge> = Lazy::new(||
     Gauge::new("cache_local_entries", "number of values the cache is holding in this process, as of the last sweep. Zero when the values are shared through Redis and it is answering; non-zero there too, for as long as cache_fallback_active reports an outage, since that is when a Redis backend starts holding its own values here instead. A number to watch rather than to alert on: keeping the values here is a setting, and the only one a single instance of the bot needs"));
 pub static CACHE_FALLBACK_ACTIVE: Lazy<Gauge> = Lazy::new(||
     Gauge::new("cache_fallback_active", "1 when the bot was told to share its cached values through Redis and isn't: either it fell back to its own process as it started, or the most recent call to Redis failed. 0 once a call succeeds again. cache_local_entries says whether the values are kept here, this says only whether Redis is presently answering"));
+pub static STARTUP_VERIFICATION_ERROR: Lazy<StartupVerificationGauge> = Lazy::new(||
+    StartupVerificationGauge::new("startup_verification_error", "1 for each check made at startup that failed, 0 for one that passed, by kind. The feature behind a failed check is off until the next restart, which is the only time the value changes. A check that didn't run, because its feature isn't configured, has no series"));
 pub static BOT_ADMIN_LOOKUP: Lazy<CacheLookupCounters> = Lazy::new(||
     CacheLookupCounters::new("bot_admin_lookup_total", "count of lookups of the bot's right to delete messages in a chat, split by whether the cache knew the answer"));
 pub static BROADCAST_LANGUAGE: Lazy<BroadcastLanguageCounter> = Lazy::new(||
@@ -124,7 +185,7 @@ pub static CHAT_MIGRATION: Lazy<ChatMigrationCounter> = Lazy::new(||
     ChatMigrationCounter::new("chat_migration_total", "count of group to supergroup migrations the bot witnessed, by outcome: migrated when the chat came across whole, migrated_unanchored when it came across but left its inline half behind, untraceable when it wasn't known by its old id at all, conflict when both ids already had a row of their own"));
 pub static DAILY_SHRINK: Lazy<DailyShrinkCounters> = Lazy::new(DailyShrinkCounters::new);
 pub static DAILY_SHRINK_LAST_RUN_TIMESTAMP: Lazy<Gauge> = Lazy::new(||
-    Gauge::new("daily_shrink_last_run_timestamp_seconds", "the UTC midnight the last logged shrink belongs to, as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes daily_shrink_period_seconds plus two hours"));
+    Gauge::new("daily_shrink_last_run_timestamp_seconds", "the moment the last logged shrink was scheduled for (its date at DAILY_SHRINK_TIME, UTC), as a Unix timestamp. Read from the database rather than counted in this process, so it survives a restart: alert when time() minus this passes daily_shrink_period_seconds plus two hours"));
 pub static DAILY_SHRINK_PERIOD: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_period_seconds", "the value of DAILY_SHRINK_PERIOD_DAYS in seconds, so that the alert on daily_shrink_last_run_timestamp_seconds can allow for the days without a run"));
 pub static DAILY_SHRINK_BROADCAST_PENDING: Lazy<Gauge> = Lazy::new(||
@@ -138,12 +199,17 @@ pub static DAILY_SHRINK_BROADCAST_BATCH_SIZE: Lazy<Histogram> = Lazy::new(||
 pub static DAILY_SHRINK_BROADCAST_BATCH_LIMIT: Lazy<Gauge> = Lazy::new(||
     Gauge::new("daily_shrink_broadcast_batch_limit", "the value of DAILY_SHRINK_BROADCAST_BATCH_SIZE, so that a graph can tell a full batch from a small one without knowing the setting"));
 pub static TELEGRAM_REQUEST_ERRORS: Lazy<TelegramRequestErrorCounters> = Lazy::new(||
-    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/rate_limited/other). A spike of connect/timeout is the DPI-stalling signal; rate_limited means Telegram asked the bot to slow down, so the THROTTLE_* limits are set too high"));
+    TelegramRequestErrorCounters::new("telegram_request_errors_total", "count of failed requests to the Telegram Bot API, split by kind (connect/timeout/network/api/rate_limited/too_long/stale_query/not_modified/message_gone/other). A spike of connect/timeout is the DPI-stalling signal; rate_limited means Telegram asked the bot to slow down, so the THROTTLE_* limits are set too high; too_long means a text went over Telegram's 4096 characters"));
 pub static TELEGRAM_REQUEST_DURATION: Lazy<TelegramRequestDuration> = Lazy::new(||
     TelegramRequestDuration::new("telegram_request_duration_seconds",
         "how long a request to the Telegram Bot API took, by method and outcome — the failed ones are measured too, so that a timeout (the slowest case there is) is not missing from the histogram"));
 pub static TELEGRAM_THROTTLE_QUEUE_FULL: Lazy<Counter> = Lazy::new(||
-    Counter::new("telegram_throttle_queue_full_total", "how many times the throttle worker found its queue full, which means the schedulers are asking for more requests than Telegram's limits allow and the extra ones are waiting. Teloxide reports this at most once every 4 seconds, so this counts moments, not requests"));
+    Counter::new("telegram_throttle_queue_full_total", "how many times requests that their chats' limits allowed were still waiting because THROTTLE_MESSAGES_PER_SEC_OVERALL was used up, which means the bot asks for more than the overall limit allows. Teloxide reports this at most once every 4 seconds, so this counts moments, not requests"));
+pub static TELEGRAM_THROTTLE_WAIT: Lazy<TelegramThrottleWait> = Lazy::new(||
+    TelegramThrottleWait::new("telegram_throttle_wait_seconds",
+        "how long a request waited in the throttle before it was let through to Telegram, by the kind of its chat (private/group/supergroup, or malformed for an id outside every range Telegram assigns)"));
+pub static UNEXPECTED_TELEGRAM_IDS: Lazy<UnexpectedTelegramIds> = Lazy::new(||
+    UnexpectedTelegramIds::new("unexpected_telegram_ids_total", "count of ids that don't have the shape the bot expects, by source: inline_message_id (an id that doesn't decode) or outgoing_chat_id (a request to a chat id outside every range Telegram assigns). Either may mean Telegram changed a format; the logs carry the id itself"));
 
 pub static DB_POOL_CONNECTIONS_OPENED: Lazy<Counter> = Lazy::new(||
     Counter::new("db_pool_connections_opened_total", "count of new physical connections opened by the sqlx pool"));
@@ -151,6 +217,10 @@ pub static DB_POOL_IDLE_SECONDS: Lazy<Histogram> = Lazy::new(||
     Histogram::new("db_pool_connection_idle_seconds",
         "how long a connection sat idle in the pool before being handed out to a caller",
         &[0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0]));
+pub static DB_POOL_ACQUIRE_SECONDS: Lazy<Histogram> = Lazy::new(||
+    Histogram::new("db_pool_acquire_seconds",
+        "how long a query waited for a connection from the sqlx pool. A wait means the pool was empty; an acquire that ran out DATABASE_ACQUIRE_TIMEOUT failed and is not here",
+        &[0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]));
 pub static DB_POOL_CONNECTION_AGE_SECONDS: Lazy<Histogram> = Lazy::new(||
     Histogram::new("db_pool_connection_age_seconds",
         "how old a connection was (time since it was first opened) when it was returned to the pool",
@@ -208,8 +278,13 @@ fn force_registration() {
     Lazy::force(&CMD_HELP_COUNTER);
     Lazy::force(&CMD_PRIVACY_COUNTER);
     Lazy::force(&CMD_SUPPORT_COUNTER);
+    Lazy::force(&CMD_VOUCHER_COUNTER);
+    Lazy::force(&CMD_RESET_COUNTER);
+    Lazy::force(&CMD_BUY_COUNTER);
+    Lazy::force(&CMD_DONATE_COUNTER);
     Lazy::force(&BANNED_UPDATES_BLOCKED);
     Lazy::force(&RATE_LIMITED_UPDATES);
+    Lazy::force(&STALE_COMMANDS);
     Lazy::force(&START_SPAM_LIMITED);
     Lazy::force(&RATE_LIMIT_USER_WINDOWS);
     Lazy::force(&RATE_LIMIT_CHAT_WINDOWS);
@@ -222,6 +297,18 @@ fn force_registration() {
     Lazy::force(&CMD_STATS);
     Lazy::force(&CMD_SHRINKS);
     Lazy::force(&CMD_IMPORT);
+    Lazy::force(&CMD_GROW_REJECTED);
+    Lazy::force(&CMD_TOP_REJECTED);
+    Lazy::force(&CMD_LOAN_REJECTED);
+    Lazy::force(&CMD_DOD_REJECTED);
+    Lazy::force(&CMD_PVP_REJECTED);
+    Lazy::force(&CMD_PROMO_REJECTED);
+    Lazy::force(&CMD_LANGUAGE_REJECTED);
+    Lazy::force(&CMD_TOPICS_REJECTED);
+    Lazy::force(&CMD_RESET_REJECTED);
+    Lazy::force(&CMD_CLEANUP_REJECTED);
+    Lazy::force(&CMD_MENTIONS_REJECTED);
+    Lazy::force(&CMD_SUPPORT_REJECTED);
     Lazy::force(&CMD_PROMO);
     Lazy::force(&PROMO_ATTEMPTS);
     Lazy::force(&PROMO_ATTEMPT_USERS);
@@ -250,9 +337,12 @@ fn force_registration() {
     Lazy::force(&TELEGRAM_REQUEST_ERRORS);
     Lazy::force(&TELEGRAM_REQUEST_DURATION);
     Lazy::force(&TELEGRAM_THROTTLE_QUEUE_FULL);
+    Lazy::force(&TELEGRAM_THROTTLE_WAIT);
+    Lazy::force(&UNEXPECTED_TELEGRAM_IDS);
 
     Lazy::force(&DB_POOL_CONNECTIONS_OPENED);
     Lazy::force(&DB_POOL_IDLE_SECONDS);
+    Lazy::force(&DB_POOL_ACQUIRE_SECONDS);
     Lazy::force(&DB_POOL_CONNECTION_AGE_SECONDS);
 }
 
@@ -279,6 +369,7 @@ struct DbPoolCollector {
 }
 
 impl DbPoolCollector {
+    #[allow(clippy::disallowed_types, reason = "prometheus takes a std map")]
     fn new(pool: sqlx::Pool<sqlx::Postgres>) -> Self {
         let size_desc = prometheus::core::Desc::new(
             "db_pool_size".to_owned(),
@@ -323,7 +414,69 @@ pub struct ComplexCommandCounters {
     invoked: Counter,
     finished: Counter,
 }
-pub struct ImportCommandCounters(CounterVec);
+/// Phases of `/import` by the bot it imports from, and its rejections by the same.
+pub struct ImportCommandCounters {
+    usage: CounterVec,
+    rejected: CounterVec,
+    reasons: ImportReasons,
+}
+
+/// The reasons of `/import`, by whether the source bot can be known when they are given.
+struct ImportReasons {
+    any_source: &'static [RejectionReason],
+    without_source: &'static [RejectionReason],
+    with_source: &'static [RejectionReason],
+}
+
+/// The rejections of one command by reason: the user was told what to change, and nothing was done.
+/// Every command counts into the same `command_rejected_total`, under its own `command` label.
+pub struct RejectionCounter {
+    command: &'static str,
+    reasons: &'static [RejectionReason],
+}
+
+/// An outcome of a command that may be a refusal.
+pub trait RejectableOutcome {
+    fn rejection(&self) -> Option<RejectionReason>;
+}
+
+/// Why a command was refused. The values of the `reason` label of the rejection counters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum_macros::Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum RejectionReason {
+    FeatureDisabled,
+    AdminsOnly,
+    AnotherUser,
+    Banned,
+    NotPlaying,
+    MissingArgument,
+    InvalidArgument,
+    DoneToday,
+    NoCandidates,
+    Debt,
+    PositiveLength,
+    PayoutRatioChanged,
+    SamePerson,
+    NotEnoughInitiator,
+    NotEnoughAcceptor,
+    AlreadyInProgress,
+    NotFound,
+    NotStarted,
+    Expired,
+    Exhausted,
+    AlreadyActivated,
+    NotRegistered,
+    NotAForum,
+    GroupHint,
+    TooOften,
+    BotNotAdmin,
+    NotReply,
+    LegacyGroup,
+    TooManyMembers,
+    NothingFound,
+    AmbiguousNames,
+    InvalidLines,
+}
 pub struct BothModesCounters {
     pub chat: Counter,
     pub inline: Counter,
@@ -379,6 +532,30 @@ impl Counter {
     }
 }
 
+/// What a startup check found, by the kind of check.
+pub struct StartupVerificationGauge(prometheus::IntGaugeVec);
+
+/// A check made once at startup, named by what its failure means.
+#[derive(Clone, Copy, derive_more::Display)]
+pub enum StartupCheck {
+    #[display("support_chat_unusable")]
+    SupportChat,
+}
+
+impl StartupVerificationGauge {
+    fn new(name: &str, help: &str) -> Self {
+        let inner = prometheus::IntGaugeVec::new(Opts::new(name, help), &["kind"])
+            .unwrap_or_else(|e| panic!("unable to create the {name} gauge vec: {e}"));
+        REGISTRY.register(Box::new(inner.clone()))
+            .unwrap_or_else(|e| panic!("unable to register the {name} gauge vec: {e}"));
+        Self(inner)
+    }
+
+    pub fn report(&self, check: StartupCheck, failed: bool) {
+        self.0.with_label_values(&[&check.to_string()]).set(failed.into())
+    }
+}
+
 impl Gauge {
     fn new(name: &str, help: &str) -> Self {
         let inner = prometheus::IntGauge::with_opts(Opts::new(name, help))
@@ -412,6 +589,11 @@ impl Histogram {
 
     pub fn observe(&self, value: f64) {
         self.0.observe(value)
+    }
+
+    #[cfg(test)]
+    pub fn sample_count(&self) -> u64 {
+        self.0.get_sample_count()
     }
 }
 
@@ -475,43 +657,70 @@ impl ComplexCommandCounters {
 }
 
 impl ImportCommandCounters {
-
-    const STATES: [&'static str; 4] = ["invoked", "finished", "rejected", "failed"];
-
-    fn new() -> Self {
-        let vec = CounterVec::new(
+    fn new(reasons: ImportReasons) -> Self {
+        let usage = CounterVec::new(
             "command_import_usage_total",
-            "count of /import invocations and their outcomes by source bot",
+            "count of /import invocations and the imports that finished, by source bot",
             &["state", "bot"],
         );
-        for state in Self::STATES {
-            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
-                vec.counter(&[state, &import_source_label(bot)]);
+        let rejected = CounterVec::new(
+            "command_import_rejected_total",
+            "count of /import invocations answered with what the user has to change, by reason and source bot",
+            &["reason", "bot"],
+        );
+        for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+            let label = import_source_label(bot);
+            usage.counter(&["invoked", &label]);
+            if bot.is_some() {
+                usage.counter(&["finished", &label]);
+            }
+            for reason in reasons.possible(bot) {
+                rejected.counter(&[&reason.to_string(), &label]);
             }
         }
-        Self(vec)
+        Self { usage, rejected, reasons }
     }
 
     pub fn invoked(&self, bot: Option<OriginalBotKind>) {
-        self.count("invoked", bot)
+        self.usage.inc(&["invoked", &import_source_label(bot)])
     }
 
     pub fn finished(&self, bot: Option<OriginalBotKind>) {
-        self.count("finished", bot)
+        debug_assert!(bot.is_some(), "an import finished without a source bot");
+        self.usage.inc(&["finished", &import_source_label(bot)])
     }
 
-    /// Answered with an explanation of what the user has to change.
-    pub fn rejected(&self, bot: Option<OriginalBotKind>) {
-        self.count("rejected", bot)
+    pub fn rejected(&self, reason: RejectionReason, bot: Option<OriginalBotKind>) {
+        debug_assert!(self.reasons.possible(bot).any(|r| r == reason), "{reason} is not a reason of /import here");
+        self.rejected.inc(&[&reason.to_string(), &import_source_label(bot)])
+    }
+}
+
+impl ImportReasons {
+    fn possible(&self, bot: Option<OriginalBotKind>) -> impl Iterator<Item = RejectionReason> + '_ {
+        let by_source = if bot.is_some() { self.with_source } else { self.without_source };
+        self.any_source.iter().chain(by_source).copied()
+    }
+}
+
+impl RejectionCounter {
+    fn new(command: &'static str, reasons: &'static [RejectionReason]) -> Self {
+        for reason in reasons {
+            COMMAND_REJECTIONS.counter(&[command, &reason.to_string()]);
+        }
+        Self { command, reasons }
     }
 
-    /// Ended with an error nobody was told about.
-    pub fn failed(&self, bot: Option<OriginalBotKind>) {
-        self.count("failed", bot)
+    pub fn rejected(&self, reason: RejectionReason) {
+        debug_assert!(self.reasons.contains(&reason), "{reason} is not a reason of /{}", self.command);
+        COMMAND_REJECTIONS.inc(&[self.command, &reason.to_string()])
     }
 
-    fn count(&self, state: &str, bot: Option<OriginalBotKind>) {
-        self.0.counter(&[state, &import_source_label(bot)]).inc()
+    /// Counts the outcome if it is a refusal.
+    pub fn count(&self, outcome: &impl RejectableOutcome) {
+        if let Some(reason) = outcome.rejection() {
+            self.rejected(reason);
+        }
     }
 }
 
@@ -845,19 +1054,11 @@ impl ChatMigrationCounter {
     }
 }
 
-/// How far each subject gets within a fixed window, counted as the thresholds it reaches.
+/// How far each subject gets within a window, counted as the thresholds it reaches.
 ///
-/// A count per subject can't be a label, so it is kept in the store, and only the threshold a hit
-/// lands on — one of a short, fixed list — is counted. The series form a survival curve: the first
-/// is everyone, and each later one is how many got that far.
-pub struct ThresholdCounter {
-    curve: ThresholdCurve,
-    name: &'static str,
-    window: Duration,
-}
-
-/// The series of such a curve, for a count that is already known: whoever holds it reports each
-/// new value, and only the ones on the list are counted.
+/// A count per subject can't be a label, so whoever keeps the count reports each new value, and
+/// only the ones on a short, fixed list are counted. The series form a survival curve: the first is
+/// everyone, and each later one is how many got that far.
 pub struct ThresholdCurve {
     vec: CounterVec,
     thresholds: &'static [u64],
@@ -876,25 +1077,6 @@ pub struct DailyShrinkCounters {
     retries: Counter,
 }
 
-impl ThresholdCounter {
-    fn new(name: &'static str, help: &str, window: Duration, thresholds: &'static [u64]) -> Self {
-        Self { curve: ThresholdCurve::new(name, help, thresholds), name, window }
-    }
-
-    /// Counts one hit for the subject. A store that can't be asked only costs the curve a sample.
-    pub async fn hit(&self, cache: &Cache, subject: impl Display) {
-        if let Some(reached) = self.reached(cache, subject).await {
-            self.curve.record(reached)
-        }
-    }
-
-    async fn reached(&self, cache: &Cache, subject: impl Display) -> Option<u64> {
-        let key = ThresholdKey { name: self.name, subject: subject.to_string() };
-        let count = cache.or_local().increment(key, self.window).await?;
-        self.curve.on_list(count)
-    }
-}
-
 impl ThresholdCurve {
     fn new(name: &str, help: &str, thresholds: &'static [u64]) -> Self {
         let vec = CounterVec::new(name, help, &["reached"]);
@@ -906,28 +1088,11 @@ impl ThresholdCurve {
 
     /// Reports that a subject's count has just become `count`.
     pub fn observe(&self, count: u64) {
-        if let Some(reached) = self.on_list(count) {
-            self.record(reached)
+        if self.thresholds.contains(&count) {
+            self.vec.counter(&[&count.to_string()]).inc()
         }
     }
-
-    fn record(&self, reached: u64) {
-        self.vec.counter(&[&reached.to_string()]).inc()
-    }
-
-    fn on_list(&self, count: u64) -> Option<u64> {
-        self.thresholds.contains(&count).then_some(count)
-    }
 }
-
-#[derive(derive_more::Display)]
-#[display("thresholds:{name}:{subject}")]
-struct ThresholdKey {
-    name: &'static str,
-    subject: String,
-}
-
-impl CacheKey for ThresholdKey {}
 
 impl DailyShrinkCounters {
     fn new() -> Self {
@@ -1013,15 +1178,20 @@ impl DailyShrinkCounters {
 /// * `timeout` (a read/total timeout after connecting),
 /// * `network` (other network/IO errors),
 /// * `api` (a legitimate Telegram API error — the network was fine),
+/// * `rate_limited` (Telegram asked the bot to slow down),
+/// * `too_long` (a text over Telegram's limit on a message's length),
+/// * `stale_query`, `not_modified`, `message_gone` (Telegram answered, but there was nothing left to
+///   do — see [`Moot`]),
 /// * `other` (anything else).
 pub struct TelegramRequestErrorCounters(CounterVec);
 
 impl TelegramRequestErrorCounters {
     fn new(name: &str, help: &str) -> Self {
         let vec = CounterVec::new(name, help, &["kind"]);
-        for kind in ["connect", "timeout", "network", "api", "rate_limited", "other"] {
-            vec.counter(&[kind]);
-        }
+        let moot = <Moot as strum::VariantArray>::VARIANTS.iter().map(|moot| moot.label());
+        ["connect", "timeout", "network", "api", "rate_limited", "too_long", "other"].into_iter()
+            .chain(moot)
+            .for_each(|kind| { vec.counter(&[kind]); });
         Self(vec)
     }
 
@@ -1049,6 +1219,56 @@ impl TelegramRequestDuration {
     /// (e.g. `SendMessage`), a set fixed by the library, so the label stays bounded.
     pub fn record(&self, method: &str, outcome: &str, seconds: f64) {
         self.0.observe(&[method, outcome], seconds)
+    }
+}
+
+/// How long a request waited in the throttle, labeled by the kind of its chat.
+///
+/// The buckets tell no wait apart from a few hundred milliseconds, and those from seconds: a chat
+/// held back by its per-minute limit waits for up to a minute.
+pub struct TelegramThrottleWait(HistogramVec);
+
+impl TelegramThrottleWait {
+    fn new(name: &str, help: &str) -> Self {
+        Self(HistogramVec::new(name, help, &["chat_kind"],
+            &[0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0]))
+    }
+
+    pub fn record(&self, kind: ThrottledChatKind, waited: Duration) {
+        let label = match kind {
+            ThrottledChatKind::Private => "private",
+            ThrottledChatKind::Group => "group",
+            ThrottledChatKind::ChannelOrSupergroup => "supergroup",
+            ThrottledChatKind::Malformed => "malformed",
+            _ => "other",
+        };
+        self.0.observe(&[label], waited.as_secs_f64())
+    }
+}
+
+/// Ids from Telegram that don't have the shape the bot expects, by where they were found:
+/// an `inline_message_id` that doesn't decode, or a chat id outside every range Telegram assigns
+/// on its way out through the throttle. Either is a sign that Telegram changed a format.
+pub struct UnexpectedTelegramIds(CounterVec);
+
+impl UnexpectedTelegramIds {
+    const INLINE_MESSAGE_ID: &str = "inline_message_id";
+    const OUTGOING_CHAT_ID: &str = "outgoing_chat_id";
+
+    fn new(name: &str, help: &str) -> Self {
+        let vec = CounterVec::new(name, help, &["source"]);
+        for source in [Self::INLINE_MESSAGE_ID, Self::OUTGOING_CHAT_ID] {
+            vec.counter(&[source]);
+        }
+        Self(vec)
+    }
+
+    pub fn inline_message_id(&self) {
+        self.0.counter(&[Self::INLINE_MESSAGE_ID]).inc()
+    }
+
+    pub fn outgoing_chat_id(&self) {
+        self.0.counter(&[Self::OUTGOING_CHAT_ID]).inc()
     }
 }
 
@@ -1086,13 +1306,11 @@ mod tests {
     use crate::domain::objects::OriginalBotKind;
     use crate::repo::{ChatMigrationOutcome, DeletionState, MessageKind};
     use super::{CHAT_MIGRATION, DAILY_SHRINK, DB_POOL_CONNECTIONS_OPENED, DB_POOL_IDLE_SECONDS,
-                BROADCAST_LANGUAGE, CMD_IMPORT, ImportCommandCounters, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
+                BROADCAST_LANGUAGE, CMD_IMPORT, import_source_label, DB_POOL_CONNECTION_AGE_SECONDS, SELF_DESTRUCTION, SELF_DESTRUCTION_BATCH_SIZE,
                 SELF_DESTRUCTION_RETRIES, TASK_DAILY_SHRINK, language_label, render_metrics,
-                PROMO_ATTEMPT_USERS, RATE_LIMIT_CHAT_WINDOWS, RATE_LIMIT_USER_WINDOWS, ThresholdCounter,
-                ThresholdCurve};
-    use std::time::Duration;
-    use crate::cache::Cache;
-    use crate::config::{CacheConfig, CacheMode};
+                PROMO_ATTEMPT_USERS, RATE_LIMIT_CHAT_WINDOWS, RATE_LIMIT_USER_WINDOWS, ThresholdCurve, RejectionCounter, RejectionReason, CMD_GROW_REJECTED, CMD_TOP_REJECTED, CMD_LOAN_REJECTED,
+                CMD_DOD_REJECTED, CMD_PVP_REJECTED, CMD_PROMO_REJECTED, CMD_LANGUAGE_REJECTED,
+                CMD_TOPICS_REJECTED, CMD_CLEANUP_REJECTED, CMD_MENTIONS_REJECTED, CMD_SUPPORT_REJECTED};
 
     /// The outcomes worth alerting on are the ones that should never be incremented, so they have
     /// to be exported at zero rather than spring into existence the first time a chat is lost.
@@ -1107,18 +1325,52 @@ mod tests {
         }
     }
 
+    /// `state` holds the phases only; a refusal is a reason of the rejection counter. A series that
+    /// can never move is not exported.
     #[test]
-    fn import_counter_exports_every_state_for_every_source() {
+    fn import_counters_export_only_the_possible_combinations() {
         Lazy::force(&CMD_IMPORT);
         let rendered = render_metrics();
-        for state in ImportCommandCounters::STATES {
-            for bot in OriginalBotKind::iter().map(Some).chain([None]) {
-                let bot = import_source_label(bot);
-                let series = format!("command_import_usage_total{{bot=\"{bot}\",state=\"{state}\"}}");
-                assert!(rendered.contains(&series), "{series} is missing from:
-{rendered}");
+        let reasons = &CMD_IMPORT.reasons;
+        let every_reason: Vec<_> = [reasons.any_source, reasons.without_source, reasons.with_source].concat();
+        for bot in OriginalBotKind::iter().map(Some).chain([None]) {
+            let label = import_source_label(bot);
+            for (state, possible) in [("invoked", true), ("finished", bot.is_some())] {
+                let series = format!("command_import_usage_total{{bot=\"{label}\",state=\"{state}\"}}");
+                assert_eq!(rendered.contains(&series), possible, "{series} in:\n{rendered}");
+            }
+            for &reason in &every_reason {
+                let possible = reasons.possible(bot).any(|r| r == reason);
+                let series = format!("command_import_rejected_total{{bot=\"{label}\",reason=\"{reason}\"}}");
+                assert_eq!(rendered.contains(&series), possible, "{series} in:\n{rendered}");
             }
         }
+        assert!(!rendered.contains("state=\"rejected\""), "a rejection is still a state:\n{rendered}");
+        assert!(!rendered.contains("state=\"failed\""), "a failure is still a state:\n{rendered}");
+    }
+
+    /// An alert's `increase()` needs a series before its first sample, so every reason is exported
+    /// at zero from the start.
+    #[test]
+    fn every_rejection_reason_is_exported() {
+        assert_exported(&CMD_GROW_REJECTED);
+        assert_exported(&CMD_TOP_REJECTED);
+        assert_exported(&CMD_LOAN_REJECTED);
+        assert_exported(&CMD_DOD_REJECTED);
+        assert_exported(&CMD_PVP_REJECTED);
+        assert_exported(&CMD_PROMO_REJECTED);
+        assert_exported(&CMD_LANGUAGE_REJECTED);
+        assert_exported(&CMD_TOPICS_REJECTED);
+        assert_exported(&CMD_CLEANUP_REJECTED);
+        assert_exported(&CMD_MENTIONS_REJECTED);
+        assert_exported(&CMD_SUPPORT_REJECTED);
+    }
+
+    #[test]
+    fn a_reason_is_written_in_snake_case() {
+        assert_eq!(RejectionReason::PayoutRatioChanged.to_string(), "payout_ratio_changed");
+        assert_eq!(RejectionReason::BotNotAdmin.to_string(), "bot_not_admin");
+        assert_eq!(RejectionReason::NotAForum.to_string(), "not_a_forum");
     }
 
     /// The dashboard watches the failure rate here, and a ratio needs all of its series from the
@@ -1260,34 +1512,6 @@ mod tests {
         assert_eq!(language_label(None), "unknown");
     }
 
-    /// Each subject is counted apart, and only the counts on the list are reported.
-    #[tokio::test]
-    async fn each_subject_reports_the_thresholds_it_reaches() {
-        let cache = local_cache().await;
-        let counter = ThresholdCounter::new("test_thresholds_per_subject_total", "test",
-            Duration::from_hours(1), &[1, 2, 3, 5]);
-
-        let mut reached = Vec::new();
-        for _ in 0..5 {
-            reached.push(counter.reached(&cache, 1).await);
-        }
-        reached.push(counter.reached(&cache, 2).await);
-
-        assert_eq!(reached, [Some(1), Some(2), Some(3), None, Some(5), Some(1)]);
-    }
-
-    #[tokio::test]
-    async fn two_counters_keep_apart_counts_for_the_same_subject() {
-        let cache = local_cache().await;
-        let first = ThresholdCounter::new("test_thresholds_first_total", "test", Duration::from_hours(1), &[1, 2]);
-        let second = ThresholdCounter::new("test_thresholds_second_total", "test", Duration::from_hours(1), &[1, 2]);
-
-        first.reached(&cache, 1).await;
-        let reached = second.reached(&cache, 1).await;
-
-        assert_eq!(reached, Some(1));
-    }
-
     /// A subject's count that is already known is reported straight to the curve, and the counts
     /// between two thresholds are not counted.
     #[test]
@@ -1306,7 +1530,7 @@ mod tests {
     #[test]
     fn every_threshold_is_exported_at_zero() {
         let curves = [
-            ("promo_attempt_users_total", &PROMO_ATTEMPT_USERS.curve),
+            ("promo_attempt_users_total", &*PROMO_ATTEMPT_USERS),
             ("rate_limit_user_windows_total", &*RATE_LIMIT_USER_WINDOWS),
             ("rate_limit_chat_windows_total", &*RATE_LIMIT_CHAT_WINDOWS),
         ];
@@ -1319,7 +1543,15 @@ mod tests {
         }
     }
 
-    async fn local_cache() -> Cache {
-        Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await
+    fn assert_exported(counter: &Lazy<RejectionCounter>) {
+        let rendered = {
+            Lazy::force(counter);
+            render_metrics()
+        };
+        for reason in counter.reasons {
+            let command = counter.command;
+            let series = format!("command_rejected_total{{command=\"{command}\",reason=\"{reason}\"}}");
+            assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+        }
     }
 }

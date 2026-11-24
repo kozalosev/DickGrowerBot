@@ -4,6 +4,7 @@
 //! one means. SIGHUP reloads, SIGTERM and SIGINT stop; a signal cannot mean both.
 
 use teloxide::dispatching::ShutdownToken;
+use crate::errors::flat::flat;
 
 /// Stops the dispatcher on the first stop signal.
 ///
@@ -17,7 +18,7 @@ pub fn spawn_stop_on_signal(token: ShutdownToken) {
         tracing::info!("a stop signal arrived, shutting the bot down");
         match token.shutdown() {
             Ok(finished) => finished.await,
-            Err(e) => tracing::warn!(error = %e, "the dispatcher was not running when the signal arrived"),
+            Err(e) => tracing::warn!(error = flat!(e), "the dispatcher was not running when the signal arrived"),
         }
     });
 }
@@ -37,7 +38,7 @@ pub async fn stop_signal() {
     use tokio::signal::unix::{signal, SignalKind};
 
     let Ok(mut terminate) = signal(SignalKind::terminate())
-        .inspect_err(|e| tracing::error!(error = %e, "couldn't listen for SIGTERM, the bot will only stop on Ctrl-C"))
+        .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't listen for SIGTERM, the bot will only stop on Ctrl-C"))
     else {
         return ctrl_c().await
     };
@@ -55,5 +56,5 @@ pub async fn stop_signal() {
 
 async fn ctrl_c() {
     tokio::signal::ctrl_c().await
-        .unwrap_or_else(|e| tracing::error!(error = %e, "couldn't listen for Ctrl-C"));
+        .unwrap_or_else(|e| tracing::error!(error = flat!(e), "couldn't listen for Ctrl-C"));
 }

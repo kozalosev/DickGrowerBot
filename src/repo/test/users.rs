@@ -1,4 +1,5 @@
 use sqlx::{Pool, Postgres};
+use domain_types::traits::ApproxInto;
 use crate::domain::objects::User;
 use crate::domain::primitives::{BonusPercent, DaysCount, LengthChange, Ratio, UserId};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TelegramChatId};
@@ -9,6 +10,8 @@ use crate::repo::test::dicks::{create_another_user_and_dick, create_user_and_dic
 const INACTIVITY_DAYS: DaysCount = DaysCount::new(7);
 const POOREST_BONUS: BonusPercent = BonusPercent::new(100);
 const RECENT_WINS_DAYS: DaysCount = DaysCount::new(5);
+/// The χ² of four outcomes (three degrees of freedom) that chance alone exceeds once in a million runs.
+const CHI_SQUARED_3_DOF_ONE_IN_A_MILLION: f64 = 30.66;
 
 #[tokio::test]
 async fn create_or_update() {
@@ -140,10 +143,11 @@ async fn get_random_active_member_with_poor_in_priority() {
     println!("Middle  (len  20): {middle_wins}");
     println!("Richest (len  40): {richest_wins}");
 
-    assert!(poorest_wins > base_wins, "the poorest member must win more often than the base one");
-    assert!(base_wins > middle_wins, "the base member must win more often than the middle one");
-    assert!(middle_wins > richest_wins, "the middle member must win more often than the richest one");
-    assert!(poorest_wins < richest_wins * 3, "the poorest member's chance must stay within the bonus");
+    // With α = 100% the weight is 2 − percent_rank: 2, 5/3, 4/3 and 1 out of 6.
+    let expected = [(poorest_wins, 2.0), (base_wins, 5.0 / 3.0), (middle_wins, 4.0 / 3.0), (richest_wins, 1.0)];
+    let chi_squared = chi_squared(&expected, results.len());
+    assert!(chi_squared < CHI_SQUARED_3_DOF_ONE_IN_A_MILLION,
+        "the wins are too far from the weights to be chance: χ² = {chi_squared:.1}");
 }
 
 #[tokio::test]
@@ -198,6 +202,19 @@ async fn prepare_for_additional_tests(db: &Pool<Postgres>) -> (repo::Users, Chat
     create_user_and_dick_2(db, &chat_id, "User-2").await;
     create_another_user_and_dick(db, &chat_id, 3, "User-3", 10).await;
     (users, chat_id)
+}
+
+/// Pearson's χ² of the observed counts against the shares their weights give.
+fn chi_squared(observed_and_weights: &[(usize, f64)], draws: usize) -> f64 {
+    let total_weight: f64 = observed_and_weights.iter().map(|(_, weight)| weight).sum();
+    let draws: f64 = draws.approx_into();
+    observed_and_weights.iter()
+        .map(|&(observed, weight)| {
+            let expected = draws * weight / total_weight;
+            let observed: f64 = observed.approx_into();
+            (observed - expected).powi(2) / expected
+        })
+        .sum()
 }
 
 fn count(v: &[UserId], uid: i64) -> usize {

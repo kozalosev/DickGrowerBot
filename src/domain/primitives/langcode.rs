@@ -21,8 +21,8 @@ static LOCALE_TO_LANGUAGE: [(&str, SupportedLanguage); 11] = [
 #[domain_type(features(no_auto_default))]
 struct LanguageCode(String);
 
-#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, strum_macros::EnumString, sqlx::Type,
-         serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, strum_macros::Display, strum_macros::EnumString,
+         strum_macros::IntoStaticStr, sqlx::Type, serde::Serialize, serde::Deserialize)]
 #[strum(serialize_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "language_code", rename_all = "lowercase")]
@@ -32,6 +32,14 @@ pub enum SupportedLanguage {
     IT,
     FA,
     ZH,
+}
+
+impl std::ops::Deref for SupportedLanguage {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.into()
+    }
 }
 
 impl SupportedLanguage {
@@ -171,5 +179,19 @@ mod test_from_maybe_string {
             let result = LanguageCode::from_maybe_string(case);
             assert_eq!(result.to_supported_language(), EN)
         }
+    }
+}
+
+#[cfg(test)]
+mod test_deref {
+    use crate::domain::primitives::SupportedLanguage;
+
+    #[test]
+    fn a_language_derefs_to_its_code() {
+        for lang in SupportedLanguage::ALL {
+            let displayed = lang.to_string();
+            assert_eq!(&*lang, displayed);
+        }
+        assert_eq!(&*SupportedLanguage::ZH, "zh");
     }
 }

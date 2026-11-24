@@ -13,6 +13,7 @@ use std::time::Duration;
 use crate::cache::{Cache, CacheKey};
 use crate::config::AppConfig;
 use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId};
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::repo::Repositories;
 
@@ -87,7 +88,7 @@ pub async fn remember_bot_rights(upd: ChatMemberUpdated, cache: Cache, config: A
         match repos.chats.clear_unreachable(&chat_id).await {
             Ok(true) => tracing::info!("the bot may post to the chat again"),
             Ok(false) => {},
-            Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't clear the unreachable mark of the chat"),
+            Err(e) => tracing::warn!(error = flat!(e), "couldn't clear the unreachable mark of the chat"),
         }
     }
 }
@@ -101,7 +102,7 @@ fn may_post_again(upd: &ChatMemberUpdated) -> bool {
 
 /// Whether the bot could send a message with that status. Being present is enough for every status
 /// but `restricted`, which is the muted one and carries the answer as a field of its own.
-fn may_post(member: &ChatMember) -> bool {
+pub(crate) fn may_post(member: &ChatMember) -> bool {
     match &member.kind {
         ChatMemberKind::Restricted(restricted) => restricted.is_member && restricted.can_send_messages,
         kind => kind.is_present(),

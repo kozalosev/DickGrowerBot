@@ -3,6 +3,7 @@ use anyhow::Context;
 use chrono::{DateTime, NaiveDate, Utc};
 use crate::domain::primitives::{Count, DaysCount, Length, Limit, Offset, Ratio, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
+use crate::errors::details::{DetailedContext, Details};
 use crate::repo::Chat;
 use crate::repository;
 
@@ -199,7 +200,10 @@ repository!(Shrinks,
                 chat_id.value() as String, date, offset as Offset, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't fetch shrinks of {chat_id} for {date}"))
+            .detailed_context(Details::new("couldn't fetch the shrinks")
+                .date(date)
+                .offset(offset)
+                .limit(limit))
     },
 
     /// The same page as [`Self::get_shrinks_for_date`], for a caller that already holds the chat's
@@ -234,7 +238,10 @@ repository!(Shrinks,
                 chat_id as InternalChatId, date, offset as Offset, limit as Limit)
             .fetch_all(&self.pool)
             .await
-            .context(format!("couldn't fetch shrinks of the chat with id = {chat_id} for {date}"))
+            .detailed_context(Details::new("couldn't fetch the shrinks")
+                .date(date)
+                .offset(offset)
+                .limit(limit))
     },
 
     #[autometrics]
@@ -251,7 +258,7 @@ repository!(Shrinks,
                 chat_id.value() as String)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't fetch the latest shrink date for {chat_id}"))
+            .context("couldn't fetch the latest shrink date")
     },
 
     /// Nearest older and newer dates with logged shrinks. Two scalar lookups rather than a date
@@ -272,7 +279,7 @@ repository!(Shrinks,
                 chat_id.value() as String, date)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't fetch the older shrink date for {chat_id}"))?;
+            .context("couldn't fetch the older shrink date")?;
         let newer = sqlx::query_scalar!(
             r#"SELECT MIN(s.created_at) AS "created_at"
                 FROM Stale_Dick_Shrinks s
@@ -282,7 +289,7 @@ repository!(Shrinks,
                 chat_id.value() as String, date)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't fetch the newer shrink date for {chat_id}"))?;
+            .context("couldn't fetch the newer shrink date")?;
         Ok(AdjacentDates { older, newer })
     }
 );

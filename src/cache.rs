@@ -20,7 +20,7 @@
 //! trip, so a Redis that never fails never pays for one. [`sync_fallback_to_redis`] hands whatever
 //! is still there back to Redis the moment it answers again, before the routing switches back.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +34,7 @@ use serde::de::DeserializeOwned;
 use tokio::time::Instant;
 use domain_types::traits::SaturatingInto;
 use crate::config::{CacheConfig, CacheMode};
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::metrics::CacheSourceCounters;
 
@@ -177,7 +178,7 @@ impl Cache {
             Route::Disabled => false,
             Route::Local(store) => store.remove(&key),
             Route::Redis(state) => state.health.record(state.conn.clone().del::<_, usize>(&key).await)
-                .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't remove a value from the cache"))
+                .inspect_err(|e| tracing::warn!(error = flat!(e), key, "couldn't remove a value from the cache"))
                 .is_ok_and(|removed| removed > 0),
         }
     }
@@ -198,7 +199,7 @@ impl Cache {
                     .conditional_set(redis::ExistenceCheck::NX)
                     .with_expiration(redis::SetExpiry::EX(ttl.as_secs()));
                 state.health.record(state.conn.clone().set_options::<_, _, Option<String>>(&key, &token.0, options).await)
-                    .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't take a lock, letting the caller through"))
+                    .inspect_err(|e| tracing::warn!(error = flat!(e), key, "couldn't take a lock, letting the caller through"))
                     // This one call must not stop the bot working, so it counts as free — the same
                     // fallback a miss gets everywhere else here. The next one isn't reached at all —
                     // see `Backend::route` — and the lock is a real one again, taken against
@@ -220,7 +221,7 @@ impl Cache {
             Route::Local(store) => store.remove_if_holds(&key, token.0.as_bytes()),
             Route::Redis(state) => state.health.record(UNLOCK.key(&key).arg(&token.0)
                 .invoke_async::<usize>(&mut state.conn.clone()).await)
-                .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't free a lock, leaving it to run out"))
+                .inspect_err(|e| tracing::warn!(error = flat!(e), key, "couldn't free a lock, leaving it to run out"))
                 .is_ok_and(|freed| freed > 0),
         }
     }
@@ -236,7 +237,7 @@ impl Cache {
             Route::Local(store) => Some(store.increment(&key, ttl)),
             Route::Redis(state) => state.health.record(INCREMENT.key(&key).arg(ttl.as_secs().max(1))
                 .invoke_async::<i64>(&mut state.conn.clone()).await)
-                .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't count a hit"))
+                .inspect_err(|e| tracing::warn!(error = flat!(e), key, "couldn't count a hit"))
                 .ok()
                 .map(|count| count.saturating_into()),
         }
@@ -275,14 +276,14 @@ impl Cache {
     async fn get_json_at<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
         let bytes = self.get_raw(key).await?;
         serde_json::from_slice(&bytes)
-            .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't read a value out of the cache"))
+            .inspect_err(|e| tracing::warn!(error = flat!(e), key, "couldn't read a value out of the cache"))
             .ok()
     }
 
     async fn set_json_at<T: Serialize>(&self, key: &str, value: &T, ttl: Duration) {
         match serde_json::to_vec(value) {
             Ok(bytes) => self.set_raw(key, bytes, ttl).await,
-            Err(e) => tracing::warn!(error = %e, key, "couldn't write a value into the cache"),
+            Err(e) => tracing::warn!(error = flat!(e), key, "couldn't write a value into the cache"),
         }
     }
 
@@ -291,7 +292,7 @@ impl Cache {
             Route::Disabled => None,
             Route::Local(store) => store.get(key),
             Route::Redis(state) => state.health.record(state.conn.clone().get::<_, Option<Vec<u8>>>(key).await)
-                .inspect_err(|e| tracing::warn!(error = %e, key, "couldn't read a value from the cache"))
+                .inspect_err(|e| tracing::warn!(error = flat!(e), key, "couldn't read a value from the cache"))
                 .ok()
                 .flatten(),
         }
@@ -302,7 +303,7 @@ impl Cache {
             Route::Disabled => {}
             Route::Local(store) => store.insert(key, value, ttl),
             Route::Redis(state) => state.health.record(state.conn.clone().set_ex::<_, _, ()>(key, value, ttl.as_secs()).await)
-                .unwrap_or_else(|e| tracing::warn!(error = %e, key, "couldn't write a value into the cache")),
+                .unwrap_or_else(|e| tracing::warn!(error = flat!(e), key, "couldn't write a value into the cache")),
         }
     }
 }
@@ -431,7 +432,7 @@ impl RedisHealth {
 /// The values kept in this process, in one map for every kind of them, so that there is one sweeper
 /// and one number to watch however many tenants there are.
 #[derive(Clone, Default)]
-struct LocalStore(Arc<Mutex<HashMap<String, Entry>>>);
+struct LocalStore(Arc<Mutex<FxHashMap<String, Entry>>>);
 
 struct Entry {
     bytes: Vec<u8>,
@@ -519,7 +520,7 @@ impl LocalStore {
         }))
     }
 
-    fn entries(&self) -> MutexGuard<'_, HashMap<String, Entry>> {
+    fn entries(&self) -> MutexGuard<'_, FxHashMap<String, Entry>> {
         lock(&self.0)
     }
 
@@ -567,7 +568,7 @@ async fn connect_to_redis(url: Option<String>) -> Backend {
             }))
         }
         Err(e) => {
-            tracing::error!(error = %e, "couldn't connect to Redis, the cached values are kept in this process");
+            tracing::error!(error = flat!(e), "couldn't connect to Redis, the cached values are kept in this process");
             Backend::Local(LocalStore::default())
         }
     }
@@ -589,7 +590,7 @@ fn spawn_redis_health_check(state: Arc<RedisState>, idle_timeout: Duration) {
                 None => {
                     let result = state.conn.clone().ping::<String>().await;
                     let recovered = state.health.record(result)
-                        .inspect_err(|e| tracing::debug!(error = %e, "Redis is still not answering"))
+                        .inspect_err(|e| tracing::debug!(error = flat!(e), "Redis is still not answering"))
                         .is_ok();
                     if recovered {
                         sync_fallback_to_redis(&state).await;
@@ -631,7 +632,7 @@ async fn sync_fallback_to_redis(state: &RedisState) {
         pipeline.set_ex(entry.key, entry.bytes, entry.ttl.as_secs().max(1)).ignore();
     }
     if let Err(e) = pipeline.query_async::<()>(&mut state.conn.clone()).await {
-        tracing::warn!(error = %e, count, "couldn't sync the fallback into Redis");
+        tracing::warn!(error = flat!(e), count, "couldn't sync the fallback into Redis");
     }
 }
 

@@ -2,8 +2,7 @@ use std::time::Duration;
 use autometrics::autometrics;
 use chrono::Utc;
 use futures::{stream, StreamExt};
-use teloxide::{ApiError, Bot, RequestError};
-use teloxide::adaptors::Throttle;
+use teloxide::{ApiError, RequestError};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::{Request, Requester};
 use teloxide::sugar::request::RequestLinkPreviewExt;
@@ -11,13 +10,14 @@ use teloxide::types::{ChatId, ReplyMarkup, UserId as TeloxideUserId};
 use teloxide::types::ParseMode::Html;
 use domain_types::traits::ApproxInto;
 use crate::cache::{Cache, CacheKey};
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ThrottledBot};
 use crate::domain::primitives::{LanguageCode, Page, ScheduledBroadcastId, SupportedLanguage};
 use crate::domain::primitives::chat::{ChatIdKind, InternalChatId};
+use crate::errors::flat::flat;
 use crate::handlers::shrink::{build_shrink_keyboard, shrinks_page_for_internal_chat, ShrinkView};
 use crate::metrics;
 use crate::repo::{BroadcastState, Repositories, ScheduledBroadcast};
-use super::backoff;
+use super::{backoff, never_reached_telegram};
 use crate::topics::TopicPolicy;
 use crate::users::LanguageService;
 
@@ -31,7 +31,7 @@ impl CacheKey for BroadcastLanguageKey {}
 /// The services every summary needs, bundled so the per-chat calls stay readable.
 #[derive(Clone, Copy)]
 pub struct BroadcastDeps<'a> {
-    pub bot: &'a Throttle<Bot>,
+    pub bot: &'a ThrottledBot,
     pub repos: &'a Repositories,
     pub language_service: &'a LanguageService,
     pub topics: &'a TopicPolicy,
@@ -46,6 +46,8 @@ enum Outcome {
     Sent,
     /// Something transient went wrong; the row is tried again later.
     Retry,
+    /// Telegram couldn't be reached; the row is tried again later without spending an attempt.
+    Offline,
     /// The bot can't post to that chat at all, which marks the chat too.
     Unreachable,
     /// It won't work, now or later, for a reason that says nothing about the chat.
@@ -128,9 +130,13 @@ async fn send_and_record(deps: BroadcastDeps<'_>, broadcast: ScheduledBroadcast)
                 other => other.map(|_| ()),
             }
         },
+        Outcome::Offline => {
+            metrics::DAILY_SHRINK.broadcast_retried();
+            deps.repos.broadcasts.defer(id, Utc::now() + config.retry_delay, lang).await
+        },
     };
     if let Err(e) = result {
-        tracing::error!(error = format!("{e:#}"), "couldn't record the outcome of a shrink summary");
+        tracing::error!(error = flat!(e), "couldn't record the outcome of a shrink summary");
     }
 }
 
@@ -173,8 +179,6 @@ async fn send(deps: BroadcastDeps<'_>, broadcast: &ScheduledBroadcast) -> (Outco
     let keyboard = build_shrink_keyboard(ShrinkView::Broadcast, broadcast.shrink_date,
                                          Page::first(), page.has_more_pages, None, &lang_code);
 
-    // The throttled request wraps the payload, so the keyboard goes through the setter rather than
-    // the field the plain `Bot` exposes.
     let mut request = bot.send_message(ChatId(broadcast.chat_id.value()), page.lines)
         .parse_mode(Html)
         .disable_link_preview(true);
@@ -214,20 +218,24 @@ async fn outcome_of(
         Err(e) => e,
     };
 
+    if never_reached_telegram(&error) {
+        tracing::warn!(error = flat!(error), "couldn't reach Telegram to notify the chat about the shrinks");
+        return Outcome::Offline
+    }
     if !is_chat_unreachable(&error) {
         if is_final(&error) {
-            tracing::warn!(error = %error, "the shrink summary can't be sent to this chat at all");
+            tracing::warn!(error = flat!(error), "the shrink summary can't be sent to this chat at all");
             return Outcome::Failed
         }
-        tracing::warn!(error = %error, "couldn't notify the chat about the shrinks");
+        tracing::warn!(error = flat!(error), "couldn't notify the chat about the shrinks");
         return Outcome::Retry
     }
 
     // Marking is best-effort: a chat that stays unmarked is merely queued again tomorrow.
-    tracing::info!(error = %error, "the chat is unreachable, skipping it from now on");
+    tracing::info!(error = flat!(error), "the chat is unreachable, skipping it from now on");
     repos.chats.mark_unreachable(&broadcast.chat_id)
         .await
-        .unwrap_or_else(|e| tracing::warn!(error = format!("{e:#}"), "couldn't mark the chat as unreachable"));
+        .unwrap_or_else(|e| tracing::warn!(error = flat!(e), "couldn't mark the chat as unreachable"));
     Outcome::Unreachable
 }
 
@@ -325,7 +333,7 @@ async fn tallied_language(
     cache.read_through(key, ttl, &metrics::BROADCAST_LANGUAGE_TALLY, || async {
         let uids: Vec<TeloxideUserId> = repos.dicks
             .get_player_uids_sample(internal_chat_id, config.daily_shrink.broadcast.language_sample).await
-            .inspect_err(|e| tracing::warn!(error = format!("{e:#}"), "couldn't list the players of the chat"))
+            .inspect_err(|e| tracing::warn!(error = flat!(e), "couldn't list the players of the chat"))
             .unwrap_or_default()
             .into_iter()
             .map(Into::into)

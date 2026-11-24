@@ -13,6 +13,20 @@ commands:
       success: "完成！現在我會用這種語言回覆本群所有人。"
       reset: "完成！群組語言已清除 —— 我會重新依每個人自己的語言回覆。"
       auto_button: "🌐 自動（各自的語言）"
+  voucher:
+    description: "轉讓公分"
+  reset:
+    description: "重置排行榜"
+    errors:
+      admins_only: "只有群組管理員才能重置排行榜。"
+  buy:
+    description: "購買公分"
+    text: "🛒 <b>公分可以在拍賣中買到</b>\n促銷碼會在 %{bot} 中拍賣：用 Telegram Stars 出價，只有勝出者付款，被超過出價的人會拿回自己的星星。使用 /promo 指令啟用促銷碼。"
+    button: "🔨 去拍賣"
+  donate:
+    description: "支持開發者"
+    text: "❤️ <b>支持開發者</b>\n我們利用業餘時間開發這個機器人，幾乎得不到任何回報，只換來了一個個不眠之夜。如果你喜歡這個遊戲，可以在這裡感謝我們。"
+    button: "❤️ 支持我們"
   support:
     description: "聯絡機器人主人"
     request: "請寫下你的留言，我會轉交給我的主人。發送任意指令即可取消。"
@@ -127,6 +141,7 @@ commands:
       exhausted: "這個神秘代碼的名額已經用完了 😞"
       invalid_format: "這看起來不像神秘代碼 🤔 它由 3 到 16 個字元組成：字母、數字、連字號和底線。"
       already_activated: "神秘代碼已經啟用過了 🤨"
+      too_often: "猜神秘代碼的次數太多了 🤚 休息一下，%{minutes} 分鐘後再試吧。"
       no_dicks: "看起來你還沒有任何老二。🤔 現在是時候把我加入一個聊天並執行 <code>/grow</code> 命令了！"
     inline:
       switch_button: "啟用神秘代碼 '%{code}'…"
@@ -199,10 +214,13 @@ inline:
       grow: "讓你的老二變大！"
       top: "取得聊天中最大的老二"
       dick_of_day: "選出今日老二"
-      pvp: "用 %{bet} 公分的賭注挑戰其他人！"
+      pvp: "賭 %{bet} 公分，發起挑戰！"
       stats: "勝利統計"
       loan: "負數？申請貸款！"
       shrinks: "查看最近的縮水"
+      voucher: "轉讓公分"
+      buy: "購買公分"
+      donate: "支持開發者"
   callback:
     errors:
       another_user: "此訊息由其他人發送。"
@@ -237,6 +255,7 @@ errors:
   not_group_chat: "此機器人僅在群聊中執行任務！"
   group_account: "不能以群組或頻道的身份遊玩——請關閉匿名模式後重試！"
   feature_disabled: "此功能當前暫時禁用。"
+  internal: "我這邊出了點問題，請過幾分鐘再試。"
   banned: "你在 %{date} 之前無法遊玩。如果你認為這是誤判，請用 /support 聯絡我們。"
   banned_inline_title: "你已被封鎖"
   rate_limited: "請求過多！請稍作休息，一分鐘後再試。"

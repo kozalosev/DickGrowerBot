@@ -1,11 +1,15 @@
+use std::borrow::Cow;
 use anyhow::anyhow;
 use autometrics::autometrics;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::{CallbackQuery, Message, Requester};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
+use crate::config::ThrottledBot;
+use crate::metrics::RejectionReason;
 use crate::config::MessageGroup::Notice;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::primitives::chat::ChatIdKind;
@@ -21,16 +25,23 @@ pub enum MentionsCommands {
     Mentions,
 }
 
+impl PublishedCommands for MentionsCommands {
+    fn is_published(&self, _scope: MenuScope, toggles: &CommandToggles) -> bool {
+        toggles.mentions_enabled
+    }
+}
+
 /// In a private chat, shows the user's mention setting for every chat with a button to flip it.
 /// In a group, answers with a hint.
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
-pub async fn mentions_cmd_handler(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+pub async fn mentions_cmd_handler(bot: ThrottledBot, msg: Message, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, self_destruction, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_MENTIONS.invoked();
 
     if !msg.chat.is_private() {
+        metrics::CMD_MENTIONS_REJECTED.rejected(RejectionReason::GroupHint);
         reply_html_ephemeral!(bot, msg, t!("commands.mentions.group_hint", locale = &lang_code),
             self_destruction, Notice, lang_code);
         return Ok(())
@@ -54,7 +65,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn mentions_callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn mentions_callback_handler(bot: ThrottledBot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let uid = UserId::from(&query.from);
@@ -78,19 +89,23 @@ pub async fn mentions_callback_handler(bot: Bot, query: CallbackQuery, deps: Han
                 None => "commands.shrink.mentions.not_playing",
             };
             let not_playing = toggled.is_none();
-            metrics::CMD_MENTIONS.finished();
+            if not_playing {
+                metrics::CMD_MENTIONS_REJECTED.rejected(RejectionReason::NotPlaying);
+            } else {
+                metrics::CMD_MENTIONS.finished();
+            }
             bot.answer_callback_query(query.id)
                 .show_alert(not_playing)
                 .text(t!(key, locale = &lang_code))
-                .await?;
+                .await.ignore_moot()?;
         },
     }
     Ok(())
 }
 
-fn render_state(enabled: bool, lang_code: &LanguageCode) -> String {
+fn render_state(enabled: bool, lang_code: &LanguageCode) -> Cow<'static, str> {
     let key = if enabled { "commands.mentions.enabled" } else { "commands.mentions.disabled" };
-    t!(key, locale = lang_code).to_string()
+    t!(key, locale = lang_code)
 }
 
 fn build_keyboard(enabled: bool, lang_code: &LanguageCode) -> InlineKeyboardMarkup {

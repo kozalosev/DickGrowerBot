@@ -5,6 +5,7 @@ use crate::domain::enums::MessageGroup;
 use crate::domain::objects::ChatCleanupSettings;
 use crate::domain::primitives::DelayMinutes;
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality};
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::repo::Chats;
 
@@ -38,7 +39,7 @@ impl CleanupPolicy {
         self.cache.read_through(CleanupKey(chat_id.clone()), self.ttl, &metrics::CHAT_CLEANUP, || async {
             self.chats.get_cleanup_settings(chat_id).await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(error = format!("{e:#}"), "couldn't fetch the cleanup settings of the chat");
+                    tracing::warn!(error = flat!(e), "couldn't fetch the cleanup settings of the chat");
                     ChatCleanupSettings::default()
                 })
         }).await

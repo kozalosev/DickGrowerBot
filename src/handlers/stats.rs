@@ -1,13 +1,12 @@
 use autometrics::autometrics;
 use anyhow::anyhow;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::Message;
 use crate::config::MessageGroup::Report;
 use crate::handlers::{FromRefs, HandlerDeps, HandlerResult, reply_html};
 use crate::{metrics, reply_html_ephemeral, repo};
-use crate::config::BattlesFeatureToggles;
+use crate::config::{BattlesFeatureToggles, ThrottledBot};
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::objects::WinRateAware;
 use crate::handlers::utils::{DickId, Incrementor};
@@ -22,7 +21,7 @@ pub enum StatsCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn stats_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     incr: Incrementor,
     deps: HandlerDeps,
@@ -57,7 +56,7 @@ async fn personal_stats_impl(
 ) -> anyhow::Result<String> {
     repos.personal_stats.get_personal_stats(UserId::from(from_refs.0)).await
         .map(|stats| t!("commands.stats.personal", locale = lang_code,
-            chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).to_string())
+            chats = stats.chats, max_length = stats.max_length, total_length = stats.total_length).into_owned())
 }
 
 pub(crate) async fn chat_stats_impl(

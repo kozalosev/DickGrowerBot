@@ -5,6 +5,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use byteorder::{LittleEndian, ReadBytesExt};
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::chat::TelegramChatId;
+use crate::errors::flat::flat;
+use crate::metrics;
 
 impl TryFrom<&str> for InlineMessageIdInfo {
     type Error = InvalidIDFormat;
@@ -17,19 +19,26 @@ impl TryFrom<&str> for InlineMessageIdInfo {
     }
 }
 
+/// Decodes an `inline_message_id`. An id that doesn't decode is logged with its raw value and
+/// counted in `unexpected_telegram_ids_total`: Telegram doesn't document the format, so this is
+/// where a change to it shows up first.
 pub fn resolve_inline_message_id(inline_message_id: &str) -> anyhow::Result<InlineMessageIdInfo> {
     tracing::debug!(inline_message_id = %inline_message_id, "resolving an inline_message_id");
-    let info = inline_message_id.try_into()
-        .map_err(|e: InvalidIDFormat| anyhow!(e))?;
+    let info = InlineMessageIdInfo::try_from(inline_message_id)
+        .map_err(|e| anyhow!(e))
+        .inspect_err(|e| {
+            metrics::UNEXPECTED_TELEGRAM_IDS.inline_message_id();
+            tracing::error!(error = flat!(e), inline_message_id = %inline_message_id,
+                "couldn't resolve the inline_message_id, its format may have changed");
+        })?;
     tracing::debug!(info = ?info, "resolved an inline_message_id");
     Ok(info)
 }
 
 /// The chat an inline message belongs to, when it can be told at all: only supergroups and
-/// channels encode it (see [`fix_chat_id`]). Errors are logged and reported as "unknown".
+/// channels encode it (see [`fix_chat_id`]). An id that doesn't decode is reported as "unknown".
 pub fn try_resolve_chat_id(msg_id: &str) -> Option<TelegramChatId> {
     resolve_inline_message_id(msg_id)
-        .inspect_err(|e| tracing::error!(error = %e, "couldn't resolve the inline_message_id"))
         .ok()
         .and_then(|info| info.chat_id)
 }
@@ -39,6 +48,8 @@ pub enum InvalidIDFormat {
     DecodeError(base64::DecodeError),
     InvalidLength(String),
     IOError(std::io::Error),
+    /// A negative peer id too large for a channel or a supergroup.
+    PeerOutOfRange(i64),
 }
 
 impl From<base64::DecodeError> for InvalidIDFormat {
@@ -61,7 +72,9 @@ impl std::fmt::Display for InvalidIDFormat {
             InvalidIDFormat::InvalidLength(value) =>
                 f.write_fmt(format_args!("InvalidIDLength({}): {value}", value.len())),
             InvalidIDFormat::IOError(err) =>
-                f.write_fmt(format_args!("IdIoError: {err}"))
+                f.write_fmt(format_args!("IdIoError: {err}")),
+            InvalidIDFormat::PeerOutOfRange(peer) =>
+                f.write_fmt(format_args!("PeerOutOfRange: {peer}")),
         }
     }
 }
@@ -84,7 +97,7 @@ impl TryFrom<&str> for IDFormatKind {
 }
 
 impl IDFormatKind {
-    fn decode(&self, bytes: Vec<u8>) -> Result<InlineMessageIdInfo, std::io::Error> {
+    fn decode(&self, bytes: Vec<u8>) -> Result<InlineMessageIdInfo, InvalidIDFormat> {
         let mut cursor = std::io::Cursor::new(bytes);
         let (dc_id, chat_id, message_id, access_hash) = match self {
             IDFormatKind::ID32 => {
@@ -108,7 +121,7 @@ impl IDFormatKind {
         };
         Ok(InlineMessageIdInfo::from_primitive_values(
             dc_id,
-            fix_chat_id(chat_id),
+            fix_chat_id(chat_id)?,
             message_id,
             access_hash,
         ))
@@ -126,16 +139,27 @@ impl IDFormatKind {
 /// supergroup registered before those ran out.
 const SUPERGROUP_ID_SHIFT: i64 = -1_000_000_000_000;
 
+/// The largest peer id Telegram gives a channel or a supergroup (10¹² − 2³¹). Past it, the Bot
+/// API has no `chat_id` for the peer at all.
+const MAX_CHANNEL_PEER_ID: i64 = 997_852_516_352;
+
 /// Turns the peer id decoded out of an `inline_message_id` into a Bot API `chat_id`.
 ///
 /// Only supergroups and channels come out negative. A legacy (basic) group's inline id doesn't
 /// encode the chat at all — it decodes to an unrelated positive number, typically the inline
 /// sender's user id — and a positive value is indistinguishable from a basic group's own peer
 /// id anyway, so nothing positive can be trusted.
-fn fix_chat_id(number: i64) -> Option<i64> {
-    number.is_negative()
-        .then(|| SUPERGROUP_ID_SHIFT.checked_add(number))
-        .flatten()
+///
+/// A negative value no channel can have means the id isn't laid out the way it is read here, so
+/// it is refused rather than turned into a chat that doesn't exist.
+fn fix_chat_id(number: i64) -> Result<Option<i64>, InvalidIDFormat> {
+    if !number.is_negative() {
+        return Ok(None)
+    }
+    if number < -MAX_CHANNEL_PEER_ID {
+        return Err(InvalidIDFormat::PeerOutOfRange(number))
+    }
+    Ok(Some(SUPERGROUP_ID_SHIFT + number))
 }
 
 /// The reverse of the decoding above: an `inline_message_id` of a message posted into the given
@@ -155,20 +179,34 @@ pub fn inline_message_id_of(chat_id: i64) -> String {
 #[cfg(test)]
 mod tests {
     use crate::domain::primitives::chat::TelegramChatId;
-    use super::{fix_chat_id, inline_message_id_of, try_resolve_chat_id};
+    use super::{fix_chat_id, inline_message_id_of, try_resolve_chat_id, InvalidIDFormat};
 
     #[test]
     fn test_fix_chat_id() {
         // a ten-digit peer id
-        assert_eq!(fix_chat_id(-1100294568), Some(-1001100294568));
+        assert_eq!(fix_chat_id(-1100294568).ok(), Some(Some(-1001100294568)));
         // supergroups registered earlier have shorter peer ids and keep the leading zeros
-        assert_eq!(fix_chat_id(-599075523), Some(-1000599075523));
-        assert_eq!(fix_chat_id(-1234567), Some(-1000001234567));
+        assert_eq!(fix_chat_id(-599075523).ok(), Some(Some(-1000599075523)));
+        assert_eq!(fix_chat_id(-1234567).ok(), Some(Some(-1000001234567)));
+        // the last peer id a channel can have
+        assert_eq!(fix_chat_id(-997852516352).ok(), Some(Some(-1997852516352)));
         // a legacy group decodes to something positive, which is never a chat we can trust
-        assert_eq!(fix_chat_id(68761694), None);
-        assert_eq!(fix_chat_id(0), None);
-        // a value too far out to shift is garbage rather than a chat
-        assert_eq!(fix_chat_id(i64::MIN), None);
+        assert_eq!(fix_chat_id(68761694).ok(), Some(None));
+        assert_eq!(fix_chat_id(0).ok(), Some(None));
+    }
+
+    #[test]
+    fn peers_out_of_channel_range_are_refused() {
+        for peer in [-997852516353, -5_000_000_000_000, i64::MIN] {
+            let fixed = fix_chat_id(peer);
+            assert!(matches!(fixed, Err(InvalidIDFormat::PeerOutOfRange(p)) if p == peer), "{peer}: {fixed:?}");
+        }
+    }
+
+    #[test]
+    fn an_id_with_a_peer_out_of_range_doesnt_resolve() {
+        let resolved = try_resolve_chat_id(&inline_message_id_of(-6_000_000_000_000));
+        assert_eq!(resolved, None);
     }
 
     /// The test fixture has to agree with the decoder it feeds.

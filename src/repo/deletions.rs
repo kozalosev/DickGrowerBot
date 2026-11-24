@@ -5,6 +5,7 @@ use itertools::Itertools;
 use crate::config::MessageGroup;
 use crate::domain::primitives::{AttemptsCount, Count, LanguageCode, Limit, ScheduledDeletionId};
 use crate::domain::primitives::chat::{InlineMessageId, TelegramChatId, TelegramMessageId};
+use crate::errors::flat::flat;
 use crate::repository;
 
 /// What the row is about: the bot's own answer, the command that caused it, or an inline message.
@@ -34,6 +35,9 @@ pub enum DeletionState {
     Removed,
     /// The message was already gone when its turn came: someone deleted it first.
     RemovedBefore,
+    /// The message was gone, or already carried its placeholder, after a request of ours had timed
+    /// out: that request was most likely carried out and only its answer lost.
+    RemovedOnRetry,
     /// The message grew older than Telegram lets a bot delete, so it was never even tried.
     Expired,
     /// Every attempt failed for a reason that looked transient and never stopped being one.
@@ -42,7 +46,7 @@ pub enum DeletionState {
 
 impl DeletionState {
     /// The states a row never leaves. What is kept in the table until the cleaning process runs.
-    pub const TERMINAL: [Self; 4] = [Self::Removed, Self::RemovedBefore, Self::Expired, Self::Failed];
+    pub const TERMINAL: [Self; 5] = [Self::Removed, Self::RemovedBefore, Self::RemovedOnRetry, Self::Expired, Self::Failed];
 }
 
 /// The message a row points at. The two variants are the two things Telegram lets us address, and
@@ -79,6 +83,18 @@ pub struct ScheduledDeletion {
     pub created_at: DateTime<Utc>,
     /// Attempts that have already failed, which is what the back-off is computed from.
     pub attempts: AttemptsCount,
+    /// Whether a request about the message timed out since the last step, and so may have been
+    /// carried out.
+    pub timed_out: bool,
+}
+
+/// Why Telegram gave no answer to a request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unanswered {
+    /// The connection failed, so the request never got there.
+    Unreached,
+    /// The request may have been carried out; only its answer never came.
+    TimedOut,
 }
 
 /// The messages of one group and kind that one statement finished as expired.
@@ -213,7 +229,7 @@ repository!(ScheduledDeletions,
                           inline_message_id AS "inline_message_id: InlineMessageId",
                           message_kind AS "kind: MessageKind", message_group AS "group: MessageGroup",
                           lang_code AS "lang_code: LanguageCode", state AS "state: DeletionState",
-                          created_at, attempts AS "attempts!: AttemptsCount""#,
+                          created_at, attempts AS "attempts!: AttemptsCount", timed_out"#,
             limit as Limit, lease_until
         )
             .fetch_all(&self.pool)
@@ -227,7 +243,7 @@ repository!(ScheduledDeletions,
                 // on would come back with every tick for ever.
                 tracing::error!(id = %row.id, "a scheduled deletion points at no message, giving up on it");
                 self.finish(row.id, DeletionState::Failed).await
-                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = format!("{e:#}"),
+                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = flat!(e),
                         "couldn't give up on the unusable scheduled deletion"));
                 continue
             };
@@ -240,6 +256,7 @@ repository!(ScheduledDeletions,
                 state: row.state,
                 created_at: row.created_at,
                 attempts: row.attempts,
+                timed_out: row.timed_out,
             });
         }
         Ok(claimed)
@@ -263,7 +280,8 @@ repository!(ScheduledDeletions,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(id = %id))]
     pub async fn mark_warned(&self, id: ScheduledDeletionId, fire_after: DateTime<Utc>) -> anyhow::Result<()> {
-        sqlx::query!("UPDATE Scheduled_Message_Deletions SET state = 'warned', fire_after = $2 WHERE id = $1",
+        sqlx::query!("UPDATE Scheduled_Message_Deletions SET state = 'warned', fire_after = $2, timed_out = false
+                    WHERE id = $1",
                 id as ScheduledDeletionId, fire_after)
             .execute(&self.pool)
             .await
@@ -283,6 +301,20 @@ repository!(ScheduledDeletions,
             .await
             .context("couldn't postpone the scheduled deletion")?;
         Ok(attempts)
+    },
+
+    /// Pushes the row back to `retry_after` without counting an attempt. A timeout is remembered
+    /// until the next step, since the request may still have been carried out.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(id = %id))]
+    pub async fn defer(&self, id: ScheduledDeletionId, retry_after: DateTime<Utc>, why: Unanswered) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE Scheduled_Message_Deletions SET fire_after = $2, timed_out = timed_out OR $3 WHERE id = $1",
+                id as ScheduledDeletionId, retry_after, why == Unanswered::TimedOut)
+            .execute(&self.pool)
+            .await
+            .context("couldn't defer the scheduled deletion")?;
+        Ok(())
     },
 
     /// Leaves the row behind in a terminal state instead of dropping it, so that what the worker

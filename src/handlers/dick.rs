@@ -5,15 +5,16 @@ use chrono::{Datelike, Utc};
 use domain_types::traits::SaturatingInto;
 use num_traits::ToPrimitive;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyMarkup};
 use teloxide::types::{User as TeloxideUser};
-use crate::config::{AppConfig, MessageGroup};
+use crate::metrics::RejectionReason;
+use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::{metrics, reply_html_ephemeral, repo};
 use crate::domain::objects::GrowthResult;
 use crate::domain::primitives::chat::ChatIdPartiality;
 use crate::domain::primitives::{LanguageCode, Username, Offset, Page, UserId, DaysCount, InvalidPage};
+use crate::errors::details::Details;
 use crate::handlers::{answer_callback_feature_disabled, banned_until_of, HandlerDeps, HandlerResult, TaggedReply, reply_html, utils};
 use crate::handlers::utils::{callbacks, days_word_ru, Incrementor};
 
@@ -31,7 +32,7 @@ pub enum DickCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn dick_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: DickCommands,
     incr: Incrementor,
@@ -77,7 +78,8 @@ pub(crate) async fn grow_impl(
     let user = match repos.users.create_or_update(uid, &name).await {
         Ok(user) => user,
         Err(e) if let Some(date) = banned_until_of(&e) => {
-            let text = t!("errors.banned", locale = lang_code, date = date).to_string();
+            metrics::CMD_GROW_REJECTED.rejected(RejectionReason::Banned);
+            let text = t!("errors.banned", locale = lang_code, date = date).into_owned();
             return Ok(TaggedReply { text, group: MessageGroup::Notice })
         },
         Err(e) => return Err(e)
@@ -85,7 +87,8 @@ pub(crate) async fn grow_impl(
     let days_since_registration = Utc::now() - user.created_at;
     let days_since_registration = days_since_registration.num_days().to_u32()
         .map(DaysCount::new)
-        .ok_or_else(|| anyhow!("days since registration are too much: {days_since_registration}"))?;
+        .ok_or_else(|| Details::new("couldn't count the days since the registration")
+            .registered_at(user.created_at))?;
     let mut growth_tx = repos.dicks.begin_growth(uid, chat_id).await?;
     let increment = incr.growth_increment(&mut growth_tx, days_since_registration, lang_code).await;
     let grow_result = growth_tx.commit_growth(increment.total).await?;
@@ -106,7 +109,10 @@ pub(crate) async fn grow_impl(
             };
             (text, MessageGroup::Event)
         },
-        None => (t!("commands.grow.tomorrow", locale = lang_code).to_string(), MessageGroup::Notice)
+        None => {
+            metrics::CMD_GROW_REJECTED.rejected(RejectionReason::DoneToday);
+            (t!("commands.grow.tomorrow", locale = lang_code).into_owned(), MessageGroup::Notice)
+        },
     };
     let time_left_part = utils::date::get_time_till_next_day_string(lang_code);
     Ok(TaggedReply { text: format!("{main_part}{time_left_part}"), group })
@@ -162,7 +168,7 @@ pub(crate) async fn top_impl(
             let pos: i64 = d.position.map(|p| p.saturating_into())
                 .unwrap_or_else(|| (i + 1).saturating_into());
             let mut line = t!("commands.top.line", locale = &lang_code,
-                n = pos, name = name, length = d.length).to_string();
+                n = pos, name = name, length = d.length).into_owned();
             if inactive {
                 any_inactive = true;
                 line.push_str(" [~]")
@@ -203,7 +209,7 @@ pub fn page_callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&q), uid = q.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn page_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     q: CallbackQuery,
     deps: HandlerDeps,
 ) -> HandlerResult {
@@ -211,18 +217,17 @@ pub async fn page_callback_handler(
     let lang_code = lang_resolver.execute().await;
     let edit_msg_req_params = callbacks::get_params_for_message_edit(&q)?;
     if !config.features.top_unlimited {
+        metrics::CMD_TOP_REJECTED.rejected(RejectionReason::FeatureDisabled);
         return answer_callback_feature_disabled(bot, &q, edit_msg_req_params, lang_code).await
     }
 
     let page = q.data.as_ref()
         .ok_or(InvalidPage::message("no data"))
         .and_then(|d| d.strip_prefix(CALLBACK_PREFIX_TOP_PAGE)
-            .map(str::to_owned)
-            .ok_or(InvalidPage::for_value(d, "invalid prefix")))
+            .ok_or(InvalidPage::message("invalid prefix")))
         .and_then(|r| r.parse::<u16>()
             .map(Page::new)
-            .map_err(|e| InvalidPage::for_value(&r, e)))
-        .map_err(|e| anyhow!(e))?;
+            .map_err(|_| InvalidPage::message("not a page number")))?;
     let chat_id_kind = edit_msg_req_params.clone().into();
     let chat_id_partiality = ChatIdPartiality::Specific(chat_id_kind);
     let from_refs = FromRefs(&q.from, &chat_id_partiality);
@@ -243,5 +248,5 @@ pub(crate) fn build_pagination_keyboard(page: Page, has_more_pages: bool) -> Inl
         let next_page = page + 1;
         buttons.push(InlineKeyboardButton::callback("➡️", format!("{CALLBACK_PREFIX_TOP_PAGE}{next_page}")))
     }
-    InlineKeyboardMarkup::new(vec![buttons])
+    InlineKeyboardMarkup::new([buttons])
 }

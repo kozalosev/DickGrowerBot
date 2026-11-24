@@ -1,11 +1,11 @@
 use autometrics::autometrics;
 use anyhow::anyhow;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::types::Message;
+use crate::metrics::RejectionReason;
 use crate::{metrics, reply_html_ephemeral, repo};
-use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup};
+use crate::config::{AppConfig, DickOfDaySelectionMode, MessageGroup, ThrottledBot};
 use crate::domain::objects::{DickOfDayResult, GrowthResult, User};
 use crate::repo::DickOfDayIntentStatus;
 use crate::domain::primitives::{LanguageCode, Username};
@@ -24,7 +24,7 @@ pub enum DickOfDayCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn dod_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     incr: Incrementor,
     deps: HandlerDeps,
@@ -114,11 +114,13 @@ fn chosen_answer(
 }
 
 fn already_chosen_answer(name: &Username, lang_code: &LanguageCode) -> (String, MessageGroup) {
-    let text = t!("commands.dod.already_chosen", locale = lang_code, name = name.escaped()).to_string();
+    metrics::CMD_DOD_REJECTED.rejected(RejectionReason::DoneToday);
+    let text = t!("commands.dod.already_chosen", locale = lang_code, name = name.escaped()).into_owned();
     (text, MessageGroup::Notice)
 }
 
 fn no_candidates_answer(lang_code: &LanguageCode) -> (String, MessageGroup) {
-    let text = t!("commands.dod.no_candidates", locale = lang_code).to_string();
+    metrics::CMD_DOD_REJECTED.rejected(RejectionReason::NoCandidates);
+    let text = t!("commands.dod.no_candidates", locale = lang_code).into_owned();
     (text, MessageGroup::Notice)
 }

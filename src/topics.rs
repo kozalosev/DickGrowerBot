@@ -3,6 +3,7 @@ use derive_more::Constructor;
 use crate::cache::{Cache, CacheKey};
 use crate::domain::objects::AllowedTopics;
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, TopicId};
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::repo::Chats;
 
@@ -35,7 +36,7 @@ impl TopicPolicy {
         self.cache.read_through(TopicsKey(chat_id.clone()), self.ttl, &metrics::CHAT_TOPICS, || async {
             self.chats.get_allowed_topics(chat_id).await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(error = format!("{e:#}"), "couldn't fetch the allowed topics of the chat");
+                    tracing::warn!(error = flat!(e), "couldn't fetch the allowed topics of the chat");
                     AllowedTopics::default()
                 })
         }).await

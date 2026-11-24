@@ -1,11 +1,14 @@
+use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::anyhow;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
+use crate::errors::moot::IgnoreMoot;
+use crate::config::ThrottledBot;
+use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, reply_html};
 use crate::domain::objects::AllowedTopics;
 use crate::domain::primitives::LanguageCode;
@@ -26,7 +29,7 @@ pub enum TopicsCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn topics_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     topics: TopicPolicy,
     deps: HandlerDeps,
@@ -36,12 +39,14 @@ pub async fn topics_cmd_handler(
     metrics::CMD_TOPICS.invoked();
 
     if !is_forum(&msg.chat) {
+        metrics::CMD_TOPICS_REJECTED.rejected(RejectionReason::NotAForum);
         reply_html!(bot, msg, t!("commands.topics.errors.not_a_forum", locale = &lang_code));
         return Ok(());
     }
     let from_id = msg.from.as_ref().map(|user| user.id)
         .ok_or(anyhow!("unexpected absence of a FROM field"))?;
     if !is_chat_admin(&bot, &msg, from_id).await? {
+        metrics::CMD_TOPICS_REJECTED.rejected(RejectionReason::AdminsOnly);
         reply_html!(bot, msg, t!("commands.topics.errors.admins_only", locale = &lang_code));
         return Ok(());
     }
@@ -62,7 +67,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn topics_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     topics: TopicPolicy,
     deps: HandlerDeps,
@@ -70,7 +75,8 @@ pub async fn topics_callback_handler(
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let data = TopicsCallbackData::parse(&query)?;
-    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid,
+        on_another_user = metrics::CMD_TOPICS_REJECTED.rejected(RejectionReason::AnotherUser));
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
 
     let message = query.message.as_ref()
@@ -88,7 +94,7 @@ pub async fn topics_callback_handler(
     let keyboard = build_keyboard(&allowed, current, data.uid, &lang_code);
     callbacks::edit_message_text_with_keyboard(&bot, edit_msg_params,
         render_state(&allowed, current, &lang_code), Some(keyboard)).await?;
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 
@@ -97,16 +103,16 @@ pub async fn topics_callback_handler(
 ///
 /// The other topics can't be named — the Bot API doesn't tell us their names — so they are a count
 /// rather than a list, and each one is managed from inside itself.
-fn render_state(allowed: &AllowedTopics, current: TopicId, lang_code: &LanguageCode) -> String {
+fn render_state(allowed: &AllowedTopics, current: TopicId, lang_code: &LanguageCode) -> Cow<'static, str> {
     if allowed.is_unrestricted() {
-        return t!("commands.topics.state.unrestricted", locale = lang_code).to_string()
+        return t!("commands.topics.state.unrestricted", locale = lang_code)
     }
     let key = if allowed.allows(current) {
         "commands.topics.state.allowed_here"
     } else {
         "commands.topics.state.forbidden_here"
     };
-    t!(key, locale = lang_code, count = allowed.count()).to_string()
+    t!(key, locale = lang_code, count = allowed.count())
 }
 
 /// The picker: what to do with the topic the command was invoked in, and how to lift the
@@ -131,7 +137,7 @@ fn build_keyboard(
     };
     let data = TopicsCallbackData { uid, current, action };
     rows.push(vec![InlineKeyboardButton::callback(
-        t!(label, locale = lang_code).to_string(),
+        t!(label, locale = lang_code),
         data.to_data_string())]);
 
     // Only a chat that has a restriction can be offered to lift it.
@@ -140,7 +146,7 @@ fn build_keyboard(
             uid, current, action: TopicsAction::AllowAll,
         };
         rows.push(vec![InlineKeyboardButton::callback(
-            t!("commands.topics.buttons.allow_everywhere", locale = lang_code).to_string(),
+            t!("commands.topics.buttons.allow_everywhere", locale = lang_code),
             data.to_data_string())]);
     }
 

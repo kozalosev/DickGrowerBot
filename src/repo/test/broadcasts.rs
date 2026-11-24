@@ -153,6 +153,24 @@ async fn a_postponed_summary_counts_its_attempts() {
     assert_eq!(claimed_again[0].attempts, 1);
 }
 
+#[tokio::test]
+async fn a_deferred_summary_keeps_its_attempts_and_language() {
+    let db = fresh_db().await;
+    let repo = ScheduledBroadcasts::new(db.clone());
+    queue(&db, create_chat(&db, -1001234567890).await, 0).await;
+    let claimed = repo.claim_due(Limit::new(10), far_future())
+        .await.expect("couldn't claim the summaries");
+
+    repo.defer(claimed[0].id, Utc::now() - Duration::from_secs(1), Some(SupportedLanguage::RU))
+        .await.expect("couldn't defer the summary");
+
+    let claimed_again = repo.claim_due(Limit::new(10), far_future())
+        .await.expect("couldn't claim the summaries");
+    assert_eq!(claimed_again.len(), 1);
+    assert_eq!(claimed_again[0].attempts, 0);
+    assert_eq!(claimed_again[0].lang_code, Some(SupportedLanguage::RU));
+}
+
 /// A finished row stays in the table as the account of what happened, but is out of the
 /// worker's way and out of the gauge that says how much work is left.
 #[tokio::test]

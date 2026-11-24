@@ -1,16 +1,21 @@
+use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::{anyhow, Context};
 use domain_types::traits::SaturatingInto;
-use crate::domain::primitives::Coefficient;
 use futures::join;
 use rand::RngExt;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
-use teloxide::payloads::AnswerInlineQuerySetters;
+use teloxide::utils::command::BotCommands as _;
+use teloxide::payloads::{AnswerInlineQuerySetters, EditMessageTextInlineSetters};
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, ParseMode, ReplyMarkup};
+use teloxide::types::{CallbackQuery, ChosenInlineResult, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery,
+                      InlineQueryResult, InlineQueryResultArticle, InputMessageContent, InputMessageContentText,
+                      Message, ParseMode, ReplyMarkup};
 use teloxide::types::User as TeloxideUser;
+
+use crate::config::{AppConfig, FeatureToggles, ThrottledBot};
+use crate::domain::primitives::Coefficient;
 use crate::handlers::{reply_html, send_error_callback_answer, utils, CallbackButton, CallbackResult, HandlerDeps,
     HandlerImplResult, HandlerResult};
 use crate::{metrics, reply_html, reply_html_ephemeral, repo};
@@ -18,9 +23,13 @@ use crate::config::{BattlesFeatureToggles, MessageGroup};
 use crate::domain::objects::{BattleStats, GrowthResult, User, WinRateAware};
 use crate::domain::primitives::{Bet, CharCount, LanguageCode, LengthChange, LoanPayout, UserId, Username};
 use crate::domain::primitives::chat::{ChatIdKind, ChatIdPartiality, InlineMessageId, TelegramChatId};
+use crate::errors::moot::IgnoreMoot;
+use crate::errors::flat::flat;
 use crate::handlers::utils::callbacks;
+use crate::handlers::utils::SelfDestructionService;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackDataBuilder, NewLayoutValue};
 use crate::handlers::utils::locks::BattleLocks;
+use crate::metrics::RejectionReason;
 use crate::repo::Repositories;
 
 // let's calculate time offsets from 22.06.2024
@@ -30,10 +39,10 @@ const TIMESTAMP_MILLIS_SINCE_2024: i64 = 1719014400000;
 #[command(rename_rule = "lowercase")]
 pub enum BattleCommands {
     #[command(description = "pvp")]
-    Pvp(u16),
-    Battle(u16),
-    Attack(u16),
-    Fight(u16),
+    Pvp(u32),
+    Battle(u32),
+    Attack(u32),
+    Fight(u32),
 }
 
 #[derive(BotCommands, Clone)]
@@ -46,7 +55,7 @@ pub enum BattleCommandsNoArgs {
 }
 
 impl BattleCommands {
-    fn bet(&self) -> u16 {
+    fn bet(&self) -> u32 {
         match *self {
             Self::Battle(bet) => bet,
             Self::Pvp(bet) => bet,
@@ -97,7 +106,7 @@ impl TryFrom<String> for BattleCallbackData {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn pvp_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: BattleCommands,
     deps: HandlerDeps,
@@ -113,7 +122,7 @@ pub async fn pvp_cmd_handler(
         chat_id: msg.chat.id.into(),
         lang_code: lang_code.clone(),
     };
-    let bet = Bet::new(cmd.bet().into());
+    let bet = Bet::new(cmd.bet());
     let answer = pvp_impl_start(params, user, bet).await?;
 
     reply_html_ephemeral!(bot, msg, answer.text(), self_destruction, MessageGroup::Application, lang_code,
@@ -123,42 +132,42 @@ pub async fn pvp_cmd_handler(
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
-pub async fn pvp_cmd_handler_no_args(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+pub async fn pvp_cmd_handler_no_args(bot: ThrottledBot, msg: Message, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::CMD_PVP_COUNTER.chat.inc();
+    metrics::CMD_PVP_REJECTED.rejected(RejectionReason::MissingArgument);
 
     reply_html!(bot, msg, t!("commands.pvp.errors.no_args", locale = &lang_code));
     Ok(())
 }
 
-pub fn inline_filter(query: InlineQuery) -> bool {
-    let maybe_bet: Result<u32, _> = query.query.parse();
-    maybe_bet.is_ok()
+pub fn inline_filter(query: InlineQuery, config: AppConfig) -> bool {
+    inline_bet(&query.query, config.pvp_default_bet).is_some()
 }
 
-pub fn chosen_inline_result_filter(result: ChosenInlineResult) -> bool {
-    let maybe_bet: Result<u32, _> = result.query.parse();
-    maybe_bet.is_ok()
+pub fn chosen_inline_result_filter(result: ChosenInlineResult, config: AppConfig) -> bool {
+    inline_bet(&result.query, config.pvp_default_bet).is_some()
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn pvp_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
-    let HandlerDeps { lang_resolver, .. } = deps;
+pub async fn pvp_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
+    let HandlerDeps { lang_resolver, config, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
 
-    let bet = Bet::new(query.query.parse()?);
+    let bet = inline_bet(&query.query, config.pvp_default_bet)
+        .ok_or(anyhow!("the inline query holds no bet"))?;
     let name = utils::get_full_name(&query.from);
     let res = build_inline_keyboard_article_result(query.from.id.into(), &lang_code, &name, bet);
 
-    let mut answer = bot.answer_inline_query(query.id.clone(), vec![res.clone()])
+    let mut answer = bot.answer_inline_query(query.id.clone(), [res])
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await.context(format!("couldn't answer a callback query {query:?} with {res:?}"))?;
+    answer.await.ignore_moot().context("couldn't answer the inline query")?;
     Ok(())
 }
 
@@ -170,35 +179,44 @@ pub(super) fn build_inline_keyboard_article_result(
 ) -> InlineQueryResult {
     tracing::debug!(uid = %uid, bet = %bet, "building an inline PvP offer");
 
-    let title = t!("inline.results.titles.pvp", locale = lang_code, bet = bet);
-    let text = t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet);
-    let content = InputMessageContent::Text(InputMessageContentText::new(text).parse_mode(ParseMode::Html));
-    let btn_label = t!("commands.pvp.button", locale = lang_code);
+    let texts = OfferTexts::new(lang_code, name, bet);
+    let content = InputMessageContent::Text(InputMessageContentText::new(texts.text).parse_mode(ParseMode::Html));
     let btn_data = BattleCallbackData::new(uid, bet).to_data_string();
-    InlineQueryResultArticle::new("pvp", title, content)
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-            InlineKeyboardButton::callback(btn_label, btn_data)
+    InlineQueryResultArticle::new("pvp", texts.title, content)
+        .reply_markup(InlineKeyboardMarkup::new([[
+            InlineKeyboardButton::callback(texts.button, btn_data)
         ]]))
         .into()
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn pvp_inline_chosen_handler(result: ChosenInlineResult, deps: HandlerDeps) -> HandlerResult {
-    let HandlerDeps { self_destruction, lang_resolver, config, .. } = deps;
+pub async fn pvp_inline_chosen_handler(
+    bot: ThrottledBot,
+    result: ChosenInlineResult,
+    deps: HandlerDeps,
+) -> HandlerResult {
+    let HandlerDeps { repos, self_destruction, lang_resolver, config } = deps;
     metrics::INLINE_COUNTER.finished();
 
-    // The offer is built by Telegram out of the article, so this is the first (and only) moment the
-    // bot learns which message carries it — and the only thing it knows about the chat is whatever
-    // the id encodes. The text is Telegram's too, hence no reading time: the offer is one line.
-    if let Some(inline_message_id) = result.inline_message_id {
-        let lang_code = lang_resolver.execute().await;
-        let chat = config.features.chats_merging
-            .then(|| utils::try_resolve_chat_id(&inline_message_id))
-            .flatten()
-            .map(ChatIdKind::from);
-        self_destruction.schedule_inline(InlineMessageId::new(inline_message_id), chat,
-            MessageGroup::Application, CharCount::new(0), &lang_code).await;
+    // Telegram posts the offer out of the article, so this is the first (and only) moment the bot
+    // learns which message carries it — and the only thing it knows about the chat is whatever the
+    // id encodes. The text isn't handed back, so it is built again for the reading time.
+    let Some(inline_message_id) = result.inline_message_id.map(InlineMessageId::new) else {
+        return Ok(())
+    };
+    let AppConfig { features, pvp_default_bet, .. } = config;
+    let lang_code = lang_resolver.execute().await;
+    let chat = determine_offer_chat(features, &inline_message_id);
+    let bet = inline_bet(&result.query, pvp_default_bet)
+        .ok_or(anyhow!("the chosen inline result holds no bet"))?;
+    let name = utils::get_full_name(&result.from);
+    let texts = OfferTexts::new(&lang_code, &name, bet);
+
+    if can_afford(&repos, features.pvp, &chat, result.from.id.into(), bet).await? {
+        schedule_offer(&self_destruction, inline_message_id, chat, &texts).await;
+    } else {
+        refuse_offer(&bot, &self_destruction, inline_message_id, chat, &texts).await?;
     }
     Ok(())
 }
@@ -210,7 +228,7 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn pvp_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     battle_locker: BattleLocks,
     deps: HandlerDeps,
@@ -223,22 +241,22 @@ pub async fn pvp_callback_handler(
         .or_else(|| config.features.chats_merging
             .then_some(query.inline_message_id.as_ref())
             .flatten()
-            .and_then(|msg_id| utils::resolve_inline_message_id(msg_id)
-                .inspect_err(|e| tracing::error!(error = %e, "couldn't resolve the inline_message_id"))
-                .ok()
-            )
-            .and_then(|info| info.chat_id)
+            .and_then(|msg_id| utils::try_resolve_chat_id(msg_id))
         )
         .map(ChatIdPartiality::from)
         .unwrap_or(ChatIdPartiality::from(query.chat_instance.clone()));
 
     let callback_data = BattleCallbackData::parse(&query)?;
     if callback_data.initiator == query.from.id {
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::SamePerson);
         return send_error_callback_answer(bot, query, "commands.pvp.errors.same_person").await;
     }
     let _battle_guard = match battle_locker.try_lock(&callback_data).await {
         Some(lock) => lock,
-        None => return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await
+        None => {
+            metrics::CMD_PVP_REJECTED.rejected(RejectionReason::AlreadyInProgress);
+            return send_error_callback_answer(bot, query, "commands.pvp.errors.battle_already_in_progress").await
+        },
     };
 
     let params = BattleParams {
@@ -314,12 +332,13 @@ pub(crate) async fn pvp_impl_start(
     tracing::debug!(uid = %initiator.uid, chat_id = %p.chat_id, bet = %bet, enough, "starting a PvP");
 
     let data = if enough {
-        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).to_string();
-        let btn_label = t!("commands.pvp.button", locale = &p.lang_code).to_string();
+        let text = t!("commands.pvp.results.start", locale = &p.lang_code, name = initiator.name.escaped(), bet = bet).into_owned();
+        let btn_label = t!("commands.pvp.button", locale = &p.lang_code).into_owned();
         let btn_data = BattleCallbackData::new(initiator.uid, bet);
         HandlerImplResult::WithKeyboard { text, buttons: vec![CallbackButton::new(btn_label, btn_data)] }
     } else {
-        HandlerImplResult::OnlyText(t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string())
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
+        HandlerImplResult::OnlyText(t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).into_owned())
     };
     Ok(data)
 }
@@ -346,14 +365,14 @@ async fn pvp_impl_attack(
         let (loser_res, winner_res) = p.repos.dicks.move_length(&p.chat_id, loser, winner, bet).await?;
 
         let battle_stats = p.repos.pvp_stats.send_battle_result(&p.chat_id.kind(), winner, loser, bet).await
-            .inspect_err(|e| tracing::error!(winner = %winner, loser = %loser, error = %e, "couldn't send the battle statistics"))
+            .inspect_err(|e| tracing::error!(winner = %winner, loser = %loser, error = flat!(e), "couldn't send the battle statistics"))
             .ok()
             .filter(|_| p.features.show_stats)
             .map(|BattleStats { winner: winner_stats, loser: loser_stats }| {
                 let mut stats_str = t!("commands.pvp.results.stats.text", locale = &p.lang_code,
                     winner_win_rate = winner_stats.win_rate_percentage(), loser_win_rate = loser_stats.win_rate_percentage(),
                     winner_win_streak = winner_stats.win_streak_current, winner_win_streak_max = winner_stats.win_streak_max,
-                ).to_string();
+                ).into_owned();
                 if loser_stats.prev_win_streak > 1 {
                     stats_str.push('\n');
                     stats_str.push_str(&t!("commands.pvp.results.stats.lost_win_streak", locale = &p.lang_code,
@@ -365,7 +384,7 @@ async fn pvp_impl_attack(
             .unwrap_or_default();
         
         let (winner_res, withheld_part) = pay_for_loan_if_needed(&p, winner, bet).await
-            .inspect_err(|e| tracing::error!(error = %e, "couldn't pay for a loan from a battle award"))
+            .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't pay for a loan from a battle award"))
             .ok().flatten()
             .filter(|(_, withheld)| *withheld > 0)
             .map(|(res, withheld)| {
@@ -387,10 +406,12 @@ async fn pvp_impl_attack(
         };
         CallbackResult::EditMessage(format!("{text}{withheld_part}{battle_stats}"), None)
     } else if enough_acceptor {
-        let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).to_string();
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
+        let text = t!("commands.pvp.errors.not_enough.initiator", locale = &p.lang_code).into_owned();
         CallbackResult::EditMessage(text, None)
     } else {
-        let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code).to_string();
+        metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughAcceptor);
+        let text = t!("commands.pvp.errors.not_enough.acceptor", locale = &p.lang_code).into_owned();
         CallbackResult::ShowError(text)
     };
     Ok(result)
@@ -437,6 +458,144 @@ async fn pay_for_loan_if_needed(
     Ok(Some((growth_res, payout)))
 }
 
-pub fn new_short_timestamp() -> NewLayoutValue<i64> {
+fn new_short_timestamp() -> NewLayoutValue<i64> {
     NewLayoutValue::Some(chrono::Utc::now().timestamp_millis() - TIMESTAMP_MILLIS_SINCE_2024)
+}
+
+/// The chat an inline offer was posted in, when its id encodes one.
+fn determine_offer_chat(features: FeatureToggles, inline_message_id: &InlineMessageId) -> Option<ChatIdKind> {
+    features.chats_merging
+        .then(|| utils::try_resolve_chat_id(inline_message_id))
+        .flatten()
+        .map(ChatIdKind::from)
+}
+
+/// Whether the initiator's dick covers the bet. With no chat to look in, nobody can tell, so it does.
+async fn can_afford(
+    repos: &Repositories,
+    features: BattlesFeatureToggles,
+    chat: &Option<ChatIdKind>,
+    uid: UserId,
+    bet: Bet,
+) -> anyhow::Result<bool> {
+    match chat {
+        Some(chat) if features.check_inline_offer => repos.dicks.check_dick(chat, uid, bet).await,
+        _ => Ok(true),
+    }
+}
+
+async fn schedule_offer(
+    self_destruction: &SelfDestructionService,
+    inline_message_id: InlineMessageId,
+    chat: Option<ChatIdKind>,
+    texts: &OfferTexts<'_>,
+) {
+    let char_count = CharCount::of(&texts.text);
+    self_destruction.schedule_inline(inline_message_id, chat,
+        MessageGroup::Application, char_count, texts.lang_code).await;
+}
+
+/// Turns the posted offer into a notice that the initiator is short of the bet, which also takes its
+/// button away.
+async fn refuse_offer(
+    bot: &ThrottledBot,
+    self_destruction: &SelfDestructionService,
+    inline_message_id: InlineMessageId,
+    chat: Option<ChatIdKind>,
+    texts: &OfferTexts<'_>,
+) -> anyhow::Result<()> {
+    metrics::CMD_PVP_REJECTED.rejected(RejectionReason::NotEnoughInitiator);
+    let text = texts.not_enough();
+    let char_count = CharCount::of(&text);
+    bot.edit_message_text_inline(inline_message_id.value(), text)
+        .parse_mode(ParseMode::Html)
+        .await
+        .ignore_moot()
+        .context("couldn't refuse the inline PvP offer")?;
+    self_destruction.schedule_inline(inline_message_id, chat,
+        MessageGroup::Notice, char_count, texts.lang_code).await;
+    Ok(())
+}
+
+/// What an inline offer says: its entry in the list of results, the message posted and its button.
+struct OfferTexts<'a> {
+    title: Cow<'a, str>,
+    text: Cow<'a, str>,
+    button: Cow<'a, str>,
+
+    lang_code: &'a LanguageCode,
+}
+
+impl<'a> OfferTexts<'a> {
+    fn new(lang_code: &'a LanguageCode, name: &Username, bet: Bet) -> Self {
+        Self {
+            title: t!("inline.results.titles.pvp", locale = lang_code, bet = bet),
+            text:  t!("commands.pvp.results.start", locale = lang_code, name = name.escaped(), bet = bet),
+            button: t!("commands.pvp.button", locale = lang_code),
+
+            lang_code,
+        }
+    }
+
+    /// What the offer turns into when the initiator is short of the bet. Only a refusal needs it.
+    fn not_enough(&self) -> Cow<'a, str> {
+        t!("commands.pvp.errors.not_enough.initiator", locale = self.lang_code)
+    }
+}
+
+/// The bet an inline query names: a number, alone or after `pvp` or one of its aliases, in any case.
+/// The command without a number stands for the default bet.
+fn inline_bet(query: &str, default: Bet) -> Option<Bet> {
+    let query = query.trim();
+    let number = match query.split_once(char::is_whitespace) {
+        Some((command, rest)) if is_battle_command(command) => rest.trim_start(),
+        None if is_battle_command(query) => return Some(default),
+        _ => query,
+    };
+    number.parse().ok().map(Bet::new)
+}
+
+fn is_battle_command(word: &str) -> bool {
+    BattleCommands::bot_commands().iter()
+        .any(|cmd| cmd.command.trim_start_matches('/').eq_ignore_ascii_case(word))
+}
+
+#[cfg(test)]
+mod test {
+    use crate::domain::primitives::Bet;
+    use super::inline_bet;
+
+    const DEFAULT: Bet = Bet::new(10);
+
+    #[test]
+    fn an_inline_bet_is_a_number_alone_or_after_pvp() {
+        let accepted = [
+            ("100", 100),
+            ("pvp 100", 100),
+            ("Pvp 100", 100),
+            ("PVP   100 ", 100),
+            ("battle 100", 100),
+            ("Attack 100", 100),
+            ("fight 100", 100),
+            (" 5", 5),
+        ];
+        for (query, bet) in accepted {
+            assert_eq!(inline_bet(query, DEFAULT), Some(Bet::new(bet)), "{query:?}");
+        }
+    }
+
+    #[test]
+    fn the_command_alone_takes_the_default_bet() {
+        for query in ["pvp", "Pvp ", " FIGHT"] {
+            assert_eq!(inline_bet(query, DEFAULT), Some(DEFAULT), "{query:?}");
+        }
+    }
+
+    #[test]
+    fn anything_else_holds_no_bet() {
+        let refused = ["", "pvp100", "pvp 100 200", "pvp abc", "grow 100", "grow", "-5", "abc"];
+        for query in refused {
+            assert_eq!(inline_bet(query, DEFAULT), None, "{query:?}");
+        }
+    }
 }

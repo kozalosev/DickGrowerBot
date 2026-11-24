@@ -1,4 +1,5 @@
 use crate::config::env::*;
+use crate::errors::flat::flat;
 
 /// Where the values the bot keeps briefly are stored.
 ///
@@ -28,7 +29,7 @@ impl CacheConfig {
         let url = redis_url();
         let mode = get_optional_env_string("CACHE_MODE")
             .and_then(|value| value.parse()
-                .inspect_err(|e: &strum::ParseError| tracing::warn!(key = "CACHE_MODE", error = %e,
+                .inspect_err(|e: &strum::ParseError| tracing::warn!(key = "CACHE_MODE", error = flat!(e),
                     "invalid value of an environment variable, choosing the mode by REDIS_HOST instead"))
                 .ok())
             .unwrap_or(if url.is_some() { CacheMode::Redis } else { CacheMode::Local });

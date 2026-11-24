@@ -6,14 +6,13 @@ use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 use futures::FutureExt;
-use teloxide::Bot;
-use teloxide::adaptors::throttle::{Settings, Throttle};
+use teloxide::RequestError;
 use domain_types::traits::SaturatingInto;
 use crate::cache::Cache;
 use crate::cleanup::CleanupPolicy;
-use crate::config::{get_env_value_or_default, AppConfig, ThrottleConfig};
+use crate::config::{get_env_value_or_default, AppConfig, ThrottledBot};
 use crate::domain::primitives::AttemptsCount;
-use crate::handlers::utils::date::duration_till_next_day;
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::telegram_backoff::TelegramBackoff;
 use crate::repo::Repositories;
@@ -33,26 +32,10 @@ const QUEUE_GAUGE_INTERVAL: Duration = Duration::from_mins(1);
 
 const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
 
-/// A bot that keeps the schedulers inside Telegram's rate limits.
-///
-/// Both schedulers send to many chats at once, so they need this. They must also share one, because
-/// the counting happens in a worker task the wrapper spawns, and two of them would count two
-/// budgets and allow twice as much. A clone of this shares the same worker.
-///
-/// The dispatcher and the handlers keep the plain `Bot`: they answer one user at a time.
-pub fn throttled(bot: Bot, config: ThrottleConfig) -> Throttle<Bot> {
-    let settings = Settings::default()
-        .limits(config.into())
-        .on_queue_full(|pending| async move {
-            metrics::TELEGRAM_THROTTLE_QUEUE_FULL.inc();
-            tracing::warn!(pending, "the throttle queue is full, requests are waiting for their turn");
-        });
-    Throttle::spawn_with_settings(bot, settings)
-}
-
-/// Spawns a detached, best-effort task that runs the daily shrink at UTC midnight, once every
-/// `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself isn't persisted — a restart just resumes from the next
-/// midnight; failures are logged and never abort the loop.
+/// Spawns a detached, best-effort task that runs the daily shrink at `DAILY_SHRINK_TIME` (UTC),
+/// once every `DAILY_SHRINK_PERIOD_DAYS` days. No-op when the feature is disabled. The run itself
+/// isn't persisted — a restart just waits for the next start; failures are logged and never abort
+/// the loop.
 ///
 /// What the run produces *is* persisted: the summaries it owes are rows, written by the same
 /// statement that shrank the dicks, so nothing here has to survive for a chat to be notified.
@@ -65,14 +48,14 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
     metrics::DAILY_SHRINK_PERIOD.set(i64::from(period_days.value()) * SECONDS_PER_DAY);
     tracing::info!(batch_size = %config.daily_shrink.batch_size, ratio = %config.daily_shrink.ratio,
         inactivity_days = %config.daily_shrink.inactivity_days, %period_days,
-        "the daily shrink scheduler has started");
+        start_time = %config.daily_shrink.start_time, "the daily shrink scheduler has started");
     tokio::spawn(metrics::TASK_DAILY_SHRINK.instrument(async move {
-        // A failed run is logged and forgotten: the next midnight tries again, and one bad day
+        // A failed run is logged and forgotten: the next start tries again, and one bad day
         // must not stop the scheduler for good.
         let run = || async {
             run_daily_shrink(repos.clone(), config.clone())
                 .await
-                .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the daily shrink run failed"))
+                .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the daily shrink run failed"))
         };
         // Puts the feature into effect at once instead of hours later. Re-running the same day is
         // harmless: nothing here touches `updated_at`, so the repeat picks the same victims and
@@ -82,12 +65,9 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
             resilient(run()).await;
         }
         loop {
-            let Some(till_next_day) = duration_till_next_day().and_then(|d| d.to_std().ok()) else {
-                tracing::error!("couldn't compute a valid duration till the next UTC midnight, stopping the daily shrink scheduler");
-                return;
-            };
-            tracing::debug!(sleeping_for = ?till_next_day, "waiting for the next UTC midnight");
-            tokio::time::sleep(till_next_day).await;
+            let till_next_run = config.daily_shrink.till_next_run(chrono::Utc::now());
+            tracing::debug!(sleeping_for = ?till_next_run, "waiting for the next shrink run");
+            tokio::time::sleep(till_next_run).await;
 
             if !config.daily_shrink.is_due(chrono::Utc::now().date_naive()) {
                 tracing::debug!("not a shrink day");
@@ -105,7 +85,7 @@ pub fn spawn_daily_shrink(repos: Repositories, config: AppConfig) {
 /// after the restart claims every summary that fell due meanwhile — which is what makes a broadcast
 /// to a few hundred thousand chats possible at all.
 pub fn spawn_broadcast_worker(
-    bot: Throttle<Bot>,
+    bot: ThrottledBot,
     repos: Repositories,
     language_service: LanguageService,
     topics: TopicPolicy,
@@ -138,7 +118,7 @@ pub fn spawn_broadcast_worker(
                     topics: &topics, cache: &cache, config: &config,
                 };
                 if let Err(e) = run_pending_broadcasts(deps).await {
-                    tracing::error!(error = format!("{e:#}"), "a shrink broadcast run failed");
+                    tracing::error!(error = flat!(e), "a shrink broadcast run failed");
                 }
             }).await;
         }
@@ -168,7 +148,7 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
 
             resilient(async {
                 clean_finished_broadcasts(&repos, retention).await
-                    .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished shrink summaries failed"));
+                    .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the cleaning of the finished shrink summaries failed"));
             }).await;
         }
     }));
@@ -178,7 +158,7 @@ pub fn spawn_broadcast_cleaner(repos: Repositories, config: AppConfig) {
 /// group is permanent. Unlike the two schedulers above, this one survives a restart: the messages
 /// it acts on are rows, and the tick after the restart finds every one that fell due meanwhile.
 pub fn spawn_deletion_worker(
-    bot: Throttle<Bot>,
+    bot: ThrottledBot,
     repos: Repositories,
     cache: Cache,
     config: AppConfig,
@@ -217,7 +197,7 @@ pub fn spawn_deletion_worker(
             // picks them up. Only the count is skipped, as it comes from the same database.
             resilient(async {
                 if let Err(e) = run_pending_deletions(&bot, &repos, &cache, &cleanup, &self_destruction, bot_admin_ttl).await {
-                    tracing::error!(error = format!("{e:#}"), "a self-destruction run failed");
+                    tracing::error!(error = flat!(e), "a self-destruction run failed");
                 }
             }).await;
         }
@@ -247,7 +227,7 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 
             resilient(async {
                 clean_finished_deletions(&repos, retention).await
-                    .unwrap_or_else(|e| tracing::error!(error = format!("{e:#}"), "the cleaning of the finished self-destructions failed"));
+                    .unwrap_or_else(|e| tracing::error!(error = flat!(e), "the cleaning of the finished self-destructions failed"));
             }).await;
         }
     }));
@@ -263,13 +243,13 @@ pub fn spawn_deletion_cleaner(repos: Repositories, config: AppConfig) {
 /// It runs whatever the features say. Both gauges read tables that exist regardless, a disabled
 /// feature simply reports zero, and a gauge that stops being published is indistinguishable from a
 /// worker that died — which is what the alerts are watching for.
-pub fn spawn_queue_reporter(repos: Repositories) {
+pub fn spawn_queue_reporter(repos: Repositories, config: AppConfig) {
     tokio::spawn(async move {
         let mut ticker = paced(QUEUE_GAUGE_INTERVAL);
         loop {
             ticker.tick().await;
 
-            resilient(report_queues(&repos)).await;
+            resilient(report_queues(&repos, &config)).await;
         }
     });
 }
@@ -298,7 +278,7 @@ fn paced(period: Duration) -> tokio::time::Interval {
 /// gets another tick instead of dying with nothing but a stale heartbeat to show for it.
 ///
 /// `AssertUnwindSafe` is what makes this compile: the futures here borrow `Repositories`,
-/// `Throttle<Bot>` and the like across an `.await`, none of which the compiler can prove safe to
+/// `ThrottledBot` and the like across an `.await`, none of which the compiler can prove safe to
 /// resume after a panic. Nothing here holds a lock that could be left half-updated by one — the
 /// state that matters (the database, Redis) lives outside this process — so asserting it is safe
 /// in practice.
@@ -316,6 +296,15 @@ fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
     base.saturating_mul(factor).min(max)
 }
 
+/// Whether the request failed before reaching Telegram. That says nothing about the request
+/// itself, so trying it again costs no attempt.
+///
+/// Only a failed connection qualifies: a request that timed out may have been carried out, and one
+/// that keeps doing so must still run out of attempts.
+fn never_reached_telegram(error: &RequestError) -> bool {
+    matches!(error, RequestError::Network(e) if e.is_connect())
+}
+
 /// Publishes what the alerts read: the depth of both queues, and when the last shrink was.
 ///
 /// Only these, and only because vmalert reads Prometheus and cannot ask the database itself.
@@ -329,19 +318,22 @@ fn backoff(base: Duration, failures: AttemptsCount, max: Duration) -> Duration {
 /// A failure here loses one sample of a gauge and nothing else — the queues, the rows and the
 /// workers are untouched, and the next tick publishes again — so it is a `warn`. A database that is
 /// down has already been reported by the run that failed.
-async fn report_queues(repos: &Repositories) {
+async fn report_queues(repos: &Repositories, config: &AppConfig) {
     match repos.broadcasts.count_pending().await {
         Ok(pending) => metrics::DAILY_SHRINK_BROADCAST_PENDING.set(pending.saturating_into()),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending shrink summaries"),
+        Err(e) => tracing::warn!(error = flat!(e), "couldn't count the pending shrink summaries"),
     }
     match repos.shrinks.get_last_shrink_timestamp().await {
-        Ok(Some(at)) => metrics::DAILY_SHRINK_LAST_RUN_TIMESTAMP.set(at.timestamp()),
+        Ok(Some(at)) => {
+            let scheduled_at = config.daily_shrink.scheduled_at(at.date_naive());
+            metrics::DAILY_SHRINK_LAST_RUN_TIMESTAMP.set(scheduled_at.timestamp())
+        },
         Ok(None) => {},
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't read the time of the last shrink"),
+        Err(e) => tracing::warn!(error = flat!(e), "couldn't read the time of the last shrink"),
     }
     match repos.deletions.count_pending().await {
         Ok(pending) => metrics::SELF_DESTRUCTION_PENDING.set(pending.saturating_into()),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't count the pending self-destructions"),
+        Err(e) => tracing::warn!(error = flat!(e), "couldn't count the pending self-destructions"),
     }
 }
 
@@ -366,5 +358,40 @@ mod tests {
         assert_eq!(backoff(base, AttemptsCount::new(30), MAX), MAX);
         // The shift that would overflow must give the cap, not a wrapped-around delay of nothing.
         assert_eq!(backoff(base, AttemptsCount::new(u32::MAX), MAX), MAX);
+    }
+
+    #[tokio::test]
+    async fn a_refused_connection_never_reached_telegram() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("couldn't bind a port");
+        let address = listener.local_addr().expect("couldn't read the address");
+        drop(listener);
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build().expect("couldn't build the client");
+
+        let error = client.get(format!("http://{address}")).send().await.expect_err("nothing listens there");
+        assert!(never_reached_telegram(&RequestError::Network(error.into())));
+    }
+
+    /// A request that timed out may have been carried out, so it still counts as an attempt.
+    #[tokio::test]
+    async fn a_timed_out_request_may_have_reached_telegram() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("couldn't bind a port");
+        let address = listener.local_addr().expect("couldn't read the address");
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_millis(100))
+            .build().expect("couldn't build the client");
+
+        let error = client.get(format!("http://{address}")).send().await.expect_err("nothing ever answers");
+        assert!(!never_reached_telegram(&RequestError::Network(error.into())));
+        drop(listener);
+    }
+
+    #[test]
+    fn an_answer_from_telegram_is_not_a_connection_failure() {
+        let api = RequestError::Api(teloxide::ApiError::MessageToDeleteNotFound);
+        assert!(!never_reached_telegram(&api));
     }
 }

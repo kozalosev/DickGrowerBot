@@ -1,8 +1,10 @@
 use autometrics::autometrics;
 use std::fmt::Debug;
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use sqlx::{FromRow, Postgres};
 use crate::domain::primitives::{AffectedRows, LengthChange, PromoBonus, PromoCapacity, PromoCode, UserId};
+use crate::errors::details::{DetailedContext, Details};
+use crate::repo::violates;
 use crate::repository;
 
 const PROMOCODE_ACTIVATIONS_PK: &str = "promo_code_activations_pkey";
@@ -90,17 +92,10 @@ repository!(Promo,
         }
         Self::add_activation(&mut tx, user_id, &found_code, chats_affected)
             .await
-            .map_err(|err| {
-                match err.downcast() {
-                    Ok(sqlx::Error::Database(e)) => {
-                        e.constraint()
-                            .filter(|c| c == &PROMOCODE_ACTIVATIONS_PK)
-                            .map(|_| ActivationError::AlreadyActivated)
-                            .unwrap_or(ActivationError::Other(e.into()))
-                    },
-                    Ok(e) => ActivationError::Other(anyhow!(e)),
-                    Err(e) => ActivationError::Other(e)
-                }
+            .map_err(|err| if violates(&err, PROMOCODE_ACTIVATIONS_PK) {
+                ActivationError::AlreadyActivated
+            } else {
+                ActivationError::Other(err)
             })?;
 
         tx.commit().await?;
@@ -123,7 +118,9 @@ repository!(Promo,
                 user_id as UserId, code as &PromoCode)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't preview the activation of {code} for {user_id}"))
+            .detailed_context(Details::new("couldn't preview the activation")
+                .subject_uid(user_id)
+                .promo_code(code))
     }
 ,
     /// `None` means no code by this name has ever existed. A code that has, but falls outside its
@@ -165,7 +162,8 @@ repository!(Promo,
                 code as &PromoCode)
             .fetch_optional(&mut **tx)
             .await
-            .context(format!("couldn't find a promo code length of {code}"))
+            .detailed_context(Details::new("couldn't find the promo code")
+                .promo_code(code))
     }
 ,
     #[autometrics]
@@ -179,7 +177,9 @@ repository!(Promo,
                 user_id as UserId, i64::from(bonus.value()))
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't grow dicks of {user_id} by {bonus}"))?
+            .detailed_context(Details::new("couldn't grow the dicks")
+                .subject_uid(user_id)
+                .promo_bonus(bonus))?
             .rows_affected();
         Ok(AffectedRows::new(rows_affected))
     }
@@ -192,12 +192,15 @@ repository!(Promo,
         code: &PromoCode,
         affected_chats: AffectedRows,
     ) -> anyhow::Result<()> {
-        let affected_chats: i32 = affected_chats.value().try_into()?;
+        let affected_chats_value: i32 = affected_chats.value().try_into()?;
         sqlx::query!("INSERT INTO Promo_Code_Activations (uid, code, affected_chats, activated_at) VALUES ($1, $2, $3, current_timestamp)",
-                uid as UserId, code as &PromoCode, affected_chats)
+                uid as UserId, code as &PromoCode, affected_chats_value)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't insert a promo code activation for {uid} and {code} with {affected_chats} affected chats"))?;
+            .detailed_context(Details::new("couldn't insert an activation")
+                .subject_uid(uid)
+                .promo_code(code)
+                .affected_rows(affected_chats))?;
         Ok(())
     }
 );

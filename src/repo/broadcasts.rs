@@ -3,6 +3,7 @@ use anyhow::Context;
 use chrono::{DateTime, NaiveDate, Utc};
 use crate::domain::primitives::{AttemptsCount, Count, Limit, ScheduledBroadcastId, SupportedLanguage};
 use crate::domain::primitives::chat::{InternalChatId, TelegramChatId};
+use crate::errors::flat::flat;
 use crate::repository;
 
 /// How far a summary got. `Created` is the only actionable one; the rest are terminal and stay in
@@ -119,7 +120,7 @@ repository!(ScheduledBroadcasts,
             let Some(chat_id) = row.chat_id else {
                 tracing::error!(id = %row.id, "a queued shrink summary points at a chat with no Telegram id, giving up on it");
                 self.finish(row.id, BroadcastState::Failed, None).await
-                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = format!("{e:#}"),
+                    .unwrap_or_else(|e| tracing::error!(id = %row.id, error = flat!(e),
                         "couldn't give up on the unusable shrink summary"));
                 continue
             };
@@ -172,6 +173,26 @@ repository!(ScheduledBroadcasts,
             .await
             .context("couldn't postpone the shrink summary")?;
         Ok(attempts)
+    },
+
+    /// Pushes the row back to `retry_after` without counting an attempt. `lang` behaves as in
+    /// [`Self::postpone`].
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(id = %id))]
+    pub async fn defer(
+        &self,
+        id: ScheduledBroadcastId,
+        retry_after: DateTime<Utc>,
+        lang: Option<SupportedLanguage>,
+    ) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE Scheduled_Shrink_Broadcasts SET fire_after = $2, lang_code = COALESCE($3, lang_code)
+                    WHERE id = $1",
+                id as ScheduledBroadcastId, retry_after, lang as Option<SupportedLanguage>)
+            .execute(&self.pool)
+            .await
+            .context("couldn't defer the shrink summary")?;
+        Ok(())
     },
 
     /// Leaves the row behind in a terminal state instead of dropping it, so that what the worker

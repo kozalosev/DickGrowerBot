@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Arc, RwLock};
 
 const CACHED_ENV_TOGGLES_POISONED_MSG: &str = "CachedEnvToggles map was poisoned";
@@ -41,13 +41,14 @@ impl Default for FeatureToggles {
 #[derive(Copy, Clone, Default)]
 pub struct BattlesFeatureToggles {
     pub check_acceptor_length: bool,
+    pub check_inline_offer: bool,
     pub show_stats: bool,
     pub show_stats_notice: bool,
 }
 
 #[derive(Clone, Default)]
 pub struct CachedEnvToggles {
-    map: Arc<RwLock<HashMap<String, bool>>>
+    map: Arc<RwLock<FxHashMap<String, bool>>>
 }
 
 impl CachedEnvToggles {

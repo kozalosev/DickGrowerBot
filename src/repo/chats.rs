@@ -1,14 +1,14 @@
 use autometrics::autometrics;
-use std::fmt::Formatter;
 use std::str::FromStr;
-use anyhow::{bail, Context};
+use anyhow::Context;
 use sqlx::{Postgres, Transaction};
 use crate::domain::enums::MessageGroup;
 use crate::domain::objects::{AllowedTopics, ChatCleanupSettings};
-use crate::domain::primitives::{DelayMinutes, SupportedLanguage};
-use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
+use crate::domain::primitives::{Count, DelayMinutes, SupportedLanguage};
+use crate::domain::primitives::chat::{ChatIdFull, ChatIdKind, ChatIdPartiality, ChatIdSource, ChatTitle, InternalChatId, TelegramChatId, TelegramChatInstanceId, TopicId};
+use crate::errors::details::{DetailedContext, Details};
 use crate::repo::ensure_only_one_row_updated;
-use crate::repository;
+use crate::{error, repository};
 
 /// The one key of the `cleanup` object that isn't a message group. A group can never be called
 /// this, so the two live side by side.
@@ -144,7 +144,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get the information about the chat with id = {chat_id}"))
+            .context("couldn't get the information about the chat")
     }
 ,
     /// Tells whether a chat is *anchored*: its row holds both the real `chat_id` and the
@@ -162,7 +162,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id as &TelegramChatId)
             .fetch_one(&self.pool)
             .await
-            .context(format!("couldn't check whether the chat with id = {chat_id} is anchored"))
+            .context("couldn't check whether the chat is anchored")
     }
 ,
     /// Remembers that the bot couldn't post to this chat, so the daily shrink stops queueing
@@ -179,7 +179,7 @@ repository!(Chats, with_feature_toggles,
             .execute(&self.pool)
             .await
             .map(|_| ())
-            .context(format!("couldn't mark the chat with id = {chat_id} as unreachable"))
+            .context("couldn't mark the chat as unreachable")
     }
 ,
     /// Takes the mark off again, and says whether there was one. Keyed by the Telegram id, so that
@@ -193,7 +193,20 @@ repository!(Chats, with_feature_toggles,
             .execute(&self.pool)
             .await
             .map(|result| result.rows_affected() > 0)
-            .context(format!("couldn't clear the unreachable mark of the chat with id = {chat_id}"))
+            .context("couldn't clear the unreachable mark of the chat")
+    }
+,
+    /// Stores the chat's title and says whether it changed. A chat the bot doesn't know yet is
+    /// left alone, and an unchanged title writes nothing.
+    #[autometrics]
+    #[tracing::instrument(skip_all, fields(chat_id = %chat_id))]
+    pub async fn set_title(&self, chat_id: &TelegramChatId, title: &ChatTitle) -> anyhow::Result<bool> {
+        sqlx::query!("UPDATE Chats SET title = $2 WHERE chat_id = $1 AND title IS DISTINCT FROM $2",
+                chat_id as &TelegramChatId, title as &ChatTitle)
+            .execute(&self.pool)
+            .await
+            .map(|result| result.rows_affected() > 0)
+            .context("couldn't store the title of the chat")
     }
 ,
     #[autometrics]
@@ -214,7 +227,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get the language of the chat with id = {chat_id}"))?
+            .context("couldn't get the language of the chat")?
             .flatten()
             .and_then(|code| SupportedLanguage::from_str(&code)
                 .map_err(|_| tracing::warn!(code = ?code, "an unknown language is stored for the chat"))
@@ -233,12 +246,13 @@ repository!(Chats, with_feature_toggles,
                     internal_id as InternalChatId, lang as SupportedLanguage)
                 .execute(&self.pool)
                 .await
-                .context(format!("couldn't set the language of the chat {chat_id} to {lang}"))?,
+                .detailed_context(Details::new("couldn't set the language of the chat")
+                    .lang_code(lang))?,
             None => sqlx::query!("UPDATE Chats SET settings = settings - 'language' WHERE id = $1",
                     internal_id as InternalChatId)
                 .execute(&self.pool)
                 .await
-                .context(format!("couldn't clear the language of the chat {chat_id}"))?,
+                .context("couldn't clear the language of the chat")?,
         };
         Ok(())
     }
@@ -254,7 +268,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get the allowed topics of the chat with id = {chat_id}"))?
+            .context("couldn't get the allowed topics of the chat")?
             .flatten();
         Ok(topics.map(parse_allowed_topics).unwrap_or_default())
     }
@@ -274,7 +288,8 @@ repository!(Chats, with_feature_toggles,
                 internal_id as InternalChatId, topic_id as TopicId)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't allow the topic {topic_id} of the chat {chat_id}"))?;
+            .detailed_context(Details::new("couldn't allow the topic")
+                .topic_id(topic_id))?;
         Ok(())
     }
 ,
@@ -295,7 +310,8 @@ repository!(Chats, with_feature_toggles,
                 internal_id as InternalChatId, topic_id as TopicId)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't forbid the topic {topic_id} of the chat {chat_id}"))?;
+            .detailed_context(Details::new("couldn't forbid the topic")
+                .topic_id(topic_id))?;
         Ok(())
     }
 ,
@@ -308,7 +324,7 @@ repository!(Chats, with_feature_toggles,
                 internal_id as InternalChatId)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't allow all the topics of the chat {chat_id}"))?;
+            .context("couldn't allow all the topics of the chat")?;
         Ok(())
     }
 ,
@@ -324,7 +340,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id.value() as String)
             .fetch_optional(&self.pool)
             .await
-            .context(format!("couldn't get the cleanup settings of the chat with id = {chat_id}"))?
+            .context("couldn't get the cleanup settings of the chat")?
             .flatten();
         Ok(settings.map(parse_cleanup_settings).unwrap_or_default())
     }
@@ -349,7 +365,8 @@ repository!(Chats, with_feature_toggles,
                 internal_id as InternalChatId, group.to_string(), minutes as DelayMinutes)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't set the cleanup delay of the {group} messages of the chat {chat_id}"))?;
+            .detailed_context(Details::new("couldn't set the cleanup delay of the messages")
+                .cleanup_group(group))?;
         Ok(())
     }
 ,
@@ -366,7 +383,7 @@ repository!(Chats, with_feature_toggles,
                 internal_id as InternalChatId, compress)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't set the inline cleanup of the chat {chat_id}"))?;
+            .context("couldn't set the inline cleanup of the chat")?;
         Ok(())
     }
 ,
@@ -392,7 +409,8 @@ repository!(Chats, with_feature_toggles,
                 internal_id as InternalChatId, group.to_string())
             .execute(&self.pool)
             .await
-            .context(format!("couldn't forget the cleanup delay of the {group} messages of the chat {chat_id}"))?;
+            .detailed_context(Details::new("couldn't forget the cleanup delay of the messages")
+                .cleanup_group(group))?;
         Ok(())
     }
 ,
@@ -405,7 +423,7 @@ repository!(Chats, with_feature_toggles,
                 internal_id as InternalChatId)
             .execute(&self.pool)
             .await
-            .context(format!("couldn't reset the cleanup settings of the chat {chat_id}"))?;
+            .context("couldn't reset the cleanup settings of the chat")?;
         Ok(())
     }
 ,
@@ -429,14 +447,15 @@ repository!(Chats, with_feature_toggles,
                 id as Option<TelegramChatId>, instance as Option<&TelegramChatInstanceId>)
             .fetch_all(&mut *tx)
             .await
-            .context(format!("couldn't find the chat with id = {chat_id}"))?;
+            .context("couldn't find the chat")?;
         let was_unreachable = chats.iter().any(|chat| chat.is_unreachable);
         let internal_id = match chats.len() {
             1 if chats[0].chat_id == id && chats[0].chat_instance.as_ref() == instance => Ok(chats[0].internal_id),
             1 => Self::update_chat(&mut tx, chats[0].internal_id, id, instance).await,
             0 => Self::create_chat(&mut tx, id, instance).await,
             2 => Self::merge_chats(&mut tx, [&chats[0], &chats[1]]).await,
-            x => bail!("unexpected count of chats ({x}): {chats:?}"),
+            x => return Err(Details::new("unexpected count of chats")
+                .count(Count::<Chat>::new(u64::try_from(x)?)).into()),
         }?;
         if handled_in_chat && was_unreachable {
             Self::mark_reachable(&mut tx, internal_id).await?;
@@ -455,7 +474,7 @@ repository!(Chats, with_feature_toggles,
             .execute(&mut **tx)
             .await
             .map(|_| ())
-            .context(format!("couldn't mark the chat with id = {internal_id} as reachable"))
+            .context("couldn't mark the chat as reachable")
     }
 ,
     /// Repoints a chat's row from its old (basic group) id to the new supergroup one after
@@ -483,7 +502,8 @@ repository!(Chats, with_feature_toggles,
                 FROM Chats WHERE chat_id = $1 FOR UPDATE"#, old as &TelegramChatId)
             .fetch_optional(&mut *tx)
             .await
-            .context(format!("couldn't look up the chat to migrate from id = {old}"))?;
+            .detailed_context(Details::new("couldn't look up the chat to migrate from")
+                .old_chat_id(*old))?;
         let (old_internal_id, old_instance) = match old_chat {
             Some(chat) => (chat.id, chat.chat_instance),
             // Nothing under the old id can mean two very different things, and only one of them is
@@ -497,7 +517,8 @@ repository!(Chats, with_feature_toggles,
                         FROM Chats WHERE chat_id = $1"#, new as &TelegramChatId)
                     .fetch_optional(&mut *tx)
                     .await
-                    .context(format!("couldn't check whether the chat had already been migrated to {new}"))?;
+                    .detailed_context(Details::new("couldn't check whether the chat had already been migrated")
+                        .new_chat_id(*new))?;
                 return Ok(match migrated {
                     Some(instance) => {
                         tracing::debug!("the migrated chat had already been repointed");
@@ -511,7 +532,8 @@ repository!(Chats, with_feature_toggles,
             r#"SELECT id AS "id: InternalChatId" FROM Chats WHERE chat_id = $1"#, new as &TelegramChatId)
             .fetch_optional(&mut *tx)
             .await
-            .context(format!("couldn't look up the chat to migrate to id = {new}"))?;
+            .detailed_context(Details::new("couldn't look up the chat to migrate to")
+                .new_chat_id(*new))?;
 
         let outcome = match new_internal_id {
             // Telegram assigns a brand-new id to the supergroup, so this is the only case that
@@ -524,7 +546,10 @@ repository!(Chats, with_feature_toggles,
                     .await
                     .map_err(Into::into)
                     .and_then(ensure_only_one_row_updated)
-                    .context(format!("couldn't migrate the chat with id = {old_internal_id} from {old} to {new}"))?;
+                    .detailed_context(Details::new("couldn't migrate the chat")
+                        .internal_chat_id(old_internal_id)
+                        .old_chat_id(*old)
+                        .new_chat_id(*new))?;
                 Self::journal_migration(&mut tx, old_internal_id, old, old_instance.as_ref(), new).await?;
                 tracing::info!(internal_id = %old_internal_id, "migrated the chat");
                 ChatMigrationOutcome::of_migrated(old_instance.as_ref())
@@ -571,7 +596,10 @@ repository!(Chats, with_feature_toggles,
                 old_instance as Option<&TelegramChatInstanceId>, new as &TelegramChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't journal the migration of the chat with id = {internal_id} from {old} to {new}"))?;
+            .detailed_context(Details::new("couldn't journal the migration of the chat")
+                .internal_chat_id(internal_id)
+                .old_chat_id(*old)
+                .new_chat_id(*new))?;
         Ok(())
     }
 ,
@@ -588,7 +616,7 @@ repository!(Chats, with_feature_toggles,
                 chat_id as Option<TelegramChatId>, chat_instance as Option<&TelegramChatInstanceId>)
             .fetch_one(&mut **tx)
             .await
-            .context(format!("couldn't create a chat with chat_id = {chat_id:?} or chat_instance = {chat_instance:?}"))
+            .context("couldn't create the chat")
     }
 ,
     #[autometrics]
@@ -608,7 +636,7 @@ repository!(Chats, with_feature_toggles,
             .execute(&mut **tx)
             .await
             .map(|_| internal_id)
-            .context(format!("couldn't update the chat with id = {internal_id} to chat_id = {chat_id:?}, chat_instance = {chat_instance:?}))"))
+            .context("couldn't update the ids of the chat")
     }
 ,
     /// Carries everything that references the chat being merged away over to the surviving row.
@@ -654,7 +682,9 @@ repository!(Chats, with_feature_toggles,
             .execute(&mut **tx)
             .await
             .map(|res| res.rows_affected())
-            .context(format!("couldn't move loans from the chat with id = {deleted_id} to {main_id}"))
+            .detailed_context(Details::new("couldn't move loans of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))
     }
 ,
     /// `(uid, chat_id)` is a primary key, so a user present in both chats needs their counters
@@ -679,12 +709,15 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move battle stats from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move battle stats of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("DELETE FROM Battle_Stats WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete battle stats of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete battle stats of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
@@ -705,12 +738,15 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move announcements from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move announcements of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("DELETE FROM Announcements WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete announcements of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete announcements of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
@@ -730,12 +766,15 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move imports from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move imports of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("DELETE FROM Imports WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete imports of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete imports of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
@@ -755,12 +794,15 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move the dicks of the day from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move the dicks of the day of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("DELETE FROM Dick_of_Day WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete the dicks of the day of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete the dicks of the day of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
@@ -789,7 +831,9 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move shrinks from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move shrinks of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("ALTER TABLE Stale_Dick_Shrinks ENABLE TRIGGER trg_forbid_stale_dick_shrinks_updates")
             .execute(&mut **tx)
@@ -798,7 +842,8 @@ repository!(Chats, with_feature_toggles,
         sqlx::query!("DELETE FROM Stale_Dick_Shrinks WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete shrinks of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete shrinks of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
@@ -819,12 +864,15 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move the perk states from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move the perk states of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("DELETE FROM Perk_States WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete the perk states of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete the perk states of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
@@ -843,12 +891,15 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move the player settings from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move the player settings of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("DELETE FROM Player_Settings WHERE chat_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete the player settings of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete the player settings of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
@@ -872,19 +923,23 @@ repository!(Chats, with_feature_toggles,
                 main_id as InternalChatId, deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't move the migration journal from the chat with id = {deleted_id} to {main_id}"))?
+            .detailed_context(Details::new("couldn't move the migration journal of the merged chat")
+                .internal_chat_id(main_id)
+                .merged_chat_id(deleted_id))?
             .rows_affected();
         sqlx::query!("DELETE FROM Chat_Migrations WHERE internal_id = $1", deleted_id as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete the migration journal of the chat with id = {deleted_id}"))?;
+            .detailed_context(Details::new("couldn't delete the migration journal of the merged chat")
+                .merged_chat_id(deleted_id))?;
         Ok(moved)
     }
 ,
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_a = %chats[0].internal_id, chat_b = %chats[1].internal_id))]
     async fn merge_chats(tx: &mut Transaction<'_, Postgres>, chats: [&Chat; 2]) -> anyhow::Result<InternalChatId> {
-        let state = merge_chat_objects(&chats)?;
+        let state = merge_chat_objects(&chats)
+            .context("couldn't merge the chats")?;
         // Moving the dicks over rather than summing into the surviving rows: a user who only ever
         // played through inline mode has no row in the surviving chat at all, and updating in
         // place would skip them, leaving their length to be deleted below.
@@ -898,13 +953,16 @@ repository!(Chats, with_feature_toggles,
                 state.main.internal_id as InternalChatId, state.deleted.0 as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't update dicks while merging in the chats = {chats:?}"))?
+            .detailed_context(Details::new("couldn't move the dicks of the merged chat")
+                .internal_chat_id(state.main.internal_id)
+                .merged_chat_id(state.deleted.0))?
             .rows_affected();
         let deleted_dicks = sqlx::query!("DELETE FROM Dicks WHERE chat_id = $1",
                 state.deleted.0 as InternalChatId)
             .execute(&mut **tx)
             .await
-            .context(format!("couldn't delete dicks from the old chat with id = {}", state.deleted.0))?
+            .detailed_context(Details::new("couldn't delete the dicks of the merged chat")
+                .merged_chat_id(state.deleted.0))?
             .rows_affected();
         tracing::info!(updated_dicks, deleted_dicks, "merging the chats");
         Self::move_dependent_rows(tx, state.main.internal_id, state.deleted.0).await?;
@@ -915,7 +973,9 @@ repository!(Chats, with_feature_toggles,
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
-            .context(format!("couldn't delete the old chat with id = {} and chat_instance = {}", state.deleted.0, state.deleted.1))?;
+            .detailed_context(Details::new("couldn't delete the merged chat")
+                .merged_chat_id(state.deleted.0)
+                .merged_chat_instance(state.deleted.1))?;
         sqlx::query!("UPDATE Chats SET chat_instance = $3 WHERE id = $1 AND chat_id = $2",
             state.main.internal_id as InternalChatId,
             state.main.chat_id as TelegramChatId,
@@ -925,7 +985,9 @@ repository!(Chats, with_feature_toggles,
             .await
             .map_err(Into::into)
             .and_then(ensure_only_one_row_updated)
-            .context(format!("couldn't update chat_instance of the new chat with ids = {} and {} to {}", state.main.internal_id, state.main.chat_id, state.main.chat_instance))?;
+            .detailed_context(Details::new("couldn't give the merged chat's instance to the main one")
+                .internal_chat_id(state.main.internal_id)
+                .merged_chat_instance(state.main.chat_instance))?;
         Ok(state.main.internal_id)
     }
 );
@@ -941,20 +1003,7 @@ struct MergedChatState<'a> {
     deleted: (InternalChatId, &'a TelegramChatInstanceId)
 }
 
-#[derive(Debug, derive_more::Error)]
-struct MergeChatsError(Box<[Chat; 2]>, String);
-
-impl std::fmt::Display for MergeChatsError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("MergeChatsError ({}): {:?}", self.1, self.0))
-    }
-}
-
-impl MergeChatsError {
-    fn new(chats: &[&Chat; 2], msg: &str) -> Self {
-        Self(Box::new(chats.map(Chat::to_owned)), msg.to_owned())
-    }
-}
+error!(MergeChatsError);
 
 fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, MergeChatsError> {
     let chat_ids: Vec<(InternalChatId, TelegramChatId)> = chats.iter()
@@ -965,9 +1014,9 @@ fn merge_chat_objects<'a>(chats: &'a [&Chat; 2]) -> Result<MergedChatState<'a>, 
         .collect();
 
     if chat_ids.len() != 1 || chat_instances.len() != 1 {
-        Err(MergeChatsError::new(chats, "both chats contain the same identifiers"))
+        Err(MergeChatsError::message("both chats contain the same identifiers"))
     } else if chat_ids[0].0 == chat_instances[0].0 {
-        Err(MergeChatsError::new(chats, "both chats have the same internal id"))
+        Err(MergeChatsError::message("both chats have the same internal id"))
     } else {
         Ok(MergedChatState::<'a> {
             main: MergedChat {

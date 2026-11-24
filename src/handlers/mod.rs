@@ -19,12 +19,14 @@ pub mod topics;
 pub mod cleanup;
 pub mod mentions;
 pub mod rights;
+pub mod titles;
+pub mod info;
 
 use derive_more::Constructor;
+use reqwest::Url;
 use rust_i18n::t;
-use teloxide::Bot;
-use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextInlineSetters, EditMessageTextSetters, SendMessage, SendMessageSetters};
-use teloxide::requests::{JsonRequest, Requester};
+use teloxide::payloads::{AnswerCallbackQuerySetters, EditMessageTextInlineSetters, EditMessageTextSetters, SendMessageSetters};
+use teloxide::requests::Requester;
 use teloxide::sugar::request::RequestLinkPreviewExt;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters};
 use teloxide::types::ParseMode::Html;
@@ -43,11 +45,16 @@ pub use loan::LoanCommands;
 pub use topics::TopicsCommands;
 pub use cleanup::CleanupCommands;
 pub use mentions::MentionsCommands;
-use crate::config::{AppConfig, MessageGroup};
+pub use info::InfoCommands;
+
+use crate::errors::moot::IgnoreMoot;
+use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::primitives::LanguageCode;
-use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
+use crate::errors::flat::flat;
+use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, NoCallbackData};
 use crate::handlers::utils::disabled_link_preview;
 use crate::handlers::utils::SelfDestructionService;
+use crate::repo;
 use crate::repo::Repositories;
 use crate::users::LanguageResolver;
 
@@ -90,7 +97,7 @@ pub enum CallbackResult {
 }
 
 impl CallbackResult {
-    pub async fn apply(self, bot: Bot, callback_query: CallbackQuery) -> anyhow::Result<()> {
+    pub async fn apply(self, bot: ThrottledBot, callback_query: CallbackQuery) -> anyhow::Result<()> {
         let answer_req = bot.answer_callback_query(callback_query.id);
         match self {
             CallbackResult::EditMessage(text, keyboard) => {
@@ -101,7 +108,8 @@ impl CallbackResult {
                     edit_req.reply_markup = keyboard;
 
                     edit_req.await
-                        .inspect_err(|err| tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = %err,
+                        .ignore_moot()
+                        .inspect_err(|err| tracing::error!(chat_id = %message.chat().id, message_id = %message.id(), error = flat!(err),
                             "couldn't edit the message"))?;
                 } else if let Some(inline_message_id) = callback_query.inline_message_id {
                     let mut edit_req = bot.edit_message_text_inline(&inline_message_id, text)
@@ -110,10 +118,11 @@ impl CallbackResult {
                     edit_req.reply_markup = keyboard;
 
                     edit_req.await
-                        .inspect_err(|err| tracing::error!(inline_message_id = %inline_message_id, error = %err,
+                        .ignore_moot()
+                        .inspect_err(|err| tracing::error!(inline_message_id = %inline_message_id, error = flat!(err),
                             "couldn't edit the inline message"))?;
                 };
-                answer_req.await?;
+                answer_req.await.ignore_moot()?;
             },
             CallbackResult::ShowError(err) => {
                 answer_req
@@ -126,10 +135,14 @@ impl CallbackResult {
     }
 }
 
-pub enum HandlerImplResult<D: CallbackDataWithPrefix> {
+pub enum HandlerImplResult<D: CallbackDataWithPrefix = NoCallbackData> {
     WithKeyboard {
         text: String,
         buttons: Vec<CallbackButton<D>>
+    },
+    WithLink {
+        text: String,
+        button: LinkButton,
     },
     OnlyText(String)
 }
@@ -140,10 +153,17 @@ pub struct CallbackButton<D: CallbackDataWithPrefix> {
     data: D,
 }
 
+#[derive(Constructor)]
+pub struct LinkButton {
+    title: String,
+    url: Url,
+}
+
 impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
     pub fn text(&self) -> String {
         match self {
             HandlerImplResult::WithKeyboard { text, .. } => text,
+            HandlerImplResult::WithLink { text, .. } => text,
             HandlerImplResult::OnlyText(text) => text
         }.clone()
     }
@@ -153,21 +173,24 @@ impl <D: CallbackDataWithPrefix> HandlerImplResult<D> {
             HandlerImplResult::WithKeyboard { buttons, .. } => {
                 let buttons = buttons.iter()
                     .map(|btn| InlineKeyboardButton::callback(btn.title.clone(), btn.data.to_data_string()));
-                let keyboard = InlineKeyboardMarkup::new(vec![buttons]);
+                let keyboard = InlineKeyboardMarkup::new([buttons]);
                 Some(keyboard)
+            }
+            HandlerImplResult::WithLink { button, .. } => {
+                let button = InlineKeyboardButton::url(button.title.clone(), button.url.clone());
+                Some(InlineKeyboardMarkup::new([[button]]))
             }
             HandlerImplResult::OnlyText(_) => None
         }
     }
 }
 
-pub fn reply_html<T: Into<String>>(bot: &Bot, msg: &Message, answer: T) -> JsonRequest<SendMessage> {
-    // TODO: split to several messages if the answer is too long
+pub fn reply_html<T: Into<String>>(bot: &ThrottledBot, msg: &Message, answer: T) -> <ThrottledBot as Requester>::SendMessage {
     let mut answer = bot.send_message(msg.chat.id, answer)
         .parse_mode(Html)
         .disable_link_preview(true);
     if msg.chat.is_group() || msg.chat.is_supergroup() {
-        answer.reply_parameters.replace(ReplyParameters::new(msg.id));
+        answer = answer.reply_parameters(ReplyParameters::new(msg.id).allow_sending_without_reply());
     }
     answer
 }
@@ -183,12 +206,12 @@ macro_rules! reply_html {
     ($bot:expr, $msg:ident, $answer:expr $(, $field:ident = $value:expr)* $(,)?) => {{
         #[allow(unused_mut)]
         let mut request = reply_html(&$bot, &$msg, $answer);
-        $( request.$field = ::core::convert::Into::into($value); )*
-        // The error handler runs outside the handler's span, so the ids of the message being
-        // answered survive only in this context.
+        $( ::teloxide::requests::HasPayload::payload_mut(&mut request).$field = ::core::convert::Into::into($value); )*
+        // A failed update is logged with its chat but not with its message, so the id of the
+        // message being answered survives only in this context.
         anyhow::Context::context(
             request.await,
-            format!("failed to answer message {} in chat {}", $msg.id.0, $msg.chat.id.0)
+            format!("failed to answer message {}", $msg.id.0)
         )?
     }};
 }
@@ -208,12 +231,12 @@ macro_rules! reply_html_ephemeral {
     }};
 }
 
-pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
+pub async fn send_error_callback_answer(bot: ThrottledBot, query: CallbackQuery, tr_key: &str) -> HandlerResult {
     let lang_code = LanguageCode::from_user(&query.from);
     bot.answer_callback_query(query.id)
         .show_alert(true)
         .text(t!(tr_key, locale = &lang_code))
-        .await?;
+        .await.ignore_moot()?;
     Ok(())
 }
 
@@ -221,53 +244,55 @@ pub async fn send_error_callback_answer(bot: Bot, query: CallbackQuery, tr_key: 
 /// keyboard off the message it was attached to — a stale button can outlive the toggle that
 /// enabled its feature.
 pub(crate) async fn answer_callback_feature_disabled(
-    bot: Bot,
+    bot: ThrottledBot,
     q: &CallbackQuery,
     edit_msg_req_params: utils::callbacks::EditMessageReqParamsKind,
     lang_code: LanguageCode,
 ) -> HandlerResult {
     let mut answer = bot.answer_callback_query(q.id.clone());
     answer.show_alert.replace(true);
-    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
-    answer.await?;
+    answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).into_owned());
+    answer.await.ignore_moot()?;
 
     match edit_msg_req_params {
         utils::callbacks::EditMessageReqParamsKind::Chat(chat_id, message_id) =>
             bot.edit_message_reply_markup(chat_id, message_id)
-                .await.map(|_| ())?,
+                .await.ignore_moot()?,
         utils::callbacks::EditMessageReqParamsKind::Inline { inline_message_id, .. } =>
             bot.edit_message_reply_markup_inline(inline_message_id)
-                .await.map(|_| ())?
+                .await.ignore_moot()?
     };
     Ok(())
 }
 
 pub(crate) fn banned_until_of(e: &anyhow::Error) -> Option<String> {
-    e.downcast_ref::<sqlx::Error>()
-     .and_then(sqlx::Error::as_database_error)
-     .filter(|e| e.code().is_some_and(|code| code == BANNED_SQL_CODE))
-     .map(|e| e.message().to_owned())
+    repo::database_errors(e)
+        .find(|e| e.code().is_some_and(|code| code == BANNED_SQL_CODE))
+        .map(|e| e.message().to_owned())
 }
 
 pub mod checks {
     use autometrics::autometrics;
     use std::ops::Not;
+    use std::time::Duration;
     use chrono::{DateTime, Utc};
     use rust_i18n::t;
-    use teloxide::Bot;
-    use teloxide::dispatching::{HandlerExt, UpdateFilterExt, UpdateHandler};
+    use teloxide::dispatching::{UpdateFilterExt, UpdateHandler};
     use teloxide::payloads::{AnswerCallbackQuerySetters, AnswerInlineQuerySetters};
     use teloxide::requests::Requester;
-    use teloxide::types::{CallbackQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Me, Message, Update, UpdateKind};
+    use teloxide::types::{CallbackQuery, InlineQueryResultArticle, InputMessageContent, InputMessageContentText, Message, Update, UpdateKind};
     use teloxide::utils::command::BotCommands;
+    use crate::errors::moot::IgnoreMoot;
     use crate::bans::BanList;
     use crate::commands::COMMAND_NAMES;
-    use crate::config::MessageGroup;
+    use crate::config::{AppConfig, MessageGroup, ThrottledBot};
     use crate::domain::primitives::{LanguageCode, UserId};
     use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
+    use crate::errors::flat::flat;
     use crate::handlers::HandlerDeps;
     use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
-    use crate::handlers::utils::is_forum;
+    use crate::domain::objects::BotNames;
+    use crate::handlers::utils::{is_forum, BotCommandFilterExt};
     use crate::metrics;
     use crate::rate_limit::{Exceeded, RateLimiter};
     use crate::topics::TopicPolicy;
@@ -275,10 +300,7 @@ pub mod checks {
     use super::{reply_html, topics, HandlerResult, BAN_DATE_FORMAT};
 
     pub fn is_group_chat(msg: Message) -> bool {
-        if msg.chat.is_private() || msg.chat.is_channel() {
-            return false
-        }
-        true
+        !(msg.chat.is_private() || msg.chat.is_channel())
     }
 
     pub fn is_not_group_chat(msg: Message) -> bool {
@@ -287,7 +309,7 @@ pub mod checks {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
-    pub async fn handle_not_group_chat(bot: Bot, msg: Message, deps: HandlerDeps) -> HandlerResult {
+    pub async fn handle_not_group_chat(bot: ThrottledBot, msg: Message, deps: HandlerDeps) -> HandlerResult {
         let HandlerDeps { lang_resolver, .. } = deps;
         let lang_code = lang_resolver.execute().await;
         let answer = t!("errors.not_group_chat", locale = &lang_code);
@@ -311,7 +333,7 @@ pub mod checks {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     async fn handle_group_account(
-        bot: Bot,
+        bot: ThrottledBot,
         msg: Message,
         deps: HandlerDeps,
     ) -> HandlerResult {
@@ -338,7 +360,7 @@ pub mod checks {
         }
         repos.chats.is_anchored(&TelegramChatId::from(msg.chat.id))
             .await
-            .inspect_err(|e| tracing::error!(error = %e, "couldn't check whether the chat is anchored"))
+            .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't check whether the chat is anchored"))
             .map(bool::not)
             // on a DB error, let the command through rather than locking the chat out
             .unwrap_or(false)
@@ -355,7 +377,7 @@ pub mod checks {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg)))]
-    async fn handle_needs_setup(bot: Bot, msg: Message) -> HandlerResult {
+    async fn handle_needs_setup(bot: ThrottledBot, msg: Message) -> HandlerResult {
         let lang_code = LanguageCode::from_maybe_user(msg.from.as_ref());
         super::setup::send_setup_message(&bot, msg.chat.id, &lang_code).await?;
         Ok(())
@@ -372,13 +394,13 @@ pub mod checks {
     ///
     /// `/topics` is *not* exempted here. It is a branch of its own above this gate, so its messages
     /// never reach the predicate.
-    fn is_gated_by_topic(msg: &Message, me: &Me) -> bool {
-        is_forum(&msg.chat) && is_our_command(msg, me)
+    pub fn is_gated_by_topic(msg: Message, names: BotNames) -> bool {
+        is_forum(&msg.chat) && is_our_command(&msg, &names)
     }
 
     /// Whether the message is one of our commands: by name, and by the `@username` when Telegram's
     /// menu appended one, since a group tends to hold several bots.
-    fn is_our_command(msg: &Message, me: &Me) -> bool {
+    pub(crate) fn is_our_command(msg: &Message, names: &BotNames) -> bool {
         let Some(command) = msg.text().or_else(|| msg.caption())
             .and_then(|text| text.split_whitespace().next())
             .and_then(|word| word.strip_prefix('/'))
@@ -387,22 +409,21 @@ pub mod checks {
         };
         let (name, addressee) = command.split_once('@')
             .map_or((command, None), |(name, at)| (name, Some(at)));
-        if addressee.is_some_and(|at| !at.eq_ignore_ascii_case(me.username())) {
+        if addressee.is_some_and(|at| !names.is_ours(at)) {
             return false
         }
         COMMAND_NAMES.contains(&name.to_lowercase())
     }
 
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, topic_id = %TopicId::from(msg.thread_id)))]
-    pub async fn is_forbidden_topic(msg: Message, me: Me, topics: TopicPolicy) -> bool {
-        is_gated_by_topic(&msg, &me)
-            && !topics.allows(&msg.chat.id.into(), msg.thread_id.into()).await
+    pub async fn is_forbidden_topic(msg: Message, topics: TopicPolicy) -> bool {
+        !topics.allows(&msg.chat.id.into(), msg.thread_id.into()).await
     }
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
     pub async fn handle_forbidden_topic(
-        bot: Bot,
+        bot: ThrottledBot,
         msg: Message,
         deps: HandlerDeps,
     ) -> HandlerResult {
@@ -442,7 +463,7 @@ pub mod checks {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
     pub async fn handle_forbidden_topic_callback(
-        bot: Bot,
+        bot: ThrottledBot,
         query: CallbackQuery,
         deps: HandlerDeps,
     ) -> HandlerResult {
@@ -453,16 +474,31 @@ pub mod checks {
         bot.answer_callback_query(query.id)
             .show_alert(true)
             .text(t!("errors.forbidden_topic_callback", locale = &lang_code))
-            .await?;
+            .await.ignore_moot()?;
         Ok(())
+    }
+
+    /// Whether the message is one of our commands that took longer than `COMMAND_MAX_AGE` to
+    /// arrive. Its sender has most likely sent it again by now.
+    pub fn is_stale_command(msg: Message, names: BotNames, config: AppConfig) -> bool {
+        is_stale(msg.date, config.command_max_age, Utc::now()) && is_our_command(&msg, &names)
+    }
+
+    pub async fn drop_stale_command() -> HandlerResult {
+        metrics::STALE_COMMANDS.inc();
+        Ok(())
+    }
+
+    fn is_stale(sent: DateTime<Utc>, max_age: Duration, now: DateTime<Utc>) -> bool {
+        !max_age.is_zero() && (now - sent).to_std().is_ok_and(|age| age > max_age)
     }
 
     /// The verdict on a request that went over a limit, or `None` for one that may go on. Only
     /// what the bot would answer is counted: our commands, the buttons and the inline queries.
     /// Chatter in a group the bot reads in full, and the second step of a dialogue, are left alone.
-    pub async fn rate_limit_exceeded(upd: Update, me: Me, limiter: RateLimiter) -> Option<Exceeded> {
+    pub async fn rate_limit_exceeded(upd: Update, names: BotNames, limiter: RateLimiter) -> Option<Exceeded> {
         let (uid, chat): (_, Option<ChatIdKind>) = match &upd.kind {
-            UpdateKind::Message(msg) if is_our_command(msg, &me) => (msg.from.as_ref(), Some(msg.chat.id.into())),
+            UpdateKind::Message(msg) if is_our_command(msg, &names) => (msg.from.as_ref(), Some(msg.chat.id.into())),
             UpdateKind::CallbackQuery(query) => {
                 let chat = query.message.as_ref()
                     .map_or_else(|| query.chat_instance.clone().into(), |msg| msg.chat().id.into());
@@ -477,7 +513,7 @@ pub mod checks {
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = ?upd.from().map(|u| u.id.0), ?verdict, lang_code = tracing::field::Empty))]
     pub async fn handle_rate_limited(
-        bot: Bot,
+        bot: ThrottledBot,
         upd: Update,
         verdict: Exceeded,
         limiter: RateLimiter,
@@ -490,7 +526,7 @@ pub mod checks {
 
         let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
         let lang_code = lang_resolver.execute().await;
-        let answer = t!("errors.rate_limited", locale = &lang_code).to_string();
+        let answer = t!("errors.rate_limited", locale = &lang_code);
         let cache_time = limiter.window().as_secs().saturating_into();
 
         match upd.kind {
@@ -502,16 +538,16 @@ pub mod checks {
                     .show_alert(true)
                     .text(answer)
                     .cache_time(cache_time)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             UpdateKind::InlineQuery(query) => {
                 let title = t!("errors.rate_limited_inline_title", locale = &lang_code);
                 let content = InputMessageContent::Text(InputMessageContentText::new(answer));
                 let article = InlineQueryResultArticle::new("rate_limited", title, content);
-                bot.answer_inline_query(query.id, vec![article.into()])
+                bot.answer_inline_query(query.id, [article.into()])
                     .is_personal(true)
                     .cache_time(cache_time)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             _ => {}
         }
@@ -530,7 +566,7 @@ pub mod checks {
 
     #[autometrics]
     #[tracing::instrument(skip_all, fields(uid = ?upd.from().map(|u| u.id.0), lang_code = tracing::field::Empty))]
-    pub async fn handle_banned(bot: Bot, upd: Update, bans: BanList, deps: HandlerDeps) -> HandlerResult {
+    pub async fn handle_banned(bot: ThrottledBot, upd: Update, bans: BanList, deps: HandlerDeps) -> HandlerResult {
         let HandlerDeps { lang_resolver, self_destruction, .. } = deps;
         let Some(until) = banned_until(&upd, bans) else {
             return Ok(())
@@ -549,16 +585,16 @@ pub mod checks {
                 bot.answer_callback_query(query.id)
                     .show_alert(true)
                     .text(answer)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             UpdateKind::InlineQuery(query) => {
                 let title = t!("errors.banned_inline_title", locale = &lang_code);
                 let content = InputMessageContent::Text(InputMessageContentText::new(answer));
                 let article = InlineQueryResultArticle::new("banned", title, content);
-                bot.answer_inline_query(query.id, vec![article.into()])
+                bot.answer_inline_query(query.id, [article.into()])
                     .is_personal(true)
                     .cache_time(1)
-                    .await?;
+                    .await.ignore_moot()?;
             }
             // a chosen inline result has nothing to answer to
             _ => {}
@@ -576,7 +612,7 @@ pub mod checks {
     where
         C: BotCommands + Send + Sync + 'static
     {
-        Update::filter_message().filter_command::<C>()
+        Update::filter_message().filter_bot_command::<C>()
             .filter(is_group_chat)
             .branch(reject_group_accounts())
             .branch(require_anchored_group())
@@ -584,10 +620,11 @@ pub mod checks {
 
     pub mod inline {
         use autometrics::autometrics;
-        use teloxide::Bot;
         use teloxide::payloads::AnswerInlineQuerySetters;
         use teloxide::prelude::{InlineQuery, Requester};
         use teloxide::types::ChatType;
+        use crate::config::ThrottledBot;
+        use crate::errors::moot::IgnoreMoot;
         use super::HandlerResult;
 
         pub fn is_group_chat(query: InlineQuery) -> bool {
@@ -602,60 +639,65 @@ pub mod checks {
 
         #[autometrics]
         #[tracing::instrument(skip_all, fields(uid = query.from.id.0))]
-        pub async fn handle_not_group_chat_inline(bot: Bot, query: InlineQuery) -> HandlerResult {
-            bot.answer_inline_query(query.id, vec![])
+        pub async fn handle_not_group_chat_inline(bot: ThrottledBot, query: InlineQuery) -> HandlerResult {
+            bot.answer_inline_query(query.id, [])
                 .is_personal(true)
                 .cache_time(1)
-                .await?;
+                .await.ignore_moot()?;
             Ok(())
         }
     }
 
     #[cfg(test)]
     mod test {
-        use teloxide::types::{CallbackQuery, Me, Message};
+        use teloxide::types::{CallbackQuery, Message};
+        use crate::domain::primitives::Username;
+        use crate::domain::objects::BotNames;
         use crate::domain::primitives::chat::{ChatIdKind, TelegramChatId, TopicId};
-        use super::{callback_topic, is_gated_by_topic, is_our_command};
+        use std::time::Duration;
+        use chrono::{DateTime, TimeDelta, Utc};
+        use super::{callback_topic, is_gated_by_topic, is_our_command, is_stale};
 
         #[test]
         fn test_our_command_in_a_forum_is_gated() {
-            assert!(is_gated_by_topic(&message("/grow", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/grow", true, Some(42)), names()));
             // the General topic carries no thread id of its own
-            assert!(is_gated_by_topic(&message("/grow", true, None), &me()));
-            assert!(is_gated_by_topic(&message("/grow@DickGrowerBot arg", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/grow", true, None), names()));
+            assert!(is_gated_by_topic(message("/grow@DickGrowerBot arg", true, Some(42)), names()));
             // Telegram's menu is not consistent about the case of the username it appends
-            assert!(is_gated_by_topic(&message("/grow@dickgrowerbot", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/grow@dickgrowerbot", true, Some(42)), names()));
+            assert!(is_gated_by_topic(message("/grow@DickGrowerGame", true, Some(42)), names()));
         }
 
         /// A group usually holds several bots. Answering for a command aimed at one of them would
         /// be noise from a bot that was just told to be quieter, so the addressee is checked.
         #[test]
         fn test_another_bots_command_is_not_gated() {
-            assert!(!is_gated_by_topic(&message("/grow@SomeOtherBot", true, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("/start@SomeOtherBot", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(message("/grow@SomeOtherBot", true, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("/start@SomeOtherBot", true, Some(42)), names()));
         }
 
         /// Same reasoning for a bare command we simply don't have: it belongs to someone else.
         #[test]
         fn test_a_command_we_dont_have_is_not_gated() {
-            assert!(!is_gated_by_topic(&message("/roll 2d6", true, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("/", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(message("/roll 2d6", true, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("/", true, Some(42)), names()));
         }
 
         /// Every message of a forbidden topic would otherwise get a notice, which is noisier than
         /// the bot the setting was meant to quiet.
         #[test]
         fn test_an_ordinary_message_is_not_gated() {
-            assert!(!is_gated_by_topic(&message("hello", true, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("not a /grow", true, Some(42)), &me()));
+            assert!(!is_gated_by_topic(message("hello", true, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("not a /grow", true, Some(42)), names()));
         }
 
         /// A supergroup linked to a channel puts a thread id on discussion-thread messages too,
         /// and those aren't topics.
         #[test]
         fn test_a_non_forum_is_never_gated() {
-            assert!(!is_gated_by_topic(&message("/grow", false, Some(42)), &me()));
-            assert!(!is_gated_by_topic(&message("/grow", false, None), &me()));
+            assert!(!is_gated_by_topic(message("/grow", false, Some(42)), names()));
+            assert!(!is_gated_by_topic(message("/grow", false, None), names()));
         }
 
         /// `/topics` is not exempted here: it is a branch of its own above this gate, so a
@@ -663,16 +705,17 @@ pub mod checks {
         /// branch is ever moved below the gate, the reminder is right here.
         #[test]
         fn test_the_topics_command_is_exempted_by_the_branch_order_only() {
-            assert!(is_gated_by_topic(&message("/topics", true, Some(42)), &me()));
+            assert!(is_gated_by_topic(message("/topics", true, Some(42)), names()));
         }
 
         /// The rate limiter counts the commands in every chat, a forum or not.
         #[test]
         fn test_our_commands_are_recognized_outside_forums_too() {
-            assert!(is_our_command(&message("/help", false, None), &me()));
-            assert!(is_our_command(&message("/help@DickGrowerBot", false, None), &me()));
-            assert!(!is_our_command(&message("/help@SomeOtherBot", false, None), &me()));
-            assert!(!is_our_command(&message("help me", false, None), &me()));
+            assert!(is_our_command(&message("/help", false, None), &names()));
+            assert!(is_our_command(&message("/help@DickGrowerBot", false, None), &names()));
+            assert!(is_our_command(&message("/help@dickgrowergame", false, None), &names()));
+            assert!(!is_our_command(&message("/help@SomeOtherBot", false, None), &names()));
+            assert!(!is_our_command(&message("help me", false, None), &names()));
         }
 
         #[test]
@@ -709,6 +752,27 @@ pub mod checks {
             assert_eq!(callback_topic(&query), None);
         }
 
+        #[test]
+        fn a_command_older_than_the_limit_is_stale() {
+            let now = Utc::now();
+            let max_age = Duration::from_mins(10);
+            assert!(is_stale(now - TimeDelta::minutes(11), max_age, now));
+            assert!(!is_stale(now - TimeDelta::minutes(9), max_age, now));
+        }
+
+        #[test]
+        fn a_zero_limit_keeps_every_command() {
+            let now = Utc::now();
+            assert!(!is_stale(DateTime::UNIX_EPOCH, Duration::ZERO, now));
+        }
+
+        /// A clock behind Telegram's makes a fresh message look as if it came from the future.
+        #[test]
+        fn a_message_from_the_future_is_not_stale() {
+            let now = Utc::now();
+            assert!(!is_stale(now + TimeDelta::minutes(30), Duration::from_mins(10), now));
+        }
+
         /// A message of the given text, in a supergroup that either is a forum or isn't. Built
         /// from JSON because a `Message` has far more fields than a test wants to name.
         fn message(text: &str, is_forum: bool, thread_id: Option<i32>) -> Message {
@@ -726,14 +790,8 @@ pub mod checks {
         }
 
         /// The bot the commands are addressed to in the tests below.
-        fn me() -> Me {
-            let json = r#"{
-                "id": 42, "is_bot": true, "first_name": "Dick Grower", "username": "DickGrowerBot",
-                "can_join_groups": true, "can_read_all_group_messages": false,
-                "supports_inline_queries": true, "can_connect_to_business_account": false,
-                "has_main_web_app": false
-            }"#;
-            serde_json::from_str(json).expect("couldn't build the bot's own user")
+        fn names() -> BotNames {
+            BotNames::new(Username::from("DickGrowerBot"), [Username::from("DickGrowerGame")])
         }
 
         fn callback(data: &str, message: Option<Message>) -> CallbackQuery {

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE Chats SET title = $2 WHERE chat_id = $1 AND title IS DISTINCT FROM $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d0a8d0a3d7a0b8864b24e047f454e29ecf41e1635ead8e7f1db4d650af8cce35"
+}

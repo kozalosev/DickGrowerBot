@@ -1,5 +1,5 @@
 use autometrics::autometrics;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fmt::Debug;
 use std::str::FromStr;
 use anyhow::{anyhow, Context};
@@ -8,16 +8,19 @@ use once_cell::sync::Lazy;
 use rust_i18n::t;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, EnumString};
-use teloxide::Bot;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::requests::Requester;
 use teloxide::types::*;
 use teloxide::types::ParseMode::Html;
-use crate::config::{AppConfig, MessageGroup};
+use crate::errors::moot::IgnoreMoot;
+use crate::config::{AppConfig, MessageGroup, ThrottledBot};
 use crate::domain::objects::InlineMessageIdInfo;
 use crate::domain::primitives::{CharCount, LanguageCode, Page, UserId as DomainUserId, Username};
 use crate::domain::primitives::chat::{ChatIdFull, ChatIdSource, InlineMessageId, TelegramChatInstanceId};
+use crate::errors::details::{DetailedContext, Details};
+use crate::errors::flat::flat;
 use crate::handlers::{banned_until_of, dick, dod, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, loan, shrink, stats, utils, pvp};
+use crate::handlers::info::{self, InfoCommands};
 use crate::handlers::utils::callbacks::CallbackDataWithPrefix;
 use crate::handlers::utils::Incrementor;
 use crate::metrics;
@@ -32,6 +35,9 @@ enum InlineCommand {
     Loan,
     Stats,
     Shrinks,
+    Voucher,
+    Buy,
+    Donate,
 }
 
 struct InlineResult {
@@ -61,6 +67,16 @@ impl InlineResult {
 }
 
 impl InlineCommand {
+    /// Whether the command has anything to offer under this config.
+    fn is_available(&self, config: &AppConfig) -> bool {
+        match self {
+            InlineCommand::Shrinks => config.daily_shrink.enabled(),
+            InlineCommand::Buy => config.auction_bot.is_some(),
+            InlineCommand::Donate => config.donate_url.is_some(),
+            _ => true,
+        }
+    }
+
     async fn execute(
         &self,
         repos: &Repositories,
@@ -115,6 +131,19 @@ impl InlineCommand {
                         res
                     })
             },
+            InlineCommand::Voucher | InlineCommand::Buy | InlineCommand::Donate => self.info_command()
+                .map(|cmd| InlineResult::with_keyboard(info::info_impl(cmd, &config, lang_code), MessageGroup::Notice))
+                .ok_or_else(|| anyhow!("not an informational command")),
+        }
+    }
+
+    /// The informational command this one posts, if it is one.
+    fn info_command(&self) -> Option<InfoCommands> {
+        match self {
+            InlineCommand::Voucher => Some(InfoCommands::Voucher),
+            InlineCommand::Buy => Some(InfoCommands::Buy),
+            InlineCommand::Donate => Some(InfoCommands::Donate),
+            _ => None,
         }
     }
 }
@@ -127,7 +156,7 @@ struct ExternalVariant {
 }
 
 struct ExternalVariants {
-    result_ids: HashSet<&'static str>,
+    result_ids: FxHashSet<&'static str>,
     builders: Vec<ExternalVariantBuilder>
 }
 impl ExternalVariants {
@@ -154,7 +183,7 @@ static EXTERNAL_VARIANTS: Lazy<ExternalVariants> = Lazy::new(|| ExternalVariants
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: InlineQuery,
     deps: HandlerDeps,
 ) -> HandlerResult {
@@ -166,10 +195,10 @@ pub async fn inline_handler(
     match repos.users.create_or_update(DomainUserId::from(&query.from), &name).await {
         Ok(_) => {},
         Err(e) if banned_until_of(&e).is_some() => {
-            bot.answer_inline_query(query.id, vec![])
+            bot.answer_inline_query(query.id, [])
                 .is_personal(true)
                 .cache_time(1)
-                .await?;
+                .await.ignore_moot()?;
             return Ok(())
         },
         Err(e) => return Err(e.into()),
@@ -185,8 +214,7 @@ pub async fn inline_handler(
         _ => "inline.results.text",
     };
     let mut results: Vec<InlineQueryResult> = InlineCommand::iter()
-        // The `shrinks` command only makes sense when the daily shrink feature is on.
-        .filter(|cmd| !matches!(cmd, InlineCommand::Shrinks) || app_config.daily_shrink.enabled())
+        .filter(|cmd| cmd.is_available(&app_config))
         .map(|cmd| cmd.to_string())
         .filter(|cmd| app_config.command_toggles.enabled(cmd))
         .map(|key| {
@@ -197,7 +225,7 @@ pub async fn inline_handler(
             let mut article = InlineQueryResultArticle::new(
                 key.clone(), title, content
             );
-            let buttons = vec![vec![
+            let buttons = [[
                 InlineKeyboardButton::callback(btn_label.clone(), format!("{uid}:{key}"))
             ]];
             article.reply_markup.replace(InlineKeyboardMarkup::new(buttons));
@@ -208,19 +236,19 @@ pub async fn inline_handler(
         results.push(builder(&query, &lang_code, &app_config, &name))
     }
 
-    let mut answer = bot.answer_inline_query(query.id.clone(), results.clone())
+    let mut answer = bot.answer_inline_query(query.id.clone(), results)
         .is_personal(true);
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await.context(format!("couldn't answer inline query {query:?} with results {results:?}"))?;
+    answer.await.ignore_moot().context("couldn't answer the inline query")?;
     Ok(())
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = result.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_chosen_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     result: ChosenInlineResult,
     incr: Incrementor,
     deps: HandlerDeps,
@@ -244,7 +272,8 @@ pub async fn inline_chosen_handler(
             tracing::debug!(chat = ?chat, uid = result.from.id.0, "handling a chosen inline result");
 
             let cmd = InlineCommand::from_str(&result.result_id)
-                .context(format!("couldn't parse inline command '{}'", result.result_id))?;
+                .detailed_context(Details::new("couldn't parse the inline command")
+                    .inline_result_id(&result.result_id))?;
             let chat_id = chat.try_into().map_err(|e: NoChatIdError| anyhow!(e))?;
             let from_refs = FromRefs(&result.from, &chat_id);
             let inline_result = cmd.execute(&repos, config, incr, from_refs, &lang_code).await?;
@@ -257,7 +286,7 @@ pub async fn inline_chosen_handler(
             request.reply_markup = inline_result.keyboard;
             request.parse_mode.replace(Html);
             request.disable_web_page_preview.replace(true);
-            request.await?;
+            request.await.ignore_moot()?;
 
             self_destruction.schedule_inline(inline_message_id, Some(chat_id.kind()),
                 inline_result.group, char_count, &lang_code).await;
@@ -270,7 +299,7 @@ pub async fn inline_chosen_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn inline_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     incr: Incrementor,
     deps: HandlerDeps,
@@ -287,11 +316,7 @@ pub async fn inline_callback_handler(
                     id,
                     instance: TelegramChatInstanceId::new(query.chat_instance.clone()),
                 }.to_partiality(ChatIdSource::InlineQuery),
-                Ok(InlineMessageIdInfo { chat_id: None, .. }) => query.chat_instance.clone().into(),
-                Err(err) => {
-                    tracing::error!(error = %err, "couldn't resolve the inline_message_id");
-                    query.chat_instance.clone().into()
-                }
+                Ok(InlineMessageIdInfo { chat_id: None, .. }) | Err(_) => query.chat_instance.clone().into(),
             })
             .unwrap_or(query.chat_instance.clone().into());
         tracing::debug!(chat_id = ?chat_id, uid = query.from.id.0, "handling a callback query");
@@ -305,7 +330,7 @@ pub async fn inline_callback_handler(
             edit.reply_markup = inline_result.keyboard;
             edit.parse_mode.replace(Html);
             edit.disable_web_page_preview.replace(true);
-            edit.await?;
+            edit.await.ignore_moot()?;
 
             // Legacy groups send no chosen result. For them this is the first place the bot sees
             // the id. If the message is already scheduled, the insert does nothing, so paging does
@@ -317,23 +342,23 @@ pub async fn inline_callback_handler(
                 Ok(CallbackDataParseResult::AnotherUser) => "another_user",
                 Ok(CallbackDataParseResult::Invalid) => "invalid_data",
                 Err(e) => {
-                    tracing::error!(error = %e, "unknown callback data");
+                    tracing::error!(error = flat!(e), "unknown callback data");
                     "unknown_data"
                 }
                 Ok(CallbackDataParseResult::Ok(_)) => panic!("unexpected CallbackDataParseResult::Ok(_)")
             };
             let t_key = format!("inline.callback.errors.{key}");
-            let text = t!(&t_key, locale = &lang_code).to_string();
+            let text = t!(&t_key, locale = &lang_code).into_owned();
             answer.text.replace(text);
             answer.show_alert.replace(true);
         }
     } else {
-        let text = t!("inline.callback.errors.no_data", locale = &lang_code).to_string();
+        let text = t!("inline.callback.errors.no_data", locale = &lang_code).into_owned();
         answer.text.replace(text);
         answer.show_alert.replace(true);
     };
 
-    answer.await.context(format!("couldn't answer a callback query {query:?}"))?;
+    answer.await.ignore_moot().context("couldn't answer the callback query")?;
     Ok(())
 }
 
@@ -349,7 +374,7 @@ fn parse_callback_data(data: &str, user_id: UserId) -> Result<CallbackDataParseR
             if uid == user_id.0.to_string() {
                 InlineCommand::from_str(data)
                     .map(CallbackDataParseResult::Ok)
-                    .inspect_err(|err| tracing::error!(data = %data, error = %err, "couldn't parse the callback data"))
+                    .inspect_err(|err| tracing::error!(data = %data, error = flat!(err), "couldn't parse the callback data"))
             } else {
                 Ok(CallbackDataParseResult::AnotherUser)
             }

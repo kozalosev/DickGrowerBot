@@ -1,20 +1,24 @@
+use std::borrow::Cow;
 use autometrics::autometrics;
 use anyhow::anyhow;
 use derive_more::Display;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::{CallbackQuery, Message, UserId};
 use teloxide::requests::Requester;
 use teloxide::types::ReplyMarkup;
 use callbacks::{EditMessageReqParamsKind, InvalidCallbackData};
+use crate::errors::moot::IgnoreMoot;
+use crate::config::ThrottledBot;
 
+use crate::metrics::RejectionReason;
 use crate::{check_invoked_by_owner_and_get_answer_params, metrics, reply_html_ephemeral, repo};
 use crate::config::{AppConfig, MessageGroup};
 use crate::domain::objects::Loan;
 use crate::domain::primitives::{Debt, FloatPercentage, LanguageCode, PayoutRatio, UserId as DomainUserId};
 use domain_types::literal;
 use crate::domain::primitives::chat::{ChatIdPartiality, InlineMessageId};
+use crate::errors::flat::flat;
 use crate::handlers::{CallbackButton, FromRefs, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
 use crate::handlers::utils::try_resolve_chat_id;
 use crate::handlers::utils::callbacks;
@@ -31,7 +35,7 @@ pub enum LoanCommands {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn loan_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     deps: HandlerDeps,
 ) -> HandlerResult {
@@ -64,18 +68,21 @@ pub(crate) async fn loan_impl(
     if let Some(Loan { debt, .. }) = maybe_loan
         && !config.features.multiple_loans
     {
-        let left_to_pay = t!("commands.loan.debt", locale = lang_code, debt = debt).to_string();
+        metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::Debt);
+        let left_to_pay = t!("commands.loan.debt", locale = lang_code, debt = debt).into_owned();
         return Ok(HandlerImplResult::OnlyText(left_to_pay))
     }
 
     if config.loan_payout_ratio <= 0.0 || config.loan_payout_ratio >= 1.0 {
-        let err_text = t!("errors.feature_disabled", locale = lang_code).to_string();
+        metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::FeatureDisabled);
+        let err_text = t!("errors.feature_disabled", locale = lang_code).into_owned();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
     let length = repos.dicks.fetch_length(DomainUserId::from(from), &chat_id_kind).await?;
     if length >= 0 {
-        let err_text = t!("commands.loan.errors.positive_length", locale = lang_code).to_string();
+        metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PositiveLength);
+        let err_text = t!("commands.loan.errors.positive_length", locale = lang_code).into_owned();
         return Ok(HandlerImplResult::OnlyText(err_text))
     }
 
@@ -83,7 +90,7 @@ pub(crate) async fn loan_impl(
     let payout_percentage = FloatPercentage::from(config.loan_payout_ratio).to_string();
 
     let btn_agree = CallbackButton::new(
-        t!("commands.loan.confirmation.buttons.agree", locale = lang_code).to_string(),
+        t!("commands.loan.confirmation.buttons.agree", locale = lang_code).into_owned(),
         LoanCallbackData {
             uid: from.id,
             action: LoanCallbackAction::Confirmed {
@@ -93,7 +100,7 @@ pub(crate) async fn loan_impl(
         }
     );
     let btn_disagree = CallbackButton::new(
-        t!("commands.loan.confirmation.buttons.disagree", locale = lang_code).to_string(),
+        t!("commands.loan.confirmation.buttons.disagree", locale = lang_code).into_owned(),
         LoanCallbackData {
             uid: from.id,
             action: LoanCallbackAction::Refused
@@ -101,7 +108,7 @@ pub(crate) async fn loan_impl(
     );
     Ok(HandlerImplResult::WithKeyboard {
         text: t!("commands.loan.confirmation.text", locale = lang_code,
-            debt = debt, payout_percentage = payout_percentage).to_string(),
+            debt = debt, payout_percentage = payout_percentage).into_owned(),
         buttons: vec![btn_agree, btn_disagree]
     })
 }
@@ -113,14 +120,15 @@ pub fn callback_filter(query: CallbackQuery) -> bool {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
 pub async fn loan_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     deps: HandlerDeps,
 ) -> HandlerResult {
     let HandlerDeps { repos, config, self_destruction, lang_resolver } = deps;
     let lang_code = lang_resolver.execute().await;
     let data = LoanCallbackData::parse(&query)?;
-    let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid);
+    let mut answer = check_invoked_by_owner_and_get_answer_params!(bot, query, data.uid,
+        on_another_user = metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::AnotherUser));
 
     let edit_msg_params = callbacks::get_params_for_message_edit(&query)?;
     // Whatever the answer is, the message stops being an application the moment it gets one, and
@@ -133,15 +141,17 @@ pub async fn loan_callback_handler(
     };
     match data.action {
         LoanCallbackAction::Confirmed { .. } if config.loan_payout_ratio.is_zero() => {
+            metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::FeatureDisabled);
             answer.show_alert.replace(true);
-            answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).to_string());
+            answer.text.replace(t!("errors.feature_disabled", locale = &lang_code).into_owned());
         }
         LoanCallbackAction::Confirmed { value: debt, payout_ratio } if payout_ratio == config.loan_payout_ratio => {
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.into(), debt).await?;
                     let updated_text = borrow_result_to_text(borrow_result, &lang_code);
-                    bot.edit_message_text(chat_id, message_id, updated_text).await?;
+                    bot.edit_message_text(chat_id, message_id, updated_text)
+                        .await.ignore_moot()?;
                 }
                 EditMessageReqParamsKind::Inline { chat_instance, inline_message_id } => {
                     let maybe_chat_id = try_resolve_chat_id(&inline_message_id)
@@ -158,11 +168,13 @@ pub async fn loan_callback_handler(
 
                     let borrow_result = repos.loans.borrow(data.uid.into(), &chat_id.kind(), debt).await?;
                     let updated_text = borrow_result_to_text(borrow_result, &lang_code);
-                    bot.edit_message_text_inline(inline_message_id, updated_text).await?;
+                    bot.edit_message_text_inline(inline_message_id, updated_text)
+                        .await.ignore_moot()?;
                 }
             }
         }
         LoanCallbackAction::Confirmed { .. } => {
+            metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PayoutRatioChanged);
             let updated_text = t!("commands.loan.callback.payout_ratio_changed", locale = &lang_code);
             callbacks::edit_message_text(&bot, edit_msg_params, updated_text).await?;
         }
@@ -171,31 +183,37 @@ pub async fn loan_callback_handler(
             match edit_msg_params {
                 EditMessageReqParamsKind::Chat(chat_id, message_id) => {
                     let unable_to_delete_message = bot.delete_message(chat_id, message_id).await
-                        .inspect_err(|e| tracing::error!(error = %e, "couldn't delete the loan request message"))
+                        .ignore_moot()
+                        .inspect_err(|e| tracing::error!(error = flat!(e), "couldn't delete the loan request message"))
                         .is_err();
                     if unable_to_delete_message {
-                        bot.edit_message_text(chat_id, message_id, updated_text).await?;
+                        bot.edit_message_text(chat_id, message_id, updated_text)
+                            .await.ignore_moot()?;
                     }
                 }
                 EditMessageReqParamsKind::Inline { inline_message_id, .. } => {
-                    bot.edit_message_text_inline(inline_message_id, updated_text).await?;
+                    bot.edit_message_text_inline(inline_message_id, updated_text)
+                        .await.ignore_moot()?;
                 }
             }
         }
     }
 
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 
-fn borrow_result_to_text(borrow_result: repo::BorrowResult, lang_code: &LanguageCode) -> String {
+fn borrow_result_to_text(borrow_result: repo::BorrowResult, lang_code: &LanguageCode) -> Cow<'static, str> {
     match borrow_result {
         repo::BorrowResult::Granted => {
             metrics::CMD_LOAN_COUNTER.finished.inc();
-            t!("commands.loan.callback.success", locale = lang_code).to_string()
+            t!("commands.loan.callback.success", locale = lang_code)
         }
         // the user might have got a positive length between the loan application and the button click
-        repo::BorrowResult::NotEligible => t!("commands.loan.errors.positive_length", locale = lang_code).to_string()
+        repo::BorrowResult::NotEligible => {
+            metrics::CMD_LOAN_REJECTED.rejected(RejectionReason::PositiveLength);
+            t!("commands.loan.errors.positive_length", locale = lang_code)
+        },
     }
 }
 

@@ -1,10 +1,11 @@
-use async_trait::async_trait;
 use chrono::NaiveDate;
 use domain_types::traits::{ApproxInto, SaturatingInto};
+use enum_dispatch::enum_dispatch;
 use crate::domain::primitives::Coefficient;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use sqlx::types::JsonValue;
+use crate::errors::flat::flat;
 use crate::handlers::utils::{days_word_ru, AdditionalChange, ChangeSource, ConfigurablePerk, Perk, PerkContext, PerkOutcome};
 use crate::config::StreakGrades;
 use crate::{config, repo};
@@ -15,15 +16,23 @@ const HELP_PUSSIES: &str = "help-pussies";
 const LOAN_PAYOUT: &str = "loan-payout";
 const STREAK: &str = "streak";
 
-pub fn all(cfg: &config::AppConfig) -> Vec<Box<dyn Perk>> {
+/// Every perk the bot knows.
+#[enum_dispatch(Perk)]
+pub enum AnyPerk {
+    HelpPussies(HelpPussiesPerk),
+    LoanPayout(LoanPayoutPerk),
+    Streak(StreakPerk),
+}
+
+pub fn all(cfg: &config::AppConfig) -> Vec<AnyPerk> {
     let perks = &cfg.incrementor.perks;
 
     vec![
-        Box::new(HelpPussiesPerk {
+        AnyPerk::HelpPussies(HelpPussiesPerk {
             coefficient: perks.help_pussies_ratio,
         }),
-        Box::new(LoanPayoutPerk),
-        Box::new(StreakPerk { grades: perks.streak_grades.clone() })
+        AnyPerk::LoanPayout(LoanPayoutPerk),
+        AnyPerk::Streak(StreakPerk { grades: perks.streak_grades.clone() }),
     ]
 }
 
@@ -31,7 +40,6 @@ pub struct HelpPussiesPerk {
     coefficient: Ratio
 }
 
-#[async_trait]
 impl Perk for HelpPussiesPerk {
     fn name(&self) -> PerkName {
         literal!(PerkName = HELP_PUSSIES)
@@ -52,17 +60,23 @@ impl Perk for HelpPussiesPerk {
     }
 }
 
-impl ConfigurablePerk for HelpPussiesPerk {
+impl ConfigurablePerk<AnyPerk> for HelpPussiesPerk {
     type Config = Ratio;
 
     fn get_config(&self) -> Self::Config {
         self.coefficient
     }
+
+    fn find_in(perk: &AnyPerk) -> Option<&Self> {
+        match perk {
+            AnyPerk::HelpPussies(perk) => Some(perk),
+            _ => None,
+        }
+    }
 }
 
 pub struct LoanPayoutPerk;
 
-#[async_trait]
 impl Perk for LoanPayoutPerk {
     fn name(&self) -> PerkName {
         literal!(PerkName = LOAN_PAYOUT)
@@ -86,7 +100,7 @@ impl Perk for LoanPayoutPerk {
         let payout = u32::try_from(payout_value)
             .map(LoanPayout::new)
             .unwrap_or_else(|e| {
-                tracing::error!(payout = payout_value, dick_id = %dick_id, error = %e, "the loan payout is invalid");
+                tracing::error!(payout = payout_value, dick_id = %dick_id, error = flat!(e), "the loan payout is invalid");
                 LoanPayout::new(0)
             });
         if payout.is_zero() {
@@ -112,7 +126,6 @@ struct StreakState {
     last_grow: NaiveDate,
 }
 
-#[async_trait]
 impl Perk for StreakPerk {
     fn name(&self) -> PerkName {
         literal!(PerkName = STREAK)
@@ -144,7 +157,7 @@ impl Perk for StreakPerk {
         Ok(PerkOutcome {
             change: AdditionalChange(LengthChange::signed(bonus)),
             state: serde_json::to_value(state)
-                .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = %e, "couldn't serialize a streak"))
+                .inspect_err(|e| tracing::error!(dick_id = %ctx.dick_id, error = flat!(e), "couldn't serialize a streak"))
                 .ok(),
             note: Some(PerkNote::new(note)),
         })
@@ -153,7 +166,7 @@ impl Perk for StreakPerk {
     fn stats_line(&self, state: Option<&JsonValue>, lang_code: &LanguageCode) -> Option<String> {
         let state = state.and_then(parse_streak)?;
         Some(t!("commands.stats.streak", locale = lang_code,
-            current = state.streak, max = state.max).to_string())
+            current = state.streak, max = state.max).into_owned())
     }
 
     fn enabled(&self) -> bool {
@@ -161,11 +174,18 @@ impl Perk for StreakPerk {
     }
 }
 
-impl ConfigurablePerk for StreakPerk {
+impl ConfigurablePerk<AnyPerk> for StreakPerk {
     type Config = StreakGrades;
 
     fn get_config(&self) -> Self::Config {
         self.grades.clone()
+    }
+
+    fn find_in(perk: &AnyPerk) -> Option<&Self> {
+        match perk {
+            AnyPerk::Streak(perk) => Some(perk),
+            _ => None,
+        }
     }
 }
 
@@ -173,7 +193,7 @@ impl ConfigurablePerk for StreakPerk {
 /// streak starts over rather than the growth failing.
 fn parse_streak(state: &JsonValue) -> Option<StreakState> {
     serde_json::from_value(state.clone())
-        .inspect_err(|e| tracing::warn!(error = %e, "couldn't read a stored streak"))
+        .inspect_err(|e| tracing::warn!(error = flat!(e), "couldn't read a stored streak"))
         .ok()
 }
 

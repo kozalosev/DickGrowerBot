@@ -2,18 +2,21 @@ use autometrics::autometrics;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rust_i18n::t;
-use teloxide::Bot;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::AnswerInlineQuerySetters;
 use teloxide::prelude::{CallbackQuery, Dialogue, InlineQuery, Requester};
 use teloxide::types::{InlineQueryResultsButton, InlineQueryResultsButtonKind, Message, ReplyMarkup, User};
+use crate::errors::moot::IgnoreMoot;
+use crate::config::ThrottledBot;
+use crate::errors::flat::flat;
+use crate::metrics::{RejectableOutcome, RejectionReason};
 use crate::dialogue::CachedDialogueStorage;
 use crate::handlers::{CallbackButton, HandlerDeps, HandlerImplResult, HandlerResult, reply_html};
 use crate::handlers::utils::callbacks;
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::{metrics, reply_html, repo};
-use crate::cache::Cache;
 use crate::domain::primitives::{AffectedRows, LanguageCode, PromoBonus, PromoCode, UserId};
+use crate::rate_limit::{Exceeded, RateLimiter};
 use crate::repo::ActivationError;
 
 pub(crate) const PROMO_START_PARAM_PREFIX: &str = "promo-";
@@ -52,6 +55,24 @@ enum ActivationOutcome {
     Exhausted,
     NoDicks,
     AlreadyActivated,
+    /// Over the user's limit of attempts.
+    TooOften,
+}
+
+impl RejectableOutcome for ActivationOutcome {
+    fn rejection(&self) -> Option<RejectionReason> {
+        match self {
+            Self::Success | Self::Confirmation => None,
+            Self::InvalidFormat => Some(RejectionReason::InvalidArgument),
+            Self::NotFound => Some(RejectionReason::NotFound),
+            Self::NotStarted => Some(RejectionReason::NotStarted),
+            Self::Expired => Some(RejectionReason::Expired),
+            Self::Exhausted => Some(RejectionReason::Exhausted),
+            Self::NoDicks => Some(RejectionReason::NotPlaying),
+            Self::AlreadyActivated => Some(RejectionReason::AlreadyActivated),
+            Self::TooOften => Some(RejectionReason::TooOften),
+        }
+    }
 }
 
 impl TryFrom<ActivationError> for ActivationOutcome {
@@ -79,11 +100,11 @@ struct PromoCodeActivationResult {
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn promo_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: PromoCommands,
     dialogue: PromoCodeDialogue,
-    cache: Cache,
+    limiter: RateLimiter,
     deps: HandlerDeps,
 ) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
@@ -94,25 +115,27 @@ pub async fn promo_cmd_handler(
         PromoCommands::Promo(code) if code.is_empty() => {
             dialogue.update(PromoCommandState::Requested).await?;
 
-            HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).to_string())
+            Some(HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).into_owned()))
         }
         PromoCommands::Promo(code) => {
             dialogue.exit().await?;
 
-            activate_or_refuse(repos.promo, &cache, user, code, lang_code).await?
+            parse_and_try_activate(repos.promo, &limiter, user, code, &lang_code).await?
         },
     };
-    reply_html!(bot, msg, answer.text(), reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
+    if let Some(answer) = answer {
+        reply_html!(bot, msg, answer.text(), reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
+    }
     Ok(())
 }
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn promo_requested_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     dialogue: PromoCodeDialogue,
-    cache: Cache,
+    limiter: RateLimiter,
     deps: HandlerDeps,
 ) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
@@ -122,13 +145,15 @@ pub async fn promo_requested_handler(
             dialogue.exit().await?;
 
             let user = msg.from.as_ref().ok_or("no from user")?;
-            activate_or_refuse(repos.promo, &cache, user, code.to_owned(), lang_code).await?
+            parse_and_try_activate(repos.promo, &limiter, user, code.to_owned(), &lang_code).await?
         },
         None => {
-            HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).to_string())
+            Some(HandlerImplResult::OnlyText(t!("commands.promo.request", locale = &lang_code).into_owned()))
         }
     };
-    reply_html!(bot, msg, answer.text(), reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
+    if let Some(answer) = answer {
+        reply_html!(bot, msg, answer.text(), reply_markup = answer.keyboard().map(ReplyMarkup::InlineKeyboard));
+    }
     Ok(())
 }
 
@@ -138,7 +163,7 @@ pub fn promo_inline_filter(InlineQuery { query, .. }: InlineQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn promo_inline_handler(bot: ThrottledBot, query: InlineQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     metrics::INLINE_COUNTER.invoked();
@@ -157,7 +182,7 @@ pub async fn promo_inline_handler(bot: Bot, query: InlineQuery, deps: HandlerDep
     if cfg!(debug_assertions) {
         answer.cache_time.replace(1);
     }
-    answer.await?;
+    answer.await.ignore_moot()?;
     Ok(())
 }
 
@@ -167,23 +192,66 @@ pub fn promo_callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = ?crate::handlers::cq_chat_id(&query), uid = query.from.id.0, lang_code = tracing::field::Empty))]
-pub async fn promo_callback_handler(bot: Bot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
+pub async fn promo_callback_handler(bot: ThrottledBot, query: CallbackQuery, deps: HandlerDeps) -> HandlerResult {
     let HandlerDeps { repos, lang_resolver, .. } = deps;
     let lang_code = lang_resolver.execute().await;
     let text = match PromoCallbackData::parse(&query)? {
         PromoCallbackData::Confirm(code) => activate(repos.promo, &query.from, &code, &lang_code).await?.answer,
-        PromoCallbackData::Cancel => t!("commands.promo.confirmation.cancelled", locale = &lang_code).to_string(),
+        PromoCallbackData::Cancel => t!("commands.promo.confirmation.cancelled", locale = &lang_code).into_owned(),
     };
     let params = callbacks::get_params_for_message_edit(&query)?;
-    bot.answer_callback_query(query.id).await?;
+    bot.answer_callback_query(query.id).await.ignore_moot()?;
     callbacks::edit_message_text_with_keyboard(&bot, params, text, None).await?;
     Ok(())
 }
 
-/// Asks for a confirmation first when the code would take a lot away.
-pub(crate) async fn promo_activation_impl(
+/// Every attempt is counted against the user's limit before it reaches the database. `None` is an
+/// attempt that gets no answer at all.
+pub(crate) async fn try_activate(
     promo_repo: repo::Promo,
-    cache: &Cache,
+    limiter: &RateLimiter,
+    user: &User,
+    code: PromoCode,
+    lang_code: &LanguageCode,
+) -> anyhow::Result<Option<HandlerImplResult<PromoCallbackData>>> {
+    let Some(exceeded) = limiter.promo_exceeded(UserId::from(user)).await else {
+        return promo_activation_impl(promo_repo, user, &code, lang_code)
+            .await
+            .map(Some)
+    };
+    record_attempt(ActivationOutcome::TooOften);
+    metrics::CMD_PROMO_REJECTED.count(&ActivationOutcome::TooOften);
+    let answer = (exceeded == Exceeded::Warn).then(|| {
+        let minutes = limiter.promo_window().as_secs().div_ceil(60);
+        let text = t!("commands.promo.errors.too_often", locale = lang_code, minutes = minutes);
+        HandlerImplResult::OnlyText(text.into_owned())
+    });
+    Ok(answer)
+}
+
+/// A code the type refuses is answered here and never reaches the limit or the database.
+async fn parse_and_try_activate(
+    promo_repo: repo::Promo,
+    limiter: &RateLimiter,
+    user: &User,
+    code: String,
+    lang_code: &LanguageCode,
+) -> anyhow::Result<Option<HandlerImplResult<PromoCallbackData>>> {
+    match PromoCode::new(code) {
+        Ok(code) => try_activate(promo_repo, limiter, user, code, lang_code).await,
+        Err(e) => {
+            tracing::info!(error = flat!(e), "the promo code doesn't fit the format");
+            record_attempt(ActivationOutcome::InvalidFormat);
+            metrics::CMD_PROMO_REJECTED.rejected(RejectionReason::InvalidArgument);
+            let text = t!("commands.promo.errors.invalid_format", locale = lang_code).into_owned();
+            Ok(Some(HandlerImplResult::OnlyText(text)))
+        }
+    }
+}
+
+/// Asks for a confirmation first when the code would take a lot away.
+async fn promo_activation_impl(
+    promo_repo: repo::Promo,
     user: &User,
     promo_code: &PromoCode,
     lang_code: &LanguageCode,
@@ -194,7 +262,7 @@ pub(crate) async fn promo_activation_impl(
     let (answer, outcome) = match preview {
         Some(preview) => (HandlerImplResult::WithKeyboard {
             text: t!("commands.promo.confirmation.text", locale = lang_code,
-                length = preview.bonus_length.value().unsigned_abs(), chats = preview.chats).to_string(),
+                length = preview.bonus_length.value().unsigned_abs(), chats = preview.chats).into_owned(),
             buttons: confirmation_buttons(promo_code, lang_code),
         }, ActivationOutcome::Confirmation),
         None => {
@@ -202,7 +270,7 @@ pub(crate) async fn promo_activation_impl(
             (HandlerImplResult::OnlyText(answer), outcome)
         },
     };
-    record_attempt(cache, UserId::from(user), outcome).await;
+    record_attempt(outcome);
     Ok(answer)
 }
 
@@ -226,50 +294,30 @@ async fn activate(
             let text = t!("commands.promo.success.template", locale = &lang_code,
                 ending = t!(&format!("commands.promo.success.{direction}.{plurality}"), locale = &lang_code,
                     growth = bonus.unsigned_abs(), affected_chats = res.chats_affected,
-                    word_chats = chats_in_russian))
-                .to_string();
+                    word_chats = chats_in_russian)).into_owned();
             (text, ActivationOutcome::Success)
         },
         Err(e) => {
             let outcome = ActivationOutcome::try_from(e)?;
+            metrics::CMD_PROMO_REJECTED.count(&outcome);
             let t_key = format!("commands.promo.errors.{outcome}");
-            (t!(&t_key, locale = &lang_code).to_string(), outcome)
+            (t!(&t_key, locale = &lang_code).into_owned(), outcome)
         }
     };
     Ok(PromoCodeActivationResult { answer: text, outcome })
 }
 
-/// A code the type refuses never reaches the database.
-async fn activate_or_refuse(
-    promo_repo: repo::Promo,
-    cache: &Cache,
-    user: &User,
-    code: String,
-    lang_code: LanguageCode,
-) -> anyhow::Result<HandlerImplResult<PromoCallbackData>> {
-    match PromoCode::new(code) {
-        Ok(code) => promo_activation_impl(promo_repo, cache, user, &code, &lang_code).await,
-        Err(e) => {
-            tracing::info!(error = %e, "the promo code doesn't fit the format");
-            record_attempt(cache, UserId::from(user), ActivationOutcome::InvalidFormat).await;
-            let text = t!("commands.promo.errors.invalid_format", locale = &lang_code).to_string();
-            Ok(HandlerImplResult::OnlyText(text))
-        }
-    }
-}
-
-async fn record_attempt(cache: &Cache, uid: UserId, outcome: ActivationOutcome) {
+fn record_attempt(outcome: ActivationOutcome) {
     metrics::PROMO_ATTEMPTS.inc(&[outcome.into()]);
-    metrics::PROMO_ATTEMPT_USERS.hit(cache, uid).await;
 }
 
 fn confirmation_buttons(code: &PromoCode, lang_code: &LanguageCode) -> Vec<CallbackButton<PromoCallbackData>> {
     vec![
         CallbackButton::new(
-            t!("commands.promo.confirmation.buttons.confirm", locale = lang_code).to_string(),
+            t!("commands.promo.confirmation.buttons.confirm", locale = lang_code).into_owned(),
             PromoCallbackData::Confirm(code.clone())),
         CallbackButton::new(
-            t!("commands.promo.confirmation.buttons.cancel", locale = lang_code).to_string(),
+            t!("commands.promo.confirmation.buttons.cancel", locale = lang_code).into_owned(),
             PromoCallbackData::Cancel),
     ]
 }

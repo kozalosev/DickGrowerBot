@@ -72,6 +72,20 @@ commands:
     group_hint: "To stop me tagging you in this chat, press 🔕 under a shrink reminder. To change it for every chat, send me /mentions in a private chat."
   privacy:
     description: "Privacy Policy detailing what data we store"
+  voucher:
+    description: "Transfer centimetres"
+  reset:
+    description: "Reset the top"
+    errors:
+      admins_only: "Only chat administrators can reset the top."
+  buy:
+    description: "Buy centimetres"
+    text: "🛒 <b>Centimetres are sold at auctions</b>\nPromo codes are auctioned in %{bot}: you bid Telegram Stars, only the winner pays, and everyone who was outbid gets their Stars back. Activate a code with /promo."
+    button: "🔨 Go to the auction"
+  donate:
+    description: "Support the developers"
+    text: "❤️ <b>Support the developers</b>\nWe make the bot in our spare time and get almost nothing in return but sleepless nights. If you enjoy the game, you can thank us here."
+    button: "❤️ Support us"
   support:
     description: "Write to the bot's owner"
     request: "Write your message and I'll pass it to my owner. Send any command to cancel."
@@ -194,6 +208,7 @@ commands:
       exhausted: "This promo code exists, but every activation of it has already been used up 😞"
       invalid_format: "That doesn't look like a promo code 🤔 They are 3 to 16 characters long: letters, digits, hyphens and underscores."
       already_activated: "It seems you already used this promocode earlier 🤨"
+      too_often: "Too many attempts to guess a promo code 🤚 Take a break and try again in %{minutes} minutes."
       no_dicks: "It seems you don't have any dicks yet. 🤔 Right now is the time to add me into a chat and execute the <code>/grow</code> command!"
     inline:
       switch_button: "Activate promo code '%{code}'…"
@@ -212,10 +227,13 @@ inline:
       grow: "Grow your dick!"
       top: "Get the biggest dicks of the chat"
       dick_of_day: "Elect the Dick of a Day"
-      pvp: "Challenge others with a bet of %{bet} cm!"
+      pvp: "Challenge for %{bet} cm!"
       stats: "Win statistics"
       loan: "Minus? Take a loan!"
       shrinks: "See recent shrinks"
+      voucher: "Transfer centimetres"
+      buy: "Buy centimetres"
+      donate: "Support the developers"
   callback:
     errors:
       another_user: "This message was sent by another person."
@@ -250,6 +268,7 @@ errors:
   not_group_chat: "This bot is supposed to do its mission in group chats only!"
   group_account: "You can't play on behalf of a group or channel — switch off anonymous mode and try again!"
   feature_disabled: "This feature is currently temporarily disabled."
+  internal: "Something went wrong on my side. Try again in a few minutes."
   banned: "You can't play until %{date}. Write via /support if you think it's a mistake."
   banned_inline_title: "You are blocked"
   rate_limited: "Too many requests! Take a break and try again in a minute."

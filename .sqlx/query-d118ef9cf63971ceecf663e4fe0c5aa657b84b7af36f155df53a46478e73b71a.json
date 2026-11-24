@@ -15,6 +15,7 @@
                 "warned",
                 "removed",
                 "removed_before",
+                "removed_on_retry",
                 "expired",
                 "failed"
               ]

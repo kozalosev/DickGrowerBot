@@ -5,14 +5,14 @@
 //! It is the way out for a data deletion or access request — see the privacy policy — so it stays
 //! above the ban gate in the dispatcher tree and must never write a row for its sender.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use rustc_hash::FxHashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use autometrics::autometrics;
 use derive_more::Display;
 use rust_i18n::t;
-use teloxide::Bot;
-use crate::dialogue::CachedDialogueStorage;
+use teloxide::RequestError;
 use teloxide::macros::BotCommands;
 use teloxide::payloads::{CopyMessageSetters, SendMessageSetters};
 use teloxide::prelude::{Dialogue, Requester};
@@ -21,12 +21,18 @@ use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboar
                       Message, MessageEntityKind, MessageEntityRef, MessageId, ParseMode, ReplyParameters,
                       User as TelegramUser, UserId as TelegramUserId};
 use teloxide::utils::html;
+use crate::errors::moot::IgnoreMoot;
+use crate::commands::{CommandToggles, MenuScope, PublishedCommands};
+use crate::config::ThrottledBot;
+use crate::dialogue::CachedDialogueStorage;
 use crate::domain::primitives::{LanguageCode, UserId};
 use crate::domain::primitives::chat::TelegramChatId;
-use crate::handlers::{HandlerDeps, HandlerResult, reply_html};
+use crate::errors::flat::flat;
+use crate::handlers::{HandlerDeps, HandlerResult, reply_html, rights};
 use crate::handlers::utils::callbacks::{CallbackDataWithPrefix, InvalidCallbackData, InvalidCallbackDataBuilder};
 use crate::handlers::utils::get_full_name;
 use crate::{metrics, reply_html};
+use crate::metrics::{RejectableOutcome, RejectionReason, StartupCheck};
 
 /// One request per user per minute. A `const` rather than an environment variable: the knob is too
 /// small to be worth a line in every deployment file.
@@ -38,6 +44,12 @@ const TICKET_PREFIX: &str = "🆘 ";
 pub enum SupportCommands {
     #[command(description = "support")]
     Support(String),
+}
+
+impl PublishedCommands for SupportCommands {
+    fn is_published(&self, _scope: MenuScope, toggles: &CommandToggles) -> bool {
+        toggles.support_enabled
+    }
 }
 
 #[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -82,12 +94,16 @@ pub struct SupportRecipient {
 #[derive(Clone)]
 pub struct SupportService {
     chat_id: Option<TelegramChatId>,
-    last_sent: Arc<Mutex<HashMap<UserId, Instant>>>,
+    last_sent: Arc<Mutex<FxHashMap<UserId, Instant>>>,
 }
 
 impl SupportService {
     pub fn new(chat_id: Option<TelegramChatId>) -> Self {
         Self { chat_id, last_sent: Default::default() }
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.chat_id.is_some()
     }
 
     fn extract_reply_recipient(&self, msg: &Message, bot_id: TelegramUserId) -> Option<SupportRecipient> {
@@ -103,7 +119,7 @@ impl SupportService {
 
     async fn relay(
         &self,
-        bot: &Bot,
+        bot: &ThrottledBot,
         from: &TelegramUser,
         lang_code: &LanguageCode,
         text: &str,
@@ -142,10 +158,64 @@ impl SupportService {
     }
 }
 
+/// Why the chat set in `SUPPORT_CHAT_ID` can't be used.
+#[derive(Debug, Display)]
+pub enum Unusable {
+    #[display("the group was upgraded to the supergroup {}", _0.0)]
+    Migrated(ChatId),
+    #[display("the bot can't post there")]
+    CannotPost,
+    #[display("{_0}")]
+    Unknown(RequestError),
+}
+
+impl From<RequestError> for Unusable {
+    fn from(e: RequestError) -> Self {
+        match e {
+            RequestError::MigrateToChatId(new_id) => Self::Migrated(new_id),
+            e => Self::Unknown(e),
+        }
+    }
+}
+
+/// The support chat to use: the configured one when the bot can post there, none otherwise.
+pub async fn check_support_chat(bot: &ThrottledBot, chat_id: Option<TelegramChatId>, me: &Me) -> Option<TelegramChatId> {
+    let chat_id = chat_id?;
+    let checked = support_chat_usable(bot, chat_id, me).await;
+    metrics::STARTUP_VERIFICATION_ERROR.report(StartupCheck::SupportChat, checked.is_err());
+    checked
+        .inspect(|()| tracing::info!(%chat_id, "the support chat is usable"))
+        .inspect_err(|e| tracing::error!(%chat_id, reason = %e, "the support chat is unusable, so /support is disabled"))
+        .ok()
+        .map(|()| chat_id)
+}
+
+async fn support_chat_usable(bot: &ThrottledBot, chat_id: TelegramChatId, me: &Me) -> Result<(), Unusable> {
+    let chat_id = ChatId::from(chat_id);
+    bot.get_chat(chat_id).await?;
+    if chat_id.is_user() {
+        return Ok(())
+    }
+    let member = bot.get_chat_member(chat_id, me.id).await?;
+    rights::may_post(&member)
+        .then_some(())
+        .ok_or(Unusable::CannotPost)
+}
+
 enum Relayed {
     Sent,
     TooOften,
     Disabled,
+}
+
+impl RejectableOutcome for Relayed {
+    fn rejection(&self) -> Option<RejectionReason> {
+        match self {
+            Self::Sent => None,
+            Self::TooOften => Some(RejectionReason::TooOften),
+            Self::Disabled => Some(RejectionReason::FeatureDisabled),
+        }
+    }
 }
 
 impl Relayed {
@@ -219,7 +289,7 @@ pub fn support_callback_filter(query: CallbackQuery) -> bool {
 
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg)))]
-pub async fn support_reply_handler(bot: Bot, msg: Message, recipient: SupportRecipient) -> HandlerResult {
+pub async fn support_reply_handler(bot: ThrottledBot, msg: Message, recipient: SupportRecipient) -> HandlerResult {
     let SupportRecipient { chat_id, lang_code, ticket } = recipient;
     let keyboard = InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
         t!("commands.support.reply_button", locale = &lang_code),
@@ -229,7 +299,7 @@ pub async fn support_reply_handler(bot: Bot, msg: Message, recipient: SupportRec
         .reply_markup(keyboard)
         .await;
     if let Err(error) = copied {
-        tracing::warn!(recipient = chat_id.0, error = %error, "couldn't deliver support reply");
+        tracing::warn!(recipient = chat_id.0, error = flat!(error), "couldn't deliver support reply");
         bot.send_message(msg.chat.id, format!("Не удалось доставить ответ пользователю: {error}"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -240,7 +310,7 @@ pub async fn support_reply_handler(bot: Bot, msg: Message, recipient: SupportRec
 #[autometrics]
 #[tracing::instrument(skip_all, fields(uid = %query.from.id))]
 pub async fn support_callback_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     query: CallbackQuery,
     dialogue: SupportDialogue,
     deps: HandlerDeps,
@@ -248,7 +318,7 @@ pub async fn support_callback_handler(
     let ticket = SupportTicket::parse(&query)?;
     let lang_code = deps.lang_resolver.execute().await;
     dialogue.update(SupportCommandState::Replying(ticket)).await?;
-    bot.answer_callback_query(query.id).await?;
+    bot.answer_callback_query(query.id).await.ignore_moot()?;
     bot.send_message(dialogue.chat_id(), t!("commands.support.request", locale = &lang_code))
         .await?;
     Ok(())
@@ -257,7 +327,7 @@ pub async fn support_callback_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn support_cmd_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     cmd: SupportCommands,
     dialogue: SupportDialogue,
@@ -269,9 +339,13 @@ pub async fn support_cmd_handler(
     metrics::CMD_SUPPORT_COUNTER.inc();
 
     let SupportCommands::Support(text) = cmd;
-    let answer = if text.trim().is_empty() {
+    let answer = if !support.is_enabled() {
+        let refused = Relayed::Disabled;
+        metrics::CMD_SUPPORT_REJECTED.count(&refused);
+        t!(refused.tr_key(), locale = &lang_code)
+    } else if text.trim().is_empty() {
         dialogue.update(SupportCommandState::Requested).await?;
-        t!("commands.support.request", locale = &lang_code).to_string()
+        t!("commands.support.request", locale = &lang_code)
     } else {
         dialogue.exit().await?;
         relay(&bot, &msg, &support, &text, &lang_code, None).await?
@@ -283,7 +357,7 @@ pub async fn support_cmd_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn support_requested_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     dialogue: SupportDialogue,
     support: SupportService,
@@ -295,7 +369,7 @@ pub async fn support_requested_handler(
 #[autometrics]
 #[tracing::instrument(skip_all, fields(chat_id = msg.chat.id.0, uid = ?crate::handlers::msg_user_id(&msg), lang_code = tracing::field::Empty))]
 pub async fn support_follow_up_handler(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     ticket: SupportTicket,
     dialogue: SupportDialogue,
@@ -306,7 +380,7 @@ pub async fn support_follow_up_handler(
 }
 
 async fn answer_request(
-    bot: Bot,
+    bot: ThrottledBot,
     msg: Message,
     dialogue: SupportDialogue,
     support: SupportService,
@@ -321,29 +395,30 @@ async fn answer_request(
         // of a request would only confuse both sides.
         Some(text) if text.starts_with('/') => {
             dialogue.exit().await?;
-            t!("commands.support.cancelled", locale = &lang_code).to_string()
+            t!("commands.support.cancelled", locale = &lang_code)
         }
         Some(text) => {
             dialogue.exit().await?;
             relay(&bot, &msg, &support, text, &lang_code, ticket).await?
         }
-        None => t!("commands.support.request", locale = &lang_code).to_string()
+        None => t!("commands.support.request", locale = &lang_code)
     };
     reply_html!(bot, msg, answer);
     Ok(())
 }
 
 async fn relay(
-    bot: &Bot,
+    bot: &ThrottledBot,
     msg: &Message,
     support: &SupportService,
     text: &str,
     lang_code: &LanguageCode,
     ticket: Option<SupportTicket>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Cow<'static, str>> {
     let from = msg.from.as_ref().ok_or(anyhow::anyhow!("no from user"))?;
     let relayed = support.relay(bot, from, lang_code, text, ticket).await?;
-    Ok(t!(relayed.tr_key(), locale = lang_code).to_string())
+    metrics::CMD_SUPPORT_REJECTED.count(&relayed);
+    Ok(t!(relayed.tr_key(), locale = lang_code))
 }
 
 /// The link right after the emoji can only be the bot's own, and so can the `<code>` with the id:
@@ -563,6 +638,75 @@ mod tests {
         assert_eq!(api.methods(), ["CopyMessage", "SendMessage"]);
     }
 
+    #[tokio::test]
+    async fn a_group_the_bot_may_post_in_is_usable() {
+        let api = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), member_answer("member")).await;
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(SUPPORT_CHAT), &me()).await;
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(api.methods(), ["GetChat", "GetChatMember"]);
+    }
+
+    #[tokio::test]
+    async fn a_group_the_bot_is_muted_in_is_not() {
+        let api = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), muted_answer()).await;
+
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(SUPPORT_CHAT), &me()).await;
+        assert!(matches!(result, Err(Unusable::CannotPost)), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_chat_disables_support() {
+        let not_found = json!({ "ok": false, "error_code": 400, "description": "Bad Request: chat not found" });
+        let api = chat_api(not_found, member_answer("member")).await;
+
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(SUPPORT_CHAT), &me()).await;
+        assert!(matches!(result, Err(Unusable::Unknown(_))), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn a_migrated_group_names_its_new_id() {
+        let migrated = json!({
+            "ok": false,
+            "error_code": 400,
+            "description": "Bad Request: group chat was upgraded to a supergroup chat",
+            "parameters": { "migrate_to_chat_id": SUPPORT_CHAT }
+        });
+        let api = chat_api(migrated, member_answer("member")).await;
+
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(-4242), &me()).await;
+        assert!(matches!(result, Err(Unusable::Migrated(ChatId(SUPPORT_CHAT)))), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn a_private_chat_needs_no_membership() {
+        let api = chat_api(chat_answer(USER_ID, "private"), member_answer("left")).await;
+        let result = support_chat_usable(&api.bot, TelegramChatId::new(USER_ID), &me()).await;
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(api.methods(), ["GetChat"]);
+    }
+
+    /// The only test that reports to the gauge, since the tests share it and run in parallel.
+    #[tokio::test]
+    async fn the_check_reports_its_outcome() {
+        let usable = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), member_answer("member")).await;
+        let chat = check(&usable, SUPPORT_CHAT).await;
+        assert_eq!(chat, Some(TelegramChatId::new(SUPPORT_CHAT)));
+        assert_verification(0);
+
+        let unusable = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), muted_answer()).await;
+        let chat = check(&unusable, SUPPORT_CHAT).await;
+        assert_eq!(chat, None);
+        assert_verification(1);
+    }
+
+    #[tokio::test]
+    async fn an_unset_chat_asks_nothing() {
+        let api = chat_api(chat_answer(SUPPORT_CHAT, "supergroup"), member_answer("member")).await;
+        let chat = check_support_chat(&api.bot, None, &me()).await;
+        assert_eq!(chat, None);
+        assert!(api.methods().is_empty());
+    }
+
     fn reply_message() -> Value {
         json!({
             "message_id": 20,
@@ -646,5 +790,86 @@ mod tests {
                 }
             }),
         }).await
+    }
+
+    async fn check(api: &FakeApi, chat_id: i64) -> Option<TelegramChatId> {
+        check_support_chat(&api.bot, Some(TelegramChatId::new(chat_id)), &me()).await
+    }
+
+    fn assert_verification(expected: i64) {
+        let series = format!("startup_verification_error{{kind=\"support_chat_unusable\"}} {expected}");
+        let rendered = metrics::render_metrics();
+        assert!(rendered.contains(&series), "{series} is missing from:\n{rendered}");
+    }
+
+    async fn chat_api(get_chat: Value, get_chat_member: Value) -> FakeApi {
+        FakeApi::start(move |method| match method {
+            "GetChat" => get_chat.clone(),
+            "GetChatMember" => get_chat_member.clone(),
+            _ => json!({ "ok": false, "error_code": 400, "description": "Bad Request: unexpected" }),
+        }).await
+    }
+
+    fn chat_answer(id: i64, kind: &str) -> Value {
+        let mut chat = json!({
+            "id": id,
+            "type": kind,
+            "max_reaction_count": 11,
+            "accepted_gift_types": {
+                "unlimited_gifts": false, "limited_gifts": false,
+                "unique_gifts": false, "premium_subscription": false
+            }
+        });
+        if kind == "private" {
+            chat["first_name"] = json!("Name");
+        } else {
+            chat["title"] = json!("Support");
+        }
+        json!({ "ok": true, "result": chat })
+    }
+
+    fn member_answer(status: &str) -> Value {
+        json!({
+            "ok": true,
+            "result": {
+                "status": status,
+                "user": { "id": BOT_ID, "is_bot": true, "first_name": "Bot" }
+            }
+        })
+    }
+
+    fn muted_answer() -> Value {
+        json!({
+            "ok": true,
+            "result": {
+                "status": "restricted",
+                "user": { "id": BOT_ID, "is_bot": true, "first_name": "Bot" },
+                "until_date": 0,
+                "is_member": true,
+                "can_send_messages": false,
+                "can_send_audios": false,
+                "can_send_documents": false,
+                "can_send_photos": false,
+                "can_send_videos": false,
+                "can_send_video_notes": false,
+                "can_send_voice_notes": false,
+                "can_send_polls": false,
+                "can_send_other_messages": false,
+                "can_add_web_page_previews": false,
+                "can_change_info": false,
+                "can_invite_users": false,
+                "can_pin_messages": false,
+                "can_manage_topics": false
+            }
+        })
+    }
+
+    fn me() -> Me {
+        serde_json::from_value(json!({
+            "id": BOT_ID, "is_bot": true, "first_name": "Bot", "username": "TestBot",
+            "can_join_groups": true, "can_read_all_group_messages": false,
+            "supports_inline_queries": true, "can_connect_to_business_account": false,
+            "has_main_web_app": false
+        })).expect("couldn't build the bot's own user")
     }
 }

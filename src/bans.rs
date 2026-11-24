@@ -8,13 +8,14 @@
 //! [`BanList::spawn_listen_task`] reloads on it. The timer stays behind that as the backstop, for
 //! the moments a listener is reconnecting and hears nothing.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 use chrono::{DateTime, Utc};
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres};
 use crate::domain::primitives::UserId;
+use crate::errors::flat::flat;
 use crate::metrics;
 use crate::repo::Users;
 
@@ -25,7 +26,7 @@ const CHANNEL: &str = "bans";
 /// fresh meanwhile, so there is nothing to be gained by hurrying.
 const RECONNECT_DELAY: Duration = Duration::from_mins(1);
 
-type Bans = HashMap<UserId, DateTime<Utc>>;
+type Bans = FxHashMap<UserId, DateTime<Utc>>;
 
 #[derive(Clone)]
 pub struct BanList {
@@ -35,7 +36,7 @@ pub struct BanList {
 
 impl BanList {
     pub async fn load(users: Users) -> Self {
-        let list = Self { users, bans: Arc::new(RwLock::new(Bans::new())) };
+        let list = Self { users, bans: Arc::new(RwLock::new(Bans::default())) };
         list.refresh().await;
         list
     }
@@ -52,7 +53,7 @@ impl BanList {
         let banned = match self.users.get_banned().await {
             Ok(banned) => banned,
             Err(e) => {
-                tracing::warn!(error = format!("{e:#}"), "couldn't refresh the ban list, keeping the previous one");
+                tracing::warn!(error = flat!(e), "couldn't refresh the ban list, keeping the previous one");
                 return
             }
         };
@@ -74,7 +75,7 @@ impl BanList {
             loop {
                 match subscribe(&pool).await {
                     Ok(listener) => consume(&list, listener).await,
-                    Err(e) => tracing::error!(error = %e, "couldn't listen for changes to the ban list"),
+                    Err(e) => tracing::error!(error = flat!(e), "couldn't listen for changes to the ban list"),
                 }
                 tokio::time::sleep(RECONNECT_DELAY).await;
             }
@@ -121,7 +122,7 @@ async fn consume(list: &BanList, mut listener: PgListener) {
                 tracing::info!(uid = notification.payload(), "a user's ban status has changed");
                 list.refresh().await;
             }
-            Err(e) => return tracing::error!(error = %e, "the ban listener has stopped"),
+            Err(e) => return tracing::error!(error = flat!(e), "the ban listener has stopped"),
         }
     }
 }
