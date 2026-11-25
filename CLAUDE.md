@@ -67,8 +67,9 @@ through an explicit list. Every new variable goes into **all** of these:
 5. the topic's file in `.claude/rules/` (see below) — what it does and what happens when it is
    unset. **Not `README.md`**: it is the
    project's index, and a variable's name, default or tuning advice is not what belongs there;
-6. the server-configs repo — a note in `PENDING-PROD-CHANGES.md` with the line for
-   `DickGrowerBot/.env.sops`. **That file lists every variable the bot reads**, a default value
+6. the server-configs repo — the line in `DickGrowerBot/.env`, committed in plain text there; a secret goes into
+   `DickGrowerBot/.env.secrets.sops` instead, which only the user edits (`make secret-edit DIR=DickGrowerBot`), so
+   give them the line. **`.env` lists every variable the bot reads**, a default value
    included; one whose mere presence changes something (a `DISABLE_*` switch) goes in commented
    out. Its compose file takes the whole `.env` through `env_file`, so it needs no change.
 
@@ -133,6 +134,28 @@ since "below" means nothing across files.
 | The store of short-lived values (cache, locks), dialogue state | `cache.md` |
 | user-service integration, languages | `user-service.md` |
 | Tests against the database | `db-tests.md` |
+
+## The production server
+
+When a problem is about how the bot behaves in production (an error users see, a slow command, a broadcast that
+didn't finish), look at the server before guessing from the code. `ssh server-claude <command>` runs one read-only
+command there; the user set it up for exactly this. The bot's containers are `dickgrowerbot`,
+`dickgrowerbot-postgresql` and `dickgrowerbot-redis`:
+
+```bash
+ssh server-claude docker ps                                       # what runs, since when, healthy or not
+ssh server-claude docker logs --since 2h dickgrowerbot            # the bot's log (also --tail N, --until T)
+ssh server-claude docker inspect dickgrowerbot                    # status, health, restarts, image (nothing else)
+ssh server-claude docker stats                                    # CPU and memory now
+ssh server-claude docker logs --since 2h dickgrowerbot-postgresql # Postgres: slow or cancelled statements, backups
+ssh server-claude cat DickGrowerBot/.env                          # the settings in production (server-configs)
+ssh server-claude git log --oneline -5                            # what server-configs runs
+```
+
+A gate on the server checks every command against a whitelist (the server-configs repo, `CLAUDE.md`, "Server
+access for Claude", and `scripts/claude-gate.sh`): no shell, quotes, pipes or globs (`--since -1h`, not
+`--since "1 hour ago"`), no `docker exec`, no database shell, no secrets. Filter the output here, not there. Anything
+that changes the server (a restart, a setting, a query that writes) is for the user to run.
 
 ## Architecture
 

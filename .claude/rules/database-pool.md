@@ -42,7 +42,7 @@ DATABASE_URL=postgres://…/dickgrowerbotdb?options=-c%20statement_timeout%3D5s
 ```
 
 In server-configs that URL is built by Compose substitution, so the setting is one there too —
-`…?options=-c%20statement_timeout%3D${DATABASE_STATEMENT_TIMEOUT:-0}`, with the value in `.env.sops`.
+`…?options=-c%20statement_timeout%3D${DATABASE_STATEMENT_TIMEOUT:-0}`, with the value in `DickGrowerBot/.env`.
 
 The pool has a limit on *waiting* and none on *running*, which is the wrong way round when a plan
 goes wrong: a query with nothing to stop it holds its connection for as long as it likes, and enough

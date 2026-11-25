@@ -170,7 +170,7 @@ moves once a day reads zero both when nothing happened and when nobody scraped i
 restarted, and nothing afterwards tells the two apart — which is how a fortnight of silence went
 unnoticed. Alert on `time() - daily_shrink_last_run_timestamp_seconds > daily_shrink_period_seconds + 2h`, and on
 `daily_shrink_broadcast_pending` staying above zero for hours. Both live in the server-configs
-repo's `vmalert/metrics-alerts.yml`, next to the Grafana dashboard.
+repo's `victoria-observe/vmalert/rules/metrics-alerts.yml`, next to the Grafana dashboard.
 
 **`daily_shrink_broadcast_last_tick_timestamp_seconds` is a faster version of the same idea, scoped
 to one tick instead of one day.** It is set at the very top of the worker's loop, before `claim_due`
