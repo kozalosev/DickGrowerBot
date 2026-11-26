@@ -1,3 +1,6 @@
 # `cargo sqlx prepare` writes these with LF; without this, checkouts on Windows convert them
 # to CRLF and every regeneration shows the whole cache as modified with an empty content diff.
 .sqlx/query-*.json text eol=lf
+
+# Shell scripts run inside Linux containers, where a CRLF checkout breaks the shebang (`/bin/bash^M`).
+*.sh text eol=lf
