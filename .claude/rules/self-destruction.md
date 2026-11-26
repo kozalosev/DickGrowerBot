@@ -163,6 +163,14 @@ guess costs them different things:
 That asymmetry is the whole reason the check survived at all: for `ENABLED` it would be pure
 overhead.
 
+**The worker reads the cache too**, before it deletes a command. Every command a chat sends while
+the answer is unknown (after the bot joins, and each time the entry expires) is queued, and they
+come due together. Without the check, the first refusal taught the cache and every other one was
+still sent and refused, one request each against the quota the answers need: about six a minute
+in production, most of the bot's log. With it, the rest end `failed` without a request. That
+refusal is the price of the guess, so it is logged at `debug`; a refusal to delete one of the
+bot's own replies (`is_expected_refusal` tells them apart) still warns.
+
 **What becomes of a row** is the whole state machine, and **no ending deletes it**:
 
 | Ending | State |

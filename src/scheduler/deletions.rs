@@ -255,6 +255,15 @@ impl Cleaner<'_> {
                 }
                 let chat = ChatId::from(*chat_id);
                 let message = MessageId::from(*message_id);
+                // A command is queued while the bot's right in the chat is unknown (`ENABLED` guesses
+                // "yes"), and the refusal of an earlier command there may have answered the question
+                // since. Every command of the chat waiting in the queue would otherwise be sent, and
+                // refused, one by one.
+                if deletion.kind == MessageKind::Command
+                    && rights::cached_deletion_right(self.cache, chat).await == Some(false) {
+                    tracing::debug!(kind = %deletion.kind, "the bot may not delete messages in the chat, so the command stays");
+                    return Outcome::Failed
+                }
                 if warn {
                     let request = self.bot.edit_message_text(chat, message, self.warning(&deletion)).parse_mode(Html);
                     return outcome_of_warning(request.await.map(|_| ()), deletion.id)
@@ -314,9 +323,10 @@ impl Cleaner<'_> {
             return if deletion.timed_out { Outcome::RemovedOnRetry } else { Outcome::Removed }
         }
 
-        if is_refused(&error) && deletion.kind == MessageKind::Command {
+        let expected = is_expected_refusal(&error, deletion.kind);
+        if expected {
             // The bot may not delete messages here. Remembering that keeps every later command out of
-            // the queue instead of into this same failure.
+            // the queue, and the ones already in it away from Telegram, instead of into this same failure.
             if let DeletionTarget::ChatMessage { chat_id, .. } = deletion.target {
                 rights::remember_deletion_right(self.cache, ChatId::from(chat_id), false, self.bot_admin_ttl).await;
             }
@@ -326,7 +336,11 @@ impl Cleaner<'_> {
             return Outcome::Offline(why)
         }
         if is_final(&error) {
-            tracing::warn!(kind = %deletion.kind, error = flat!(error), "the message can't be removed at all");
+            if expected {
+                tracing::debug!(kind = %deletion.kind, error = flat!(error), "the bot may not delete the command here");
+            } else {
+                tracing::warn!(kind = %deletion.kind, error = flat!(error), "the message can't be removed at all");
+            }
             return Outcome::Failed
         }
 
@@ -406,6 +420,13 @@ fn is_refused(error: &RequestError) -> bool {
     }
 }
 
+/// Whether the refusal is the price of the guess `ENABLED` makes, not a problem: a user's command is
+/// queued while the bot doesn't know whether it may delete messages in the chat, and a refusal is how
+/// it finds out. Its own replies are deleted by right of authorship, so a refusal of one is unexpected.
+fn is_expected_refusal(error: &RequestError, kind: MessageKind) -> bool {
+    kind == MessageKind::Command && is_refused(error)
+}
+
 /// Why Telegram gave no answer, if it gave none. Neither reason says anything about the message,
 /// and every request here can be repeated harmlessly — a second deletion finds the message gone, a
 /// second edit finds it unchanged — so the row waits for the network instead of spending its
@@ -452,6 +473,7 @@ mod tests {
     use serde_json::json;
     use crate::config::{CacheConfig, CacheMode, DeletionMode, InlineGroups};
     use crate::domain::primitives::{AttemptsCount, LanguageCode};
+    use crate::domain::primitives::chat::{TelegramChatId, TelegramMessageId};
     use crate::fake_telegram::FakeApi;
     use crate::handlers::utils::inline_message_id_of;
     use crate::repo::test::{fresh_db, repos};
@@ -535,6 +557,45 @@ mod tests {
             "Bad Request: not enough rights to delete a message".to_owned()));
         assert!(is_refused(&refused));
         assert!(is_final(&refused));
+    }
+
+    /// A refused command is how `ENABLED` finds out it may not delete in the chat; a refused reply of
+    /// the bot's own is news.
+    #[test]
+    fn only_a_refused_command_is_expected() {
+        let refused = RequestError::Api(ApiError::MessageCantBeDeleted);
+        assert!(is_expected_refusal(&refused, MessageKind::Command));
+        assert!(!is_expected_refusal(&refused, MessageKind::Reply));
+
+        let transient = RequestError::Api(ApiError::Unknown("Bad Gateway".to_owned()));
+        assert!(!is_expected_refusal(&transient, MessageKind::Command));
+    }
+
+    /// The first command of a chat that forbids deletion finds out, and the cache remembers it.
+    #[tokio::test]
+    async fn a_refused_command_teaches_the_cache() {
+        let (outcome, api, cache) = act_on_command(None).await;
+
+        assert_eq!(outcome, Outcome::Failed);
+        assert_eq!(api.methods(), ["DeleteMessage"]);
+        let known = rights::cached_deletion_right(&cache, ChatId(CHAT_ID)).await;
+        assert_eq!(known, Some(false));
+    }
+
+    /// The commands queued before that refusal aren't sent to be refused again, one by one.
+    #[tokio::test]
+    async fn a_command_in_a_chat_known_to_forbid_deletion_is_not_sent() {
+        let (outcome, api, _) = act_on_command(Some(false)).await;
+
+        assert_eq!(outcome, Outcome::Failed);
+        assert!(api.methods().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_command_in_a_chat_known_to_allow_deletion_is_deleted() {
+        let (_, api, _) = act_on_command(Some(true)).await;
+
+        assert_eq!(api.methods(), ["DeleteMessage"]);
     }
 
     #[test]
@@ -643,6 +704,29 @@ mod tests {
         inline_groups: &str,
         edit: serde_json::Value,
     ) -> (Outcome, FakeApi, Cache) {
+        act(deletion, inline_groups, edit, None).await
+    }
+
+    /// Runs a user's command in [`CHAT_ID`] through [`Cleaner::act`] against an API that refuses
+    /// every deletion, with `known` as what the cache knows about the bot's right there.
+    async fn act_on_command(known: Option<bool>) -> (Outcome, FakeApi, Cache) {
+        let deletion = ScheduledDeletion {
+            target: DeletionTarget::ChatMessage {
+                chat_id: TelegramChatId::from(ChatId(CHAT_ID)),
+                message_id: TelegramMessageId::from(MessageId(42)),
+            },
+            kind: MessageKind::Command,
+            ..inline_deletion(inline_message_id_of(CHAT_ID), DeletionState::Created)
+        };
+        act(deletion, "", json!({ "ok": true, "result": true }), known).await
+    }
+
+    async fn act(
+        deletion: ScheduledDeletion,
+        inline_groups: &str,
+        edit: serde_json::Value,
+        known: Option<bool>,
+    ) -> (Outcome, FakeApi, Cache) {
         let api = FakeApi::start(move |method| match method {
             "DeleteMessage" => json!({
                 "ok": false,
@@ -654,6 +738,9 @@ mod tests {
         let db = fresh_db().await;
         let repos = repos(&db);
         let cache = Cache::connect(CacheConfig::without_redis(CacheMode::Local)).await;
+        if let Some(may_delete) = known {
+            rights::remember_deletion_right(&cache, ChatId(CHAT_ID), may_delete, Duration::from_hours(1)).await;
+        }
         let cleanup = CleanupPolicy::new(repos.chats.clone(), cache.clone(), Duration::from_hours(1));
         let config = SelfDestructionConfig {
             mode: DeletionMode::Enabled,
